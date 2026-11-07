@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Deep Cobalt to Things Royal Blue Diagonal Gradient -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endX="108"
+                android:endY="108"
+                android:startX="0"
+                android:startY="0"
+                android:type="linear">
+                <item
+                    android:color="#FF2B7FFF"
+                    android:offset="0.0" />
+                <item
+                    android:color="#FF165DFC"
+                    android:offset="0.52" />
+                <item
+                    android:color="#FF0B358E"
+                    android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Subtle Soft Glow in Top-Left -->
+    <path
+        android:fillAlpha="0.18"
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M-10,-10 m-48,0 a48,48 0 1,0 96,0 a48,48 0 1,0 -96,0" />
+</vector>

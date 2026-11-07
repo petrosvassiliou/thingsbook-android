@@ -292,6 +292,21 @@ interface TaskDao {
 
     @Query("UPDATE tasks SET isDirty = 0 WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>)
+
+    @Query(
+        """
+        SELECT * FROM tasks
+        WHERE isDeleted = 0
+          AND status = 'OPEN'
+          AND (
+              scheduleState IN ('TODAY', 'THIS_EVENING')
+              OR (whenDate IS NOT NULL AND whenDate <= :endOfTodayMillis)
+              OR (deadline IS NOT NULL AND deadline <= :endOfTodayMillis)
+          )
+        ORDER BY sortOrder ASC
+        """
+    )
+    suspend fun getOpenActiveTasksForToday(endOfTodayMillis: Long): List<TaskEntity>
 }
 
 @Dao
@@ -331,6 +346,12 @@ interface TagDao {
 
     @Upsert
     suspend fun upsertAll(tags: List<TagEntity>)
+
+    @Query("DELETE FROM task_tags WHERE tagId = :tagId")
+    suspend fun deleteTaskTagCrossRefsForTag(tagId: String)
+
+    @Query("DELETE FROM project_tags WHERE tagId = :tagId")
+    suspend fun deleteProjectTagCrossRefsForTag(tagId: String)
 
     @Query("UPDATE tags SET isDirty = 0 WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>)

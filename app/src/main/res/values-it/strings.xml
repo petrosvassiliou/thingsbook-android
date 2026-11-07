@@ -114,4 +114,35 @@
     <string name="gemini_generating">Gemini sta elaborando con calma…</string>
     <string name="gemini_api_key_label">Chiave API Gemini opzionale (sovrascrive Vertex AI)</string>
     <string name="gemini_api_key_placeholder">Incolla chiave AIza… o lascia vuoto per Firebase Vertex AI</string>
+
+    <!-- Calendar Date Picker & Task Reminders -->
+    <string name="when_pick_date_title">Seleziona data</string>
+    <string name="when_pick_calendar_tab">Calendario</string>
+    <string name="when_task_reminder_title">Orario promemoria attività</string>
+    <string name="when_task_reminder_none">Nessun orario impostato</string>
+    <string name="when_task_reminder_set">Promemoria alle %1$s</string>
+    <string name="when_apply_date_button">Applica data e promemoria</string>
+    <string name="deadline_picker_title">Seleziona data di scadenza</string>
+    <string name="deadline_clear_button">Rimuovi scadenza</string>
+
+    <!-- Daily Digest & Notification Settings -->
+    <string name="notifications_title">Notifiche e promemoria</string>
+    <string name="notifications_daily_digest_title">Riepilogo giornaliero attività attive</string>
+    <string name="notifications_daily_digest_desc">Ricevi una notifica ogni giorno all\'ora scelta per tutte le attività attive di Oggi.</string>
+    <string name="notifications_daily_time_label">Orario notifica giornaliera</string>
+    <string name="notifications_task_specific_desc">Puoi anche impostare un promemoria specifico per ogni singola attività sotto \"Quando\".</string>
+    <string name="notifications_test_now">Invia notifica di prova ora</string>
+    <string name="notifications_daily_digest_channel">Riepilogo giornaliero Oggi</string>
+    <string name="notifications_daily_digest_header">Oggi: %1$d attività attive</string>
+    <string name="notifications_daily_digest_empty">Tutto completato per Oggi!</string>
+
+    <!-- Full Tag Management -->
+    <string name="tags_manage_title">Gestione Tag</string>
+    <string name="tags_assign_title">Assegna Tag all\'attività</string>
+    <string name="tags_new_placeholder">Nome nuovo tag (es. Urgente, Casa, Ufficio)…</string>
+    <string name="tags_shortcut_placeholder">Scorciatoia</string>
+    <string name="tags_add_button">Crea Tag</string>
+    <string name="tags_edit_title">Rinomina Tag</string>
+    <string name="tags_empty_hint">Nessun tag presente. Crea il tuo primo tag qui sopra.</string>
+    <string name="tags_filter_all">Tutti</string>
 </resources>

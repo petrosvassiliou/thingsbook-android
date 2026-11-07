@@ -317,6 +317,53 @@ class ThingsRepository @Inject constructor(
         syncRepository.syncBidirectionalDeltas()
     }
 
+    suspend fun createOrUpdateTag(
+        id: String = UUID.randomUUID().toString(),
+        title: String,
+        shortcut: String? = null,
+        parentTagId: String? = null
+    ): String {
+        val trimmedTitle = title.trim()
+        if (trimmedTitle.isEmpty()) return id
+        val now = System.currentTimeMillis()
+        val existing = database.tagDao().getById(id)
+        val tagEntity = TagEntity(
+            id = id,
+            title = trimmedTitle,
+            parentTagId = parentTagId,
+            shortcut = shortcut?.trim()?.takeIf { it.isNotEmpty() },
+            sortOrder = existing?.sortOrder ?: (now % 100_000).toDouble(),
+            createdAt = existing?.createdAt ?: now,
+            updatedAt = now,
+            isDeleted = false,
+            isDirty = true
+        )
+        database.tagDao().upsert(tagEntity)
+        syncRepository.syncBidirectionalDeltas()
+        return id
+    }
+
+    suspend fun softDeleteTag(tagId: String) {
+        val existing = database.tagDao().getById(tagId) ?: return
+        val now = System.currentTimeMillis()
+        database.tagDao().deleteTaskTagCrossRefsForTag(tagId)
+        database.tagDao().deleteProjectTagCrossRefsForTag(tagId)
+        database.tagDao().upsert(
+            existing.copy(
+                isDeleted = true,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.syncBidirectionalDeltas()
+    }
+
+    suspend fun getOpenActiveTasksForToday(): List<String> {
+        return database.taskDao()
+            .getOpenActiveTasksForToday(endOfTodayEpochMillis())
+            .map { it.title }
+    }
+
     suspend fun createProjectFromBlueprint(
         title: String,
         notes: String,

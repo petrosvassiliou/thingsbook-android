@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.culturedcode.things3.data.ai.GeminiLogbookReviewResponse
 import com.culturedcode.things3.data.ai.ThingsbookGeminiService
 import com.culturedcode.things3.data.local.ThingsDatabase
+import com.culturedcode.things3.data.notifications.DailyDigestConfig
 import com.culturedcode.things3.data.notifications.ReminderScheduler
 import com.culturedcode.things3.data.repository.CloudSyncStatus
 import com.culturedcode.things3.data.repository.SyncRepository
@@ -75,6 +76,20 @@ class ThingsbookViewModel @Inject constructor(
 
     private val _collapsedHeadingIds = MutableStateFlow<Set<String>>(emptySet())
     val collapsedHeadingIds: StateFlow<Set<String>> = _collapsedHeadingIds.asStateFlow()
+
+    // Tag Filter & Tag Management Modal States
+    private val _selectedFilterTagId = MutableStateFlow<String?>(null)
+    val selectedFilterTagId: StateFlow<String?> = _selectedFilterTagId.asStateFlow()
+
+    private val _isTagManagerOpen = MutableStateFlow(false)
+    val isTagManagerOpen: StateFlow<Boolean> = _isTagManagerOpen.asStateFlow()
+
+    // Daily Digest & Notification Settings Modal States
+    private val _isNotificationSettingsOpen = MutableStateFlow(false)
+    val isNotificationSettingsOpen: StateFlow<Boolean> = _isNotificationSettingsOpen.asStateFlow()
+
+    private val _dailyDigestConfig = MutableStateFlow(reminderScheduler.getDailyDigestConfig())
+    val dailyDigestConfig: StateFlow<DailyDigestConfig> = _dailyDigestConfig.asStateFlow()
 
     // Quick Find (SQLite FTS5)
     private val _isQuickFindOpen = MutableStateFlow(false)
@@ -613,5 +628,133 @@ class ThingsbookViewModel @Inject constructor(
             )
             reminderScheduler.scheduleExactReminder(task.id, task.title, triggerAtMillis)
         }
+    }
+
+    fun updateTaskScheduleWithReminder(
+        task: TaskItem,
+        newState: ScheduleState,
+        newWhenDate: Long?,
+        newReminderTime: Long?
+    ) {
+        viewModelScope.launch {
+            repository.createOrUpdateTask(
+                id = task.id,
+                title = task.title,
+                notes = task.notes,
+                status = task.status,
+                scheduleState = newState,
+                whenDate = newWhenDate,
+                deadline = task.deadline,
+                reminderTime = newReminderTime,
+                projectId = task.projectId,
+                headingId = task.headingId,
+                areaId = task.areaId,
+                recurrenceRule = task.recurrenceRule,
+                sortOrder = task.sortOrder,
+                tagIds = task.tags.map { it.id }
+            )
+            if (newReminderTime != null) {
+                reminderScheduler.scheduleExactReminder(task.id, task.title, newReminderTime)
+            } else {
+                reminderScheduler.cancelReminder(task.id)
+            }
+        }
+    }
+
+    // =========================================================================
+    // Full Tag Management & Task Tag Assignment
+    // =========================================================================
+
+    fun setTagManagerOpen(open: Boolean) {
+        _isTagManagerOpen.value = open
+    }
+
+    fun selectFilterTag(tagId: String?) {
+        _selectedFilterTagId.value = if (_selectedFilterTagId.value == tagId) null else tagId
+    }
+
+    fun createTag(title: String, shortcut: String?) {
+        viewModelScope.launch {
+            repository.createOrUpdateTag(title = title, shortcut = shortcut)
+        }
+    }
+
+    fun renameTag(tagId: String, newTitle: String, shortcut: String?) {
+        viewModelScope.launch {
+            repository.createOrUpdateTag(id = tagId, title = newTitle, shortcut = shortcut)
+        }
+    }
+
+    fun deleteTag(tagId: String) {
+        viewModelScope.launch {
+            if (_selectedFilterTagId.value == tagId) {
+                _selectedFilterTagId.value = null
+            }
+            repository.softDeleteTag(tagId)
+        }
+    }
+
+    fun updateTaskTags(task: TaskItem, newTagIds: List<String>) {
+        viewModelScope.launch {
+            repository.createOrUpdateTask(
+                id = task.id,
+                title = task.title,
+                notes = task.notes,
+                status = task.status,
+                scheduleState = task.scheduleState,
+                whenDate = task.whenDate,
+                deadline = task.deadline,
+                reminderTime = task.reminderTime,
+                projectId = task.projectId,
+                headingId = task.headingId,
+                areaId = task.areaId,
+                recurrenceRule = task.recurrenceRule,
+                sortOrder = task.sortOrder,
+                tagIds = newTagIds
+            )
+        }
+    }
+
+    fun createAndAssignTagToTask(task: TaskItem, newTagTitle: String) {
+        viewModelScope.launch {
+            val newId = repository.createOrUpdateTag(title = newTagTitle)
+            val updatedTagIds = (task.tags.map { it.id } + newId).distinct()
+            repository.createOrUpdateTask(
+                id = task.id,
+                title = task.title,
+                notes = task.notes,
+                status = task.status,
+                scheduleState = task.scheduleState,
+                whenDate = task.whenDate,
+                deadline = task.deadline,
+                reminderTime = task.reminderTime,
+                projectId = task.projectId,
+                headingId = task.headingId,
+                areaId = task.areaId,
+                recurrenceRule = task.recurrenceRule,
+                sortOrder = task.sortOrder,
+                tagIds = updatedTagIds
+            )
+        }
+    }
+
+    // =========================================================================
+    // Daily Active Tasks Notification Settings
+    // =========================================================================
+
+    fun setNotificationSettingsOpen(open: Boolean) {
+        if (open) {
+            _dailyDigestConfig.value = reminderScheduler.getDailyDigestConfig()
+        }
+        _isNotificationSettingsOpen.value = open
+    }
+
+    fun updateDailyDigestConfig(enabled: Boolean, hour: Int, minute: Int) {
+        reminderScheduler.updateDailyDigestSchedule(enabled, hour, minute)
+        _dailyDigestConfig.value = reminderScheduler.getDailyDigestConfig()
+    }
+
+    fun sendTestDailyDigestNotificationNow() {
+        reminderScheduler.triggerDailyDigestNotificationNow()
     }
 }

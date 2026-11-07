@@ -114,4 +114,35 @@
     <string name="gemini_generating">Gemini is thinking calmly…</string>
     <string name="gemini_api_key_label">Optional Gemini API Key (overrides Vertex AI default)</string>
     <string name="gemini_api_key_placeholder">Paste AIza… key or leave blank for Firebase Vertex AI</string>
+
+    <!-- Calendar Date Picker & Task Reminders -->
+    <string name="when_pick_date_title">Select Date</string>
+    <string name="when_pick_calendar_tab">Calendar</string>
+    <string name="when_task_reminder_title">Task Notification Time</string>
+    <string name="when_task_reminder_none">No notification time</string>
+    <string name="when_task_reminder_set">Notify at %1$s</string>
+    <string name="when_apply_date_button">Apply Date &amp; Reminder</string>
+    <string name="deadline_picker_title">Select Deadline Date</string>
+    <string name="deadline_clear_button">Remove Deadline</string>
+
+    <!-- Daily Digest & Notification Settings -->
+    <string name="notifications_title">Notifications &amp; Reminders</string>
+    <string name="notifications_daily_digest_title">Daily Active Tasks Summary</string>
+    <string name="notifications_daily_digest_desc">Receive a notification every day at your chosen time for all To-Dos active Today.</string>
+    <string name="notifications_daily_time_label">Daily Notification Time</string>
+    <string name="notifications_task_specific_desc">You can also set an individual notification time inside any To-Do under \"When\".</string>
+    <string name="notifications_test_now">Send Test Notification Now</string>
+    <string name="notifications_daily_digest_channel">Daily Today Summary</string>
+    <string name="notifications_daily_digest_header">Today: %1$d active To-Dos</string>
+    <string name="notifications_daily_digest_empty">All clear for Today — no open To-Dos scheduled!</string>
+
+    <!-- Full Tag Management -->
+    <string name="tags_manage_title">Manage Tags</string>
+    <string name="tags_assign_title">Assign Tags to To-Do</string>
+    <string name="tags_new_placeholder">New tag name (e.g. Urgent, Home, Office)…</string>
+    <string name="tags_shortcut_placeholder">Shortcut</string>
+    <string name="tags_add_button">Create Tag</string>
+    <string name="tags_edit_title">Rename Tag</string>
+    <string name="tags_empty_hint">No tags yet. Create your first tag above.</string>
+    <string name="tags_filter_all">All</string>
 </resources>

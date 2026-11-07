@@ -23,13 +23,14 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.util.Locale
 import javax.inject.Provider
 
 /**
  * Language-sensitive `RoomDatabase.Callback` that safely installs FTS triggers on open
- * and seeds localized Things 3 GTD hierarchy data (Areas, Projects, Headings, Tasks, ChecklistItems, Tags)
+ * and seeds inspiring, everyday GTD hierarchy data (Areas, Projects, Headings, Tasks, ChecklistItems, Tags)
  * in EN, DE, IT, FR, or ES on first database creation.
  */
 class DatabaseSeeder(
@@ -65,16 +66,19 @@ class DatabaseSeeder(
         if (db.taskDao().getTotalTaskCount() > 0) return@runCatching
 
         val zone = ZoneId.systemDefault()
-        val todayEpoch = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
+        val today = LocalDate.now(zone)
+        val todayEpoch = today.atStartOfDay(zone).toInstant().toEpochMilli()
         val now = todayEpoch
-        val tomorrowEpoch = LocalDate.now(zone).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-        val inThreeDaysEpoch = LocalDate.now(zone).plusDays(3).atStartOfDay(zone).toInstant().toEpochMilli()
-        val inFiveDaysEpoch = LocalDate.now(zone).plusDays(5).atStartOfDay(zone).toInstant().toEpochMilli()
+        val todayReminder15h = today.atTime(LocalTime.of(15, 0)).atZone(zone).toInstant().toEpochMilli()
+        val tomorrowEpoch = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val inThreeDaysEpoch = today.plusDays(3).atStartOfDay(zone).toInstant().toEpochMilli()
+        val inFiveDaysEpoch = today.plusDays(5).atStartOfDay(zone).toInstant().toEpochMilli()
 
         val bundle = buildLocalizedSeedBundle(
             lang = languageCode.lowercase(Locale.ROOT),
             now = now,
             todayEpoch = todayEpoch,
+            todayReminder15h = todayReminder15h,
             tomorrowEpoch = tomorrowEpoch,
             inThreeDaysEpoch = inThreeDaysEpoch,
             inFiveDaysEpoch = inFiveDaysEpoch
@@ -105,25 +109,26 @@ class DatabaseSeeder(
         lang: String,
         now: Long,
         todayEpoch: Long,
+        todayReminder15h: Long,
         tomorrowEpoch: Long,
         inThreeDaysEpoch: Long,
         inFiveDaysEpoch: Long
     ): LocalizedSeedBundle {
-        // Stable deterministic UUIDs so multiple devices or language tests stay clean
-        val tagFocusId = "tag-focus-001"
-        val tagQuickId = "tag-quick-002"
-        val tagDeepWorkId = "tag-deepwork-003"
+        val tagImportantId = "tag-important-001"
+        val tagHomeId = "tag-home-002"
+        val tagOfficeId = "tag-office-003"
         val tagErrandsId = "tag-errands-004"
+        val tagQuickId = "tag-quick-005"
 
-        val areaWorkId = "area-work-001"
-        val areaPersonalId = "area-personal-002"
+        val areaPersonalId = "area-personal-001"
+        val areaWorkId = "area-work-002"
 
-        val projLaunchId = "proj-launch-001"
-        val projTripId = "proj-trip-002"
+        val projVacationId = "proj-vacation-001"
+        val projHomeId = "proj-home-002"
 
-        val headArchId = "head-arch-001"
-        val headDesignId = "head-design-002"
-        val headLogisticsId = "head-logistics-003"
+        val headBookingId = "head-booking-001"
+        val headPackingId = "head-packing-002"
+        val headEverydayId = "head-everyday-003"
 
         val taskInbox1Id = "task-inbox-001"
         val taskToday1Id = "task-today-002"
@@ -136,198 +141,203 @@ class DatabaseSeeder(
 
         val strings = when (lang) {
             "de" -> SeedStrings(
-                tagFocus = "Fokus",
+                tagImportant = "Wichtig",
+                tagHome = "Zuhause",
+                tagOffice = "Büro",
+                tagErrands = "Unterwegs",
                 tagQuick = "5 Min.",
-                tagDeepWork = "Deep Work",
-                tagErrands = "Besorgungen",
-                areaWork = "Arbeit & Architektur",
-                areaPersonal = "Privat & Leben",
-                projLaunchTitle = "Things 3 Android Release",
-                projLaunchNotes = "Kompromisslose 120-Hz-Produktivitäts-App mit Offline-First Room FTS5 & Firebase Delta-Sync.",
-                projTripTitle = "Wochenendtrip nach Südtirol",
-                projTripNotes = "Hotel, Wanderroute und Packliste entspannt vorbereiten.",
-                headArch = "Architektur & Cloud-Sync",
-                headDesign = "UI/UX & 120-Hz-Animationen",
-                headLogistics = "Reiseplanung & Buchung",
-                taskInboxTitle = "Willkommen in Things 3 – Tippe hier zum Aufklappen",
-                taskInboxNotes = "Ein Tap öffnet kein neues Fenster, sondern morpht diese Zeile per Feder-Animation direkt in der Liste zu einer Karte.",
-                taskToday1Title = "Inline-Card-Expansion & Magic-Plus testen",
-                taskToday1Notes = "Ziehe das blaue **Magic Plus (+)** unten rechts direkt zwischen zwei Aufgaben oder an den linken Rand für eine neue Überschrift.",
-                taskToday2Title = "SQLite FTS5 Volltextsuche mit Umlauten prüfen (Äpfel, Öl, Überprüfung)",
-                taskToday2Notes = "Wische auf der Liste nach unten für die Schnellsuche (`unicode61`-Tokenizer).",
-                taskEveningTitle = "Abendlektüre & Tagesrückblick bei Tee",
-                taskEveningNotes = "Erscheint in der Sektion **Heute Abend** mit sanftem Mond-Symbol.",
-                taskUpcomingTitle = "Architektur-Review mit dem Team",
-                taskUpcomingNotes = "Wiederkehrender Termin und Frist-Countdown im Blick behalten.",
-                taskAnytimeTitle = "Haptisches Feedback für Checkbox Long-Press verfeinern",
-                taskAnytimeNotes = "Ein langer Druck auf eine Checkbox markiert die Aufgabe als *Abgebrochen* (X-Symbol).",
-                taskSomedayTitle = "Alpenüberquerung zu Fuß planen",
-                taskSomedayNotes = "Ideensammlung für den nächsten Sommer.",
-                taskCompletedTitle = "Room-Datenbank & Firebase Delta-Sync Architektur aufsetzen",
-                check1 = "Aufgabe antippen, um die weiße Karte sanft zu öffnen",
-                check2 = "Wann-Dialog öffnen und „morgen“ oder „heute abend“ tippen",
-                check3 = "Magic Plus (+) zwischen zwei Zeilen ziehen"
+                areaPersonal = "Privat & Zuhause",
+                areaWork = "Beruf & Fokus",
+                projVacationTitle = "Urlaub & Reiseplanung",
+                projVacationNotes = "Unterkunft, Anreise, Ausflüge und Packliste entspannt im Voraus vorbereiten.",
+                projHomeTitle = "Zuhause & Wohlfühl-Alltag",
+                projHomeNotes = "Ideen, Besorgungen und gesunde Routinen für jede Woche.",
+                headBooking = "Buchung & Dokumente",
+                headPacking = "Packliste & Vorbereitung",
+                headEveryday = "Woche & Besorgungen",
+                taskInboxTitle = "Zahnarzt-Vorsorgetermin für nächsten Monat vereinbaren",
+                taskInboxNotes = "Kurz anrufen und Termin vormittags auswählen.",
+                taskToday1Title = "Hotel am Meer & Zugverbindung buchen",
+                taskToday1Notes = "Frühbucher-Option mit kostenloser Stornierung wählen.",
+                taskToday2Title = "Frisches Obst, Gemüse & Kaffeebohnen vom Wochenmarkt holen",
+                taskToday2Notes = "Stoffbeutel nicht vergessen.",
+                taskEveningTitle = "30 Minuten Abendspaziergang & Buch lesen",
+                taskEveningNotes = "Handy auf Flugmodus schalten und entspannen.",
+                taskUpcomingTitle = "Reisepass-Gültigkeit & Reiseapotheke prüfen",
+                taskUpcomingNotes = "Rechtzeitig vor der Abreise kontrollieren.",
+                taskAnytimeTitle = "Kamera, Ladegeräte & Sonnenbrille bereitlegen",
+                taskAnytimeNotes = "SD-Karte leeren und Powerbank aufladen.",
+                taskSomedayTitle = "Schönste Panorama-Wanderrouten & Restaurants vor Ort sammeln",
+                taskSomedayNotes = "Empfehlungen von Freunden notieren.",
+                taskCompletedTitle = "Schreibtisch aufgeräumt & Wochenfokus festgelegt",
+                check1 = "Reisedaten im Kalender bestätigen",
+                check2 = "Zugsitzplätze am Fenster reservieren",
+                check3 = "Buchungsbestätigung offline speichern"
             )
             "it" -> SeedStrings(
-                tagFocus = "Focus",
-                tagQuick = "5 min",
-                tagDeepWork = "Lavoro profondo",
+                tagImportant = "Importante",
+                tagHome = "Casa",
+                tagOffice = "Ufficio",
                 tagErrands = "Commissioni",
-                areaWork = "Lavoro & Architettura",
-                areaPersonal = "Vita personale",
-                projLaunchTitle = "Lancio Things 3 per Android",
-                projLaunchNotes = "App di produttività nativa a 120 Hz con Room FTS5 Offline-First e sincronizzazione delta Firebase.",
-                projTripTitle = "Weekend in Toscana",
-                projTripNotes = "Itinerario, agriturismo e preparazione bagagli.",
-                headArch = "Architettura & Cloud Sync",
-                headDesign = "UI/UX & Micro-animazioni 120 Hz",
-                headLogistics = "Logistica & Prenotazioni",
-                taskInboxTitle = "Benvenuto in Things 3 – Tocca qui per espandere",
-                taskInboxNotes = "Un tocco trasforma fluidamente la riga in una scheda bianca direttamente nella lista.",
-                taskToday1Title = "Provare l'espansione inline e il pulsante Magic Plus",
-                taskToday1Notes = "Trascina il pulsante blu **Magic Plus (+)** direttamente tra due attività nella lista.",
-                taskToday2Title = "Verificare la ricerca FTS5 con accenti (città, perché, più)",
-                taskToday2Notes = "Scorri verso il basso per aprire la Ricerca rapida in tempo reale.",
-                taskEveningTitle = "Lettura serale e revisione della giornata",
-                taskEveningNotes = "Pianificato per **Stasera** sotto l'icona della luna.",
-                taskUpcomingTitle = "Revisione architetturale con il team",
-                taskUpcomingNotes = "Controllare le scadenze e le attività ricorrenti.",
-                taskAnytimeTitle = "Perfezionare il feedback aptico sulla casella di controllo",
-                taskAnytimeNotes = "Una pressione prolungata segna l'attività come *Annullata* (icona X).",
-                taskSomedayTitle = "Imparare la fotografia analogica",
-                taskSomedayNotes = "Progetto ispirazionale per il futuro.",
-                taskCompletedTitle = "Configurare il database Room e Firebase Delta-Sync",
-                check1 = "Tocca l'attività per aprire la scheda con animazione a molla",
-                check2 = "Apri Quando e digita \"domani\" o \"stasera\"",
-                check3 = "Trascina il Magic Plus (+) nella lista"
+                tagQuick = "5 min",
+                areaPersonal = "Casa e Vita personale",
+                areaWork = "Lavoro e Progetti",
+                projVacationTitle = "Vacanze e Viaggio",
+                projVacationNotes = "Alloggio, treni, escursioni e valigia organizzati con calma.",
+                projHomeTitle = "Casa e Benessere Quotidiano",
+                projHomeNotes = "Acquisti, idee per la casa e buone abitudini.",
+                headBooking = "Prenotazioni e Documenti",
+                headPacking = "Valigia e Preparativi",
+                headEveryday = "Settimana e Spesa",
+                taskInboxTitle = "Prenotare visita di controllo dal dentista",
+                taskInboxNotes = "Scegliere un orario al mattino.",
+                taskToday1Title = "Prenotare hotel sul mare e biglietti del treno",
+                taskToday1Notes = "Verificare l'opzione di cancellazione gratuita.",
+                taskToday2Title = "Comprare frutta fresca, verdura e caffè al mercato",
+                taskToday2Notes = "Portare le borse riutilizzabili.",
+                taskEveningTitle = "Passeggiata serale di 30 minuti e lettura",
+                taskEveningNotes = "Rilassarsi senza schermi prima di dormire.",
+                taskUpcomingTitle = "Controllare validità documenti e kit da viaggio",
+                taskUpcomingNotes = "Da verificare prima della partenza.",
+                taskAnytimeTitle = "Preparare fotocamera, caricabatterie e occhiali da sole",
+                taskAnytimeNotes = "Ricaricare la powerbank.",
+                taskSomedayTitle = "Raccogliere consigli su ristoranti e sentieri panoramici",
+                taskSomedayNotes = "Idee per le prossime escursioni.",
+                taskCompletedTitle = "Scrivania riordinata e priorità della settimana definite",
+                check1 = "Confermare le date nel calendario",
+                check2 = "Prenotare i posti sul treno",
+                check3 = "Salvare la conferma di prenotazione"
             )
             "fr" -> SeedStrings(
-                tagFocus = "Focus",
-                tagQuick = "5 min",
-                tagDeepWork = "Travail profond",
+                tagImportant = "Important",
+                tagHome = "Maison",
+                tagOffice = "Bureau",
                 tagErrands = "Courses",
-                areaWork = "Travail & Architecture",
-                areaPersonal = "Vie personnelle",
-                projLaunchTitle = "Lancement Things 3 Android",
-                projLaunchNotes = "Application de productivité native 120 Hz avec Room FTS5 Offline-First et synchronisation delta Firebase.",
-                projTripTitle = "Week-end en Provence",
-                projTripNotes = "Réservations, itinéraire et liste de voyage.",
-                headArch = "Architecture & Synchronisation Cloud",
-                headDesign = "UI/UX & Micro-animations 120 Hz",
-                headLogistics = "Logistique & Réservations",
-                taskInboxTitle = "Bienvenue dans Things 3 – Touchez ici pour agrandir",
-                taskInboxNotes = "Un toucher transforme la ligne en une carte blanche directement dans la liste avec une animation fluide.",
-                taskToday1Title = "Tester l'expansion de carte et le bouton Magic Plus",
-                taskToday1Notes = "Faites glisser le bouton bleu **Magic Plus (+)** directement entre deux tâches.",
-                taskToday2Title = "Vérifier la recherche FTS5 avec accents (échéance, être, à bientôt)",
-                taskToday2Notes = "Balayez vers le bas pour ouvrir la Recherche rapide instantanée.",
-                taskEveningTitle = "Lecture du soir et bilan de la journée",
-                taskEveningNotes = "Planifié pour **Ce soir** avec l'icône de lune.",
-                taskUpcomingTitle = "Revue d'architecture avec l'équipe",
-                taskUpcomingNotes = "Suivre le compte à rebours de l'échéance.",
-                taskAnytimeTitle = "Affiner le retour haptique lors d'un appui long",
-                taskAnytimeNotes = "Un appui long sur la case marque la tâche comme *Annulée* (icône X).",
-                taskSomedayTitle = "Planifier une traversée des Alpes",
-                taskSomedayNotes = "Idées mises de côté pour un jour.",
-                taskCompletedTitle = "Configurer la base Room et Firebase Delta-Sync",
-                check1 = "Toucher la tâche pour déployer la carte en douceur",
-                check2 = "Ouvrir Quand et saisir « demain » ou « ce soir »",
-                check3 = "Glisser-déposer le Magic Plus (+) dans la liste"
+                tagQuick = "5 min",
+                areaPersonal = "Maison & Vie personnelle",
+                areaWork = "Travail & Projets",
+                projVacationTitle = "Vacances & Planification de voyage",
+                projVacationNotes = "Hébergement, billets de train, excursions et bagages en toute sérénité.",
+                projHomeTitle = "Maison & Quotidien Bien-être",
+                projHomeNotes = "Courses, idées déco et routines saines.",
+                headBooking = "Réservations & Documents",
+                headPacking = "Bagages & Préparatifs",
+                headEveryday = "Semaine & Courses",
+                taskInboxTitle = "Prendre rendez-vous chez le dentiste pour le mois prochain",
+                taskInboxNotes = "Privilégier un créneau le matin.",
+                taskToday1Title = "Réserver l'hôtel en bord de mer et les billets de train",
+                taskToday1Notes = "Choisir le tarif avec annulation flexible.",
+                taskToday2Title = "Acheter des fruits frais, des légumes et du café au marché",
+                taskToday2Notes = "Penser aux sacs cabas.",
+                taskEveningTitle = "Promenade du soir de 30 minutes et lecture",
+                taskEveningNotes = "Déconnexion calme en fin de journée.",
+                taskUpcomingTitle = "Vérifier les pièces d'identité et la trousse de voyage",
+                taskUpcomingNotes = "Contrôler avant le départ.",
+                taskAnytimeTitle = "Préparer appareil photo, chargeurs et lunettes de soleil",
+                taskAnytimeNotes = "Charger la batterie externe.",
+                taskSomedayTitle = "Noter les bonnes adresses de restaurants et randonnées",
+                taskSomedayNotes = "Inspirations pour les vacances.",
+                taskCompletedTitle = "Bureau rangé et priorités de la semaine définies",
+                check1 = "Confirmer les dates dans le calendrier",
+                check2 = "Réserver les places côté fenêtre",
+                check3 = "Enregistrer la confirmation hors ligne"
             )
             "es" -> SeedStrings(
-                tagFocus = "Enfoque",
-                tagQuick = "5 min",
-                tagDeepWork = "Trabajo profundo",
+                tagImportant = "Importante",
+                tagHome = "Casa",
+                tagOffice = "Oficina",
                 tagErrands = "Recados",
-                areaWork = "Trabajo y Arquitectura",
-                areaPersonal = "Vida personal",
-                projLaunchTitle = "Lanzamiento Things 3 Android",
-                projLaunchNotes = "App de productividad nativa a 120 Hz con Room FTS5 Offline-First y sincronización delta en Firebase.",
-                projTripTitle = "Escapada a la Costa Brava",
-                projTripNotes = "Rutas, alojamiento y equipaje para el fin de semana.",
-                headArch = "Arquitectura y Sincronización Cloud",
-                headDesign = "UI/UX y Micro-animaciones 120 Hz",
-                headLogistics = "Logística y Reservas",
-                taskInboxTitle = "Bienvenido a Things 3 – Toca aquí para desplegar",
-                taskInboxNotes = "Un toque transforma la fila directamente en una tarjeta blanca con animación elástica.",
-                taskToday1Title = "Probar la expansión de tarjeta y el botón Magic Plus",
-                taskToday1Notes = "Arrastra el botón azul **Magic Plus (+)** directamente entre dos tareas.",
-                taskToday2Title = "Comprobar búsqueda FTS5 con acentos y eñes (mañana, rápido, acción)",
-                taskToday2Notes = "Desliza hacia abajo en cualquier lista para abrir Búsqueda rápida.",
-                taskEveningTitle = "Lectura nocturna y revisión del día",
-                taskEveningNotes = "Programado para **Esta noche** bajo el icono de la luna.",
-                taskUpcomingTitle = "Revisión de arquitectura con el equipo",
-                taskUpcomingNotes = "Con fecha límite y cuenta atrás activa.",
-                taskAnytimeTitle = "Ajustar respuesta háptica al mantener pulsada la casilla",
-                taskAnytimeNotes = "Una pulsación larga marca la tarea como *Cancelada* (icono X).",
-                taskSomedayTitle = "Aprender fotografía analógica",
-                taskSomedayNotes = "Ideas guardadas para algún día.",
-                taskCompletedTitle = "Configurar base de datos Room y Firebase Delta-Sync",
-                check1 = "Tocar la tarea para abrir la tarjeta con animación fluida",
-                check2 = "Abrir Cuándo y escribir «mañana» o «esta noche»",
-                check3 = "Arrastrar el botón Magic Plus (+) a la lista"
+                tagQuick = "5 min",
+                areaPersonal = "Hogar y Vida personal",
+                areaWork = "Trabajo y Proyectos",
+                projVacationTitle = "Vacaciones y Plan de Viaje",
+                projVacationNotes = "Alojamiento, trenes, rutas y equipaje organizados con tranquilidad.",
+                projHomeTitle = "Hogar y Bienestar Diario",
+                projHomeNotes = "Compras semanales, hogar y hábitos saludables.",
+                headBooking = "Reservas y Documentos",
+                headPacking = "Equipaje y Preparativos",
+                headEveryday = "Semana y Compras",
+                taskInboxTitle = "Pedir cita de revisión con el dentista",
+                taskInboxNotes = "Elegir horario por la mañana.",
+                taskToday1Title = "Reservar hotel junto al mar y billetes de tren",
+                taskToday1Notes = "Seleccionar tarifa con cancelación flexible.",
+                taskToday2Title = "Comprar fruta fresca, verdura y café en el mercado",
+                taskToday2Notes = "Llevar bolsas reutilizables.",
+                taskEveningTitle = "Paseo tranquilo de 30 minutos y lectura nocturna",
+                taskEveningNotes = "Desconectar el móvil por la noche.",
+                taskUpcomingTitle = "Revisar pasaporte y botiquín de viaje",
+                taskUpcomingNotes = "Comprobar con antelación.",
+                taskAnytimeTitle = "Preparar cámara, cargadores y gafas de sol",
+                taskAnytimeNotes = "Cargar la batería portátil.",
+                taskSomedayTitle = "Guardar recomendaciones de restaurantes y miradores",
+                taskSomedayNotes = "Ideas para próximas escapadas.",
+                taskCompletedTitle = "Escritorio ordenado y objetivos semanales listos",
+                check1 = "Confirmar fechas en el calendario",
+                check2 = "Reservar asientos junto a la ventana",
+                check3 = "Guardar confirmación de reserva"
             )
             else -> SeedStrings(
-                tagFocus = "Focus",
-                tagQuick = "5 min",
-                tagDeepWork = "Deep Work",
+                tagImportant = "Important",
+                tagHome = "Home",
+                tagOffice = "Office",
                 tagErrands = "Errands",
-                areaWork = "Work & Architecture",
-                areaPersonal = "Personal & Life",
-                projLaunchTitle = "Things 3 Android Launch",
-                projLaunchNotes = "Uncompromising 120Hz native productivity app with Offline-First Room FTS5 & Firebase Delta-Sync.",
-                projTripTitle = "Weekend Trip to the Alps",
-                projTripNotes = "Cabin booking, trail map, and packing essentials.",
-                headArch = "Architecture & Cloud Sync",
-                headDesign = "UI/UX & 120Hz Micro-Animations",
-                headLogistics = "Logistics & Booking",
-                taskInboxTitle = "Welcome to Things 3 – Tap here to expand inline",
-                taskInboxNotes = "Tapping a To-Do never opens a jarring screen—it morphs smoothly right in the list using spring physics.",
-                taskToday1Title = "Experience Inline Card Expansion & Magic Plus",
-                taskToday1Notes = "Drag the glowing blue **Magic Plus (+)** button at the bottom right directly between two To-Dos or to the left edge for a Heading.",
-                taskToday2Title = "Verify SQLite FTS5 Search with Diacritics (Café, Zürich, Mañana)",
-                taskToday2Notes = "Swipe down on any list to open Quick Find powered by `unicode61` FTS5.",
-                taskEveningTitle = "Evening reading & daily reflection",
-                taskEveningNotes = "Scheduled for **This Evening** with the crescent moon icon.",
-                taskUpcomingTitle = "Architecture review & release sign-off",
-                taskUpcomingNotes = "Includes a hard deadline countdown and weekly recurrence.",
-                taskAnytimeTitle = "Refine haptic feedback on checkbox long-press",
-                taskAnytimeNotes = "Long-pressing any checkbox lets you mark the To-Do as *Canceled* (X icon).",
-                taskSomedayTitle = "Plan a trans-alpine hiking expedition",
-                taskSomedayNotes = "Saved in Someday for future inspiration.",
-                taskCompletedTitle = "Set up Room Offline-First DB & Firebase Delta-Sync",
-                check1 = "Tap this To-Do to expand the white card inline",
-                check2 = "Open When dialog and type \"tomorrow\" or \"this evening\"",
-                check3 = "Drag the Magic Plus (+) button into the list"
+                tagQuick = "5 min",
+                areaPersonal = "Personal & Home",
+                areaWork = "Work & Focus",
+                projVacationTitle = "Summer Vacation & Travel Plan",
+                projVacationNotes = "Hotel, train tickets, local sights, and packing checklist organized calmly.",
+                projHomeTitle = "Home & Everyday Wellbeing",
+                projHomeNotes = "Weekly groceries, home organization, and healthy routines.",
+                headBooking = "Bookings & Documents",
+                headPacking = "Packing & Preparation",
+                headEveryday = "Weekly & Errands",
+                taskInboxTitle = "Book dental checkup appointment for next month",
+                taskInboxNotes = "Pick a morning slot.",
+                taskToday1Title = "Book seaside hotel & train tickets",
+                taskToday1Notes = "Choose flexible rate with free cancellation.",
+                taskToday2Title = "Pick up fresh fruit, vegetables & coffee beans at the market",
+                taskToday2Notes = "Bring reusable tote bags.",
+                taskEveningTitle = "30-minute evening walk & book reading",
+                taskEveningNotes = "Unplug and wind down for the night.",
+                taskUpcomingTitle = "Check passport validity & travel kit",
+                taskUpcomingNotes = "Review ahead of departure.",
+                taskAnytimeTitle = "Pack camera, chargers & sunglasses",
+                taskAnytimeNotes = "Charge power bank and clear SD card.",
+                taskSomedayTitle = "Collect favorite local restaurants & scenic hiking trails",
+                taskSomedayNotes = "Saved ideas for the trip.",
+                taskCompletedTitle = "Tidy desk & set weekly focus priorities",
+                check1 = "Confirm travel dates in calendar",
+                check2 = "Reserve window seats on the train",
+                check3 = "Save booking confirmation offline"
             )
         }
 
         val tags = listOf(
             TagEntity(
-                id = tagFocusId,
-                title = strings.tagFocus,
+                id = tagImportantId,
+                title = strings.tagImportant,
                 parentTagId = null,
-                shortcut = "f",
+                shortcut = "w",
                 sortOrder = 100.0,
                 createdAt = now,
                 updatedAt = now,
                 isDirty = true
             ),
             TagEntity(
-                id = tagQuickId,
-                title = strings.tagQuick,
+                id = tagHomeId,
+                title = strings.tagHome,
                 parentTagId = null,
-                shortcut = "5",
+                shortcut = "h",
                 sortOrder = 200.0,
                 createdAt = now,
                 updatedAt = now,
                 isDirty = true
             ),
             TagEntity(
-                id = tagDeepWorkId,
-                title = strings.tagDeepWork,
-                parentTagId = tagFocusId,
-                shortcut = "d",
+                id = tagOfficeId,
+                title = strings.tagOffice,
+                parentTagId = null,
+                shortcut = "b",
                 sortOrder = 300.0,
                 createdAt = now,
                 updatedAt = now,
@@ -337,8 +347,18 @@ class DatabaseSeeder(
                 id = tagErrandsId,
                 title = strings.tagErrands,
                 parentTagId = null,
-                shortcut = "e",
+                shortcut = "u",
                 sortOrder = 400.0,
+                createdAt = now,
+                updatedAt = now,
+                isDirty = true
+            ),
+            TagEntity(
+                id = tagQuickId,
+                title = strings.tagQuick,
+                parentTagId = null,
+                shortcut = "5",
+                sortOrder = 500.0,
                 createdAt = now,
                 updatedAt = now,
                 isDirty = true
@@ -347,68 +367,68 @@ class DatabaseSeeder(
 
         val areas = listOf(
             AreaEntity(
-                id = areaWorkId,
-                title = strings.areaWork,
+                id = areaPersonalId,
+                title = strings.areaPersonal,
                 sortOrder = 1000.0,
-                tagIdsJson = json.encodeToString(listOf(tagFocusId)),
+                tagIdsJson = json.encodeToString(listOf(tagHomeId)),
                 createdAt = now,
                 updatedAt = now,
                 isDirty = true
             ),
             AreaEntity(
-                id = areaPersonalId,
-                title = strings.areaPersonal,
+                id = areaWorkId,
+                title = strings.areaWork,
                 sortOrder = 2000.0,
-                tagIdsJson = "[]",
+                tagIdsJson = json.encodeToString(listOf(tagOfficeId)),
                 createdAt = now,
                 updatedAt = now,
                 isDirty = true
             )
         )
 
-        val projLaunchTags = listOf(tagFocusId, tagDeepWorkId)
-        val projTripTags = listOf(tagErrandsId)
+        val projVacationTags = listOf(tagImportantId)
+        val projHomeTags = listOf(tagHomeId, tagErrandsId)
 
         val projects = listOf(
             ProjectEntity(
-                id = projLaunchId,
-                areaId = areaWorkId,
-                title = strings.projLaunchTitle,
-                notes = strings.projLaunchNotes,
+                id = projVacationId,
+                areaId = areaPersonalId,
+                title = strings.projVacationTitle,
+                notes = strings.projVacationNotes,
                 status = ProjectStatus.ACTIVE,
                 scheduleState = ScheduleState.TODAY,
                 whenDate = todayEpoch,
                 deadline = inFiveDaysEpoch,
                 completedAt = null,
                 sortOrder = 1000.0,
-                tagIdsJson = json.encodeToString(projLaunchTags),
+                tagIdsJson = json.encodeToString(projVacationTags),
                 createdAt = now,
                 updatedAt = now,
                 isDirty = true
-            ) to projLaunchTags,
+            ) to projVacationTags,
             ProjectEntity(
-                id = projTripId,
+                id = projHomeId,
                 areaId = areaPersonalId,
-                title = strings.projTripTitle,
-                notes = strings.projTripNotes,
+                title = strings.projHomeTitle,
+                notes = strings.projHomeNotes,
                 status = ProjectStatus.ACTIVE,
                 scheduleState = ScheduleState.ANYTIME,
                 whenDate = null,
                 deadline = null,
                 completedAt = null,
                 sortOrder = 2000.0,
-                tagIdsJson = json.encodeToString(projTripTags),
+                tagIdsJson = json.encodeToString(projHomeTags),
                 createdAt = now,
                 updatedAt = now,
                 isDirty = true
-            ) to projTripTags
+            ) to projHomeTags
         )
 
         val headings = listOf(
             HeadingEntity(
-                id = headArchId,
-                projectId = projLaunchId,
-                title = strings.headArch,
+                id = headBookingId,
+                projectId = projVacationId,
+                title = strings.headBooking,
                 sortOrder = 1000.0,
                 isArchived = false,
                 createdAt = now,
@@ -416,9 +436,9 @@ class DatabaseSeeder(
                 isDirty = true
             ),
             HeadingEntity(
-                id = headDesignId,
-                projectId = projLaunchId,
-                title = strings.headDesign,
+                id = headPackingId,
+                projectId = projVacationId,
+                title = strings.headPacking,
                 sortOrder = 2000.0,
                 isArchived = false,
                 createdAt = now,
@@ -426,9 +446,9 @@ class DatabaseSeeder(
                 isDirty = true
             ),
             HeadingEntity(
-                id = headLogisticsId,
-                projectId = projTripId,
-                title = strings.headLogistics,
+                id = headEverydayId,
+                projectId = projHomeId,
+                title = strings.headEveryday,
                 sortOrder = 1000.0,
                 isArchived = false,
                 createdAt = now,
@@ -442,7 +462,7 @@ class DatabaseSeeder(
                 mode = RecurrenceMode.FIXED_SCHEDULE,
                 interval = 1,
                 unit = RecurrenceUnit.WEEKS,
-                daysOfWeek = listOf(5) // Friday
+                daysOfWeek = listOf(5)
             )
         )
 
@@ -476,18 +496,18 @@ class DatabaseSeeder(
                 scheduleState = ScheduleState.TODAY,
                 whenDate = todayEpoch,
                 deadline = inThreeDaysEpoch,
-                reminderTime = null,
+                reminderTime = todayReminder15h,
                 completedAt = null,
-                projectId = projLaunchId,
-                headingId = headDesignId,
-                areaId = areaWorkId,
+                projectId = projVacationId,
+                headingId = headBookingId,
+                areaId = areaPersonalId,
                 recurrenceRuleJson = null,
                 sortOrder = 1000.0,
-                tagIdsJson = json.encodeToString(listOf(tagFocusId, tagDeepWorkId)),
+                tagIdsJson = json.encodeToString(listOf(tagImportantId, tagHomeId)),
                 createdAt = now,
                 updatedAt = now,
                 isDirty = true
-            ) to listOf(tagFocusId, tagDeepWorkId),
+            ) to listOf(tagImportantId, tagHomeId),
 
             TaskEntity(
                 id = taskToday2Id,
@@ -496,19 +516,19 @@ class DatabaseSeeder(
                 status = TaskStatus.OPEN,
                 scheduleState = ScheduleState.TODAY,
                 whenDate = todayEpoch,
-                deadline = todayEpoch,
+                deadline = null,
                 reminderTime = null,
                 completedAt = null,
-                projectId = projLaunchId,
-                headingId = headArchId,
-                areaId = areaWorkId,
+                projectId = projHomeId,
+                headingId = headEverydayId,
+                areaId = areaPersonalId,
                 recurrenceRuleJson = null,
                 sortOrder = 2000.0,
-                tagIdsJson = json.encodeToString(listOf(tagQuickId)),
+                tagIdsJson = json.encodeToString(listOf(tagErrandsId)),
                 createdAt = now,
                 updatedAt = now,
                 isDirty = true
-            ) to listOf(tagQuickId),
+            ) to listOf(tagErrandsId),
 
             TaskEntity(
                 id = taskEvening1Id,
@@ -520,16 +540,16 @@ class DatabaseSeeder(
                 deadline = null,
                 reminderTime = null,
                 completedAt = null,
-                projectId = null,
-                headingId = null,
+                projectId = projHomeId,
+                headingId = headEverydayId,
                 areaId = areaPersonalId,
                 recurrenceRuleJson = null,
                 sortOrder = 3000.0,
-                tagIdsJson = "[]",
+                tagIdsJson = json.encodeToString(listOf(tagHomeId)),
                 createdAt = now,
                 updatedAt = now,
                 isDirty = true
-            ) to emptyList(),
+            ) to listOf(tagHomeId),
 
             TaskEntity(
                 id = taskUpcoming1Id,
@@ -541,16 +561,16 @@ class DatabaseSeeder(
                 deadline = inFiveDaysEpoch,
                 reminderTime = null,
                 completedAt = null,
-                projectId = projLaunchId,
-                headingId = headArchId,
-                areaId = areaWorkId,
+                projectId = projVacationId,
+                headingId = headBookingId,
+                areaId = areaPersonalId,
                 recurrenceRuleJson = weeklyRecurrenceJson,
                 sortOrder = 4000.0,
-                tagIdsJson = json.encodeToString(listOf(tagFocusId)),
+                tagIdsJson = json.encodeToString(listOf(tagImportantId)),
                 createdAt = now,
                 updatedAt = now,
                 isDirty = true
-            ) to listOf(tagFocusId),
+            ) to listOf(tagImportantId),
 
             TaskEntity(
                 id = taskAnytime1Id,
@@ -562,16 +582,16 @@ class DatabaseSeeder(
                 deadline = null,
                 reminderTime = null,
                 completedAt = null,
-                projectId = projLaunchId,
-                headingId = headDesignId,
-                areaId = areaWorkId,
+                projectId = projVacationId,
+                headingId = headPackingId,
+                areaId = areaPersonalId,
                 recurrenceRuleJson = null,
                 sortOrder = 5000.0,
-                tagIdsJson = json.encodeToString(listOf(tagDeepWorkId)),
+                tagIdsJson = json.encodeToString(listOf(tagHomeId)),
                 createdAt = now,
                 updatedAt = now,
                 isDirty = true
-            ) to listOf(tagDeepWorkId),
+            ) to listOf(tagHomeId),
 
             TaskEntity(
                 id = taskSomeday1Id,
@@ -583,16 +603,16 @@ class DatabaseSeeder(
                 deadline = null,
                 reminderTime = null,
                 completedAt = null,
-                projectId = projTripId,
-                headingId = headLogisticsId,
+                projectId = projVacationId,
+                headingId = headPackingId,
                 areaId = areaPersonalId,
                 recurrenceRuleJson = null,
                 sortOrder = 6000.0,
-                tagIdsJson = json.encodeToString(listOf(tagErrandsId)),
+                tagIdsJson = json.encodeToString(listOf(tagQuickId)),
                 createdAt = now,
                 updatedAt = now,
                 isDirty = true
-            ) to listOf(tagErrandsId),
+            ) to listOf(tagQuickId),
 
             TaskEntity(
                 id = taskCompleted1Id,
@@ -604,16 +624,16 @@ class DatabaseSeeder(
                 deadline = null,
                 reminderTime = null,
                 completedAt = now - 3600_000L,
-                projectId = projLaunchId,
-                headingId = headArchId,
-                areaId = areaWorkId,
+                projectId = projHomeId,
+                headingId = headEverydayId,
+                areaId = areaPersonalId,
                 recurrenceRuleJson = null,
                 sortOrder = 500.0,
-                tagIdsJson = json.encodeToString(listOf(tagFocusId)),
+                tagIdsJson = json.encodeToString(listOf(tagHomeId)),
                 createdAt = now - 7200_000L,
                 updatedAt = now,
                 isDirty = true
-            ) to listOf(tagFocusId)
+            ) to listOf(tagHomeId)
         )
 
         val checklistItems = listOf(
@@ -660,19 +680,20 @@ class DatabaseSeeder(
     }
 
     private data class SeedStrings(
-        val tagFocus: String,
-        val tagQuick: String,
-        val tagDeepWork: String,
+        val tagImportant: String,
+        val tagHome: String,
+        val tagOffice: String,
         val tagErrands: String,
-        val areaWork: String,
+        val tagQuick: String,
         val areaPersonal: String,
-        val projLaunchTitle: String,
-        val projLaunchNotes: String,
-        val projTripTitle: String,
-        val projTripNotes: String,
-        val headArch: String,
-        val headDesign: String,
-        val headLogistics: String,
+        val areaWork: String,
+        val projVacationTitle: String,
+        val projVacationNotes: String,
+        val projHomeTitle: String,
+        val projHomeNotes: String,
+        val headBooking: String,
+        val headPacking: String,
+        val headEveryday: String,
         val taskInboxTitle: String,
         val taskInboxNotes: String,
         val taskToday1Title: String,

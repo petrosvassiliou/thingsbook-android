@@ -65,11 +65,10 @@ import androidx.compose.ui.unit.dp
 import com.culturedcode.things3.R
 import com.culturedcode.things3.domain.model.ChecklistItem
 import com.culturedcode.things3.domain.model.ScheduleState
+import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
 import com.culturedcode.things3.ui.theme.ThingsTheme
-import java.time.LocalDate
-import java.time.ZoneId
 import java.util.Locale
 
 /**
@@ -79,20 +78,25 @@ import java.util.Locale
  * - The row morphs in-place via spring physics (`spring(dampingRatio = 0.8f, stiffness = 400f)`)
  *   into a pure white card (`#FFFFFF` in Light / `#24262D` in Dark) with subtle elevation shadow,
  *   pushing neighboring rows smoothly apart.
- * - Includes integrated **Gemini Magic Breakdown (✨)** button to auto-generate localized checklist steps
- *   in EN, DE, IT, FR, or ES.
+ * - Includes integrated Calendar Date Picker, Task-Specific Time Reminder Picker, Deadline Calendar Picker,
+ *   Tag Assignment Dialog, and **Gemini Magic Breakdown (✨)**.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ExpandableTaskCard(
     task: TaskItem,
+    allTags: List<Tag> = emptyList(),
     isExpanded: Boolean,
     isGeneratingMagicBreakdown: Boolean,
     onExpandToggle: () -> Unit,
     onStatusChange: (TaskStatus) -> Unit,
     onTitleNotesChange: (String, String) -> Unit,
     onScheduleChange: (ScheduleState, Long?) -> Unit,
+    onScheduleWithReminderChange: ((ScheduleState, Long?, Long?) -> Unit)? = null,
     onDeadlineChange: (Long?) -> Unit,
+    onUpdateTaskTags: ((List<String>) -> Unit)? = null,
+    onCreateAndAssignTag: ((String) -> Unit)? = null,
+    onOpenFullTagManager: (() -> Unit)? = null,
     onAddChecklistItem: (String) -> Unit,
     onToggleChecklistItem: (String, Boolean) -> Unit,
     onTriggerGeminiMagicBreakdown: () -> Unit,
@@ -107,6 +111,8 @@ fun ExpandableTaskCard(
     var editedNotes by remember(task.id, task.notes) { mutableStateOf(task.notes) }
     var newChecklistText by remember(task.id) { mutableStateOf("") }
     var showWhenDialog by remember(task.id) { mutableStateOf(false) }
+    var showDeadlineDialog by remember(task.id) { mutableStateOf(false) }
+    var showTagPickerDialog by remember(task.id) { mutableStateOf(false) }
 
     val horizontalPadding by animateDpAsState(
         targetValue = if (isExpanded) 12.dp else 16.dp,
@@ -224,12 +230,15 @@ fun ExpandableTaskCard(
                     )
                 }
 
-                // Collapsed inline metadata pills (Checklist progress, Tags, Deadline)
+                // Collapsed inline metadata pills (Reminder time, Checklist progress, Tags, Deadline)
                 if (!isExpanded) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        task.reminderTime?.let { rt ->
+                            ThingsReminderBadge(reminderEpochMillis = rt)
+                        }
                         if (task.checklistItems.isNotEmpty()) {
                             val doneCount = task.checklistItems.count { it.isCompleted }
                             ThingsTagPill(title = "$doneCount/${task.checklistItems.size}")
@@ -256,7 +265,7 @@ fun ExpandableTaskCard(
                 )
             }
 
-            // Expanded Card Content (Notes, Checklist, Tags, When/Deadline, Gemini Magic Breakdown)
+            // Expanded Card Content (Notes, Checklist, Tags, When/Reminder, Deadline, Gemini Magic Breakdown)
             AnimatedVisibility(
                 visible = isExpanded,
                 enter = expandVertically(
@@ -366,7 +375,7 @@ fun ExpandableTaskCard(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Tags & Badges Row
+                    // Tags, When, Reminder & Deadline Badges Row
                     FlowRow(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -379,28 +388,77 @@ fun ExpandableTaskCard(
                             onClick = { showWhenDialog = true }
                         )
 
+                        task.reminderTime?.let { rt ->
+                            ThingsReminderBadge(
+                                reminderEpochMillis = rt,
+                                onClick = { showWhenDialog = true }
+                            )
+                        }
+
                         task.deadline?.let { dl ->
                             ThingsDeadlineBadge(
                                 deadlineEpochMillis = dl,
                                 locale = locale,
-                                onClick = { onDeadlineChange(null) }
+                                onClick = { showDeadlineDialog = true }
                             )
                         }
 
                         task.tags.forEach { tag ->
-                            ThingsTagPill(title = tag.title)
+                            ThingsTagPill(
+                                title = tag.title,
+                                onClick = { showTagPickerDialog = true }
+                            )
                         }
+
+                        ThingsTagPill(
+                            title = "+ " + stringResource(R.string.action_tags),
+                            onClick = { showTagPickerDialog = true }
+                        )
                     }
 
                     if (showWhenDialog) {
                         WhenNaturalDateDialog(
                             currentScheduleState = task.scheduleState,
                             currentWhenDate = task.whenDate,
+                            currentReminderTime = task.reminderTime,
                             locale = locale,
                             onApplySchedule = { newState, newWhen ->
                                 onScheduleChange(newState, newWhen)
                             },
+                            onApplyScheduleWithReminder = { newState, newWhen, newReminder ->
+                                if (onScheduleWithReminderChange != null) {
+                                    onScheduleWithReminderChange(newState, newWhen, newReminder)
+                                } else {
+                                    onScheduleChange(newState, newWhen)
+                                }
+                            },
                             onDismiss = { showWhenDialog = false }
+                        )
+                    }
+
+                    if (showDeadlineDialog) {
+                        DeadlineDatePickerDialog(
+                            currentDeadline = task.deadline,
+                            locale = locale,
+                            onApplyDeadline = { newDl -> onDeadlineChange(newDl) },
+                            onDismiss = { showDeadlineDialog = false }
+                        )
+                    }
+
+                    if (showTagPickerDialog) {
+                        TaskTagPickerDialog(
+                            allTags = allTags,
+                            selectedTagIds = task.tags.map { it.id },
+                            onUpdateSelectedTags = { updatedIds ->
+                                onUpdateTaskTags?.invoke(updatedIds)
+                            },
+                            onCreateAndAssignTag = { newTagTitle ->
+                                onCreateAndAssignTag?.invoke(newTagTitle)
+                            },
+                            onOpenFullTagManager = {
+                                onOpenFullTagManager?.invoke()
+                            },
+                            onDismiss = { showTagPickerDialog = false }
                         )
                     }
 
@@ -408,7 +466,7 @@ fun ExpandableTaskCard(
                     HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Bottom Card Action Bar: Gemini Magic Breakdown ✨, When, Deadline (+3d), Delete, Done
+                    // Bottom Card Action Bar: Gemini Magic Breakdown ✨, When Calendar, Tags, Deadline Calendar, Delete, Done
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -462,7 +520,7 @@ fun ExpandableTaskCard(
                                 Icon(
                                     imageVector = Icons.Outlined.CalendarToday,
                                     contentDescription = stringResource(R.string.action_when),
-                                    tint = colors.secondaryText,
+                                    tint = if (task.whenDate != null || task.reminderTime != null) colors.thingsBlue else colors.secondaryText,
                                     modifier = Modifier.size(17.dp)
                                 )
                             }
@@ -470,13 +528,22 @@ fun ExpandableTaskCard(
                             IconButton(
                                 onClick = {
                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    val zone = ZoneId.systemDefault()
-                                    val inThreeDays = LocalDate.now(zone)
-                                        .plusDays(3)
-                                        .atStartOfDay(zone)
-                                        .toInstant()
-                                        .toEpochMilli()
-                                    onDeadlineChange(if (task.deadline == null) inThreeDays else null)
+                                    showTagPickerDialog = true
+                                },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.LocalOffer,
+                                    contentDescription = stringResource(R.string.action_tags),
+                                    tint = if (task.tags.isNotEmpty()) colors.thingsBlue else colors.secondaryText,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    showDeadlineDialog = true
                                 },
                                 modifier = Modifier.size(32.dp)
                             ) {

@@ -114,4 +114,35 @@
     <string name="gemini_generating">Gemini strukturiert deine Gedanken…</string>
     <string name="gemini_api_key_label">Optionaler Gemini API-Schlüssel (überschreibt Vertex AI)</string>
     <string name="gemini_api_key_placeholder">AIza… Schlüssel einfügen oder für Firebase Vertex AI leer lassen</string>
+
+    <!-- Calendar Date Picker & Task Reminders -->
+    <string name="when_pick_date_title">Datum auswählen</string>
+    <string name="when_pick_calendar_tab">Kalender</string>
+    <string name="when_task_reminder_title">Aufgabenbezogene Erinnerung (Uhrzeit)</string>
+    <string name="when_task_reminder_none">Keine Uhrzeit festgelegt</string>
+    <string name="when_task_reminder_set">Erinnerung um %1$s Uhr</string>
+    <string name="when_apply_date_button">Datum &amp; Erinnerung übernehmen</string>
+    <string name="deadline_picker_title">Frist-Datum auswählen</string>
+    <string name="deadline_clear_button">Frist entfernen</string>
+
+    <!-- Daily Digest & Notification Settings -->
+    <string name="notifications_title">Benachrichtigungen &amp; Erinnerungen</string>
+    <string name="notifications_daily_digest_title">Tägliche Benachrichtigung für aktive Aufgaben</string>
+    <string name="notifications_daily_digest_desc">Jeden Tag zur gewählten Uhrzeit eine Benachrichtigung für alle Aufgaben erhalten, die am jeweiligen Tag aktiv sind.</string>
+    <string name="notifications_daily_time_label">Tägliche Uhrzeit</string>
+    <string name="notifications_task_specific_desc">Zusätzlich kannst du direkt in jeder Aufgabe unter „Wann“ eine eigene, aufgabenbezogene Uhrzeit-Erinnerung einstellen.</string>
+    <string name="notifications_test_now">Test-Benachrichtigung jetzt senden</string>
+    <string name="notifications_daily_digest_channel">Tägliche Aufgaben-Übersicht</string>
+    <string name="notifications_daily_digest_header">Heute aktiv: %1$d Aufgaben</string>
+    <string name="notifications_daily_digest_empty">Alles erledigt – heute stehen keine offenen Aufgaben an!</string>
+
+    <!-- Full Tag Management -->
+    <string name="tags_manage_title">Tags verwalten</string>
+    <string name="tags_assign_title">Tags für diese Aufgabe</string>
+    <string name="tags_new_placeholder">Neuer Tag-Name (z. B. Wichtig, Zuhause, Büro)…</string>
+    <string name="tags_shortcut_placeholder">Kürzel</string>
+    <string name="tags_add_button">Tag anlegen</string>
+    <string name="tags_edit_title">Tag umbenennen</string>
+    <string name="tags_empty_hint">Noch keine Tags vorhanden. Lege oben deinen ersten Tag an.</string>
+    <string name="tags_filter_all">Alle</string>
 </resources>

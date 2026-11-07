@@ -35,6 +35,8 @@ import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.LocalOffer
+import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -75,6 +77,7 @@ import com.culturedcode.things3.R
 import com.culturedcode.things3.data.repository.CloudSyncStatus
 import com.culturedcode.things3.domain.model.Heading
 import com.culturedcode.things3.domain.model.Project
+import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.ui.components.ExpandableTaskCard
 import com.culturedcode.things3.ui.components.GeminiAssistantModal
@@ -86,6 +89,8 @@ import com.culturedcode.things3.ui.components.ProjectProgressRing
 import com.culturedcode.things3.ui.components.SmartViewIcon
 import com.culturedcode.things3.ui.components.SmartViewType
 import com.culturedcode.things3.ui.components.ThingsAuthAndSyncModal
+import com.culturedcode.things3.ui.components.ThingsNotificationSettingsModal
+import com.culturedcode.things3.ui.components.ThingsTagManagerModal
 import com.culturedcode.things3.ui.components.ThisEveningHeaderBadge
 import com.culturedcode.things3.ui.theme.ThingsTheme
 import com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget
@@ -117,6 +122,11 @@ fun ThingsSmartViewScreen(
     val activeProjects by viewModel.activeProjects.collectAsState()
     val projectHeadings by viewModel.activeProjectHeadings.collectAsState()
     val projectTasks by viewModel.activeProjectTasks.collectAsState()
+    val allTags by viewModel.allTags.collectAsState()
+    val selectedFilterTagId by viewModel.selectedFilterTagId.collectAsState()
+    val isTagManagerOpen by viewModel.isTagManagerOpen.collectAsState()
+    val isNotificationSettingsOpen by viewModel.isNotificationSettingsOpen.collectAsState()
+    val dailyDigestConfig by viewModel.dailyDigestConfig.collectAsState()
 
     val isQuickFindOpen by viewModel.isQuickFindOpen.collectAsState()
     val quickFindQuery by viewModel.quickFindQuery.collectAsState()
@@ -140,8 +150,8 @@ fun ThingsSmartViewScreen(
     val defaultNewTodoTitle = stringResource(R.string.entity_new_todo)
     val defaultNewHeadingTitle = stringResource(R.string.entity_new_heading)
 
-    // Determine primary task list for current view
-    val primaryTasks: List<TaskItem> = when (val target = navTarget) {
+    // Determine primary task list for current view, filtered by selected tag if active
+    val rawPrimaryTasks: List<TaskItem> = when (val target = navTarget) {
         is ActiveNavigationTarget.SmartView -> when (target.type) {
             SmartViewType.INBOX -> inboxTasks
             SmartViewType.TODAY -> todayTasks
@@ -154,12 +164,24 @@ fun ThingsSmartViewScreen(
         is ActiveNavigationTarget.AreaDetail -> anytimeTasks
     }
 
+    val primaryTasks: List<TaskItem> = remember(rawPrimaryTasks, selectedFilterTagId) {
+        val tagId = selectedFilterTagId
+        if (tagId == null) rawPrimaryTasks
+        else rawPrimaryTasks.filter { task -> task.tags.any { it.id == tagId } }
+    }
+
+    val filteredEveningTasks: List<TaskItem> = remember(eveningTasks, selectedFilterTagId) {
+        val tagId = selectedFilterTagId
+        if (tagId == null) eveningTasks
+        else eveningTasks.filter { task -> task.tags.any { it.id == tagId } }
+    }
+
     val isProjectView = navTarget is ActiveNavigationTarget.ProjectDetail
     val currentProject: Project? = (navTarget as? ActiveNavigationTarget.ProjectDetail)?.let { detail ->
         activeProjects.find { it.id == detail.projectId }
     }
 
-    // Adaptive Layout Detection: Googlebooks / Chromebooks, Tablets & Foldables (>= 700dp) vs. Android Phones (< 700dp)
+    // Adaptive Layout Detection: Tablets & Foldables (>= 700dp) vs. Android Phones (< 700dp)
     val isWideScreen = configuration.screenWidthDp >= 700
     val smartViewCounts = mapOf(
         SmartViewType.INBOX to inboxTasks.size,
@@ -174,7 +196,6 @@ fun ThingsSmartViewScreen(
         modifier = modifier
             .fillMaxSize()
             .background(colors.canvasBackground)
-            // Hardware Keyboard Shortcuts for Googlebooks / Chromebooks (Ctrl+F, Ctrl+N, Ctrl+G, Esc)
             .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown) {
                     val ctrlOrMeta = event.isCtrlPressed || event.isMetaPressed
@@ -203,6 +224,14 @@ fun ThingsSmartViewScreen(
                                 }
                                 isAuthModalOpen -> {
                                     viewModel.setAuthModalOpen(false)
+                                    true
+                                }
+                                isTagManagerOpen -> {
+                                    viewModel.setTagManagerOpen(false)
+                                    true
+                                }
+                                isNotificationSettingsOpen -> {
+                                    viewModel.setNotificationSettingsOpen(false)
                                     true
                                 }
                                 expandedTaskId != null -> {
@@ -277,9 +306,10 @@ fun ThingsSmartViewScreen(
                         .widthIn(max = if (isWideScreen) 840.dp else 2000.dp)
                         .fillMaxSize()
                 ) {
-                    // Top Utility & Navigation Bar (Quick Find, Gemini AI ✨, Per-App Language Switcher, Cloud Sync)
+                    // Top Utility & Navigation Bar (Quick Find, Gemini AI ✨, Tags 🏷️, Notifications 🔔, Language, Cloud Sync)
                     TopThingsbookBar(
                         syncStatus = syncStatus,
+                        dailyDigestEnabled = dailyDigestConfig.enabled,
                         showLanguageMenu = showLanguageMenu,
                         onToggleLanguageMenu = { showLanguageMenu = it },
                         onSelectLanguage = { tag ->
@@ -288,6 +318,8 @@ fun ThingsSmartViewScreen(
                         },
                         onOpenQuickFind = { viewModel.setQuickFindOpen(true) },
                         onOpenGeminiHub = { viewModel.setGeminiModalOpen(true) },
+                        onOpenTagManager = { viewModel.setTagManagerOpen(true) },
+                        onOpenNotificationSettings = { viewModel.setNotificationSettingsOpen(true) },
                         onManualSync = { viewModel.setAuthModalOpen(true) }
                     )
 
@@ -307,6 +339,14 @@ fun ThingsSmartViewScreen(
                         currentProject = currentProject
                     )
 
+                    // Interactive Tag Filter Strip + Tag Management Trigger
+                    TagFilterAndManageStrip(
+                        allTags = allTags,
+                        selectedTagId = selectedFilterTagId,
+                        onSelectTag = { viewModel.selectFilterTag(it) },
+                        onOpenTagManager = { viewModel.setTagManagerOpen(true) }
+                    )
+
                     // Main Task & Heading List with Inline Card Expansion + Magic Plus Insertion Gaps
                     LazyColumn(
                         modifier = Modifier
@@ -314,52 +354,97 @@ fun ThingsSmartViewScreen(
                             .weight(1f),
                         contentPadding = PaddingValues(bottom = 110.dp)
                     ) {
-                // If viewing Logbook, show the Gemini Logbook Reflection Card at the top
-                if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK)) {
-                    item(key = "gemini_logbook_card") {
-                        GeminiLogbookReflectionCard(
-                            review = logbookAiReview,
-                            isGenerating = isGeminiBusy,
-                            onGenerateReflection = {
-                                viewModel.generateGeminiLogbookReflection(activeLocale)
-                            },
-                            onAdoptSuggestedFocusTask = { title ->
-                                viewModel.adoptSuggestedFocusTaskForToday(title)
+                        // If viewing Logbook, show the Gemini Logbook Reflection Card at the top
+                        if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK)) {
+                            item(key = "gemini_logbook_card") {
+                                GeminiLogbookReflectionCard(
+                                    review = logbookAiReview,
+                                    isGenerating = isGeminiBusy,
+                                    onGenerateReflection = {
+                                        viewModel.generateGeminiLogbookReflection(activeLocale)
+                                    },
+                                    onAdoptSuggestedFocusTask = { title ->
+                                        viewModel.adoptSuggestedFocusTaskForToday(title)
+                                    }
+                                )
                             }
-                        )
-                    }
-                }
-
-                // If viewing a Project, group tasks under collapsible Headings
-                if (isProjectView && projectHeadings.isNotEmpty()) {
-                    projectHeadings.forEachIndexed { hIdx, heading ->
-                        item(key = "heading_${heading.id}") {
-                            ProjectHeadingSectionHeader(
-                                heading = heading,
-                                isCollapsed = heading.id in collapsedHeadingIds,
-                                onToggleCollapse = { viewModel.toggleHeadingCollapsed(heading.id) }
-                            )
                         }
 
-                        if (heading.id !in collapsedHeadingIds) {
-                            val tasksInHeading = primaryTasks.filter { it.headingId == heading.id }
+                        // If viewing a Project, group tasks under collapsible Headings
+                        if (isProjectView && projectHeadings.isNotEmpty()) {
+                            projectHeadings.forEachIndexed { hIdx, heading ->
+                                item(key = "heading_${heading.id}") {
+                                    ProjectHeadingSectionHeader(
+                                        heading = heading,
+                                        isCollapsed = heading.id in collapsedHeadingIds,
+                                        onToggleCollapse = { viewModel.toggleHeadingCollapsed(heading.id) }
+                                    )
+                                }
+
+                                if (heading.id !in collapsedHeadingIds) {
+                                    val tasksInHeading = primaryTasks.filter { it.headingId == heading.id }
+                                    itemsIndexed(
+                                        items = tasksInHeading,
+                                        key = { _, task -> task.id }
+                                    ) { index, task ->
+                                        MagicPlusInsertionGap(
+                                            visible = magicDragState.isDragging && magicDragState.dropIndex == index && hIdx == 0,
+                                            dropMode = magicDragState.dropMode
+                                        )
+                                        ExpandableTaskCard(
+                                            task = task,
+                                            allTags = allTags,
+                                            isExpanded = expandedTaskId == task.id,
+                                            isGeneratingMagicBreakdown = magicBreakdownTaskId == task.id,
+                                            onExpandToggle = { viewModel.toggleTaskExpansion(task.id) },
+                                            onStatusChange = { viewModel.updateTaskStatus(task.id, it) },
+                                            onTitleNotesChange = { t, n -> viewModel.updateTaskTitleAndNotes(task, t, n) },
+                                            onScheduleChange = { s, w -> viewModel.updateTaskSchedule(task, s, w) },
+                                            onScheduleWithReminderChange = { s, w, r ->
+                                                viewModel.updateTaskScheduleWithReminder(task, s, w, r)
+                                            },
+                                            onDeadlineChange = { dl -> viewModel.updateTaskDeadline(task, dl) },
+                                            onUpdateTaskTags = { tagIds -> viewModel.updateTaskTags(task, tagIds) },
+                                            onCreateAndAssignTag = { newTag -> viewModel.createAndAssignTagToTask(task, newTag) },
+                                            onOpenFullTagManager = { viewModel.setTagManagerOpen(true) },
+                                            onAddChecklistItem = { itemTitle -> viewModel.addChecklistItem(task.id, itemTitle) },
+                                            onToggleChecklistItem = { itemId, done -> viewModel.toggleChecklistItem(itemId, done) },
+                                            onTriggerGeminiMagicBreakdown = {
+                                                viewModel.triggerGeminiMagicBreakdown(task, activeLocale)
+                                            },
+                                            onDeleteTask = { viewModel.deleteTask(task.id) },
+                                            locale = activeLocale
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            // Standard Smart View List with Magic Plus drop gaps between every item
                             itemsIndexed(
-                                items = tasksInHeading,
+                                items = primaryTasks,
                                 key = { _, task -> task.id }
                             ) { index, task ->
                                 MagicPlusInsertionGap(
-                                    visible = magicDragState.isDragging && magicDragState.dropIndex == index && hIdx == 0,
+                                    visible = magicDragState.isDragging && magicDragState.dropIndex == index,
                                     dropMode = magicDragState.dropMode
                                 )
+
                                 ExpandableTaskCard(
                                     task = task,
+                                    allTags = allTags,
                                     isExpanded = expandedTaskId == task.id,
                                     isGeneratingMagicBreakdown = magicBreakdownTaskId == task.id,
                                     onExpandToggle = { viewModel.toggleTaskExpansion(task.id) },
                                     onStatusChange = { viewModel.updateTaskStatus(task.id, it) },
                                     onTitleNotesChange = { t, n -> viewModel.updateTaskTitleAndNotes(task, t, n) },
                                     onScheduleChange = { s, w -> viewModel.updateTaskSchedule(task, s, w) },
+                                    onScheduleWithReminderChange = { s, w, r ->
+                                        viewModel.updateTaskScheduleWithReminder(task, s, w, r)
+                                    },
                                     onDeadlineChange = { dl -> viewModel.updateTaskDeadline(task, dl) },
+                                    onUpdateTaskTags = { tagIds -> viewModel.updateTaskTags(task, tagIds) },
+                                    onCreateAndAssignTag = { newTag -> viewModel.createAndAssignTagToTask(task, newTag) },
+                                    onOpenFullTagManager = { viewModel.setTagManagerOpen(true) },
                                     onAddChecklistItem = { itemTitle -> viewModel.addChecklistItem(task.id, itemTitle) },
                                     onToggleChecklistItem = { itemId, done -> viewModel.toggleChecklistItem(itemId, done) },
                                     onTriggerGeminiMagicBreakdown = {
@@ -369,85 +454,61 @@ fun ThingsSmartViewScreen(
                                     locale = activeLocale
                                 )
                             }
+
+                            // Trailing Magic Plus drop slot at the end of the list
+                            item(key = "trailing_magic_plus_gap") {
+                                MagicPlusInsertionGap(
+                                    visible = magicDragState.isDragging && magicDragState.dropIndex >= primaryTasks.size,
+                                    dropMode = magicDragState.dropMode
+                                )
+                            }
+                        }
+
+                        // Today Smart View: "This Evening / Heute Abend / Stasera / Ce soir / Esta noche" Section
+                        if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) && filteredEveningTasks.isNotEmpty()) {
+                            item(key = "this_evening_header") {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                                ) {
+                                    HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    ThisEveningHeaderBadge()
+                                }
+                            }
+
+                            items(
+                                items = filteredEveningTasks,
+                                key = { "evening_${it.id}" }
+                            ) { eveningTask ->
+                                ExpandableTaskCard(
+                                    task = eveningTask,
+                                    allTags = allTags,
+                                    isExpanded = expandedTaskId == eveningTask.id,
+                                    isGeneratingMagicBreakdown = magicBreakdownTaskId == eveningTask.id,
+                                    onExpandToggle = { viewModel.toggleTaskExpansion(eveningTask.id) },
+                                    onStatusChange = { viewModel.updateTaskStatus(eveningTask.id, it) },
+                                    onTitleNotesChange = { t, n -> viewModel.updateTaskTitleAndNotes(eveningTask, t, n) },
+                                    onScheduleChange = { s, w -> viewModel.updateTaskSchedule(eveningTask, s, w) },
+                                    onScheduleWithReminderChange = { s, w, r ->
+                                        viewModel.updateTaskScheduleWithReminder(eveningTask, s, w, r)
+                                    },
+                                    onDeadlineChange = { dl -> viewModel.updateTaskDeadline(eveningTask, dl) },
+                                    onUpdateTaskTags = { tagIds -> viewModel.updateTaskTags(eveningTask, tagIds) },
+                                    onCreateAndAssignTag = { newTag -> viewModel.createAndAssignTagToTask(eveningTask, newTag) },
+                                    onOpenFullTagManager = { viewModel.setTagManagerOpen(true) },
+                                    onAddChecklistItem = { itemTitle -> viewModel.addChecklistItem(eveningTask.id, itemTitle) },
+                                    onToggleChecklistItem = { itemId, done -> viewModel.toggleChecklistItem(itemId, done) },
+                                    onTriggerGeminiMagicBreakdown = {
+                                        viewModel.triggerGeminiMagicBreakdown(eveningTask, activeLocale)
+                                    },
+                                    onDeleteTask = { viewModel.deleteTask(eveningTask.id) },
+                                    locale = activeLocale
+                                )
+                            }
                         }
                     }
-                } else {
-                    // Standard Smart View List with Magic Plus drop gaps between every item
-                    itemsIndexed(
-                        items = primaryTasks,
-                        key = { _, task -> task.id }
-                    ) { index, task ->
-                        MagicPlusInsertionGap(
-                            visible = magicDragState.isDragging && magicDragState.dropIndex == index,
-                            dropMode = magicDragState.dropMode
-                        )
-
-                        ExpandableTaskCard(
-                            task = task,
-                            isExpanded = expandedTaskId == task.id,
-                            isGeneratingMagicBreakdown = magicBreakdownTaskId == task.id,
-                            onExpandToggle = { viewModel.toggleTaskExpansion(task.id) },
-                            onStatusChange = { viewModel.updateTaskStatus(task.id, it) },
-                            onTitleNotesChange = { t, n -> viewModel.updateTaskTitleAndNotes(task, t, n) },
-                            onScheduleChange = { s, w -> viewModel.updateTaskSchedule(task, s, w) },
-                            onDeadlineChange = { dl -> viewModel.updateTaskDeadline(task, dl) },
-                            onAddChecklistItem = { itemTitle -> viewModel.addChecklistItem(task.id, itemTitle) },
-                            onToggleChecklistItem = { itemId, done -> viewModel.toggleChecklistItem(itemId, done) },
-                            onTriggerGeminiMagicBreakdown = {
-                                viewModel.triggerGeminiMagicBreakdown(task, activeLocale)
-                            },
-                            onDeleteTask = { viewModel.deleteTask(task.id) },
-                            locale = activeLocale
-                        )
-                    }
-
-                    // Trailing Magic Plus drop slot at the end of the list
-                    item(key = "trailing_magic_plus_gap") {
-                        MagicPlusInsertionGap(
-                            visible = magicDragState.isDragging && magicDragState.dropIndex >= primaryTasks.size,
-                            dropMode = magicDragState.dropMode
-                        )
-                    }
-                }
-
-                // Today Smart View: "This Evening / Heute Abend / Stasera / Ce soir / Esta noche" Section
-                if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) && eveningTasks.isNotEmpty()) {
-                    item(key = "this_evening_header") {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 20.dp, vertical = 12.dp)
-                        ) {
-                            HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
-                            Spacer(modifier = Modifier.height(6.dp))
-                            ThisEveningHeaderBadge()
-                        }
-                    }
-
-                    items(
-                        items = eveningTasks,
-                        key = { "evening_${it.id}" }
-                    ) { eveningTask ->
-                        ExpandableTaskCard(
-                            task = eveningTask,
-                            isExpanded = expandedTaskId == eveningTask.id,
-                            isGeneratingMagicBreakdown = magicBreakdownTaskId == eveningTask.id,
-                            onExpandToggle = { viewModel.toggleTaskExpansion(eveningTask.id) },
-                            onStatusChange = { viewModel.updateTaskStatus(eveningTask.id, it) },
-                            onTitleNotesChange = { t, n -> viewModel.updateTaskTitleAndNotes(eveningTask, t, n) },
-                            onScheduleChange = { s, w -> viewModel.updateTaskSchedule(eveningTask, s, w) },
-                            onDeadlineChange = { dl -> viewModel.updateTaskDeadline(eveningTask, dl) },
-                            onAddChecklistItem = { itemTitle -> viewModel.addChecklistItem(eveningTask.id, itemTitle) },
-                            onToggleChecklistItem = { itemId, done -> viewModel.toggleChecklistItem(itemId, done) },
-                            onTriggerGeminiMagicBreakdown = {
-                                viewModel.triggerGeminiMagicBreakdown(eveningTask, activeLocale)
-                            },
-                            onDeleteTask = { viewModel.deleteTask(eveningTask.id) },
-                            locale = activeLocale
-                        )
-                    }
-                }
-            }
                 }
             }
         }
@@ -522,17 +583,43 @@ fun ThingsSmartViewScreen(
                 onDismiss = { viewModel.setAuthModalOpen(false) }
             )
         }
+
+        // Full Tag Management Modal
+        if (isTagManagerOpen) {
+            ThingsTagManagerModal(
+                allTags = allTags,
+                onCreateTag = { title, shortcut -> viewModel.createTag(title, shortcut) },
+                onRenameTag = { id, title, shortcut -> viewModel.renameTag(id, title, shortcut) },
+                onDeleteTag = { id -> viewModel.deleteTag(id) },
+                onDismiss = { viewModel.setTagManagerOpen(false) }
+            )
+        }
+
+        // Daily Active Tasks Notification & Reminder Settings Modal
+        if (isNotificationSettingsOpen) {
+            ThingsNotificationSettingsModal(
+                config = dailyDigestConfig,
+                onSaveDailyDigestConfig = { enabled, hr, min ->
+                    viewModel.updateDailyDigestConfig(enabled, hr, min)
+                },
+                onSendTestNotificationNow = { viewModel.sendTestDailyDigestNotificationNow() },
+                onDismiss = { viewModel.setNotificationSettingsOpen(false) }
+            )
+        }
     }
 }
 
 @Composable
 private fun TopThingsbookBar(
     syncStatus: CloudSyncStatus,
+    dailyDigestEnabled: Boolean,
     showLanguageMenu: Boolean,
     onToggleLanguageMenu: (Boolean) -> Unit,
     onSelectLanguage: (String) -> Unit,
     onOpenQuickFind: () -> Unit,
     onOpenGeminiHub: () -> Unit,
+    onOpenTagManager: () -> Unit,
+    onOpenNotificationSettings: () -> Unit,
     onManualSync: () -> Unit
 ) {
     val colors = ThingsTheme.colors
@@ -568,7 +655,7 @@ private fun TopThingsbookBar(
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             // Gemini AI Button ✨
             Row(
@@ -590,6 +677,32 @@ private fun TopThingsbookBar(
                     text = "Gemini",
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                     color = colors.thingsBlue
+                )
+            }
+
+            // Tag Management Button 🏷️
+            IconButton(
+                onClick = onOpenTagManager,
+                modifier = Modifier.size(34.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.LocalOffer,
+                    contentDescription = stringResource(R.string.tags_manage_title),
+                    tint = colors.secondaryText,
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+
+            // Daily & Task Notifications Button 🔔
+            IconButton(
+                onClick = onOpenNotificationSettings,
+                modifier = Modifier.size(34.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.NotificationsActive,
+                    contentDescription = stringResource(R.string.notifications_title),
+                    tint = if (dailyDigestEnabled) colors.thingsBlue else colors.secondaryText,
+                    modifier = Modifier.size(19.dp)
                 )
             }
 
@@ -653,6 +766,98 @@ private fun TopThingsbookBar(
                     contentDescription = stringResource(R.string.sync_title),
                     tint = syncTint,
                     modifier = Modifier.size(19.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TagFilterAndManageStrip(
+    allTags: List<Tag>,
+    selectedTagId: String?,
+    onSelectTag: (String?) -> Unit,
+    onOpenTagManager: () -> Unit
+) {
+    val colors = ThingsTheme.colors
+    val haptics = LocalHapticFeedback.current
+
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 6.dp),
+        contentPadding = PaddingValues(horizontal = 20.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        // "All" Chip
+        item(key = "tag_filter_all") {
+            val isAllSelected = selectedTagId == null
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (isAllSelected) colors.thingsBlue else colors.tagPillBg)
+                    .clickable {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        if (!isAllSelected) onSelectTag(null)
+                    }
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.tags_filter_all),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = if (isAllSelected) FontWeight.Bold else FontWeight.Medium
+                    ),
+                    color = if (isAllSelected) Color.White else colors.tagPillText
+                )
+            }
+        }
+
+        items(allTags, key = { "tag_chip_${it.id}" }) { tag ->
+            val isSelected = selectedTagId == tag.id
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (isSelected) colors.thingsBlue else colors.tagPillBg)
+                    .clickable {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onSelectTag(tag.id)
+                    }
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
+            ) {
+                Text(
+                    text = tag.title,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                    ),
+                    color = if (isSelected) Color.White else colors.tagPillText
+                )
+            }
+        }
+
+        // Manage Tags Action Chip
+        item(key = "tag_manage_trigger") {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(colors.thingsBlueSoft)
+                    .clickable {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onOpenTagManager()
+                    }
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.LocalOffer,
+                    contentDescription = null,
+                    tint = colors.thingsBlue,
+                    modifier = Modifier.size(13.dp)
+                )
+                Text(
+                    text = stringResource(R.string.tags_manage_title),
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = colors.thingsBlue
                 )
             }
         }

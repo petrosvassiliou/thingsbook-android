@@ -236,3 +236,35 @@ fun ThingsWhenBadge(
         )
     }
 }
+
+@Composable
+fun ThingsReminderBadge(
+    reminderEpochMillis: Long,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
+) {
+    val colors = ThingsTheme.colors
+    val zone = ZoneId.systemDefault()
+    val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+    val formattedTime = Instant.ofEpochMilli(reminderEpochMillis)
+        .atZone(zone)
+        .toLocalTime()
+        .format(timeFormatter)
+
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(colors.thingsBlueSoft)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 7.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = "🔔 $formattedTime",
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+            color = colors.thingsBlue
+        )
+    }
+}
+

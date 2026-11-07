@@ -114,4 +114,35 @@
     <string name="gemini_generating">Gemini está estructurando tus ideas con calma…</string>
     <string name="gemini_api_key_label">Clave API de Gemini opcional (reemplaza Vertex AI)</string>
     <string name="gemini_api_key_placeholder">Pega la clave AIza… o déjalo en blanco para Firebase Vertex AI</string>
+
+    <!-- Calendar Date Picker & Task Reminders -->
+    <string name="when_pick_date_title">Seleccionar fecha</string>
+    <string name="when_pick_calendar_tab">Calendario</string>
+    <string name="when_task_reminder_title">Hora de recordatorio de la tarea</string>
+    <string name="when_task_reminder_none">Sin hora de recordatorio</string>
+    <string name="when_task_reminder_set">Recordar a las %1$s</string>
+    <string name="when_apply_date_button">Aplicar fecha y recordatorio</string>
+    <string name="deadline_picker_title">Seleccionar fecha límite</string>
+    <string name="deadline_clear_button">Quitar fecha límite</string>
+
+    <!-- Daily Digest & Notification Settings -->
+    <string name="notifications_title">Notificaciones y recordatorios</string>
+    <string name="notifications_daily_digest_title">Resumen diario de tareas activas</string>
+    <string name="notifications_daily_digest_desc">Recibe una notificación cada día a la hora elegida con todas las tareas activas del día.</string>
+    <string name="notifications_daily_time_label">Hora de notificación diaria</string>
+    <string name="notifications_task_specific_desc">También puedes configurar una hora de recordatorio individual en cada tarea bajo «Cuándo».</string>
+    <string name="notifications_test_now">Enviar notificación de prueba ahora</string>
+    <string name="notifications_daily_digest_channel">Resumen diario de Hoy</string>
+    <string name="notifications_daily_digest_header">Hoy: %1$d tareas activas</string>
+    <string name="notifications_daily_digest_empty">¡Todo al día para Hoy!</string>
+
+    <!-- Full Tag Management -->
+    <string name="tags_manage_title">Gestionar etiquetas</string>
+    <string name="tags_assign_title">Asignar etiquetas a la tarea</string>
+    <string name="tags_new_placeholder">Nombre de nueva etiqueta (ej. Urgente, Casa, Oficina)…</string>
+    <string name="tags_shortcut_placeholder">Atajo</string>
+    <string name="tags_add_button">Crear etiqueta</string>
+    <string name="tags_edit_title">Renombrar etiqueta</string>
+    <string name="tags_empty_hint">Aún no hay etiquetas. Crea la primera arriba.</string>
+    <string name="tags_filter_all">Todas</string>
 </resources>

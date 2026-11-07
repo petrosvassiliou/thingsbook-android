@@ -114,4 +114,35 @@
     <string name="gemini_generating">Gemini structure vos idées avec calme…</string>
     <string name="gemini_api_key_label">Clé API Gemini facultative (remplace Vertex AI)</string>
     <string name="gemini_api_key_placeholder">Collez la clé AIza… ou laissez vide pour Firebase Vertex AI</string>
+
+    <!-- Calendar Date Picker & Task Reminders -->
+    <string name="when_pick_date_title">Choisir une date</string>
+    <string name="when_pick_calendar_tab">Calendrier</string>
+    <string name="when_task_reminder_title">Heure du rappel de la tâche</string>
+    <string name="when_task_reminder_none">Aucune heure définie</string>
+    <string name="when_task_reminder_set">Rappel à %1$s</string>
+    <string name="when_apply_date_button">Appliquer date et rappel</string>
+    <string name="deadline_picker_title">Choisir la date d\'échéance</string>
+    <string name="deadline_clear_button">Supprimer l\'échéance</string>
+
+    <!-- Daily Digest & Notification Settings -->
+    <string name="notifications_title">Notifications et rappels</string>
+    <string name="notifications_daily_digest_title">Résumé quotidien des tâches actives</string>
+    <string name="notifications_daily_digest_desc">Recevez une notification chaque jour à l\'heure choisie pour toutes les tâches actives du jour.</string>
+    <string name="notifications_daily_time_label">Heure de notification quotidienne</string>
+    <string name="notifications_task_specific_desc">Vous pouvez aussi définir une heure de rappel spécifique dans chaque tâche sous « Quand ».</string>
+    <string name="notifications_test_now">Envoyer une notification test</string>
+    <string name="notifications_daily_digest_channel">Résumé quotidien Aujourd\'hui</string>
+    <string name="notifications_daily_digest_header">Aujourd\'hui : %1$d tâches actives</string>
+    <string name="notifications_daily_digest_empty">Tout est à jour pour aujourd\'hui !</string>
+
+    <!-- Full Tag Management -->
+    <string name="tags_manage_title">Gérer les Tags</string>
+    <string name="tags_assign_title">Attribuer des Tags</string>
+    <string name="tags_new_placeholder">Nom du nouveau tag (ex. Urgent, Maison, Bureau)…</string>
+    <string name="tags_shortcut_placeholder">Raccourci</string>
+    <string name="tags_add_button">Créer le tag</string>
+    <string name="tags_edit_title">Renommer le tag</string>
+    <string name="tags_empty_hint">Aucun tag. Créez votre premier tag ci-dessus.</string>
+    <string name="tags_filter_all">Tous</string>
 </resources>

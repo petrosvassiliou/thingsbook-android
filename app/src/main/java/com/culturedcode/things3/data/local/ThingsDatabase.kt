@@ -45,7 +45,7 @@ abstract class ThingsDatabase : RoomDatabase() {
     abstract fun tagDao(): TagDao
 
     companion object {
-        const val DATABASE_NAME = "thingsbook_v3_clean.db"
+        const val DATABASE_NAME = "thingsbook_v4_fresh.db"
 
         @Volatile
         private var fts5Available: Boolean = false

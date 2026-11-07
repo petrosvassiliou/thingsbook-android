@@ -211,7 +211,7 @@ interface TaskDao {
     fun observeUpcomingTasks(endOfTodayMillis: Long): Flow<List<TaskWithDetails>>
 
     /**
-     * Anytime Smart View: Active tasks without a future start date, excluding SOMEDAY and INBOX.
+     * Anytime Smart View: Active tasks without a scheduled date or recurrence rule, excluding SOMEDAY, INBOX, TODAY, and UPCOMING.
      */
     @Transaction
     @Query(
@@ -219,7 +219,9 @@ interface TaskDao {
         SELECT * FROM tasks
         WHERE isDeleted = 0
           AND status = 'OPEN'
-          AND scheduleState IN ('ANYTIME', 'TODAY', 'THIS_EVENING')
+          AND scheduleState = 'ANYTIME'
+          AND whenDate IS NULL
+          AND recurrenceRuleJson IS NULL
         ORDER BY sortOrder ASC
         """
     )
@@ -334,6 +336,17 @@ interface TaskDao {
         """
     )
     suspend fun getOpenActiveTasksForToday(endOfTodayMillis: Long): List<TaskEntity>
+
+    @Query(
+        """
+        SELECT * FROM tasks
+        WHERE isDeleted = 0
+          AND status = 'OPEN'
+          AND scheduleState = 'ANYTIME'
+          AND (whenDate IS NOT NULL OR recurrenceRuleJson IS NOT NULL)
+        """
+    )
+    suspend fun getMisclassifiedAnytimeTasks(): List<TaskEntity>
 }
 
 @Dao

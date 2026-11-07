@@ -50,6 +50,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,6 +59,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -80,6 +83,7 @@ import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
 import com.culturedcode.things3.ui.theme.ThingsTheme
+import kotlinx.coroutines.delay
 import java.util.Locale
 
 /**
@@ -127,14 +131,23 @@ fun ExpandableTaskCard(
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
 
-    var editedTitle by remember(task.id, task.title) { mutableStateOf(task.title) }
-    var editedNotes by remember(task.id, task.notes) { mutableStateOf(task.notes) }
+    var editedTitle by remember(task.id) { mutableStateOf(task.title) }
+    var editedNotes by remember(task.id) { mutableStateOf(task.notes) }
     var newChecklistText by remember(task.id) { mutableStateOf("") }
     var showWhenDialog by remember(task.id) { mutableStateOf(false) }
     var showDeadlineDialog by remember(task.id) { mutableStateOf(false) }
     var showRepeatDialog by remember(task.id) { mutableStateOf(false) }
     var showMoveDialog by remember(task.id) { mutableStateOf(false) }
     var showTagPickerDialog by remember(task.id) { mutableStateOf(false) }
+
+    val titleFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(isExpanded, task.id) {
+        if (isExpanded && editedTitle.isBlank()) {
+            delay(60)
+            runCatching { titleFocusRequester.requestFocus() }
+        }
+    }
 
     val assignedProject = remember(task.projectId, allProjects) {
         allProjects.find { it.id == task.projectId }
@@ -231,8 +244,11 @@ fun ExpandableTaskCard(
                         textStyle = MaterialTheme.typography.titleMedium.copy(
                             color = colors.primaryText
                         ),
+                        singleLine = true,
                         cursorBrush = SolidColor(colors.thingsBlue),
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(titleFocusRequester),
                         decorationBox = { innerTextField ->
                             Box {
                                 if (editedTitle.isEmpty()) {
@@ -248,13 +264,18 @@ fun ExpandableTaskCard(
                     )
                 } else {
                     val isDoneOrCanceled = task.status != TaskStatus.OPEN
+                    val hasTitle = task.title.isNotBlank()
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = task.title,
+                            text = if (hasTitle) task.title else stringResource(R.string.placeholder_todo_title),
                             style = MaterialTheme.typography.bodyLarge.copy(
                                 textDecoration = if (isDoneOrCanceled) TextDecoration.LineThrough else TextDecoration.None
                             ),
-                            color = if (isDoneOrCanceled) colors.tertiaryText else colors.primaryText,
+                            color = when {
+                                isDoneOrCanceled -> colors.tertiaryText
+                                !hasTitle -> colors.tertiaryText
+                                else -> colors.primaryText
+                            },
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )

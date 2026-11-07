@@ -91,6 +91,8 @@ import com.culturedcode.things3.data.repository.ThingsRepository
 import com.culturedcode.things3.domain.model.Area
 import com.culturedcode.things3.domain.model.Heading
 import com.culturedcode.things3.domain.model.Project
+import com.culturedcode.things3.domain.model.RecurrenceMode
+import com.culturedcode.things3.domain.model.RecurrenceUnit
 import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.ui.components.CreateOrEditProjectDialog
@@ -115,6 +117,7 @@ import com.culturedcode.things3.ui.theme.ThingsTheme
 import com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget
 import com.culturedcode.things3.ui.viewmodel.ThingsbookViewModel
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -177,7 +180,7 @@ fun ThingsSmartViewScreen(
     var projectDialogPreselectedAreaId by remember { mutableStateOf<String?>(null) }
     var editingProject by remember { mutableStateOf<Project?>(null) }
 
-    val defaultNewTodoTitle = stringResource(R.string.entity_new_todo)
+    val defaultNewTodoTitle = ""
     val defaultNewHeadingTitle = stringResource(R.string.entity_new_heading)
 
     // Determine primary task list for current view, filtered by selected tag if active
@@ -614,6 +617,42 @@ fun ThingsSmartViewScreen(
                                         RenderTaskCard(task = task)
                                     }
                                 }
+                            }
+                        } else if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.UPCOMING)) {
+                            // Upcoming Smart View ("Geplant"): Group tasks chronologically by day ("Gruppierung pro Tag")
+                            val zone = ZoneId.systemDefault()
+                            val todayDate = LocalDate.now(zone)
+                            val groupedUpcoming = primaryTasks
+                                .groupBy { task -> computeUpcomingTargetDate(task, todayDate, zone) }
+                                .toSortedMap()
+
+                            groupedUpcoming.entries.forEachIndexed { groupIdx, (targetDate, dayTasks) ->
+                                item(key = "upcoming_day_header_${targetDate.toEpochDay()}") {
+                                    UpcomingDayGroupHeader(
+                                        date = targetDate,
+                                        todayDate = todayDate,
+                                        locale = activeLocale,
+                                        isFirstGroup = groupIdx == 0
+                                    )
+                                }
+                                itemsIndexed(
+                                    items = dayTasks,
+                                    key = { _, task -> "upcoming_${targetDate.toEpochDay()}_${task.id}" }
+                                ) { index, task ->
+                                    MagicPlusInsertionGap(
+                                        visible = magicDragState.isDragging && magicDragState.dropIndex == index && groupIdx == 0,
+                                        dropMode = magicDragState.dropMode
+                                    )
+                                    RenderTaskCard(task = task)
+                                }
+                            }
+
+                            // Trailing Magic Plus drop slot at the end of the list
+                            item(key = "trailing_magic_plus_gap") {
+                                MagicPlusInsertionGap(
+                                    visible = magicDragState.isDragging && magicDragState.dropIndex >= primaryTasks.size,
+                                    dropMode = magicDragState.dropMode
+                                )
                             }
                         } else {
                             // Standard Smart View / Area Task List with Magic Plus drop gaps between every item
@@ -2195,3 +2234,123 @@ private fun ThingsChromebookSidebar(
         }
     }
 }
+
+private fun computeUpcomingTargetDate(
+    task: TaskItem,
+    todayDate: LocalDate,
+    zone: ZoneId
+): LocalDate {
+    val whenLocal = task.whenDate?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() }
+    val deadlineLocal = task.deadline?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() }
+
+    if (whenLocal != null && whenLocal.isAfter(todayDate)) {
+        return whenLocal
+    }
+
+    val rule = task.recurrenceRule
+    if (rule != null) {
+        val safeInterval = rule.interval.coerceAtLeast(1).toLong()
+        val baseDate = if (whenLocal != null && !whenLocal.isAfter(todayDate)) todayDate else (whenLocal ?: todayDate)
+        return when (rule.unit) {
+            RecurrenceUnit.DAYS -> baseDate.plusDays(safeInterval)
+            RecurrenceUnit.WEEKS -> {
+                if (rule.mode == RecurrenceMode.FIXED_SCHEDULE && rule.daysOfWeek.isNotEmpty()) {
+                    val sortedDays = rule.daysOfWeek.map { it.coerceIn(1, 7) }.distinct().sorted()
+                    val currentDow = baseDate.dayOfWeek.value
+                    val nextInSameWeek = sortedDays.firstOrNull { it > currentDow }
+                    if (nextInSameWeek != null) {
+                        baseDate.plusDays((nextInSameWeek - currentDow).toLong())
+                    } else {
+                        val firstDow = sortedDays.first()
+                        baseDate
+                            .minusDays((currentDow - 1).toLong())
+                            .plusWeeks(safeInterval)
+                            .plusDays((firstDow - 1).toLong())
+                    }
+                } else {
+                    baseDate.plusWeeks(safeInterval)
+                }
+            }
+            RecurrenceUnit.MONTHS -> {
+                val nextMonth = baseDate.plusMonths(safeInterval)
+                if (rule.mode == RecurrenceMode.FIXED_SCHEDULE && rule.dayOfMonth != null) {
+                    val maxDom = nextMonth.lengthOfMonth()
+                    val targetDom = if (rule.dayOfMonth == -1) maxDom else rule.dayOfMonth.coerceIn(1, maxDom)
+                    nextMonth.withDayOfMonth(targetDom)
+                } else {
+                    nextMonth
+                }
+            }
+            RecurrenceUnit.YEARS -> baseDate.plusYears(safeInterval)
+        }
+    }
+
+    if (deadlineLocal != null && deadlineLocal.isAfter(todayDate)) {
+        return deadlineLocal
+    }
+
+    return whenLocal ?: deadlineLocal ?: todayDate.plusDays(1)
+}
+
+@Composable
+private fun UpcomingDayGroupHeader(
+    date: LocalDate,
+    todayDate: LocalDate,
+    locale: Locale,
+    isFirstGroup: Boolean
+) {
+    val colors = ThingsTheme.colors
+    val tomorrowLabel = stringResource(R.string.date_tomorrow)
+    val todayLabel = stringResource(R.string.view_today)
+
+    val dayMonthText = remember(date, locale) {
+        val pattern = if (locale.language == "de") "d. MMM" else "MMM d"
+        date.format(DateTimeFormatter.ofPattern(pattern, locale))
+    }
+    val weekdayText = remember(date, locale) {
+        date.format(DateTimeFormatter.ofPattern("EEEE", locale))
+            .replaceFirstChar { if (it.isLowerCase()) it.titlecase(locale) else it.toString() }
+    }
+
+    val subtitleText = when (date) {
+        todayDate -> "$todayLabel • $weekdayText"
+        todayDate.plusDays(1) -> "$tomorrowLabel • $weekdayText"
+        else -> weekdayText
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                start = 20.dp,
+                end = 20.dp,
+                top = if (isFirstGroup) 6.dp else 18.dp,
+                bottom = 6.dp
+            )
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = dayMonthText,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = colors.primaryText
+                )
+            )
+            Text(
+                text = subtitleText,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.Medium,
+                    color = if (date == todayDate.plusDays(1)) colors.thingsBlue else colors.secondaryText
+                ),
+                modifier = Modifier.padding(bottom = 1.dp)
+            )
+        }
+        Spacer(modifier = Modifier.height(5.dp))
+        HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
+    }
+}
+

@@ -320,13 +320,42 @@ class ThingsRepository @Inject constructor(
         val existing = database.taskDao().getById(taskId) ?: return
         val now = System.currentTimeMillis()
         val zone = ZoneId.systemDefault()
-        val todayEpoch = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
-        val updatedWhen = if (recurrenceRule != null && existing.whenDate == null) todayEpoch else existing.whenDate
-        val updatedState = if (recurrenceRule != null && existing.scheduleState == ScheduleState.INBOX) {
-            ScheduleState.TODAY
+        val todayDate = LocalDate.now(zone)
+        val todayEpoch = todayDate.atStartOfDay(zone).toInstant().toEpochMilli()
+
+        val updatedWhen = if (recurrenceRule != null && existing.whenDate == null) {
+            if (recurrenceRule.mode == RecurrenceMode.FIXED_SCHEDULE &&
+                recurrenceRule.unit == RecurrenceUnit.WEEKS &&
+                recurrenceRule.daysOfWeek.isNotEmpty()
+            ) {
+                val sortedDays = recurrenceRule.daysOfWeek.map { it.coerceIn(1, 7) }.distinct().sorted()
+                val currentDow = todayDate.dayOfWeek.value
+                val nextInWeek = sortedDays.firstOrNull { it >= currentDow }
+                val targetDate = if (nextInWeek != null) {
+                    todayDate.plusDays((nextInWeek - currentDow).toLong())
+                } else {
+                    todayDate.minusDays((currentDow - 1).toLong()).plusWeeks(1).plusDays((sortedDays.first() - 1).toLong())
+                }
+                targetDate.atStartOfDay(zone).toInstant().toEpochMilli()
+            } else {
+                todayEpoch
+            }
+        } else {
+            existing.whenDate
+        }
+
+        val updatedState = if (recurrenceRule != null) {
+            if (updatedWhen != null && updatedWhen > endOfTodayEpochMillis()) {
+                ScheduleState.UPCOMING
+            } else if (existing.scheduleState == ScheduleState.INBOX || existing.scheduleState == ScheduleState.ANYTIME) {
+                ScheduleState.TODAY
+            } else {
+                existing.scheduleState
+            }
         } else {
             existing.scheduleState
         }
+
         database.taskDao().upsert(
             existing.copy(
                 scheduleState = updatedState,
@@ -352,7 +381,12 @@ class ThingsRepository @Inject constructor(
         } else {
             areaId
         }
-        val resolvedSchedule = if (existing.scheduleState == ScheduleState.INBOX && (projectId != null || resolvedAreaId != null)) {
+        val resolvedSchedule = if (
+            existing.scheduleState == ScheduleState.INBOX &&
+            existing.whenDate == null &&
+            existing.recurrenceRuleJson == null &&
+            (projectId != null || resolvedAreaId != null)
+        ) {
             ScheduleState.ANYTIME
         } else {
             existing.scheduleState
@@ -402,6 +436,26 @@ class ThingsRepository @Inject constructor(
                     )
                 )
             )
+        }
+
+        // Normalize any existing open tasks that have a recurrence rule or whenDate but still had scheduleState = ANYTIME
+        val misclassified = database.taskDao().getMisclassifiedAnytimeTasks()
+        if (misclassified.isNotEmpty()) {
+            val now = System.currentTimeMillis()
+            val zone = ZoneId.systemDefault()
+            val todayEpoch = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
+            val endOfToday = endOfTodayEpochMillis()
+            val fixed = misclassified.map { task ->
+                val resolvedWhen = task.whenDate ?: todayEpoch
+                val resolvedState = if (resolvedWhen > endOfToday) ScheduleState.UPCOMING else ScheduleState.TODAY
+                task.copy(
+                    whenDate = resolvedWhen,
+                    scheduleState = resolvedState,
+                    updatedAt = now,
+                    isDirty = true
+                )
+            }
+            database.taskDao().upsertAll(fixed)
         }
     }
 

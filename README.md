@@ -1,21 +1,37 @@
-# Thingsbook (Things 3 Clone for Android & Chromebooks / ChromeOS)
+# Thingsbook — Native Android GTD Productivity App
 
-A native Android & Chromebook (ChromeOS) productivity app inspired by **Things 3 (Cultured Code)** — built with **100% Kotlin**, **Jetpack Compose**, **Offline-First Room Database (SQLite FTS5 `unicode61`)**, **Bidirectional Firebase Firestore Delta-Sync (`thingsbook-prod`)**, **Multilingual Gemini AI**, and **5 Languages (`EN`, `DE`, `IT`, `FR`, `ES`)**.
+Eine eigenständige, native Android-Produktivitäts-App (für **Android-Smartphones, Tablets & Foldables**), gestalterisch und funktional inspiriert vom GTD-Workflow (*Getting Things Done*) — entwickelt mit **100 % Kotlin**, **Jetpack Compose**, **Offline-First Room Database (SQLite FTS5 `unicode61`)**, **Bidirektionalem Firebase Firestore Delta-Sync**, **Multilingual Gemini AI** und **5 Sprachen (`DE`, `EN`, `FR`, `IT`, `ES`)**.
 
-## Highlights
+---
 
-- **Adaptive Multi-Form-Factor UI (Android Phones + Googlebooks / Chromebooks & Tablets):**
-  - **Android Phones (`< 700dp`):** One-handed layout with horizontal Smart View pill strip, swipe-down Quick Find, Inline Card Expansion (`spring(dampingRatio = 0.8f, stiffness = 400f)`), and Draggable "Magic Plus" FAB.
-  - **Googlebooks / Chromebooks & Tablets (`>= 700dp`):** 2-Pane Split View with a permanent Things 3 Sidebar (live badge counters & Project Progress Rings), centered reading canvas (`max 840dp`), freeform window resizing (`android:resizeableActivity="true"`), non-touchscreen compatibility (`android.hardware.touchscreen` not required), and Hardware Keyboard Shortcuts (`Ctrl+F` Quick Find, `Ctrl+N` New To-Do, `Ctrl+G` Gemini AI Hub, `Esc` Collapse/Close).
+## ⚠️ Wichtiger Hinweis / Unabhängigkeits-Erklärung (Disclaimer)
+
+> **DE:** Dieses Projekt ist eine komplett unabhängige Eigenentwicklung und steht in **keinerlei geschäftlicher, technischer oder rechtlicher Verbindung zur Cultured Code GmbH & Co. KG** (den Entwicklern von *Things* / *Things 3*). **Thingsbook funktioniert zu 100 % eigenständig** und besitzt **keinerlei Datenverbindung, Schnittstelle oder Kompatibilität zur offiziellen „Things Cloud“ oder sonstigen Servern von Cultured Code**. Alle Daten werden ausschließlich lokal auf dem jeweiligen Android-Gerät (Room/SQLite) sowie optional im eigenen Firebase-Firestore-Backend des Projekts gespeichert.
+>
+> **EN:** This project is an independent development and is **in no way affiliated with, endorsed, or sponsored by Cultured Code GmbH & Co. KG** (the creators of *Things* / *Things 3*). **Thingsbook operates 100% independently** and has **no data connection, integration, or compatibility with the official "Things Cloud" or any Cultured Code servers**. All data is stored strictly locally on the Android device (Room/SQLite) and optionally synced via the project's own independent Firebase Firestore backend.
+
+---
+
+## Direkt-Download (Installierbares Android-APK)
+
+- **[Thingsbook-v1.0.0-full.apk herunterladen](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.0.0-full.apk)**
+
+---
+
+## Kernfunktionen & Architektur
+
+- **Adaptives UI für Android-Smartphones, Tablets & Foldables:**
+  - **Android-Smartphones (`< 700dp`):** Einhand-optimiertes Layout mit horizontaler Smart-View-Leiste, Wischgeste nach unten für *Quick Find*, flüssiger 120-Hz-Inline-Karten-Expansion (`spring(dampingRatio = 0.8f, stiffness = 400f)`) und ziehbarem **„Magic Plus“ (`+`)** Floating Action Button für direktes Drag & Drop in die Liste.
+  - **Große Displays / Android-Tablets & Foldables (`>= 700dp`):** 2-Spalten-Ansicht mit permanenter Seitenleiste (inkl. Live-Zählern & Projekt-Fortschrittsringen), zentrierter Arbeitsfläche (`max 840dp`) und Unterstützung für externe Tastaturen (`Strg+F` Quick Find, `Strg+N` Neue Aufgabe, `Strg+G` Gemini AI Hub, `Esc` Schließen).
 - **Offline-First Room Database + SQLite FTS5 (`unicode61 remove_diacritics 2`):**
-  - Full GTD hierarchy: `Areas`, `Projects` (with live Pie-Chart Progress Ring), `Headings`, `Tasks` (with `whenDate`, `deadline`, `recurrenceRule`, `reminderTime`, LexoRank `sortOrder`), `ChecklistItems`, and hierarchical `Tags`.
-- **Cost-Efficient Bidirectional Cloud Sync (`Firebase Firestore` + `Firebase Auth`):**
-  - Multi-device user registration & sign-in (`users/{userId}/areas`, `projects`, `headings`, `tasks`, `checklist_items`, `tags`).
-  - Delta-only queries (`whereGreaterThan("updatedAt", lastSyncTimestamp)`), `WriteBatch` uploads (`isDirty = true`), Last-Write-Wins conflict resolution, and Tombstones (`isDeleted = true`).
-- **4 Multilingual Gemini AI Features (`EN`, `DE`, `IT`, `FR`, `ES`):**
-  1. **Magic Breakdown (`✨`):** Turns any task into 4–7 actionable checklist steps.
-  2. **Brain Dump -> GTD Import:** Parses unstructured thoughts into structured tasks with schedules, deadlines, tags, and checklist items.
-  3. **AI Project Architect:** Generates complete projects with headings and tasks from a goal description.
-  4. **Logbook AI Reflection:** Summarizes completed tasks and proposes 1-tap focus tasks for Today.
-- **Full 5-Language Localization (`EN`, `DE`, `IT`, `FR`, `ES`):**
-  - Zero hardcoded UI strings, Per-App Language Switcher (`AppCompatDelegate.setApplicationLocales`), and a 5-language Natural Language Date Parser.
+  - Komplette GTD-Hierarchie: `Areas` (Lebensbereiche), `Projects` (mit Live-Pie-Chart-Fortschrittsring), `Headings` (Überschriften innerhalb von Projekten), `Tasks` (mit `whenDate`, `deadline`, `recurrenceRule`, `reminderTime`, LexoRank `sortOrder` und Long-Press auf die Checkbox für *Abgebrochen* mit `X`-Icon), `ChecklistItems` und hierarchische `Tags`.
+- **Eigenständiger Bidirektionaler Cloud-Sync (`Firebase Firestore` + `Firebase Auth`):**
+  - Multi-Device-Registrierung & Login direkt in der App (`users/{userId}/areas`, `projects`, `headings`, `tasks`, `checklist_items`, `tags`).
+  - Kosteneffizienter Delta-Sync (`whereGreaterThan("updatedAt", lastSyncTimestamp)`), `WriteBatch`-Uploads (`isDirty = true`), *Last-Write-Wins*-Konfliktlösung und Soft-Deletes (`isDeleted = true`).
+- **4 Mehrsprachige Gemini AI Features (`DE`, `EN`, `FR`, `IT`, `ES`):**
+  1. **Magic Breakdown (`✨`):** Zerlegt komplexe Aufgaben per Klick in 4–7 konkrete Checklisten-Schritte.
+  2. **Brain Dump -> GTD-Import:** Analysiert unstrukturierte Gedanken und erstellt automatisch Aufgaben mit Zeitplanung, Fristen, Tags und Checklisten.
+  3. **AI Projekt-Architekt:** Entwirft aus einer Zielbeschreibung ein komplettes Projekt samt Phasen (`Headings`) und Aufgaben (`Tasks`).
+  4. **Logbuch KI-Reflexion:** Fasst erledigte Aufgaben im Logbuch zusammen und schlägt nächste Fokus-Aufgaben für *Heute* vor.
+- **Vollständige 5-Sprachen-Lokalisierung (`DE`, `EN`, `FR`, `IT`, `ES`):**
+  - Keine hartcodierten UI-Strings, In-App-Sprachumschalter (`AppCompatDelegate.setApplicationLocales`) und ein 5-sprachiger *Natural Language Date Parser* im „Wann?“-Dialog.

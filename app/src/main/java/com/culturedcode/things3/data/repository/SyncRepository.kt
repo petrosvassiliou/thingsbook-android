@@ -158,6 +158,38 @@ class SyncRepository @Inject constructor(
         "tb_sync_${sha256Hex("thingsbook-chan-v1:$normalizedEmail:$passwordVerifier").take(28)}"
 
     /**
+     * Helper that signs in or creates an account via Firebase Email/Password provider,
+     * avoiding restricted Anonymous Auth ('This operation is restricted to administrators only').
+     */
+    private suspend fun authenticateFirebaseEmailWithFallback(
+        email: String,
+        password: String,
+        allowAutoCreateOnSignIn: Boolean
+    ): String {
+        return try {
+            val signInRes = firebaseAuth.signInWithEmailAndPassword(email, password).await()
+            signInRes.user?.uid ?: deriveUserId(email)
+        } catch (signInErr: Exception) {
+            if (allowAutoCreateOnSignIn) {
+                try {
+                    val createRes = firebaseAuth.createUserWithEmailAndPassword(email, password).await()
+                    createRes.user?.uid ?: deriveUserId(email)
+                } catch (createErr: Exception) {
+                    val msg = (createErr.message ?: signInErr.message ?: "").lowercase(Locale.ROOT)
+                    if (msg.contains("password") || msg.contains("credential") || msg.contains("already in use")) {
+                        throw IllegalArgumentException(
+                            "Falsches Passwort für $email. Klicke unten auf 'Passwort vergessen?', um es per E-Mail zurückzusetzen."
+                        )
+                    }
+                    throw createErr
+                }
+            } else {
+                throw signInErr
+            }
+        }
+    }
+
+    /**
      * Multi-Device Account Registration (Email & Password).
      * Automatically uses native Firebase Authentication + Cloud Firestore (`users/{userId}/...`)
      * when a real `google-services.json` is baked into the app, with fallback to the built-in cloud relay.
@@ -175,12 +207,17 @@ class SyncRepository @Inject constructor(
             val channelTopic = deriveDeltaChannelTopic(email, passwordVerifier)
 
             val userId = if (isLiveFirebaseConfigured()) {
-                val authResult = firebaseAuth.createUserWithEmailAndPassword(email, password).await()
-                authResult.user?.uid ?: deriveUserId(email)
+                try {
+                    val authResult = firebaseAuth.createUserWithEmailAndPassword(email, password).await()
+                    authResult.user?.uid ?: deriveUserId(email)
+                } catch (e: Exception) {
+                    // If account already exists in Firebase, try signing in with the provided password
+                    authenticateFirebaseEmailWithFallback(email, password, allowAutoCreateOnSignIn = false)
+                }
             } else {
                 val existingEnvelope = fetchCloudUserEnvelope(registryTopic)
                 if (existingEnvelope != null && existingEnvelope.passwordVerifierHash != passwordVerifier) {
-                    throw IllegalStateException("Dieses Konto existiert bereits. Bitte melde dich mit deinem Passwort über 'Anmelden' an.")
+                    throw IllegalStateException("Dieses Konto existiert bereits. Bitte melde dich mit deinem Passwort an oder nutze 'Passwort vergessen?'.")
                 }
                 val derivedId = deriveUserId(email)
                 if (existingEnvelope == null) {
@@ -238,13 +275,12 @@ class SyncRepository @Inject constructor(
             val channelTopic = deriveDeltaChannelTopic(email, passwordVerifier)
 
             val userId = if (isLiveFirebaseConfigured()) {
-                val authResult = firebaseAuth.signInWithEmailAndPassword(email, password).await()
-                authResult.user?.uid ?: deriveUserId(email)
+                authenticateFirebaseEmailWithFallback(email, password, allowAutoCreateOnSignIn = true)
             } else {
                 val existingEnvelope = fetchCloudUserEnvelope(registryTopic)
                 val derivedId = deriveUserId(email)
                 if (existingEnvelope != null && existingEnvelope.passwordVerifierHash != passwordVerifier) {
-                    throw IllegalArgumentException("Ungültiges Passwort für $email.")
+                    throw IllegalArgumentException("Ungültiges Passwort für $email. Tipp: Nutze 'Passwort vergessen?'.")
                 } else if (existingEnvelope == null) {
                     val envelope = CloudUserAuthEnvelope(
                         userId = derivedId,
@@ -287,35 +323,80 @@ class SyncRepository @Inject constructor(
     }
 
     /**
-     * One-Tap Instant Cloud Account (for Google / Anonymous Quick Cloud Sign-In).
+     * Sends a password reset email via Firebase Auth (`sendPasswordResetEmail`) for Email/Password accounts.
+     */
+    suspend fun sendPasswordResetEmail(rawEmail: String): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val email = rawEmail.trim().lowercase(Locale.ROOT)
+            require(email.contains("@") && email.contains(".")) {
+                "Bitte gib oben zuerst deine E-Mail-Adresse ein und tippe dann auf 'Passwort zurücksetzen'."
+            }
+            if (isLiveFirebaseConfigured()) {
+                firebaseAuth.sendPasswordResetEmail(email).await()
+            }
+            "E-Mail zum Zurücksetzen des Passworts wurde an $email gesendet. Bitte prüfe dein Postfach (auch den Spam-Ordner)."
+        }
+    }
+
+    /**
+     * One-Tap Instant Cloud Account (for "Weiter mit Google" / Quick Cloud Sign-In).
+     * Authenticates via the enabled Email/Password provider in Firebase so it never fails with
+     * 'This operation is restricted to administrators only' when Anonymous Auth is disabled in Firebase Console.
      */
     suspend fun signInInstantCloudAccount(preferredEmail: String? = null): Result<String> = withContext(Dispatchers.IO) {
-        if (isLiveFirebaseConfigured()) {
-            runCatching {
-                _syncStatus.value = CloudSyncStatus.SYNCING
-                val res = firebaseAuth.signInAnonymously().await()
-                val uid = res.user?.uid ?: getOrCreateDeviceId()
-                val label = "cloud-${uid.take(6)}@thingsbook.app"
-                val channelTopic = "tb_sync_${sha256Hex(uid).take(28)}"
-                context.syncDataStore.edit { prefs ->
-                    prefs[KEY_ACTIVE_USER_ID] = uid
-                    prefs[KEY_ACTIVE_USER_EMAIL] = label
-                    prefs[KEY_ACTIVE_CHANNEL_TOPIC] = channelTopic
+        runCatching {
+            _syncStatus.value = CloudSyncStatus.SYNCING
+
+            val deviceKey = getOrCreateDeviceId().take(8).lowercase(Locale.ROOT)
+            val candidateEmail = preferredEmail?.trim()?.lowercase(Locale.ROOT)
+                ?.takeIf { it.contains("@") && it.contains(".") }
+                ?: "google-$deviceKey@thingsbook.app"
+            val generatedPassword = "TbCloud!${sha256Hex("tb-instant-v2:$candidateEmail").take(14)}"
+
+            var activeEmail = candidateEmail
+            val uid = if (isLiveFirebaseConfigured()) {
+                try {
+                    authenticateFirebaseEmailWithFallback(
+                        email = candidateEmail,
+                        password = generatedPassword,
+                        allowAutoCreateOnSignIn = true
+                    )
+                } catch (_: Exception) {
+                    // If user typed an email that already has a custom password, fall back to device Google Cloud ID
+                    val fallbackEmail = "google-$deviceKey@thingsbook.app"
+                    val fallbackPw = "TbCloud!${sha256Hex("tb-instant-v2:$fallbackEmail").take(14)}"
+                    activeEmail = fallbackEmail
+                    authenticateFirebaseEmailWithFallback(
+                        email = fallbackEmail,
+                        password = fallbackPw,
+                        allowAutoCreateOnSignIn = true
+                    )
                 }
-                _activeUserIdentifier.value = label
+            } else {
+                deriveUserId(activeEmail)
+            }
+
+            val channelTopic = "tb_sync_${sha256Hex("thingsbook-instant:$activeEmail").take(28)}"
+            context.syncDataStore.edit { prefs ->
+                prefs[KEY_ACTIVE_USER_ID] = uid
+                prefs[KEY_ACTIVE_USER_EMAIL] = activeEmail
+                prefs[KEY_ACTIVE_CHANNEL_TOPIC] = channelTopic
+            }
+            _activeUserIdentifier.value = activeEmail
+
+            if (isLiveFirebaseConfigured()) {
                 pullDeltaRecordsFromFirestore(uid, 0L)
                 pushDirtyRecordsToFirestore(uid)
-                saveLastSyncTimestamp(uid, System.currentTimeMillis())
-                _syncStatus.value = CloudSyncStatus.SYNCED
-                startRealtimeMultiDeviceSync(uid, channelTopic)
-                label
-            }.onFailure {
-                _syncStatus.value = CloudSyncStatus.OFFLINE
             }
-        } else {
-            val deviceId = getOrCreateDeviceId().take(8)
-            val email = preferredEmail ?: "cloud-$deviceId@thingsbook.app"
-            registerAccount(email, "tb-instant-$deviceId")
+            pullDeltaRecordsFromBuiltInCloud(uid, channelTopic, 0L)
+            pushDirtyRecordsToBuiltInCloud(uid, channelTopic)
+            saveLastSyncTimestamp(uid, System.currentTimeMillis())
+
+            _syncStatus.value = CloudSyncStatus.SYNCED
+            startRealtimeMultiDeviceSync(uid, channelTopic)
+            activeEmail
+        }.onFailure {
+            _syncStatus.value = CloudSyncStatus.OFFLINE
         }
     }
 

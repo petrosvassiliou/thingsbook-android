@@ -168,6 +168,7 @@ fun ThingsSmartViewScreen(
     val isAuthModalOpen by viewModel.isAuthModalOpen.collectAsState()
     val isSigningIn by viewModel.isSigningIn.collectAsState()
     val authErrorMessage by viewModel.authErrorMessage.collectAsState()
+    val authInfoMessage by viewModel.authInfoMessage.collectAsState()
     val currentUserIdentifier by viewModel.currentUserIdentifier.collectAsState()
 
     var magicDragState by remember { mutableStateOf(MagicPlusDragState()) }
@@ -722,10 +723,12 @@ fun ThingsSmartViewScreen(
                 syncStatus = syncStatus,
                 currentUserIdentifier = currentUserIdentifier,
                 authErrorMessage = authErrorMessage,
+                authInfoMessage = authInfoMessage,
                 isSigningIn = isSigningIn,
                 onRegisterEmailPassword = { email, pw -> viewModel.registerWithEmailPassword(email, pw) },
                 onSignInEmailPassword = { email, pw -> viewModel.signInWithEmailPassword(email, pw) },
-                onSignInWithGoogle = { viewModel.signInAnonymouslyAndSync() },
+                onResetPassword = { email -> viewModel.sendPasswordReset(email) },
+                onSignInWithGoogle = { enteredEmail -> viewModel.signInWithGoogleAccount(enteredEmail) },
                 onSignInAnonymously = { viewModel.signInAnonymouslyAndSync() },
                 onSignOut = { viewModel.signOutCloud() },
                 onTriggerDeltaSyncNow = { viewModel.triggerManualCloudSync() },

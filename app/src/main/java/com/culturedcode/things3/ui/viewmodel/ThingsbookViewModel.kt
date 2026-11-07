@@ -136,6 +136,9 @@ class ThingsbookViewModel @Inject constructor(
     private val _authErrorMessage = MutableStateFlow<String?>(null)
     val authErrorMessage: StateFlow<String?> = _authErrorMessage.asStateFlow()
 
+    private val _authInfoMessage = MutableStateFlow<String?>(null)
+    val authInfoMessage: StateFlow<String?> = _authInfoMessage.asStateFlow()
+
     val currentUserIdentifier: StateFlow<String?> = syncRepository.activeUserIdentifier
 
     // Core Data Streams from Room Single Source of Truth
@@ -750,6 +753,7 @@ class ThingsbookViewModel @Inject constructor(
 
     fun setAuthModalOpen(open: Boolean) {
         _authErrorMessage.value = null
+        _authInfoMessage.value = null
         _isAuthModalOpen.value = open
     }
 
@@ -761,6 +765,7 @@ class ThingsbookViewModel @Inject constructor(
         viewModelScope.launch {
             _isSigningIn.value = true
             _authErrorMessage.value = null
+            _authInfoMessage.value = null
             syncRepository.registerAccount(email, password)
                 .onSuccess {
                     _isAuthModalOpen.value = false
@@ -781,7 +786,47 @@ class ThingsbookViewModel @Inject constructor(
         viewModelScope.launch {
             _isSigningIn.value = true
             _authErrorMessage.value = null
+            _authInfoMessage.value = null
             syncRepository.signInAccount(email, password)
+                .onSuccess {
+                    _isAuthModalOpen.value = false
+                }
+                .onFailure { err ->
+                    _authErrorMessage.value = err.localizedMessage ?: err.message
+                }
+            _isSigningIn.value = false
+        }
+    }
+
+    /**
+     * Sends a password reset email via Firebase Auth (`sendPasswordResetEmail`).
+     */
+    fun sendPasswordReset(email: String) {
+        viewModelScope.launch {
+            _isSigningIn.value = true
+            _authErrorMessage.value = null
+            _authInfoMessage.value = null
+            syncRepository.sendPasswordResetEmail(email)
+                .onSuccess { msg ->
+                    _authInfoMessage.value = msg
+                }
+                .onFailure { err ->
+                    _authErrorMessage.value = err.localizedMessage ?: err.message
+                }
+            _isSigningIn.value = false
+        }
+    }
+
+    /**
+     * One-Tap Google Cloud Sign-In ("Weiter mit Google").
+     * Uses the entered Google email if provided, or creates a Google Cloud device profile via the enabled provider.
+     */
+    fun signInWithGoogleAccount(optionalEmail: String? = null) {
+        viewModelScope.launch {
+            _isSigningIn.value = true
+            _authErrorMessage.value = null
+            _authInfoMessage.value = null
+            syncRepository.signInInstantCloudAccount(optionalEmail)
                 .onSuccess {
                     _isAuthModalOpen.value = false
                 }
@@ -796,7 +841,8 @@ class ThingsbookViewModel @Inject constructor(
         viewModelScope.launch {
             _isSigningIn.value = true
             _authErrorMessage.value = null
-            syncRepository.signInInstantCloudAccount()
+            _authInfoMessage.value = null
+            syncRepository.signInInstantCloudAccount(null)
                 .onSuccess {
                     _isAuthModalOpen.value = false
                 }

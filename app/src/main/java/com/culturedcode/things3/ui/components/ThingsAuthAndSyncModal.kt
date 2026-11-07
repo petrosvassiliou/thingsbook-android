@@ -59,10 +59,12 @@ fun ThingsAuthAndSyncModal(
     syncStatus: CloudSyncStatus,
     currentUserIdentifier: String?,
     authErrorMessage: String?,
+    authInfoMessage: String? = null,
     isSigningIn: Boolean,
     onRegisterEmailPassword: (String, String) -> Unit,
     onSignInEmailPassword: (String, String) -> Unit,
-    onSignInWithGoogle: () -> Unit,
+    onResetPassword: (String) -> Unit = {},
+    onSignInWithGoogle: (String) -> Unit,
     onSignInAnonymously: () -> Unit,
     onSignOut: () -> Unit,
     onTriggerDeltaSyncNow: () -> Unit,
@@ -166,11 +168,36 @@ fun ThingsAuthAndSyncModal(
 
                 if (!authErrorMessage.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = authErrorMessage,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.deadlineUrgentRed
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(colors.deadlineUrgentRed.copy(alpha = 0.12f))
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = authErrorMessage,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colors.deadlineUrgentRed
+                        )
+                    }
+                }
+
+                if (!authInfoMessage.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(colors.logbookGreen.copy(alpha = 0.14f))
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = authInfoMessage,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colors.logbookGreen
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -199,7 +226,37 @@ fun ThingsAuthAndSyncModal(
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Password Reset Button right under the password input field
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onResetPassword(email.trim())
+                            },
+                            enabled = !isSigningIn,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Email,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Passwort vergessen? Zurücksetzen",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.thingsBlue
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -262,7 +319,7 @@ fun ThingsAuthAndSyncModal(
                     Button(
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onSignInWithGoogle()
+                            onSignInWithGoogle(email.trim())
                         },
                         enabled = !isSigningIn,
                         colors = ButtonDefaults.buttonColors(containerColor = colors.primaryText),

@@ -52,11 +52,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.culturedcode.things3.R
 import com.culturedcode.things3.data.repository.ThingsRepository
 import com.culturedcode.things3.domain.model.Area
 import com.culturedcode.things3.domain.model.Heading
@@ -130,12 +132,16 @@ fun ThingsAreaManagerModal(
                         )
                         Column {
                             Text(
-                                text = "Bereiche (Things for Mac)",
+                                text = stringResource(R.string.entity_areas),
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = colors.primaryText
                             )
                             Text(
-                                text = "${areas.size} von ${ThingsRepository.MAX_AREAS} Bereichen aktiv",
+                                text = stringResource(
+                                    R.string.areas_active_count,
+                                    areas.size,
+                                    ThingsRepository.MAX_AREAS
+                                ),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = colors.secondaryText
                             )
@@ -147,7 +153,7 @@ fun ThingsAreaManagerModal(
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Close,
-                            contentDescription = null,
+                            contentDescription = stringResource(R.string.action_cancel),
                             tint = colors.secondaryText,
                             modifier = Modifier.size(18.dp)
                         )
@@ -185,7 +191,7 @@ fun ThingsAreaManagerModal(
                                         onValueChange = { editingAreaTitle = it },
                                         singleLine = true,
                                         modifier = Modifier.weight(1f),
-                                        label = { Text("Bereich umbenennen") }
+                                        label = { Text(stringResource(R.string.areas_rename_label)) }
                                     )
                                     IconButton(
                                         onClick = {
@@ -197,14 +203,14 @@ fun ThingsAreaManagerModal(
                                     ) {
                                         Icon(
                                             imageVector = Icons.Outlined.Check,
-                                            contentDescription = "Speichern",
+                                            contentDescription = stringResource(R.string.action_save),
                                             tint = colors.thingsBlue
                                         )
                                     }
                                     IconButton(onClick = { editingAreaId = null }) {
                                         Icon(
                                             imageVector = Icons.Outlined.Close,
-                                            contentDescription = "Abbrechen",
+                                            contentDescription = stringResource(R.string.action_cancel),
                                             tint = colors.secondaryText
                                         )
                                     }
@@ -239,7 +245,7 @@ fun ThingsAreaManagerModal(
                                                 color = colors.primaryText
                                             )
                                             Text(
-                                                text = "$projectCount Projekte • Antippen zum Öffnen",
+                                                text = stringResource(R.string.areas_projects_count_hint, projectCount),
                                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
                                                 color = colors.secondaryText
                                             )
@@ -261,7 +267,7 @@ fun ThingsAreaManagerModal(
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Outlined.ArrowUpward,
-                                                contentDescription = "Nach oben verschieben",
+                                                contentDescription = stringResource(R.string.action_move),
                                                 tint = if (index > 0) colors.primaryText else colors.tertiaryText,
                                                 modifier = Modifier.size(15.dp)
                                             )
@@ -277,7 +283,7 @@ fun ThingsAreaManagerModal(
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Outlined.ArrowDownward,
-                                                contentDescription = "Nach unten verschieben",
+                                                contentDescription = stringResource(R.string.action_move),
                                                 tint = if (index < areas.lastIndex) colors.primaryText else colors.tertiaryText,
                                                 modifier = Modifier.size(15.dp)
                                             )
@@ -292,7 +298,7 @@ fun ThingsAreaManagerModal(
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Outlined.Edit,
-                                                contentDescription = "Umbenennen",
+                                                contentDescription = stringResource(R.string.areas_rename_label),
                                                 tint = colors.thingsBlue,
                                                 modifier = Modifier.size(15.dp)
                                             )
@@ -307,7 +313,7 @@ fun ThingsAreaManagerModal(
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Outlined.DeleteOutline,
-                                                contentDescription = "Löschen",
+                                                contentDescription = stringResource(R.string.action_delete),
                                                 tint = colors.deadlineUrgentRed,
                                                 modifier = Modifier.size(16.dp)
                                             )
@@ -325,7 +331,10 @@ fun ThingsAreaManagerModal(
 
                 if (canAddMore) {
                     Text(
-                        text = "Neuen Bereich hinzufügen (noch ${ThingsRepository.MAX_AREAS - areas.size} frei):",
+                        text = stringResource(
+                            R.string.areas_add_new_hint,
+                            ThingsRepository.MAX_AREAS - areas.size
+                        ),
                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                         color = colors.secondaryText
                     )
@@ -339,7 +348,7 @@ fun ThingsAreaManagerModal(
                         OutlinedTextField(
                             value = newAreaTitle,
                             onValueChange = { newAreaTitle = it },
-                            placeholder = { Text("z. B. Finance, Health, Family…") },
+                            placeholder = { Text(stringResource(R.string.entity_new_area)) },
                             singleLine = true,
                             modifier = Modifier.weight(1f)
                         )
@@ -359,7 +368,7 @@ fun ThingsAreaManagerModal(
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.Add,
-                                contentDescription = "Hinzufügen",
+                                contentDescription = stringResource(R.string.entity_new_area),
                                 tint = Color.White,
                                 modifier = Modifier.size(20.dp)
                             )
@@ -408,7 +417,7 @@ fun ThingsAreaManagerModal(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Maximal ${ThingsRepository.MAX_AREAS} Bereiche erreicht. Du kannst bestehende Bereiche jederzeit umbenennen, verschieben oder löschen.",
+                            text = stringResource(R.string.areas_max_reached, ThingsRepository.MAX_AREAS),
                             style = MaterialTheme.typography.labelSmall,
                             color = colors.thingsBlue
                         )
@@ -477,7 +486,11 @@ fun CreateOrEditProjectDialog(
                     ) {
                         ProjectProgressRing(progress = existingProject?.progress ?: 0f, size = 20.dp)
                         Text(
-                            text = if (existingProject == null) "Neues Projekt" else "Projekt bearbeiten",
+                            text = if (existingProject == null) {
+                                stringResource(R.string.entity_new_project)
+                            } else {
+                                stringResource(R.string.project_edit_title)
+                            },
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = colors.primaryText
                         )
@@ -485,7 +498,7 @@ fun CreateOrEditProjectDialog(
                     IconButton(onClick = onDismiss, modifier = Modifier.size(26.dp)) {
                         Icon(
                             imageVector = Icons.Outlined.Close,
-                            contentDescription = null,
+                            contentDescription = stringResource(R.string.action_cancel),
                             tint = colors.secondaryText,
                             modifier = Modifier.size(16.dp)
                         )
@@ -497,8 +510,8 @@ fun CreateOrEditProjectDialog(
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
-                    label = { Text("Projektname") },
-                    placeholder = { Text("z. B. Website Relaunch, Urlaub…") },
+                    label = { Text(stringResource(R.string.entity_project)) },
+                    placeholder = { Text(stringResource(R.string.entity_new_project)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -508,16 +521,16 @@ fun CreateOrEditProjectDialog(
                 OutlinedTextField(
                     value = notes,
                     onValueChange = { notes = it },
-                    label = { Text("Projekt-Notizen / Zielbeschreibung") },
+                    label = { Text(stringResource(R.string.placeholder_notes)) },
                     maxLines = 3,
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Area Picker Strip ("Bereich: Work, Home, ...")
+                // Area Picker Strip
                 Text(
-                    text = "Bereich (Area):",
+                    text = "${stringResource(R.string.entity_area)}:",
                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                     color = colors.secondaryText
                 )
@@ -540,7 +553,7 @@ fun CreateOrEditProjectDialog(
                             .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Text(
-                            text = "Kein Bereich",
+                            text = stringResource(R.string.areas_none),
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = if (noAreaSelected) FontWeight.Bold else FontWeight.Medium
                             ),
@@ -583,7 +596,7 @@ fun CreateOrEditProjectDialog(
 
                 // Project Target Date (Zieldatum / Deadline) Picker Button
                 Text(
-                    text = "Projekt-Zieldatum (Frist):",
+                    text = "${stringResource(R.string.project_target_date_label)}:",
                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                     color = colors.secondaryText
                 )
@@ -596,7 +609,7 @@ fun CreateOrEditProjectDialog(
                     val formattedTargetDate = deadlineEpochMillis?.let {
                         Instant.ofEpochMilli(it).atZone(zone).toLocalDate()
                             .format(DateTimeFormatter.ofPattern("EEE, d. MMM yyyy", locale))
-                    } ?: "Kein Zieldatum festgelegt (Antippen zum Wählen)"
+                    } ?: stringResource(R.string.project_set_target_date)
 
                     Row(
                         modifier = Modifier
@@ -634,7 +647,7 @@ fun CreateOrEditProjectDialog(
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.Close,
-                                contentDescription = "Zieldatum entfernen",
+                                contentDescription = stringResource(R.string.deadline_clear_button),
                                 tint = colors.secondaryText,
                                 modifier = Modifier.size(16.dp)
                             )
@@ -659,7 +672,7 @@ fun CreateOrEditProjectDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Abbrechen",
+                            text = stringResource(R.string.action_cancel),
                             style = MaterialTheme.typography.labelMedium,
                             color = colors.secondaryText
                         )
@@ -680,7 +693,7 @@ fun CreateOrEditProjectDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Projekt speichern",
+                            text = stringResource(R.string.action_save),
                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                             color = Color.White
                         )
@@ -716,6 +729,7 @@ fun MoveTaskToProjectOrAreaDialog(
 ) {
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
+    val areaLabel = stringResource(R.string.entity_area)
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -751,7 +765,7 @@ fun MoveTaskToProjectOrAreaDialog(
                             modifier = Modifier.size(17.dp)
                         )
                         Text(
-                            text = "Verschieben (Projekt / Bereich)",
+                            text = stringResource(R.string.move_dialog_title),
                             style = MaterialTheme.typography.labelLarge.copy(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp
@@ -762,7 +776,7 @@ fun MoveTaskToProjectOrAreaDialog(
                     IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
                         Icon(
                             imageVector = Icons.Outlined.Close,
-                            contentDescription = null,
+                            contentDescription = stringResource(R.string.action_cancel),
                             tint = colors.secondaryText,
                             modifier = Modifier.size(15.dp)
                         )
@@ -795,7 +809,7 @@ fun MoveTaskToProjectOrAreaDialog(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "Kein Projekt / Kein Bereich",
+                                text = stringResource(R.string.move_none_option),
                                 style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
                                 color = colors.primaryText
                             )
@@ -842,7 +856,7 @@ fun MoveTaskToProjectOrAreaDialog(
                                         modifier = Modifier.size(15.dp)
                                     )
                                     Text(
-                                        text = "Bereich: ${area.title}",
+                                        text = "$areaLabel: ${area.title}",
                                         style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
                                         color = colors.primaryText
                                     )

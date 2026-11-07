@@ -12,9 +12,9 @@ Eine eigenständige, native Android-Produktivitäts-App (für **Android-Smartpho
 
 ---
 
-## Direkt-Download (Installierbares Android-APK — Version 1.2.1)
+## Direkt-Download (Installierbares Android-APK — Version 1.2.2)
 
-- **[Thingsbook-v1.2.1-full.apk herunterladen (v1.2.1 — Cloud-Sync Fix für „Weiter mit Google“, Passwort zurücksetzen per E-Mail, Bereiche Work & Home bis max. 6, Projekte mit Zieldatum, Unteraufgaben & Wiederkehrende Aufgaben)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.2.1-full.apk)**
+- **[Thingsbook-v1.2.2-full.apk herunterladen (v1.2.2 — Vollständige 5-Sprachen-Lokalisierung für „Bereiche / Areas / Aree / Domaines / Áreas“, Cloud-Sync Fix für „Weiter mit Google“, Passwort zurücksetzen per E-Mail, Bereiche Work & Home bis max. 6, Projekte mit Zieldatum, Unteraufgaben & Wiederkehrende Aufgaben)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.2.2-full.apk)**
 
 ---
 

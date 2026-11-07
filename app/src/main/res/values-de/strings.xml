@@ -145,4 +145,20 @@
     <string name="tags_edit_title">Tag umbenennen</string>
     <string name="tags_empty_hint">Noch keine Tags vorhanden. Lege oben deinen ersten Tag an.</string>
     <string name="tags_filter_all">Alle</string>
+
+    <!-- Areas, Projects & Password Reset -->
+    <string name="areas_manage_title">Bereiche verwalten</string>
+    <string name="areas_active_count">%1$d von %2$d Bereichen aktiv</string>
+    <string name="areas_rename_label">Bereich umbenennen</string>
+    <string name="areas_projects_count_hint">%1$d Projekte • Antippen zum Öffnen</string>
+    <string name="areas_add_new_hint">Neuen Bereich hinzufügen (noch %1$d frei):</string>
+    <string name="areas_max_reached">Maximal %1$d Bereiche erreicht. Du kannst bestehende Bereiche jederzeit umbenennen, verschieben oder löschen.</string>
+    <string name="areas_none">Kein Bereich</string>
+    <string name="areas_assign_chip">Bereich zuweisen</string>
+    <string name="project_edit_title">Projekt bearbeiten</string>
+    <string name="project_target_date_label">Zieldatum</string>
+    <string name="project_set_target_date">Projekt-Zieldatum festlegen</string>
+    <string name="move_dialog_title">Verschieben (Projekt / Bereich)</string>
+    <string name="move_none_option">Kein Projekt / Kein Bereich</string>
+    <string name="auth_forgot_password">Passwort vergessen? Zurücksetzen</string>
 </resources>

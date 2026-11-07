@@ -503,7 +503,7 @@ fun ThingsSmartViewScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text(
-                                        text = "Projekte in ${currentArea.title} (${areaProjects.size})",
+                                        text = "${stringResource(R.string.entity_projects)} • ${currentArea.title} (${areaProjects.size})",
                                         style = MaterialTheme.typography.labelLarge.copy(
                                             color = colors.thingsBlue,
                                             fontWeight = FontWeight.Bold
@@ -529,7 +529,7 @@ fun ThingsSmartViewScreen(
                                             modifier = Modifier.size(14.dp)
                                         )
                                         Text(
-                                            text = "Neues Projekt",
+                                            text = stringResource(R.string.entity_new_project),
                                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                                             color = colors.thingsBlue
                                         )
@@ -566,7 +566,7 @@ fun ThingsSmartViewScreen(
                                     HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Text(
-                                        text = "Aufgaben in ${currentArea.title} (${primaryTasks.size})",
+                                        text = "${stringResource(R.string.entity_todo)} • ${currentArea.title} (${primaryTasks.size})",
                                         style = MaterialTheme.typography.labelLarge.copy(
                                             color = colors.secondaryText,
                                             fontWeight = FontWeight.SemiBold
@@ -844,7 +844,7 @@ private fun AreaProjectOverviewRow(
                         color = colors.primaryText
                     )
                     Text(
-                        text = "${project.completedTaskCount}/${project.totalTaskCount} Aufgaben erledigt",
+                        text = "${project.completedTaskCount}/${project.totalTaskCount} • ${stringResource(R.string.entity_todo)}",
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.secondaryText
                     )
@@ -863,7 +863,7 @@ private fun AreaProjectOverviewRow(
                     )
                 } else {
                     ThingsTagPill(
-                        title = "🏁 Zieldatum",
+                        title = "🏁 ${stringResource(R.string.project_target_date_label)}",
                         onClick = { showDeadlinePicker = true }
                     )
                 }
@@ -872,7 +872,7 @@ private fun AreaProjectOverviewRow(
                     IconButton(onClick = onMoveUp, modifier = Modifier.size(26.dp)) {
                         Icon(
                             imageVector = Icons.Outlined.ArrowUpward,
-                            contentDescription = "Projekt nach oben",
+                            contentDescription = stringResource(R.string.action_move),
                             tint = colors.secondaryText,
                             modifier = Modifier.size(14.dp)
                         )
@@ -882,7 +882,7 @@ private fun AreaProjectOverviewRow(
                     IconButton(onClick = onMoveDown, modifier = Modifier.size(26.dp)) {
                         Icon(
                             imageVector = Icons.Outlined.ArrowDownward,
-                            contentDescription = "Projekt nach unten",
+                            contentDescription = stringResource(R.string.action_move),
                             tint = colors.secondaryText,
                             modifier = Modifier.size(14.dp)
                         )
@@ -891,7 +891,7 @@ private fun AreaProjectOverviewRow(
                 IconButton(onClick = onEditProject, modifier = Modifier.size(26.dp)) {
                     Icon(
                         imageVector = Icons.Outlined.Edit,
-                        contentDescription = "Projekt bearbeiten",
+                        contentDescription = stringResource(R.string.project_edit_title),
                         tint = colors.thingsBlue,
                         modifier = Modifier.size(15.dp)
                     )
@@ -989,7 +989,7 @@ private fun TopThingsbookBar(
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Inventory2,
-                    contentDescription = "Bereiche verwalten",
+                    contentDescription = stringResource(R.string.areas_manage_title),
                     tint = colors.anytimeTeal,
                     modifier = Modifier.size(19.dp)
                 )
@@ -1192,6 +1192,8 @@ private fun SmartViewNavigationStrip(
 ) {
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
+    val areasLabel = stringResource(R.string.entity_areas)
+    val projectLabel = stringResource(R.string.entity_project)
 
     LazyRow(
         modifier = Modifier
@@ -1291,7 +1293,7 @@ private fun SmartViewNavigationStrip(
             }
         }
 
-        // 4. "+ Projekt" Quick Trigger
+        // 4. "+ Project" Quick Trigger
         item(key = "nav_add_project") {
             Row(
                 modifier = Modifier
@@ -1312,14 +1314,14 @@ private fun SmartViewNavigationStrip(
                     modifier = Modifier.size(14.dp)
                 )
                 Text(
-                    text = "Projekt",
+                    text = projectLabel,
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                     color = colors.thingsBlue
                 )
             }
         }
 
-        // 5. "Bereiche (X/6)" Quick Trigger
+        // 5. "Areas / Bereiche / Aree / Domaines / Áreas (X/6)" Quick Trigger
         item(key = "nav_manage_areas") {
             Row(
                 modifier = Modifier
@@ -1340,7 +1342,7 @@ private fun SmartViewNavigationStrip(
                     modifier = Modifier.size(14.dp)
                 )
                 Text(
-                    text = "Bereiche (${areas.size}/${ThingsRepository.MAX_AREAS})",
+                    text = "$areasLabel (${areas.size}/${ThingsRepository.MAX_AREAS})",
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
                     color = colors.primaryText
                 )
@@ -1380,6 +1382,9 @@ private fun ViewTitleHeader(
     var inlineAreaTitle by remember(currentArea?.id, currentArea?.title) {
         mutableStateOf(currentArea?.title ?: "")
     }
+
+    val areaWord = stringResource(R.string.entity_area)
+    val areasWord = stringResource(R.string.entity_areas)
 
     Column(
         modifier = Modifier
@@ -1440,14 +1445,14 @@ private fun ViewTitleHeader(
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.Check,
-                                    contentDescription = "Speichern",
+                                    contentDescription = stringResource(R.string.action_save),
                                     tint = colors.thingsBlue
                                 )
                             }
                             IconButton(onClick = { isRenamingAreaInline = false }) {
                                 Icon(
                                     imageVector = Icons.Outlined.Close,
-                                    contentDescription = "Abbrechen",
+                                    contentDescription = stringResource(R.string.action_cancel),
                                     tint = colors.secondaryText
                                 )
                             }
@@ -1476,7 +1481,7 @@ private fun ViewTitleHeader(
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.ArrowUpward,
-                                contentDescription = "Projekt nach oben",
+                                contentDescription = stringResource(R.string.action_move),
                                 tint = colors.secondaryText,
                                 modifier = Modifier.size(16.dp)
                             )
@@ -1489,7 +1494,7 @@ private fun ViewTitleHeader(
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.ArrowDownward,
-                                contentDescription = "Projekt nach unten",
+                                contentDescription = stringResource(R.string.action_move),
                                 tint = colors.secondaryText,
                                 modifier = Modifier.size(16.dp)
                             )
@@ -1501,7 +1506,7 @@ private fun ViewTitleHeader(
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Edit,
-                            contentDescription = "Projekt bearbeiten",
+                            contentDescription = stringResource(R.string.project_edit_title),
                             tint = colors.thingsBlue,
                             modifier = Modifier.size(17.dp)
                         )
@@ -1512,7 +1517,7 @@ private fun ViewTitleHeader(
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.CheckCircleOutline,
-                            contentDescription = "Projekt als erledigt markieren",
+                            contentDescription = stringResource(R.string.action_complete),
                             tint = colors.logbookGreen,
                             modifier = Modifier.size(18.dp)
                         )
@@ -1523,7 +1528,7 @@ private fun ViewTitleHeader(
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.DeleteOutline,
-                            contentDescription = "Projekt löschen",
+                            contentDescription = stringResource(R.string.action_delete),
                             tint = colors.deadlineUrgentRed,
                             modifier = Modifier.size(18.dp)
                         )
@@ -1542,7 +1547,7 @@ private fun ViewTitleHeader(
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.ArrowUpward,
-                                contentDescription = "Bereich nach oben",
+                                contentDescription = stringResource(R.string.action_move),
                                 tint = colors.secondaryText,
                                 modifier = Modifier.size(16.dp)
                             )
@@ -1555,7 +1560,7 @@ private fun ViewTitleHeader(
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.ArrowDownward,
-                                contentDescription = "Bereich nach unten",
+                                contentDescription = stringResource(R.string.action_move),
                                 tint = colors.secondaryText,
                                 modifier = Modifier.size(16.dp)
                             )
@@ -1570,7 +1575,7 @@ private fun ViewTitleHeader(
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Edit,
-                            contentDescription = "Bereich umbenennen",
+                            contentDescription = stringResource(R.string.areas_rename_label),
                             tint = colors.thingsBlue,
                             modifier = Modifier.size(17.dp)
                         )
@@ -1581,7 +1586,7 @@ private fun ViewTitleHeader(
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.DeleteOutline,
-                            contentDescription = "Bereich löschen",
+                            contentDescription = stringResource(R.string.action_delete),
                             tint = colors.deadlineUrgentRed,
                             modifier = Modifier.size(18.dp)
                         )
@@ -1623,13 +1628,13 @@ private fun ViewTitleHeader(
                             onClick = { showProjectDeadlineDialog = true }
                         )
                         ThingsTagPill(
-                            title = "Zieldatum: $formattedTargetDate",
+                            title = "${stringResource(R.string.project_target_date_label)}: $formattedTargetDate",
                             onClick = { showProjectDeadlineDialog = true }
                         )
                     }
                 } else {
                     ThingsTagPill(
-                        title = "🏁 + Projekt-Zieldatum festlegen",
+                        title = "🏁 + ${stringResource(R.string.project_set_target_date)}",
                         onClick = { showProjectDeadlineDialog = true }
                     )
                 }
@@ -1638,7 +1643,11 @@ private fun ViewTitleHeader(
                 val projectArea = areas.find { it.id == currentProject.areaId }
                 Box {
                     ThingsTagPill(
-                        title = if (projectArea != null) "📦 Bereich: ${projectArea.title}" else "📦 Bereich zuweisen",
+                        title = if (projectArea != null) {
+                            "📦 $areaWord: ${projectArea.title}"
+                        } else {
+                            "📦 ${stringResource(R.string.areas_assign_chip)}"
+                        },
                         onClick = { showProjectAreaMenu = true }
                     )
                     DropdownMenu(
@@ -1646,7 +1655,7 @@ private fun ViewTitleHeader(
                         onDismissRequest = { showProjectAreaMenu = false }
                     ) {
                         DropdownMenuItem(
-                            text = { Text("Kein Bereich") },
+                            text = { Text(stringResource(R.string.areas_none)) },
                             onClick = {
                                 showProjectAreaMenu = false
                                 onUpdateProjectArea(currentProject.id, null)
@@ -1664,15 +1673,15 @@ private fun ViewTitleHeader(
                     }
                 }
 
-                // "+ Aufgabe" in Project
+                // "+ To-Do / Aufgabe" in Project
                 ThingsTagPill(
-                    title = "+ Aufgabe",
+                    title = "+ ${stringResource(R.string.entity_todo)}",
                     onClick = onAddTaskInCurrentView
                 )
 
-                // "+ Überschrift (Abschnitt)" in Project
+                // "+ Heading / Überschrift" in Project
                 ThingsTagPill(
-                    title = "+ Überschrift",
+                    title = "+ ${stringResource(R.string.entity_heading)}",
                     onClick = onAddHeadingInProject
                 )
             }
@@ -1697,15 +1706,15 @@ private fun ViewTitleHeader(
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 ThingsTagPill(
-                    title = "+ Neues Projekt in ${currentArea.title}",
+                    title = "+ ${stringResource(R.string.entity_new_project)} (${currentArea.title})",
                     onClick = { onCreateProjectInArea(currentArea.id) }
                 )
                 ThingsTagPill(
-                    title = "+ Neue Aufgabe in ${currentArea.title}",
+                    title = "+ ${stringResource(R.string.entity_new_todo)} (${currentArea.title})",
                     onClick = onAddTaskInCurrentView
                 )
                 ThingsTagPill(
-                    title = "⚙️ Bereiche verwalten (${areas.size}/${ThingsRepository.MAX_AREAS})",
+                    title = "⚙️ $areasWord (${areas.size}/${ThingsRepository.MAX_AREAS})",
                     onClick = onOpenAreaManager
                 )
             }
@@ -1752,14 +1761,14 @@ private fun ProjectHeadingSectionHeader(
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.Check,
-                        contentDescription = "Speichern",
+                        contentDescription = stringResource(R.string.action_save),
                         tint = colors.thingsBlue
                     )
                 }
                 IconButton(onClick = { isEditing = false }) {
                     Icon(
                         imageVector = Icons.Outlined.Close,
-                        contentDescription = "Abbrechen",
+                        contentDescription = stringResource(R.string.action_cancel),
                         tint = colors.secondaryText
                     )
                 }
@@ -1794,7 +1803,7 @@ private fun ProjectHeadingSectionHeader(
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Edit,
-                            contentDescription = "Überschrift umbenennen",
+                            contentDescription = stringResource(R.string.entity_heading),
                             tint = colors.secondaryText,
                             modifier = Modifier.size(14.dp)
                         )
@@ -1805,7 +1814,7 @@ private fun ProjectHeadingSectionHeader(
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.DeleteOutline,
-                            contentDescription = "Überschrift löschen",
+                            contentDescription = stringResource(R.string.action_delete),
                             tint = colors.secondaryText,
                             modifier = Modifier.size(15.dp)
                         )
@@ -1943,6 +1952,7 @@ private fun ThingsChromebookSidebar(
 ) {
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
+    val areasLabel = stringResource(R.string.entity_areas)
 
     Column(
         modifier = Modifier
@@ -2051,7 +2061,7 @@ private fun ThingsChromebookSidebar(
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.Add,
-                                contentDescription = "Neues Projekt in ${area.title}",
+                                contentDescription = stringResource(R.string.entity_new_project),
                                 tint = colors.secondaryText,
                                 modifier = Modifier.size(14.dp)
                             )
@@ -2133,7 +2143,7 @@ private fun ThingsChromebookSidebar(
             }
         }
 
-        // Bottom Sidebar Actions: "+ Neues Projekt" & "Bereiche (X/6)"
+        // Bottom Sidebar Actions: "+ New Project" & "Areas / Bereiche / Aree / Domaines / Áreas (X/6)"
         HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
         Row(
             modifier = Modifier
@@ -2156,7 +2166,7 @@ private fun ThingsChromebookSidebar(
                     modifier = Modifier.size(15.dp)
                 )
                 Text(
-                    text = "Neues Projekt",
+                    text = stringResource(R.string.entity_new_project),
                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                     color = colors.thingsBlue
                 )
@@ -2177,7 +2187,7 @@ private fun ThingsChromebookSidebar(
                     modifier = Modifier.size(14.dp)
                 )
                 Text(
-                    text = "Bereiche (${areas.size}/${ThingsRepository.MAX_AREAS})",
+                    text = "$areasLabel (${areas.size}/${ThingsRepository.MAX_AREAS})",
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.secondaryText
                 )

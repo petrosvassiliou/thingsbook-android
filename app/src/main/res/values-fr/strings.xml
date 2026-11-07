@@ -145,4 +145,20 @@
     <string name="tags_edit_title">Renommer le tag</string>
     <string name="tags_empty_hint">Aucun tag. Créez votre premier tag ci-dessus.</string>
     <string name="tags_filter_all">Tous</string>
+
+    <!-- Areas, Projects & Password Reset -->
+    <string name="areas_manage_title">Gérer les domaines</string>
+    <string name="areas_active_count">%1$d sur %2$d domaines actifs</string>
+    <string name="areas_rename_label">Renommer le domaine</string>
+    <string name="areas_projects_count_hint">%1$d projets • Toucher pour ouvrir</string>
+    <string name="areas_add_new_hint">Ajouter un domaine (%1$d restants) :</string>
+    <string name="areas_max_reached">Maximum de %1$d domaines atteint. Vous pouvez renommer, déplacer ou supprimer des domaines.</string>
+    <string name="areas_none">Aucun domaine</string>
+    <string name="areas_assign_chip">Attribuer un domaine</string>
+    <string name="project_edit_title">Modifier le projet</string>
+    <string name="project_target_date_label">Date cible</string>
+    <string name="project_set_target_date">Définir une date cible</string>
+    <string name="move_dialog_title">Déplacer (Projet / Domaine)</string>
+    <string name="move_none_option">Aucun projet / Aucun domaine</string>
+    <string name="auth_forgot_password">Mot de passe oublié ? Réinitialiser</string>
 </resources>

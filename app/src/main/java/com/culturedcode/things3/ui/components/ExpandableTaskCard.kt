@@ -497,7 +497,7 @@ fun ExpandableTaskCard(
                             )
                         }
 
-                        // Repeat Badge / Trigger (Wiederkehrende Aufgabe wie in Things for Mac)
+                        // Repeat Badge / Trigger
                         if (task.recurrenceRule != null) {
                             ThingsRepeatBadge(
                                 rule = task.recurrenceRule,
@@ -505,12 +505,12 @@ fun ExpandableTaskCard(
                             )
                         } else {
                             ThingsTagPill(
-                                title = "🔁 Wiederholen",
+                                title = "🔁 ${stringResource(R.string.action_repeat)}",
                                 onClick = { showRepeatDialog = true }
                             )
                         }
 
-                        // Deadline / Zieldatum Badge
+                        // Deadline / Target Date Badge
                         if (task.deadline != null) {
                             ThingsDeadlineBadge(
                                 deadlineEpochMillis = task.deadline,
@@ -519,7 +519,7 @@ fun ExpandableTaskCard(
                             )
                         } else {
                             ThingsTagPill(
-                                title = "🏁 Zieldatum",
+                                title = "🏁 ${stringResource(R.string.action_deadline)}",
                                 onClick = { showDeadlineDialog = true }
                             )
                         }
@@ -528,7 +528,7 @@ fun ExpandableTaskCard(
                         val containerLabel = when {
                             assignedProject != null -> "📁 ${assignedProject.title}"
                             assignedArea != null -> "📦 ${assignedArea.title}"
-                            else -> "📁 Projekt / Bereich"
+                            else -> "📁 ${stringResource(R.string.entity_project)} / ${stringResource(R.string.entity_area)}"
                         }
                         ThingsTagPill(
                             title = containerLabel,

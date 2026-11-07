@@ -145,4 +145,20 @@
     <string name="tags_edit_title">Renombrar etiqueta</string>
     <string name="tags_empty_hint">Aún no hay etiquetas. Crea la primera arriba.</string>
     <string name="tags_filter_all">Todas</string>
+
+    <!-- Areas, Projects & Password Reset -->
+    <string name="areas_manage_title">Gestionar áreas</string>
+    <string name="areas_active_count">%1$d de %2$d áreas activas</string>
+    <string name="areas_rename_label">Renombrar área</string>
+    <string name="areas_projects_count_hint">%1$d proyectos • Toca para abrir</string>
+    <string name="areas_add_new_hint">Añadir nueva área (%1$d disponibles):</string>
+    <string name="areas_max_reached">Máximo de %1$d áreas alcanzado. Puedes renombrar, mover o eliminar áreas existentes.</string>
+    <string name="areas_none">Sin área</string>
+    <string name="areas_assign_chip">Asignar área</string>
+    <string name="project_edit_title">Editar proyecto</string>
+    <string name="project_target_date_label">Fecha objetivo</string>
+    <string name="project_set_target_date">Fijar fecha objetivo</string>
+    <string name="move_dialog_title">Mover (Proyecto / Área)</string>
+    <string name="move_none_option">Sin proyecto / Sin área</string>
+    <string name="auth_forgot_password">¿Olvidaste tu contraseña? Restablecer</string>
 </resources>

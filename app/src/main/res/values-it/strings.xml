@@ -145,4 +145,20 @@
     <string name="tags_edit_title">Rinomina Tag</string>
     <string name="tags_empty_hint">Nessun tag presente. Crea il tuo primo tag qui sopra.</string>
     <string name="tags_filter_all">Tutti</string>
+
+    <!-- Areas, Projects & Password Reset -->
+    <string name="areas_manage_title">Gestione Aree</string>
+    <string name="areas_active_count">%1$d di %2$d aree attive</string>
+    <string name="areas_rename_label">Rinomina area</string>
+    <string name="areas_projects_count_hint">%1$d progetti • Tocca per aprire</string>
+    <string name="areas_add_new_hint">Aggiungi nuova area (%1$d disponibili):</string>
+    <string name="areas_max_reached">Massimo di %1$d aree raggiunto. Puoi rinominare, spostare o eliminare le aree esistenti.</string>
+    <string name="areas_none">Nessuna area</string>
+    <string name="areas_assign_chip">Assegna area</string>
+    <string name="project_edit_title">Modifica progetto</string>
+    <string name="project_target_date_label">Data obiettivo</string>
+    <string name="project_set_target_date">Imposta data obiettivo</string>
+    <string name="move_dialog_title">Sposta (Progetto / Area)</string>
+    <string name="move_none_option">Nessun progetto / Nessuna area</string>
+    <string name="auth_forgot_password">Password dimenticata? Reimposta</string>
 </resources>

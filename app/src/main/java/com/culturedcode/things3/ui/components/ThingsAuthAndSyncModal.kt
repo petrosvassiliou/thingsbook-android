@@ -249,7 +249,7 @@ fun ThingsAuthAndSyncModal(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Passwort vergessen? Zurücksetzen",
+                                text = stringResource(R.string.auth_forgot_password),
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                                 color = colors.thingsBlue
                             )

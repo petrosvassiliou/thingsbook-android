@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "116792699915",
+    "project_id": "thingsbook-prod",
+    "storage_bucket": "thingsbook-prod.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:116792699915:android:2e24f279bece36e1c82b0e",
+        "android_client_info": {
+          "package_name": "com.culturedcode.things3"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "116792699915-mkdblm3pde3b6ch44otcdeki1h7iuscf.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCUtSvssQOesHW-heLhNzNvykI1zCl7deY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "116792699915-mkdblm3pde3b6ch44otcdeki1h7iuscf.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

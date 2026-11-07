@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Thingsbook</string>
+
+    <!-- Smart Views -->
+    <string name="view_inbox">Inbox</string>
+    <string name="view_today">Today</string>
+    <string name="view_this_evening">This Evening</string>
+    <string name="view_upcoming">Upcoming</string>
+    <string name="view_anytime">Anytime</string>
+    <string name="view_someday">Someday</string>
+    <string name="view_logbook">Logbook</string>
+
+    <!-- Hierarchy & Entities -->
+    <string name="entity_area">Area</string>
+    <string name="entity_areas">Areas</string>
+    <string name="entity_new_area">New Area</string>
+    <string name="entity_project">Project</string>
+    <string name="entity_projects">Projects</string>
+    <string name="entity_new_project">New Project</string>
+    <string name="entity_heading">Heading</string>
+    <string name="entity_new_heading">New Heading</string>
+    <string name="entity_todo">To-Do</string>
+    <string name="entity_new_todo">New To-Do</string>
+    <string name="entity_checklist_item">Checklist Item</string>
+    <string name="entity_tag">Tag</string>
+    <string name="entity_tags">Tags</string>
+
+    <!-- Task Actions & Card Fields -->
+    <string name="placeholder_todo_title">New To-Do</string>
+    <string name="placeholder_notes">Notes</string>
+    <string name="placeholder_checklist">Checklist</string>
+    <string name="placeholder_add_checklist_item">Add checklist item…</string>
+    <string name="action_when">When</string>
+    <string name="action_deadline">Deadline</string>
+    <string name="action_tags">Tags</string>
+    <string name="action_checklist">Checklist</string>
+    <string name="action_reminder">Reminder</string>
+    <string name="action_move">Move</string>
+    <string name="action_repeat">Repeat</string>
+    <string name="action_complete">Complete</string>
+    <string name="action_cancel_todo">Mark as Canceled</string>
+    <string name="action_reopen_todo">Mark as Open</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_clear">Clear</string>
+    <string name="action_done">Done</string>
+    <string name="action_save">Save</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_collapse_heading">Toggle Heading</string>
+
+    <!-- Quick Find & Search -->
+    <string name="quick_find_title">Quick Find</string>
+    <string name="quick_find_placeholder">Quick Find – Type to search…</string>
+    <string name="quick_find_no_results">No matching To-Dos, Projects, or Tags</string>
+    <string name="quick_find_hint_swipe">Swipe down or tap search for Quick Find</string>
+
+    <!-- Deadlines & Dates -->
+    <string name="deadline_today">Due today</string>
+    <string name="deadline_days_left">%1$d d. left</string>
+    <string name="deadline_days_overdue">%1$d d. ago</string>
+    <string name="date_tomorrow">Tomorrow</string>
+    <string name="when_natural_input_hint">Type e.g. \"tomorrow\", \"this evening\", \"next friday\"…</string>
+
+    <!-- Cloud Sync & Auth -->
+    <string name="sync_title">Thingsbook Cloud Sync</string>
+    <string name="sync_status_synced">Synced just now</string>
+    <string name="sync_status_syncing">Syncing deltas…</string>
+    <string name="sync_status_offline">Offline-First (Local Room DB)</string>
+    <string name="sync_action_now">Sync Now</string>
+    <string name="auth_email_label">Email Address</string>
+    <string name="auth_password_label">Password (min. 6 chars)</string>
+    <string name="auth_register_account">Create Account &amp; Sync</string>
+    <string name="auth_login_email">Sign In with Email</string>
+    <string name="auth_sign_in_google">Continue with Google</string>
+    <string name="auth_sign_in_anonymous">Continue Anonymously (Single Device)</string>
+    <string name="auth_sign_out">Sign Out</string>
+    <string name="auth_multi_device_hint">Sign in with the same Email or Google account on multiple Android devices for real-time Firestore Delta-Sync.</string>
+    <string name="auth_custom_firebase_toggle">Configure Custom Firebase Project (Live Multi-Device Cloud)</string>
+    <string name="auth_firebase_project_id">Firebase Project ID</string>
+    <string name="auth_firebase_app_id">Firebase Mobile SDK App ID (1:…:android:…)</string>
+    <string name="auth_firebase_api_key">Firebase Web API Key (AIza…)</string>
+    <string name="auth_firebase_apply">Connect Live Firebase Cloud</string>
+
+    <!-- Language Switcher -->
+    <string name="settings_language">App Language</string>
+    <string name="settings_system_default">System Default</string>
+    <string name="lang_en">English</string>
+    <string name="lang_de">Deutsch</string>
+    <string name="lang_it">Italiano</string>
+    <string name="lang_fr">Français</string>
+    <string name="lang_es">Español</string>
+
+    <!-- Empty States & Magic Plus -->
+    <string name="empty_inbox">Your Inbox is empty.</string>
+    <string name="empty_today">No To-Dos scheduled for Today.</string>
+    <string name="empty_view">No items in this view right now.</string>
+    <string name="magic_plus_drop_todo">Drop to create a new To-Do here</string>
+    <string name="magic_plus_drop_heading">Drop at left edge to create Heading</string>
+    <string name="magic_plus_insertion_label">Release to insert To-Do here</string>
+    <string name="magic_plus_heading_label">Release at left edge to insert Heading</string>
+
+    <!-- Gemini AI Features in Thingsbook (Multilingual) -->
+    <string name="gemini_hub_title">Thingsbook Intelligence (Gemini)</string>
+    <string name="gemini_magic_breakdown">Magic Breakdown</string>
+    <string name="gemini_magic_breakdown_desc">Generate actionable checklist steps with Gemini</string>
+    <string name="gemini_brain_dump_title">Brain Dump → GTD Import</string>
+    <string name="gemini_brain_dump_placeholder">Type or paste anything on your mind (e.g. \"Call dentist tomorrow, finish Q4 deck by Friday, buy espresso beans this evening\")…</string>
+    <string name="gemini_brain_dump_action">Extract &amp; Schedule To-Dos</string>
+    <string name="gemini_project_architect_title">AI Project Architect</string>
+    <string name="gemini_project_architect_placeholder">Describe your project goal (e.g. \"Relocate to Munich in autumn\" or \"Launch Android 120Hz app\")…</string>
+    <string name="gemini_project_architect_action">Generate Project with Headings &amp; To-Dos</string>
+    <string name="gemini_logbook_review_title">Thingsbook AI Reflection</string>
+    <string name="gemini_logbook_review_action">Summarize Logbook &amp; Suggest Focus</string>
+    <string name="gemini_generating">Gemini is thinking calmly…</string>
+    <string name="gemini_api_key_label">Optional Gemini API Key (overrides Vertex AI default)</string>
+    <string name="gemini_api_key_placeholder">Paste AIza… key or leave blank for Firebase Vertex AI</string>
+</resources>

@@ -68,9 +68,11 @@ object AppModule {
     @Singleton
     fun provideFirebaseFirestore(): FirebaseFirestore {
         return FirebaseFirestore.getInstance().apply {
-            firestoreSettings = FirebaseFirestoreSettings.Builder()
-                .setLocalCacheSettings(PersistentCacheSettings.newBuilder().build())
-                .build()
+            runCatching {
+                firestoreSettings = FirebaseFirestoreSettings.Builder()
+                    .setLocalCacheSettings(PersistentCacheSettings.newBuilder().build())
+                    .build()
+            }
         }
     }
 }

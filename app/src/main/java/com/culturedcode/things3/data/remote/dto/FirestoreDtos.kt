@@ -60,6 +60,16 @@ data class AreaFirestoreDto(
         isDirty = false
     )
 
+    fun toFirestoreMap(): Map<String, Any?> = mapOf(
+        "id" to id,
+        "title" to title,
+        "sortOrder" to sortOrder,
+        "tagIds" to tagIds,
+        "createdAt" to createdAt,
+        "updatedAt" to updatedAt,
+        "isDeleted" to isDeleted
+    )
+
     companion object {
         fun fromEntity(entity: AreaEntity): AreaFirestoreDto = AreaFirestoreDto(
             id = entity.id,
@@ -70,6 +80,22 @@ data class AreaFirestoreDto(
             updatedAt = entity.updatedAt,
             isDeleted = entity.isDeleted
         )
+
+        @Suppress("UNCHECKED_CAST")
+        fun fromFirestoreMap(map: Map<String, Any?>?): AreaFirestoreDto? {
+            if (map == null) return null
+            val id = map["id"] as? String ?: return null
+            if (id.isBlank()) return null
+            return AreaFirestoreDto(
+                id = id,
+                title = map["title"] as? String ?: "",
+                sortOrder = (map["sortOrder"] as? Number)?.toDouble() ?: 0.0,
+                tagIds = (map["tagIds"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                createdAt = (map["createdAt"] as? Number)?.toLong() ?: 0L,
+                updatedAt = (map["updatedAt"] as? Number)?.toLong() ?: 0L,
+                isDeleted = map["isDeleted"] as? Boolean ?: false
+            )
+        }
     }
 }
 
@@ -108,6 +134,23 @@ data class ProjectFirestoreDto(
         isDirty = false
     )
 
+    fun toFirestoreMap(): Map<String, Any?> = mapOf(
+        "id" to id,
+        "areaId" to areaId,
+        "title" to title,
+        "notes" to notes,
+        "status" to status,
+        "scheduleState" to scheduleState,
+        "whenDate" to whenDate,
+        "deadline" to deadline,
+        "completedAt" to completedAt,
+        "sortOrder" to sortOrder,
+        "tagIds" to tagIds,
+        "createdAt" to createdAt,
+        "updatedAt" to updatedAt,
+        "isDeleted" to isDeleted
+    )
+
     companion object {
         fun fromEntity(entity: ProjectEntity): ProjectFirestoreDto = ProjectFirestoreDto(
             id = entity.id,
@@ -125,6 +168,28 @@ data class ProjectFirestoreDto(
             updatedAt = entity.updatedAt,
             isDeleted = entity.isDeleted
         )
+
+        fun fromFirestoreMap(map: Map<String, Any?>?): ProjectFirestoreDto? {
+            if (map == null) return null
+            val id = map["id"] as? String ?: return null
+            if (id.isBlank()) return null
+            return ProjectFirestoreDto(
+                id = id,
+                areaId = map["areaId"] as? String,
+                title = map["title"] as? String ?: "",
+                notes = map["notes"] as? String ?: "",
+                status = map["status"] as? String ?: ProjectStatus.ACTIVE.name,
+                scheduleState = map["scheduleState"] as? String ?: ScheduleState.ANYTIME.name,
+                whenDate = (map["whenDate"] as? Number)?.toLong(),
+                deadline = (map["deadline"] as? Number)?.toLong(),
+                completedAt = (map["completedAt"] as? Number)?.toLong(),
+                sortOrder = (map["sortOrder"] as? Number)?.toDouble() ?: 0.0,
+                tagIds = (map["tagIds"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                createdAt = (map["createdAt"] as? Number)?.toLong() ?: 0L,
+                updatedAt = (map["updatedAt"] as? Number)?.toLong() ?: 0L,
+                isDeleted = map["isDeleted"] as? Boolean ?: false
+            )
+        }
     }
 }
 
@@ -151,6 +216,17 @@ data class HeadingFirestoreDto(
         isDirty = false
     )
 
+    fun toFirestoreMap(): Map<String, Any?> = mapOf(
+        "id" to id,
+        "projectId" to projectId,
+        "title" to title,
+        "sortOrder" to sortOrder,
+        "isArchived" to isArchived,
+        "createdAt" to createdAt,
+        "updatedAt" to updatedAt,
+        "isDeleted" to isDeleted
+    )
+
     companion object {
         fun fromEntity(entity: HeadingEntity): HeadingFirestoreDto = HeadingFirestoreDto(
             id = entity.id,
@@ -162,6 +238,22 @@ data class HeadingFirestoreDto(
             updatedAt = entity.updatedAt,
             isDeleted = entity.isDeleted
         )
+
+        fun fromFirestoreMap(map: Map<String, Any?>?): HeadingFirestoreDto? {
+            if (map == null) return null
+            val id = map["id"] as? String ?: return null
+            if (id.isBlank()) return null
+            return HeadingFirestoreDto(
+                id = id,
+                projectId = map["projectId"] as? String ?: "",
+                title = map["title"] as? String ?: "",
+                sortOrder = (map["sortOrder"] as? Number)?.toDouble() ?: 0.0,
+                isArchived = map["isArchived"] as? Boolean ?: false,
+                createdAt = (map["createdAt"] as? Number)?.toLong() ?: 0L,
+                updatedAt = (map["updatedAt"] as? Number)?.toLong() ?: 0L,
+                isDeleted = map["isDeleted"] as? Boolean ?: false
+            )
+        }
     }
 }
 
@@ -208,6 +300,27 @@ data class TaskFirestoreDto(
         isDirty = false
     )
 
+    fun toFirestoreMap(): Map<String, Any?> = mapOf(
+        "id" to id,
+        "title" to title,
+        "notes" to notes,
+        "status" to status,
+        "scheduleState" to scheduleState,
+        "whenDate" to whenDate,
+        "deadline" to deadline,
+        "reminderTime" to reminderTime,
+        "completedAt" to completedAt,
+        "projectId" to projectId,
+        "headingId" to headingId,
+        "areaId" to areaId,
+        "recurrenceRule" to recurrenceRule,
+        "sortOrder" to sortOrder,
+        "tagIds" to tagIds,
+        "createdAt" to createdAt,
+        "updatedAt" to updatedAt,
+        "isDeleted" to isDeleted
+    )
+
     companion object {
         fun fromEntity(entity: TaskEntity): TaskFirestoreDto = TaskFirestoreDto(
             id = entity.id,
@@ -229,6 +342,32 @@ data class TaskFirestoreDto(
             updatedAt = entity.updatedAt,
             isDeleted = entity.isDeleted
         )
+
+        fun fromFirestoreMap(map: Map<String, Any?>?): TaskFirestoreDto? {
+            if (map == null) return null
+            val id = map["id"] as? String ?: return null
+            if (id.isBlank()) return null
+            return TaskFirestoreDto(
+                id = id,
+                title = map["title"] as? String ?: "",
+                notes = map["notes"] as? String ?: "",
+                status = map["status"] as? String ?: TaskStatus.OPEN.name,
+                scheduleState = map["scheduleState"] as? String ?: ScheduleState.INBOX.name,
+                whenDate = (map["whenDate"] as? Number)?.toLong(),
+                deadline = (map["deadline"] as? Number)?.toLong(),
+                reminderTime = (map["reminderTime"] as? Number)?.toLong(),
+                completedAt = (map["completedAt"] as? Number)?.toLong(),
+                projectId = map["projectId"] as? String,
+                headingId = map["headingId"] as? String,
+                areaId = map["areaId"] as? String,
+                recurrenceRule = map["recurrenceRule"] as? String,
+                sortOrder = (map["sortOrder"] as? Number)?.toDouble() ?: 0.0,
+                tagIds = (map["tagIds"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                createdAt = (map["createdAt"] as? Number)?.toLong() ?: 0L,
+                updatedAt = (map["updatedAt"] as? Number)?.toLong() ?: 0L,
+                isDeleted = map["isDeleted"] as? Boolean ?: false
+            )
+        }
     }
 }
 
@@ -255,6 +394,17 @@ data class ChecklistItemFirestoreDto(
         isDirty = false
     )
 
+    fun toFirestoreMap(): Map<String, Any?> = mapOf(
+        "id" to id,
+        "taskId" to taskId,
+        "title" to title,
+        "isCompleted" to isCompleted,
+        "sortOrder" to sortOrder,
+        "createdAt" to createdAt,
+        "updatedAt" to updatedAt,
+        "isDeleted" to isDeleted
+    )
+
     companion object {
         fun fromEntity(entity: ChecklistItemEntity): ChecklistItemFirestoreDto = ChecklistItemFirestoreDto(
             id = entity.id,
@@ -266,6 +416,22 @@ data class ChecklistItemFirestoreDto(
             updatedAt = entity.updatedAt,
             isDeleted = entity.isDeleted
         )
+
+        fun fromFirestoreMap(map: Map<String, Any?>?): ChecklistItemFirestoreDto? {
+            if (map == null) return null
+            val id = map["id"] as? String ?: return null
+            if (id.isBlank()) return null
+            return ChecklistItemFirestoreDto(
+                id = id,
+                taskId = map["taskId"] as? String ?: "",
+                title = map["title"] as? String ?: "",
+                isCompleted = map["isCompleted"] as? Boolean ?: false,
+                sortOrder = (map["sortOrder"] as? Number)?.toDouble() ?: 0.0,
+                createdAt = (map["createdAt"] as? Number)?.toLong() ?: 0L,
+                updatedAt = (map["updatedAt"] as? Number)?.toLong() ?: 0L,
+                isDeleted = map["isDeleted"] as? Boolean ?: false
+            )
+        }
     }
 }
 
@@ -292,6 +458,17 @@ data class TagFirestoreDto(
         isDirty = false
     )
 
+    fun toFirestoreMap(): Map<String, Any?> = mapOf(
+        "id" to id,
+        "title" to title,
+        "parentTagId" to parentTagId,
+        "shortcut" to shortcut,
+        "sortOrder" to sortOrder,
+        "createdAt" to createdAt,
+        "updatedAt" to updatedAt,
+        "isDeleted" to isDeleted
+    )
+
     companion object {
         fun fromEntity(entity: TagEntity): TagFirestoreDto = TagFirestoreDto(
             id = entity.id,
@@ -303,5 +480,21 @@ data class TagFirestoreDto(
             updatedAt = entity.updatedAt,
             isDeleted = entity.isDeleted
         )
+
+        fun fromFirestoreMap(map: Map<String, Any?>?): TagFirestoreDto? {
+            if (map == null) return null
+            val id = map["id"] as? String ?: return null
+            if (id.isBlank()) return null
+            return TagFirestoreDto(
+                id = id,
+                title = map["title"] as? String ?: "",
+                parentTagId = map["parentTagId"] as? String,
+                shortcut = map["shortcut"] as? String,
+                sortOrder = (map["sortOrder"] as? Number)?.toDouble() ?: 0.0,
+                createdAt = (map["createdAt"] as? Number)?.toLong() ?: 0L,
+                updatedAt = (map["updatedAt"] as? Number)?.toLong() ?: 0L,
+                isDeleted = map["isDeleted"] as? Boolean ?: false
+            )
+        }
     }
 }

@@ -14,9 +14,11 @@ import com.culturedcode.things3.domain.model.RecurrenceRule
 import com.culturedcode.things3.domain.model.RecurrenceUnit
 import com.culturedcode.things3.domain.model.ScheduleState
 import com.culturedcode.things3.domain.model.TaskStatus
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -26,33 +28,41 @@ import java.util.Locale
 import javax.inject.Provider
 
 /**
- * Language-sensitive `RoomDatabase.Callback` that installs SQLite FTS5 `unicode61` triggers on open
+ * Language-sensitive `RoomDatabase.Callback` that safely installs FTS triggers on open
  * and seeds localized Things 3 GTD hierarchy data (Areas, Projects, Headings, Tasks, ChecklistItems, Tags)
- * in EN, DE, IT, FR, or ES on first database creation with `isDirty = true` for automatic Firestore batch push.
+ * in EN, DE, IT, FR, or ES on first database creation.
  */
 class DatabaseSeeder(
     private val databaseProvider: Provider<ThingsDatabase>
 ) : RoomDatabase.Callback() {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val exceptionHandler = CoroutineExceptionHandler { _, _ -> }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + exceptionHandler)
     private val json = Json { encodeDefaults = true }
 
     override fun onCreate(db: SupportSQLiteDatabase) {
         super.onCreate(db)
-        ThingsDatabase.installFts5Triggers(db)
+        runCatching {
+            ThingsDatabase.installFts5Triggers(db)
+        }
         scope.launch {
-            seedIfNeeded(Locale.getDefault().language)
+            delay(250L)
+            runCatching {
+                seedIfNeeded(Locale.getDefault().language)
+            }
         }
     }
 
     override fun onOpen(db: SupportSQLiteDatabase) {
         super.onOpen(db)
-        ThingsDatabase.installFts5Triggers(db)
+        runCatching {
+            ThingsDatabase.installFts5Triggers(db)
+        }
     }
 
-    suspend fun seedIfNeeded(languageCode: String = Locale.getDefault().language) {
+    suspend fun seedIfNeeded(languageCode: String = Locale.getDefault().language) = runCatching {
         val db = databaseProvider.get()
-        if (db.taskDao().getTotalTaskCount() > 0) return
+        if (db.taskDao().getTotalTaskCount() > 0) return@runCatching
 
         val zone = ZoneId.systemDefault()
         val todayEpoch = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()

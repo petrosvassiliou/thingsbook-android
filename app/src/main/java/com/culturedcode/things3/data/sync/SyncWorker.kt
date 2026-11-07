@@ -55,19 +55,22 @@ class SyncWorker @AssistedInject constructor(
         }
 
         fun schedulePeriodicDeltaSync(context: Context) {
-            val constraints = Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.CONNECTED)
-                .build()
+            runCatching {
+                val constraints = Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
 
-            val periodicRequest = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES)
-                .setConstraints(constraints)
-                .build()
+                val periodicRequest = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES)
+                    .setInitialDelay(15, TimeUnit.MINUTES)
+                    .setConstraints(constraints)
+                    .build()
 
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-                UNIQUE_PERIODIC_SYNC,
-                ExistingPeriodicWorkPolicy.KEEP,
-                periodicRequest
-            )
+                WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                    UNIQUE_PERIODIC_SYNC,
+                    ExistingPeriodicWorkPolicy.KEEP,
+                    periodicRequest
+                )
+            }
         }
     }
 }

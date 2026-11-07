@@ -6,4 +6,3 @@ local.properties
 .idea/
 *.keystore
 *.jks
-*.apk

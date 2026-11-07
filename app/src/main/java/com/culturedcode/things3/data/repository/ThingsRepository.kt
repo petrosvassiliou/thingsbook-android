@@ -79,6 +79,26 @@ class ThingsRepository @Inject constructor(
     fun observeAllTags(): Flow<List<Tag>> =
         database.tagDao().observeAllTags().map { list -> list.map { it.toDomain() } }
 
+    companion object {
+        const val MAX_AREAS = 6
+    }
+
+    fun observeAllActiveHeadings(): Flow<List<Heading>> =
+        database.headingDao().observeAllActiveHeadings().map { list ->
+            list.map {
+                Heading(
+                    id = it.id,
+                    projectId = it.projectId,
+                    title = it.title,
+                    sortOrder = it.sortOrder,
+                    isArchived = it.isArchived,
+                    createdAt = it.createdAt,
+                    updatedAt = it.updatedAt,
+                    isDeleted = it.isDeleted
+                )
+            }
+        }
+
     fun searchTasksFts5(rawQuery: String): Flow<List<TaskItem>> {
         val sql = ThingsDatabase.buildTasksFts5SqlQuery(rawQuery)
         return database.taskDao().searchTasksFts5(sql).map { list -> list.map { it.toDomain() } }
@@ -184,30 +204,93 @@ class ThingsRepository @Inject constructor(
         now: Long
     ) {
         val zone = ZoneId.systemDefault()
+        val safeInterval = rule.interval.coerceAtLeast(1).toLong()
         val baseEpoch = when (rule.mode) {
             RecurrenceMode.AFTER_COMPLETION -> now
             RecurrenceMode.FIXED_SCHEDULE -> completedTask.whenDate ?: now
         }
         val baseDate = Instant.ofEpochMilli(baseEpoch).atZone(zone).toLocalDate()
-        val nextDate = when (rule.unit) {
-            RecurrenceUnit.DAYS -> baseDate.plusDays(rule.interval.toLong())
-            RecurrenceUnit.WEEKS -> baseDate.plusWeeks(rule.interval.toLong())
-            RecurrenceUnit.MONTHS -> baseDate.plusMonths(rule.interval.toLong())
-            RecurrenceUnit.YEARS -> baseDate.plusYears(rule.interval.toLong())
+
+        val nextDate: LocalDate = when (rule.unit) {
+            RecurrenceUnit.DAYS -> baseDate.plusDays(safeInterval)
+            RecurrenceUnit.WEEKS -> {
+                if (rule.mode == RecurrenceMode.FIXED_SCHEDULE && rule.daysOfWeek.isNotEmpty()) {
+                    val sortedDays = rule.daysOfWeek.map { it.coerceIn(1, 7) }.distinct().sorted()
+                    val currentDow = baseDate.dayOfWeek.value // 1 (Mon) .. 7 (Sun)
+                    val nextDaySameWeek = sortedDays.firstOrNull { it > currentDow }
+                    if (nextDaySameWeek != null) {
+                        baseDate.plusDays((nextDaySameWeek - currentDow).toLong())
+                    } else {
+                        val firstDow = sortedDays.first()
+                        val startOfTargetWeek = baseDate
+                            .minusDays((currentDow - 1).toLong())
+                            .plusWeeks(safeInterval)
+                        startOfTargetWeek.plusDays((firstDow - 1).toLong())
+                    }
+                } else {
+                    baseDate.plusWeeks(safeInterval)
+                }
+            }
+            RecurrenceUnit.MONTHS -> {
+                val targetMonthDate = baseDate.plusMonths(safeInterval)
+                if (rule.mode == RecurrenceMode.FIXED_SCHEDULE && rule.dayOfMonth != null) {
+                    val maxDom = targetMonthDate.lengthOfMonth()
+                    val targetDom = if (rule.dayOfMonth == -1) maxDom else rule.dayOfMonth.coerceIn(1, maxDom)
+                    targetMonthDate.withDayOfMonth(targetDom)
+                } else {
+                    targetMonthDate
+                }
+            }
+            RecurrenceUnit.YEARS -> baseDate.plusYears(safeInterval)
         }
+
         val nextWhenEpoch = nextDate.atStartOfDay(zone).toInstant().toEpochMilli()
 
+        // Respect optional endDateEpochMillis ("Endet am")
+        if (rule.endDateEpochMillis != null && nextWhenEpoch > rule.endDateEpochMillis) {
+            return
+        }
+
+        // Shift deadline by the same number of days if the task had both whenDate and deadline
+        val nextDeadlineEpoch = if (completedTask.deadline != null && completedTask.whenDate != null) {
+            val deltaMillis = nextWhenEpoch - completedTask.whenDate
+            completedTask.deadline + deltaMillis
+        } else {
+            completedTask.deadline
+        }
+
+        val todayEpoch = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
+        val nextScheduleState = if (nextWhenEpoch <= todayEpoch) ScheduleState.TODAY else ScheduleState.UPCOMING
+
+        val nextTaskId = UUID.randomUUID().toString()
         val nextEntity = completedTask.copy(
-            id = UUID.randomUUID().toString(),
+            id = nextTaskId,
             status = TaskStatus.OPEN,
-            scheduleState = ScheduleState.UPCOMING,
+            scheduleState = nextScheduleState,
             whenDate = nextWhenEpoch,
+            deadline = nextDeadlineEpoch,
             completedAt = null,
             createdAt = now,
             updatedAt = now,
             isDirty = true
         )
         database.taskDao().upsertTaskWithTags(nextEntity, tagIds)
+
+        // Clone subtasks (ChecklistItems) reset to uncompleted (isCompleted = false), just like Things for Mac!
+        val existingSubtasks = database.checklistDao().getForTaskSync(completedTask.id)
+        if (existingSubtasks.isNotEmpty()) {
+            val clonedSubtasks = existingSubtasks.map { item ->
+                item.copy(
+                    id = UUID.randomUUID().toString(),
+                    taskId = nextTaskId,
+                    isCompleted = false,
+                    createdAt = now,
+                    updatedAt = now,
+                    isDirty = true
+                )
+            }
+            database.checklistDao().upsertAll(clonedSubtasks)
+        }
     }
 
     suspend fun updateTaskStatus(taskId: String, newStatus: TaskStatus) {
@@ -220,8 +303,320 @@ class ThingsRepository @Inject constructor(
             isDirty = true
         )
         database.taskDao().upsert(updated)
+
+        // If an open recurring task was just checked off, spawn the next occurrence!
+        if (existing.status == TaskStatus.OPEN && newStatus == TaskStatus.COMPLETED && existing.recurrenceRuleJson != null) {
+            val rule = runCatching { json.decodeFromString<RecurrenceRule>(existing.recurrenceRuleJson) }.getOrNull()
+            if (rule != null) {
+                val tagIds = decodeStringList(existing.tagIdsJson)
+                spawnNextRecurrenceInstance(updated, rule, tagIds, now)
+            }
+        }
+
         syncRepository.syncBidirectionalDeltas()
     }
+
+    suspend fun updateTaskRecurrence(taskId: String, recurrenceRule: RecurrenceRule?) {
+        val existing = database.taskDao().getById(taskId) ?: return
+        val now = System.currentTimeMillis()
+        val zone = ZoneId.systemDefault()
+        val todayEpoch = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
+        val updatedWhen = if (recurrenceRule != null && existing.whenDate == null) todayEpoch else existing.whenDate
+        val updatedState = if (recurrenceRule != null && existing.scheduleState == ScheduleState.INBOX) {
+            ScheduleState.TODAY
+        } else {
+            existing.scheduleState
+        }
+        database.taskDao().upsert(
+            existing.copy(
+                scheduleState = updatedState,
+                whenDate = updatedWhen,
+                recurrenceRuleJson = recurrenceRule?.let { json.encodeToString(it) },
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.syncBidirectionalDeltas()
+    }
+
+    suspend fun moveTaskToContainer(
+        taskId: String,
+        projectId: String?,
+        headingId: String?,
+        areaId: String?
+    ) {
+        val existing = database.taskDao().getById(taskId) ?: return
+        val now = System.currentTimeMillis()
+        val resolvedAreaId = if (projectId != null) {
+            database.projectDao().getById(projectId)?.areaId ?: areaId
+        } else {
+            areaId
+        }
+        val resolvedSchedule = if (existing.scheduleState == ScheduleState.INBOX && (projectId != null || resolvedAreaId != null)) {
+            ScheduleState.ANYTIME
+        } else {
+            existing.scheduleState
+        }
+        database.taskDao().upsert(
+            existing.copy(
+                projectId = projectId,
+                headingId = if (projectId != null) headingId else null,
+                areaId = resolvedAreaId,
+                scheduleState = resolvedSchedule,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.syncBidirectionalDeltas()
+    }
+
+    // =========================================================================
+    // Areas of Responsibility (Bereiche — Work, Home, max 6, Rename, Move, Delete)
+    // =========================================================================
+
+    suspend fun ensureDefaultWorkAndHomeAreas() {
+        val activeAreas = database.areaDao().getActiveAreasList()
+        if (activeAreas.isEmpty()) {
+            val now = System.currentTimeMillis()
+            database.areaDao().upsertAll(
+                listOf(
+                    AreaEntity(
+                        id = "area-work-001",
+                        title = "Work",
+                        sortOrder = 1000.0,
+                        tagIdsJson = "[]",
+                        createdAt = now,
+                        updatedAt = now,
+                        isDeleted = false,
+                        isDirty = true
+                    ),
+                    AreaEntity(
+                        id = "area-home-002",
+                        title = "Home",
+                        sortOrder = 2000.0,
+                        tagIdsJson = "[]",
+                        createdAt = now,
+                        updatedAt = now,
+                        isDeleted = false,
+                        isDirty = true
+                    )
+                )
+            )
+        }
+    }
+
+    suspend fun createArea(title: String): Result<String> {
+        val trimmed = title.trim()
+        if (trimmed.isEmpty()) return Result.failure(IllegalArgumentException("Bereichsname darf nicht leer sein."))
+        val activeAreas = database.areaDao().getActiveAreasList()
+        if (activeAreas.size >= MAX_AREAS) {
+            return Result.failure(IllegalStateException("Maximal $MAX_AREAS Bereiche möglich."))
+        }
+        val now = System.currentTimeMillis()
+        val maxSort = activeAreas.maxOfOrNull { it.sortOrder } ?: 0.0
+        val id = UUID.randomUUID().toString()
+        database.areaDao().upsert(
+            AreaEntity(
+                id = id,
+                title = trimmed,
+                sortOrder = maxSort + 1000.0,
+                tagIdsJson = "[]",
+                createdAt = now,
+                updatedAt = now,
+                isDeleted = false,
+                isDirty = true
+            )
+        )
+        syncRepository.syncBidirectionalDeltas()
+        return Result.success(id)
+    }
+
+    suspend fun renameArea(areaId: String, newTitle: String) {
+        val trimmed = newTitle.trim()
+        if (trimmed.isEmpty()) return
+        val existing = database.areaDao().getById(areaId) ?: return
+        val now = System.currentTimeMillis()
+        database.areaDao().upsert(
+            existing.copy(
+                title = trimmed,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.syncBidirectionalDeltas()
+    }
+
+    suspend fun moveArea(areaId: String, moveUp: Boolean) {
+        val areas = database.areaDao().getActiveAreasList().sortedBy { it.sortOrder }
+        val index = areas.indexOfFirst { it.id == areaId }
+        if (index == -1) return
+        val targetIndex = if (moveUp) index - 1 else index + 1
+        if (targetIndex !in areas.indices) return
+
+        val now = System.currentTimeMillis()
+        val current = areas[index]
+        val neighbor = areas[targetIndex]
+        val currentSort = current.sortOrder
+        val neighborSort = if (neighbor.sortOrder == currentSort) {
+            if (moveUp) currentSort - 500.0 else currentSort + 500.0
+        } else {
+            neighbor.sortOrder
+        }
+
+        database.areaDao().upsertAll(
+            listOf(
+                current.copy(sortOrder = neighborSort, updatedAt = now, isDirty = true),
+                neighbor.copy(sortOrder = currentSort, updatedAt = now, isDirty = true)
+            )
+        )
+        syncRepository.syncBidirectionalDeltas()
+    }
+
+    suspend fun softDeleteArea(areaId: String) {
+        val existing = database.areaDao().getById(areaId) ?: return
+        val now = System.currentTimeMillis()
+        database.projectDao().clearAreaFromProjects(areaId, now)
+        database.taskDao().clearAreaFromTasks(areaId, now)
+        database.areaDao().upsert(
+            existing.copy(
+                isDeleted = true,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.syncBidirectionalDeltas()
+    }
+
+    // =========================================================================
+    // Projects (with Target Date / Deadline, Area Assignment, Move, Complete, Delete)
+    // =========================================================================
+
+    suspend fun createOrUpdateProject(
+        id: String = UUID.randomUUID().toString(),
+        title: String,
+        notes: String = "",
+        areaId: String? = null,
+        status: ProjectStatus = ProjectStatus.ACTIVE,
+        scheduleState: ScheduleState = ScheduleState.ANYTIME,
+        whenDate: Long? = null,
+        deadline: Long? = null,
+        tagIds: List<String> = emptyList()
+    ): String {
+        val trimmedTitle = title.trim()
+        if (trimmedTitle.isEmpty()) return id
+        val now = System.currentTimeMillis()
+        val existing = database.projectDao().getById(id)
+        val maxSort = database.projectDao().getActiveProjectsList().maxOfOrNull { it.sortOrder } ?: 0.0
+        val completedAt = when (status) {
+            ProjectStatus.COMPLETED, ProjectStatus.CANCELED -> existing?.completedAt ?: now
+            ProjectStatus.ACTIVE -> null
+        }
+
+        val entity = ProjectEntity(
+            id = id,
+            areaId = areaId,
+            title = trimmedTitle,
+            notes = notes,
+            status = status,
+            scheduleState = scheduleState,
+            whenDate = whenDate,
+            deadline = deadline,
+            completedAt = completedAt,
+            sortOrder = existing?.sortOrder ?: (maxSort + 1000.0),
+            tagIdsJson = json.encodeToString(tagIds),
+            createdAt = existing?.createdAt ?: now,
+            updatedAt = now,
+            isDeleted = false,
+            isDirty = true
+        )
+        database.projectDao().upsertProjectWithTags(entity, tagIds)
+        syncRepository.syncBidirectionalDeltas()
+        return id
+    }
+
+    suspend fun updateProjectDeadline(projectId: String, deadline: Long?) {
+        val existing = database.projectDao().getById(projectId) ?: return
+        val now = System.currentTimeMillis()
+        database.projectDao().upsert(
+            existing.copy(
+                deadline = deadline,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.syncBidirectionalDeltas()
+    }
+
+    suspend fun updateProjectArea(projectId: String, areaId: String?) {
+        val existing = database.projectDao().getById(projectId) ?: return
+        val now = System.currentTimeMillis()
+        database.projectDao().upsert(
+            existing.copy(
+                areaId = areaId,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.syncBidirectionalDeltas()
+    }
+
+    suspend fun updateProjectStatus(projectId: String, status: ProjectStatus) {
+        val existing = database.projectDao().getById(projectId) ?: return
+        val now = System.currentTimeMillis()
+        database.projectDao().upsert(
+            existing.copy(
+                status = status,
+                completedAt = if (status == ProjectStatus.ACTIVE) null else now,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.syncBidirectionalDeltas()
+    }
+
+    suspend fun moveProject(projectId: String, moveUp: Boolean) {
+        val projects = database.projectDao().getActiveProjectsList().sortedBy { it.sortOrder }
+        val index = projects.indexOfFirst { it.id == projectId }
+        if (index == -1) return
+        val targetIndex = if (moveUp) index - 1 else index + 1
+        if (targetIndex !in projects.indices) return
+
+        val now = System.currentTimeMillis()
+        val current = projects[index]
+        val neighbor = projects[targetIndex]
+        val currentSort = current.sortOrder
+        val neighborSort = if (neighbor.sortOrder == currentSort) {
+            if (moveUp) currentSort - 500.0 else currentSort + 500.0
+        } else {
+            neighbor.sortOrder
+        }
+
+        database.projectDao().upsertAll(
+            listOf(
+                current.copy(sortOrder = neighborSort, updatedAt = now, isDirty = true),
+                neighbor.copy(sortOrder = currentSort, updatedAt = now, isDirty = true)
+            )
+        )
+        syncRepository.syncBidirectionalDeltas()
+    }
+
+    suspend fun softDeleteProject(projectId: String) {
+        val existing = database.projectDao().getById(projectId) ?: return
+        val now = System.currentTimeMillis()
+        database.taskDao().clearProjectFromTasks(projectId, now)
+        database.projectDao().upsert(
+            existing.copy(
+                isDeleted = true,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.syncBidirectionalDeltas()
+    }
+
+    // =========================================================================
+    // Project Headings (Abschnitte — Create, Rename, Move, Delete)
+    // =========================================================================
 
     suspend fun createHeadingInProject(
         projectId: String,
@@ -246,6 +641,39 @@ class ThingsRepository @Inject constructor(
         syncRepository.syncBidirectionalDeltas()
         return id
     }
+
+    suspend fun renameHeading(headingId: String, newTitle: String) {
+        val trimmed = newTitle.trim()
+        if (trimmed.isEmpty()) return
+        val existing = database.headingDao().getById(headingId) ?: return
+        val now = System.currentTimeMillis()
+        database.headingDao().upsert(
+            existing.copy(
+                title = trimmed,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.syncBidirectionalDeltas()
+    }
+
+    suspend fun softDeleteHeading(headingId: String) {
+        val existing = database.headingDao().getById(headingId) ?: return
+        val now = System.currentTimeMillis()
+        database.taskDao().clearHeadingFromTasks(headingId, now)
+        database.headingDao().upsert(
+            existing.copy(
+                isDeleted = true,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.syncBidirectionalDeltas()
+    }
+
+    // =========================================================================
+    // Subtasks (Unteraufgaben / Checklist Items — Create, Toggle, Rename, Move, Delete)
+    // =========================================================================
 
     suspend fun addChecklistItem(
         taskId: String,
@@ -297,6 +725,58 @@ class ThingsRepository @Inject constructor(
         database.checklistDao().upsert(
             existing.copy(
                 isCompleted = isCompleted,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.syncBidirectionalDeltas()
+    }
+
+    suspend fun updateChecklistItemTitle(itemId: String, newTitle: String) {
+        val existing = database.checklistDao().getById(itemId) ?: return
+        val now = System.currentTimeMillis()
+        database.checklistDao().upsert(
+            existing.copy(
+                title = newTitle,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.syncBidirectionalDeltas()
+    }
+
+    suspend fun moveChecklistItem(taskId: String, itemId: String, moveUp: Boolean) {
+        val items = database.checklistDao().getForTaskSync(taskId).sortedBy { it.sortOrder }
+        val index = items.indexOfFirst { it.id == itemId }
+        if (index == -1) return
+        val targetIndex = if (moveUp) index - 1 else index + 1
+        if (targetIndex !in items.indices) return
+
+        val now = System.currentTimeMillis()
+        val current = items[index]
+        val neighbor = items[targetIndex]
+        val currentSort = current.sortOrder
+        val neighborSort = if (neighbor.sortOrder == currentSort) {
+            if (moveUp) currentSort - 50.0 else currentSort + 50.0
+        } else {
+            neighbor.sortOrder
+        }
+
+        database.checklistDao().upsertAll(
+            listOf(
+                current.copy(sortOrder = neighborSort, updatedAt = now, isDirty = true),
+                neighbor.copy(sortOrder = currentSort, updatedAt = now, isDirty = true)
+            )
+        )
+        syncRepository.syncBidirectionalDeltas()
+    }
+
+    suspend fun softDeleteChecklistItem(itemId: String) {
+        val existing = database.checklistDao().getById(itemId) ?: return
+        val now = System.currentTimeMillis()
+        database.checklistDao().upsert(
+            existing.copy(
+                isDeleted = true,
                 updatedAt = now,
                 isDirty = true
             )

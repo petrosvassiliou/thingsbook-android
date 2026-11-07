@@ -29,13 +29,19 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.ArrowDownward
+import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Checklist
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.LocalOffer
+import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -62,8 +68,13 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.culturedcode.things3.R
+import com.culturedcode.things3.domain.model.Area
 import com.culturedcode.things3.domain.model.ChecklistItem
+import com.culturedcode.things3.domain.model.Heading
+import com.culturedcode.things3.domain.model.Project
+import com.culturedcode.things3.domain.model.RecurrenceRule
 import com.culturedcode.things3.domain.model.ScheduleState
 import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskItem
@@ -78,14 +89,18 @@ import java.util.Locale
  * - The row morphs in-place via spring physics (`spring(dampingRatio = 0.8f, stiffness = 400f)`)
  *   into a pure white card (`#FFFFFF` in Light / `#24262D` in Dark) with subtle elevation shadow,
  *   pushing neighboring rows smoothly apart.
- * - Includes integrated Calendar Date Picker, Task-Specific Time Reminder Picker, Deadline Calendar Picker,
- *   Tag Assignment Dialog, and **Gemini Magic Breakdown (✨)**.
+ * - Includes integrated Compact Calendar Date Picker, Task-Specific Time Reminder Picker,
+ *   Deadline Calendar Picker, Things-for-Mac Repeating Task Dialog, Full Subtasks (Add, Edit, Move, Delete),
+ *   Project/Area Assignment ("Move"), Tag Assignment Dialog, and **Gemini Magic Breakdown (✨)**.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ExpandableTaskCard(
     task: TaskItem,
     allTags: List<Tag> = emptyList(),
+    allAreas: List<Area> = emptyList(),
+    allProjects: List<Project> = emptyList(),
+    allHeadings: List<Heading> = emptyList(),
     isExpanded: Boolean,
     isGeneratingMagicBreakdown: Boolean,
     onExpandToggle: () -> Unit,
@@ -94,11 +109,16 @@ fun ExpandableTaskCard(
     onScheduleChange: (ScheduleState, Long?) -> Unit,
     onScheduleWithReminderChange: ((ScheduleState, Long?, Long?) -> Unit)? = null,
     onDeadlineChange: (Long?) -> Unit,
+    onRecurrenceChange: ((RecurrenceRule?) -> Unit)? = null,
+    onMoveTaskToContainer: ((projectId: String?, headingId: String?, areaId: String?) -> Unit)? = null,
     onUpdateTaskTags: ((List<String>) -> Unit)? = null,
     onCreateAndAssignTag: ((String) -> Unit)? = null,
     onOpenFullTagManager: (() -> Unit)? = null,
     onAddChecklistItem: (String) -> Unit,
     onToggleChecklistItem: (String, Boolean) -> Unit,
+    onRenameChecklistItem: ((String, String) -> Unit)? = null,
+    onMoveChecklistItem: ((String, Boolean) -> Unit)? = null,
+    onDeleteChecklistItem: ((String) -> Unit)? = null,
     onTriggerGeminiMagicBreakdown: () -> Unit,
     onDeleteTask: () -> Unit,
     modifier: Modifier = Modifier,
@@ -112,7 +132,17 @@ fun ExpandableTaskCard(
     var newChecklistText by remember(task.id) { mutableStateOf("") }
     var showWhenDialog by remember(task.id) { mutableStateOf(false) }
     var showDeadlineDialog by remember(task.id) { mutableStateOf(false) }
+    var showRepeatDialog by remember(task.id) { mutableStateOf(false) }
+    var showMoveDialog by remember(task.id) { mutableStateOf(false) }
     var showTagPickerDialog by remember(task.id) { mutableStateOf(false) }
+
+    val assignedProject = remember(task.projectId, allProjects) {
+        allProjects.find { it.id == task.projectId }
+    }
+    val assignedArea = remember(task.areaId, assignedProject, allAreas) {
+        val targetAreaId = assignedProject?.areaId ?: task.areaId
+        allAreas.find { it.id == targetAreaId }
+    }
 
     val horizontalPadding by animateDpAsState(
         targetValue = if (isExpanded) 12.dp else 16.dp,
@@ -218,30 +248,50 @@ fun ExpandableTaskCard(
                     )
                 } else {
                     val isDoneOrCanceled = task.status != TaskStatus.OPEN
-                    Text(
-                        text = task.title,
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            textDecoration = if (isDoneOrCanceled) TextDecoration.LineThrough else TextDecoration.None
-                        ),
-                        color = if (isDoneOrCanceled) colors.tertiaryText else colors.primaryText,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = task.title,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                textDecoration = if (isDoneOrCanceled) TextDecoration.LineThrough else TextDecoration.None
+                            ),
+                            color = if (isDoneOrCanceled) colors.tertiaryText else colors.primaryText,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        // Subtle Project / Area breadcrumb under title when collapsed (just like Things 3!)
+                        val contextSubtitle = when {
+                            assignedProject != null && assignedArea != null -> "${assignedArea.title} › ${assignedProject.title}"
+                            assignedProject != null -> assignedProject.title
+                            assignedArea != null -> assignedArea.title
+                            else -> null
+                        }
+                        if (contextSubtitle != null) {
+                            Text(
+                                text = contextSubtitle,
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
+                                color = colors.secondaryText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                 }
 
-                // Collapsed inline metadata pills (Reminder time, Checklist progress, Tags, Deadline)
+                // Collapsed inline metadata pills (Repeat, Reminder time, Subtask progress, Tags, Deadline)
                 if (!isExpanded) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        task.recurrenceRule?.let { rr ->
+                            ThingsRepeatBadge(rule = rr)
+                        }
                         task.reminderTime?.let { rt ->
                             ThingsReminderBadge(reminderEpochMillis = rt)
                         }
                         if (task.checklistItems.isNotEmpty()) {
                             val doneCount = task.checklistItems.count { it.isCompleted }
-                            ThingsTagPill(title = "$doneCount/${task.checklistItems.size}")
+                            ThingsTagPill(title = "☑ $doneCount/${task.checklistItems.size}")
                         }
                         task.tags.take(2).forEach { tag ->
                             ThingsTagPill(title = tag.title)
@@ -265,7 +315,7 @@ fun ExpandableTaskCard(
                 )
             }
 
-            // Expanded Card Content (Notes, Checklist, Tags, When/Reminder, Deadline, Gemini Magic Breakdown)
+            // Expanded Card Content (Notes, Subtasks/Checklist, Project/Area, Repeat, When/Reminder, Deadline, Tags, Gemini Magic Breakdown)
             AnimatedVisibility(
                 visible = isExpanded,
                 enter = expandVertically(
@@ -310,18 +360,47 @@ fun ExpandableTaskCard(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Inline Checklist Items
+                    // =========================================================
+                    // Subtasks (Unteraufgaben / Checklist) Section
+                    // =========================================================
                     if (task.checklistItems.isNotEmpty()) {
+                        val doneCount = task.checklistItems.count { it.isCompleted }
+                        Text(
+                            text = "Unteraufgaben ($doneCount/${task.checklistItems.size} erledigt)",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 11.sp
+                            ),
+                            color = colors.thingsBlue
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
                         Column(
                             modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            task.checklistItems.forEach { item ->
+                            task.checklistItems.forEachIndexed { idx, item ->
                                 InlineChecklistRow(
                                     item = item,
+                                    canMoveUp = idx > 0,
+                                    canMoveDown = idx < task.checklistItems.lastIndex,
                                     onToggle = { checked ->
                                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         onToggleChecklistItem(item.id, checked)
+                                    },
+                                    onRename = { newSubtaskTitle ->
+                                        onRenameChecklistItem?.invoke(item.id, newSubtaskTitle)
+                                    },
+                                    onMoveUp = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onMoveChecklistItem?.invoke(item.id, true)
+                                    },
+                                    onMoveDown = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onMoveChecklistItem?.invoke(item.id, false)
+                                    },
+                                    onDelete = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onDeleteChecklistItem?.invoke(item.id)
                                     }
                                 )
                             }
@@ -329,17 +408,19 @@ fun ExpandableTaskCard(
                         Spacer(modifier = Modifier.height(6.dp))
                     }
 
-                    // Add new checklist item inline field
+                    // Add new subtask inline field + explicit '+' Button
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 4.dp),
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(colors.tagPillBg.copy(alpha = 0.65f))
+                            .padding(horizontal = 8.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Checklist,
                             contentDescription = null,
-                            tint = colors.tertiaryText,
+                            tint = colors.thingsBlue,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -362,7 +443,7 @@ fun ExpandableTaskCard(
                                 Box {
                                     if (newChecklistText.isEmpty()) {
                                         Text(
-                                            text = stringResource(R.string.placeholder_add_checklist_item),
+                                            text = "Unteraufgabe hinzufügen…",
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = colors.tertiaryText
                                         )
@@ -371,11 +452,32 @@ fun ExpandableTaskCard(
                                 }
                             }
                         )
+                        if (newChecklistText.isNotBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(colors.thingsBlue)
+                                    .clickable {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onAddChecklistItem(newChecklistText.trim())
+                                        newChecklistText = ""
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Add,
+                                    contentDescription = "Unteraufgabe hinzufügen",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Tags, When, Reminder & Deadline Badges Row
+                    // Interactive Metadata Badges Row: When, Repeat, Deadline, Project/Area, Tags
                     FlowRow(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -395,13 +497,43 @@ fun ExpandableTaskCard(
                             )
                         }
 
-                        task.deadline?.let { dl ->
+                        // Repeat Badge / Trigger (Wiederkehrende Aufgabe wie in Things for Mac)
+                        if (task.recurrenceRule != null) {
+                            ThingsRepeatBadge(
+                                rule = task.recurrenceRule,
+                                onClick = { showRepeatDialog = true }
+                            )
+                        } else {
+                            ThingsTagPill(
+                                title = "🔁 Wiederholen",
+                                onClick = { showRepeatDialog = true }
+                            )
+                        }
+
+                        // Deadline / Zieldatum Badge
+                        if (task.deadline != null) {
                             ThingsDeadlineBadge(
-                                deadlineEpochMillis = dl,
+                                deadlineEpochMillis = task.deadline,
                                 locale = locale,
                                 onClick = { showDeadlineDialog = true }
                             )
+                        } else {
+                            ThingsTagPill(
+                                title = "🏁 Zieldatum",
+                                onClick = { showDeadlineDialog = true }
+                            )
                         }
+
+                        // Project / Area Assignment Chip ("Move")
+                        val containerLabel = when {
+                            assignedProject != null -> "📁 ${assignedProject.title}"
+                            assignedArea != null -> "📦 ${assignedArea.title}"
+                            else -> "📁 Projekt / Bereich"
+                        }
+                        ThingsTagPill(
+                            title = containerLabel,
+                            onClick = { showMoveDialog = true }
+                        )
 
                         task.tags.forEach { tag ->
                             ThingsTagPill(
@@ -445,6 +577,32 @@ fun ExpandableTaskCard(
                         )
                     }
 
+                    if (showRepeatDialog) {
+                        ThingsRepeatDialog(
+                            currentRule = task.recurrenceRule,
+                            locale = locale,
+                            onApplyRecurrence = { newRule ->
+                                onRecurrenceChange?.invoke(newRule)
+                            },
+                            onDismiss = { showRepeatDialog = false }
+                        )
+                    }
+
+                    if (showMoveDialog) {
+                        MoveTaskToProjectOrAreaDialog(
+                            currentProjectId = task.projectId,
+                            currentHeadingId = task.headingId,
+                            currentAreaId = task.areaId,
+                            areas = allAreas,
+                            projects = allProjects,
+                            headings = allHeadings,
+                            onMoveTask = { pId, hId, aId ->
+                                onMoveTaskToContainer?.invoke(pId, hId, aId)
+                            },
+                            onDismiss = { showMoveDialog = false }
+                        )
+                    }
+
                     if (showTagPickerDialog) {
                         TaskTagPickerDialog(
                             allTags = allTags,
@@ -466,7 +624,7 @@ fun ExpandableTaskCard(
                     HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Bottom Card Action Bar: Gemini Magic Breakdown ✨, When Calendar, Tags, Deadline Calendar, Delete, Done
+                    // Bottom Card Action Bar: Gemini Magic Breakdown ✨, When, Repeat, Move, Tags, Deadline, Delete, Done
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -481,9 +639,9 @@ fun ExpandableTaskCard(
                                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                     onTriggerGeminiMagicBreakdown()
                                 }
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                .padding(horizontal = 9.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
                             if (isGeneratingMagicBreakdown) {
                                 CircularProgressIndicator(
@@ -496,32 +654,62 @@ fun ExpandableTaskCard(
                                     imageVector = Icons.Outlined.AutoAwesome,
                                     contentDescription = stringResource(R.string.gemini_magic_breakdown),
                                     tint = colors.thingsBlue,
-                                    modifier = Modifier.size(15.dp)
+                                    modifier = Modifier.size(14.dp)
                                 )
                             }
                             Text(
                                 text = stringResource(R.string.gemini_magic_breakdown),
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                                 color = colors.thingsBlue
                             )
                         }
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            horizontalArrangement = Arrangement.spacedBy(0.dp)
                         ) {
                             IconButton(
                                 onClick = {
                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     showWhenDialog = true
                                 },
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier.size(30.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.CalendarToday,
                                     contentDescription = stringResource(R.string.action_when),
                                     tint = if (task.whenDate != null || task.reminderTime != null) colors.thingsBlue else colors.secondaryText,
-                                    modifier = Modifier.size(17.dp)
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    showRepeatDialog = true
+                                },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Repeat,
+                                    contentDescription = "Wiederholen",
+                                    tint = if (task.recurrenceRule != null) colors.thingsBlue else colors.secondaryText,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    showMoveDialog = true
+                                },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Folder,
+                                    contentDescription = "Projekt / Bereich zuweisen",
+                                    tint = if (task.projectId != null || task.areaId != null) colors.thingsBlue else colors.secondaryText,
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
 
@@ -530,13 +718,13 @@ fun ExpandableTaskCard(
                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     showTagPickerDialog = true
                                 },
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier.size(30.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.LocalOffer,
                                     contentDescription = stringResource(R.string.action_tags),
                                     tint = if (task.tags.isNotEmpty()) colors.thingsBlue else colors.secondaryText,
-                                    modifier = Modifier.size(17.dp)
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
 
@@ -545,13 +733,13 @@ fun ExpandableTaskCard(
                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     showDeadlineDialog = true
                                 },
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier.size(30.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.Flag,
                                     contentDescription = stringResource(R.string.action_deadline),
                                     tint = if (task.deadline != null) colors.deadlineUrgentRed else colors.secondaryText,
-                                    modifier = Modifier.size(17.dp)
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
 
@@ -560,13 +748,13 @@ fun ExpandableTaskCard(
                                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                     onDeleteTask()
                                 },
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier.size(30.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.DeleteOutline,
                                     contentDescription = stringResource(R.string.action_delete),
                                     tint = colors.secondaryText,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(17.dp)
                                 )
                             }
 
@@ -575,13 +763,13 @@ fun ExpandableTaskCard(
                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     onExpandToggle()
                                 },
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier.size(30.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.Check,
                                     contentDescription = stringResource(R.string.action_done),
                                     tint = colors.thingsBlue,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(17.dp)
                                 )
                             }
                         }
@@ -595,13 +783,20 @@ fun ExpandableTaskCard(
 @Composable
 private fun InlineChecklistRow(
     item: ChecklistItem,
-    onToggle: (Boolean) -> Unit
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onToggle: (Boolean) -> Unit,
+    onRename: (String) -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    onDelete: () -> Unit
 ) {
     val colors = ThingsTheme.colors
+    var editedSubtaskTitle by remember(item.id, item.title) { mutableStateOf(item.title) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onToggle(!item.isCompleted) }
             .padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -612,12 +807,55 @@ private fun InlineChecklistRow(
             size = 16.dp
         )
         Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = item.title,
-            style = MaterialTheme.typography.bodyMedium.copy(
+        BasicTextField(
+            value = editedSubtaskTitle,
+            onValueChange = {
+                editedSubtaskTitle = it
+                onRename(it)
+            },
+            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                color = if (item.isCompleted) colors.tertiaryText else colors.primaryText,
                 textDecoration = if (item.isCompleted) TextDecoration.LineThrough else TextDecoration.None
             ),
-            color = if (item.isCompleted) colors.tertiaryText else colors.primaryText
+            cursorBrush = SolidColor(colors.thingsBlue),
+            modifier = Modifier.weight(1f)
         )
+        if (canMoveUp) {
+            IconButton(
+                onClick = onMoveUp,
+                modifier = Modifier.size(22.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.ArrowUpward,
+                    contentDescription = "Unteraufgabe nach oben",
+                    tint = colors.secondaryText,
+                    modifier = Modifier.size(13.dp)
+                )
+            }
+        }
+        if (canMoveDown) {
+            IconButton(
+                onClick = onMoveDown,
+                modifier = Modifier.size(22.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.ArrowDownward,
+                    contentDescription = "Unteraufgabe nach unten",
+                    tint = colors.secondaryText,
+                    modifier = Modifier.size(13.dp)
+                )
+            }
+        }
+        IconButton(
+            onClick = onDelete,
+            modifier = Modifier.size(22.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Close,
+                contentDescription = "Unteraufgabe löschen",
+                tint = colors.secondaryText,
+                modifier = Modifier.size(13.dp)
+            )
+        }
     }
 }

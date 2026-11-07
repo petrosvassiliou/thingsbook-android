@@ -16,6 +16,8 @@ import com.culturedcode.things3.data.repository.ThingsRepository
 import com.culturedcode.things3.domain.model.Area
 import com.culturedcode.things3.domain.model.Heading
 import com.culturedcode.things3.domain.model.Project
+import com.culturedcode.things3.domain.model.ProjectStatus
+import com.culturedcode.things3.domain.model.RecurrenceRule
 import com.culturedcode.things3.domain.model.ScheduleState
 import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskItem
@@ -66,6 +68,12 @@ class ThingsbookViewModel @Inject constructor(
     @Volatile
     private var activeAuth: FirebaseAuth = firebaseAuth
 
+    init {
+        viewModelScope.launch {
+            repository.ensureDefaultWorkAndHomeAreas()
+        }
+    }
+
     private val _navigationTarget = MutableStateFlow<ActiveNavigationTarget>(
         ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
     )
@@ -83,6 +91,10 @@ class ThingsbookViewModel @Inject constructor(
 
     private val _isTagManagerOpen = MutableStateFlow(false)
     val isTagManagerOpen: StateFlow<Boolean> = _isTagManagerOpen.asStateFlow()
+
+    // Area Manager Modal State
+    private val _isAreaManagerOpen = MutableStateFlow(false)
+    val isAreaManagerOpen: StateFlow<Boolean> = _isAreaManagerOpen.asStateFlow()
 
     // Daily Digest & Notification Settings Modal States
     private val _isNotificationSettingsOpen = MutableStateFlow(false)
@@ -154,6 +166,9 @@ class ThingsbookViewModel @Inject constructor(
     val areas: StateFlow<List<Area>> = repository.observeAreas()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val allHeadings: StateFlow<List<Heading>> = repository.observeAllActiveHeadings()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val allTags: StateFlow<List<Tag>> = repository.observeAllTags()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -204,6 +219,28 @@ class ThingsbookViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // Direct tasks belonging to an Area when viewing AreaDetail
+    val activeAreaTasks: StateFlow<List<TaskItem>> = _navigationTarget
+        .flatMapLatest { target ->
+            if (target is ActiveNavigationTarget.AreaDetail) {
+                combine(
+                    todayDaytimeTasks,
+                    thisEveningTasks,
+                    upcomingTasks,
+                    anytimeTasks,
+                    somedayTasks
+                ) { today, evening, upcoming, anytime, someday ->
+                    (today + evening + upcoming + anytime + someday)
+                        .distinctBy { it.id }
+                        .filter { it.areaId == target.areaId && it.projectId == null }
+                        .sortedBy { it.sortOrder }
+                }
+            } else {
+                flowOf(emptyList())
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     // Real-time FTS5 Quick Find Results
     val quickFindTaskResults: StateFlow<List<TaskItem>> = _quickFindQuery
         .flatMapLatest { q ->
@@ -225,6 +262,11 @@ class ThingsbookViewModel @Inject constructor(
     fun selectProject(projectId: String) {
         _expandedTaskId.value = null
         _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(projectId)
+    }
+
+    fun selectArea(areaId: String) {
+        _expandedTaskId.value = null
+        _navigationTarget.value = ActiveNavigationTarget.AreaDetail(areaId)
     }
 
     fun toggleTaskExpansion(taskId: String?) {
@@ -354,6 +396,41 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
+    fun renameChecklistItem(itemId: String, newTitle: String) {
+        viewModelScope.launch {
+            repository.updateChecklistItemTitle(itemId, newTitle)
+        }
+    }
+
+    fun moveChecklistItem(taskId: String, itemId: String, moveUp: Boolean) {
+        viewModelScope.launch {
+            repository.moveChecklistItem(taskId, itemId, moveUp)
+        }
+    }
+
+    fun deleteChecklistItem(itemId: String) {
+        viewModelScope.launch {
+            repository.softDeleteChecklistItem(itemId)
+        }
+    }
+
+    fun updateTaskRecurrence(taskId: String, recurrenceRule: RecurrenceRule?) {
+        viewModelScope.launch {
+            repository.updateTaskRecurrence(taskId, recurrenceRule)
+        }
+    }
+
+    fun moveTaskToContainer(
+        taskId: String,
+        projectId: String?,
+        headingId: String?,
+        areaId: String?
+    ) {
+        viewModelScope.launch {
+            repository.moveTaskToContainer(taskId, projectId, headingId, areaId)
+        }
+    }
+
     fun deleteTask(taskId: String) {
         viewModelScope.launch {
             if (_expandedTaskId.value == taskId) {
@@ -398,6 +475,12 @@ class ThingsbookViewModel @Inject constructor(
                 is ActiveNavigationTarget.AreaDetail -> Triple(ScheduleState.ANYTIME, null, null)
             }
 
+            val areaId = when (target) {
+                is ActiveNavigationTarget.AreaDetail -> target.areaId
+                is ActiveNavigationTarget.ProjectDetail -> activeProjects.value.find { it.id == target.projectId }?.areaId
+                else -> null
+            }
+
             val neighboringHeadingId = currentList.getOrNull(dropIndex - 1)?.headingId
                 ?: currentList.getOrNull(dropIndex)?.headingId
 
@@ -409,6 +492,7 @@ class ThingsbookViewModel @Inject constructor(
                 whenDate = whenDate,
                 projectId = projectId,
                 headingId = neighboringHeadingId,
+                areaId = areaId,
                 sortOrder = midpointOrder
             )
 
@@ -429,6 +513,127 @@ class ThingsbookViewModel @Inject constructor(
                 title = defaultHeadingTitle,
                 sortOrder = order
             )
+        }
+    }
+
+    fun renameHeading(headingId: String, newTitle: String) {
+        viewModelScope.launch {
+            repository.renameHeading(headingId, newTitle)
+        }
+    }
+
+    fun deleteHeading(headingId: String) {
+        viewModelScope.launch {
+            repository.softDeleteHeading(headingId)
+        }
+    }
+
+    // =========================================================================
+    // Areas of Responsibility (Work, Home, up to 6 Areas — Create, Rename, Move, Delete)
+    // =========================================================================
+
+    fun setAreaManagerOpen(open: Boolean) {
+        _isAreaManagerOpen.value = open
+    }
+
+    fun createArea(title: String) {
+        viewModelScope.launch {
+            repository.createArea(title)
+        }
+    }
+
+    fun renameArea(areaId: String, newTitle: String) {
+        viewModelScope.launch {
+            repository.renameArea(areaId, newTitle)
+        }
+    }
+
+    fun moveArea(areaId: String, moveUp: Boolean) {
+        viewModelScope.launch {
+            repository.moveArea(areaId, moveUp)
+        }
+    }
+
+    fun deleteArea(areaId: String) {
+        viewModelScope.launch {
+            val currentTarget = _navigationTarget.value
+            if (currentTarget is ActiveNavigationTarget.AreaDetail && currentTarget.areaId == areaId) {
+                _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
+            }
+            repository.softDeleteArea(areaId)
+        }
+    }
+
+    // =========================================================================
+    // Projects (with Target Date / Deadline, Area Assignment, Move, Complete, Delete)
+    // =========================================================================
+
+    fun saveProject(
+        id: String? = null,
+        title: String,
+        notes: String,
+        areaId: String?,
+        deadlineEpochMillis: Long?,
+        navigateToProject: Boolean = true
+    ) {
+        viewModelScope.launch {
+            val savedId = if (id != null) {
+                repository.createOrUpdateProject(
+                    id = id,
+                    title = title,
+                    notes = notes,
+                    areaId = areaId,
+                    deadline = deadlineEpochMillis
+                )
+            } else {
+                repository.createOrUpdateProject(
+                    title = title,
+                    notes = notes,
+                    areaId = areaId,
+                    deadline = deadlineEpochMillis
+                )
+            }
+            if (navigateToProject) {
+                _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(savedId)
+            }
+        }
+    }
+
+    fun updateProjectDeadline(projectId: String, deadlineEpochMillis: Long?) {
+        viewModelScope.launch {
+            repository.updateProjectDeadline(projectId, deadlineEpochMillis)
+        }
+    }
+
+    fun updateProjectArea(projectId: String, areaId: String?) {
+        viewModelScope.launch {
+            repository.updateProjectArea(projectId, areaId)
+        }
+    }
+
+    fun completeProject(projectId: String) {
+        viewModelScope.launch {
+            repository.updateProjectStatus(projectId, ProjectStatus.COMPLETED)
+            val currentTarget = _navigationTarget.value
+            if (currentTarget is ActiveNavigationTarget.ProjectDetail && currentTarget.projectId == projectId) {
+                _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK)
+            }
+        }
+    }
+
+    fun moveProject(projectId: String, moveUp: Boolean) {
+        viewModelScope.launch {
+            repository.moveProject(projectId, moveUp)
+        }
+    }
+
+    fun deleteProject(projectId: String) {
+        viewModelScope.launch {
+            val currentTarget = _navigationTarget.value
+            if (currentTarget is ActiveNavigationTarget.ProjectDetail && currentTarget.projectId == projectId) {
+                _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
+            }
+            repository.softDeleteProject(projectId)
         }
     }
 

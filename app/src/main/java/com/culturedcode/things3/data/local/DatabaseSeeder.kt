@@ -120,8 +120,8 @@ class DatabaseSeeder(
         val tagErrandsId = "tag-errands-004"
         val tagQuickId = "tag-quick-005"
 
-        val areaPersonalId = "area-personal-001"
-        val areaWorkId = "area-work-002"
+        val areaWorkId = "area-work-001"
+        val areaHomeId = "area-home-002"
 
         val projVacationId = "proj-vacation-001"
         val projHomeId = "proj-home-002"
@@ -146,23 +146,23 @@ class DatabaseSeeder(
                 tagOffice = "Büro",
                 tagErrands = "Unterwegs",
                 tagQuick = "5 Min.",
-                areaPersonal = "Privat & Zuhause",
-                areaWork = "Beruf & Fokus",
+                areaPersonal = "Home",
+                areaWork = "Work",
                 projVacationTitle = "Urlaub & Reiseplanung",
                 projVacationNotes = "Unterkunft, Anreise, Ausflüge und Packliste entspannt im Voraus vorbereiten.",
-                projHomeTitle = "Zuhause & Wohlfühl-Alltag",
-                projHomeNotes = "Ideen, Besorgungen und gesunde Routinen für jede Woche.",
+                projHomeTitle = "Quartalsziele & Team-Organisation",
+                projHomeNotes = "Wichtige Meilensteine, Präsentationen und wöchentliche Routinen im Blick behalten.",
                 headBooking = "Buchung & Dokumente",
                 headPacking = "Packliste & Vorbereitung",
-                headEveryday = "Woche & Besorgungen",
+                headEveryday = "Wochenfokus & Meilensteine",
                 taskInboxTitle = "Zahnarzt-Vorsorgetermin für nächsten Monat vereinbaren",
                 taskInboxNotes = "Kurz anrufen und Termin vormittags auswählen.",
                 taskToday1Title = "Hotel am Meer & Zugverbindung buchen",
                 taskToday1Notes = "Frühbucher-Option mit kostenloser Stornierung wählen.",
-                taskToday2Title = "Frisches Obst, Gemüse & Kaffeebohnen vom Wochenmarkt holen",
-                taskToday2Notes = "Stoffbeutel nicht vergessen.",
-                taskEveningTitle = "30 Minuten Abendspaziergang & Buch lesen",
-                taskEveningNotes = "Handy auf Flugmodus schalten und entspannen.",
+                taskToday2Title = "Wochenplanung & Projektstatus für das Team vorbereiten",
+                taskToday2Notes = "Kurzpräsentation und nächste Schritte abstimmen.",
+                taskEveningTitle = "Zimmerpflanzen gießen & 30 Min. Buch lesen",
+                taskEveningNotes = "Wiederholt sich automatisch 4 Tage nach Erledigung.",
                 taskUpcomingTitle = "Reisepass-Gültigkeit & Reiseapotheke prüfen",
                 taskUpcomingNotes = "Rechtzeitig vor der Abreise kontrollieren.",
                 taskAnytimeTitle = "Kamera, Ladegeräte & Sonnenbrille bereitlegen",
@@ -180,23 +180,23 @@ class DatabaseSeeder(
                 tagOffice = "Ufficio",
                 tagErrands = "Commissioni",
                 tagQuick = "5 min",
-                areaPersonal = "Casa e Vita personale",
-                areaWork = "Lavoro e Progetti",
+                areaPersonal = "Home",
+                areaWork = "Work",
                 projVacationTitle = "Vacanze e Viaggio",
                 projVacationNotes = "Alloggio, treni, escursioni e valigia organizzati con calma.",
-                projHomeTitle = "Casa e Benessere Quotidiano",
-                projHomeNotes = "Acquisti, idee per la casa e buone abitudini.",
+                projHomeTitle = "Obiettivi e Organizzazione Lavoro",
+                projHomeNotes = "Traguardi principali, presentazioni e routine settimanali.",
                 headBooking = "Prenotazioni e Documenti",
                 headPacking = "Valigia e Preparativi",
-                headEveryday = "Settimana e Spesa",
+                headEveryday = "Focus Settimanale",
                 taskInboxTitle = "Prenotare visita di controllo dal dentista",
                 taskInboxNotes = "Scegliere un orario al mattino.",
                 taskToday1Title = "Prenotare hotel sul mare e biglietti del treno",
                 taskToday1Notes = "Verificare l'opzione di cancellazione gratuita.",
-                taskToday2Title = "Comprare frutta fresca, verdura e caffè al mercato",
-                taskToday2Notes = "Portare le borse riutilizzabili.",
-                taskEveningTitle = "Passeggiata serale di 30 minuti e lettura",
-                taskEveningNotes = "Rilassarsi senza schermi prima di dormire.",
+                taskToday2Title = "Preparare piano settimanale e aggiornamento progetti",
+                taskToday2Notes = "Definire i prossimi passi con il team.",
+                taskEveningTitle = "Annaffiare le piante e 30 minuti di lettura",
+                taskEveningNotes = "Si ripete automaticamente 4 giorni dopo il completamento.",
                 taskUpcomingTitle = "Controllare validità documenti e kit da viaggio",
                 taskUpcomingNotes = "Da verificare prima della partenza.",
                 taskAnytimeTitle = "Preparare fotocamera, caricabatterie e occhiali da sole",
@@ -214,23 +214,23 @@ class DatabaseSeeder(
                 tagOffice = "Bureau",
                 tagErrands = "Courses",
                 tagQuick = "5 min",
-                areaPersonal = "Maison & Vie personnelle",
-                areaWork = "Travail & Projets",
+                areaPersonal = "Home",
+                areaWork = "Work",
                 projVacationTitle = "Vacances & Planification de voyage",
                 projVacationNotes = "Hébergement, billets de train, excursions et bagages en toute sérénité.",
-                projHomeTitle = "Maison & Quotidien Bien-être",
-                projHomeNotes = "Courses, idées déco et routines saines.",
+                projHomeTitle = "Objectifs & Organisation Travail",
+                projHomeNotes = "Étapes clés, présentations et routines hebdomadaires.",
                 headBooking = "Réservations & Documents",
                 headPacking = "Bagages & Préparatifs",
-                headEveryday = "Semaine & Courses",
+                headEveryday = "Focus de la Semaine",
                 taskInboxTitle = "Prendre rendez-vous chez le dentiste pour le mois prochain",
                 taskInboxNotes = "Privilégier un créneau le matin.",
                 taskToday1Title = "Réserver l'hôtel en bord de mer et les billets de train",
                 taskToday1Notes = "Choisir le tarif avec annulation flexible.",
-                taskToday2Title = "Acheter des fruits frais, des légumes et du café au marché",
-                taskToday2Notes = "Penser aux sacs cabas.",
-                taskEveningTitle = "Promenade du soir de 30 minutes et lecture",
-                taskEveningNotes = "Déconnexion calme en fin de journée.",
+                taskToday2Title = "Préparer le point hebdomadaire et les priorités d'équipe",
+                taskToday2Notes = "Synthétiser les prochaines étapes.",
+                taskEveningTitle = "Arroser les plantes & 30 minutes de lecture",
+                taskEveningNotes = "Se répète automatiquement 4 jours après achèvement.",
                 taskUpcomingTitle = "Vérifier les pièces d'identité et la trousse de voyage",
                 taskUpcomingNotes = "Contrôler avant le départ.",
                 taskAnytimeTitle = "Préparer appareil photo, chargeurs et lunettes de soleil",
@@ -248,23 +248,23 @@ class DatabaseSeeder(
                 tagOffice = "Oficina",
                 tagErrands = "Recados",
                 tagQuick = "5 min",
-                areaPersonal = "Hogar y Vida personal",
-                areaWork = "Trabajo y Proyectos",
+                areaPersonal = "Home",
+                areaWork = "Work",
                 projVacationTitle = "Vacaciones y Plan de Viaje",
                 projVacationNotes = "Alojamiento, trenes, rutas y equipaje organizados con tranquilidad.",
-                projHomeTitle = "Hogar y Bienestar Diario",
-                projHomeNotes = "Compras semanales, hogar y hábitos saludables.",
+                projHomeTitle = "Objetivos y Organización del Trabajo",
+                projHomeNotes = "Hitos principales, presentaciones y rutinas semanales.",
                 headBooking = "Reservas y Documentos",
                 headPacking = "Equipaje y Preparativos",
-                headEveryday = "Semana y Compras",
+                headEveryday = "Enfoque Semanal",
                 taskInboxTitle = "Pedir cita de revisión con el dentista",
                 taskInboxNotes = "Elegir horario por la mañana.",
                 taskToday1Title = "Reservar hotel junto al mar y billetes de tren",
                 taskToday1Notes = "Seleccionar tarifa con cancelación flexible.",
-                taskToday2Title = "Comprar fruta fresca, verdura y café en el mercado",
-                taskToday2Notes = "Llevar bolsas reutilizables.",
-                taskEveningTitle = "Paseo tranquilo de 30 minutos y lectura nocturna",
-                taskEveningNotes = "Desconectar el móvil por la noche.",
+                taskToday2Title = "Preparar planificación semanal y estado del proyecto",
+                taskToday2Notes = "Alinear próximos pasos con el equipo.",
+                taskEveningTitle = "Regar las plantas y 30 minutos de lectura",
+                taskEveningNotes = "Se repite automáticamente 4 días después de completarse.",
                 taskUpcomingTitle = "Revisar pasaporte y botiquín de viaje",
                 taskUpcomingNotes = "Comprobar con antelación.",
                 taskAnytimeTitle = "Preparar cámara, cargadores y gafas de sol",
@@ -282,23 +282,23 @@ class DatabaseSeeder(
                 tagOffice = "Office",
                 tagErrands = "Errands",
                 tagQuick = "5 min",
-                areaPersonal = "Personal & Home",
-                areaWork = "Work & Focus",
+                areaPersonal = "Home",
+                areaWork = "Work",
                 projVacationTitle = "Summer Vacation & Travel Plan",
                 projVacationNotes = "Hotel, train tickets, local sights, and packing checklist organized calmly.",
-                projHomeTitle = "Home & Everyday Wellbeing",
-                projHomeNotes = "Weekly groceries, home organization, and healthy routines.",
+                projHomeTitle = "Quarterly Goals & Team Organization",
+                projHomeNotes = "Key milestones, presentations, and weekly focus routines.",
                 headBooking = "Bookings & Documents",
                 headPacking = "Packing & Preparation",
-                headEveryday = "Weekly & Errands",
+                headEveryday = "Weekly Focus & Milestones",
                 taskInboxTitle = "Book dental checkup appointment for next month",
                 taskInboxNotes = "Pick a morning slot.",
                 taskToday1Title = "Book seaside hotel & train tickets",
                 taskToday1Notes = "Choose flexible rate with free cancellation.",
-                taskToday2Title = "Pick up fresh fruit, vegetables & coffee beans at the market",
-                taskToday2Notes = "Bring reusable tote bags.",
-                taskEveningTitle = "30-minute evening walk & book reading",
-                taskEveningNotes = "Unplug and wind down for the night.",
+                taskToday2Title = "Prepare weekly planning & project status update",
+                taskToday2Notes = "Align next steps and priorities.",
+                taskEveningTitle = "Water indoor plants & 30-minute book reading",
+                taskEveningNotes = "Repeats automatically 4 days after completion.",
                 taskUpcomingTitle = "Check passport validity & travel kit",
                 taskUpcomingNotes = "Review ahead of departure.",
                 taskAnytimeTitle = "Pack camera, chargers & sunglasses",
@@ -365,34 +365,51 @@ class DatabaseSeeder(
             )
         )
 
+        // Preconfigured Things-for-Mac Areas: "Work" (1000.0) and "Home" (2000.0)
         val areas = listOf(
             AreaEntity(
-                id = areaPersonalId,
-                title = strings.areaPersonal,
+                id = areaWorkId,
+                title = strings.areaWork,
                 sortOrder = 1000.0,
-                tagIdsJson = json.encodeToString(listOf(tagHomeId)),
+                tagIdsJson = json.encodeToString(listOf(tagOfficeId)),
                 createdAt = now,
                 updatedAt = now,
                 isDirty = true
             ),
             AreaEntity(
-                id = areaWorkId,
-                title = strings.areaWork,
+                id = areaHomeId,
+                title = strings.areaPersonal,
                 sortOrder = 2000.0,
-                tagIdsJson = json.encodeToString(listOf(tagOfficeId)),
+                tagIdsJson = json.encodeToString(listOf(tagHomeId)),
                 createdAt = now,
                 updatedAt = now,
                 isDirty = true
             )
         )
 
-        val projVacationTags = listOf(tagImportantId)
-        val projHomeTags = listOf(tagHomeId, tagErrandsId)
+        val projVacationTags = listOf(tagImportantId, tagHomeId)
+        val projWorkTags = listOf(tagOfficeId, tagImportantId)
 
         val projects = listOf(
             ProjectEntity(
+                id = projHomeId,
+                areaId = areaWorkId,
+                title = strings.projHomeTitle,
+                notes = strings.projHomeNotes,
+                status = ProjectStatus.ACTIVE,
+                scheduleState = ScheduleState.TODAY,
+                whenDate = todayEpoch,
+                deadline = inThreeDaysEpoch,
+                completedAt = null,
+                sortOrder = 1000.0,
+                tagIdsJson = json.encodeToString(projWorkTags),
+                createdAt = now,
+                updatedAt = now,
+                isDirty = true
+            ) to projWorkTags,
+            ProjectEntity(
                 id = projVacationId,
-                areaId = areaPersonalId,
+                areaId = areaHomeId,
                 title = strings.projVacationTitle,
                 notes = strings.projVacationNotes,
                 status = ProjectStatus.ACTIVE,
@@ -400,31 +417,25 @@ class DatabaseSeeder(
                 whenDate = todayEpoch,
                 deadline = inFiveDaysEpoch,
                 completedAt = null,
-                sortOrder = 1000.0,
+                sortOrder = 2000.0,
                 tagIdsJson = json.encodeToString(projVacationTags),
                 createdAt = now,
                 updatedAt = now,
                 isDirty = true
-            ) to projVacationTags,
-            ProjectEntity(
-                id = projHomeId,
-                areaId = areaPersonalId,
-                title = strings.projHomeTitle,
-                notes = strings.projHomeNotes,
-                status = ProjectStatus.ACTIVE,
-                scheduleState = ScheduleState.ANYTIME,
-                whenDate = null,
-                deadline = null,
-                completedAt = null,
-                sortOrder = 2000.0,
-                tagIdsJson = json.encodeToString(projHomeTags),
-                createdAt = now,
-                updatedAt = now,
-                isDirty = true
-            ) to projHomeTags
+            ) to projVacationTags
         )
 
         val headings = listOf(
+            HeadingEntity(
+                id = headEverydayId,
+                projectId = projHomeId,
+                title = strings.headEveryday,
+                sortOrder = 1000.0,
+                isArchived = false,
+                createdAt = now,
+                updatedAt = now,
+                isDirty = true
+            ),
             HeadingEntity(
                 id = headBookingId,
                 projectId = projVacationId,
@@ -444,25 +455,25 @@ class DatabaseSeeder(
                 createdAt = now,
                 updatedAt = now,
                 isDirty = true
-            ),
-            HeadingEntity(
-                id = headEverydayId,
-                projectId = projHomeId,
-                title = strings.headEveryday,
-                sortOrder = 1000.0,
-                isArchived = false,
-                createdAt = now,
-                updatedAt = now,
-                isDirty = true
             )
         )
 
+        // Things for Mac style Fixed Schedule recurrence (Every Monday & Friday)
         val weeklyRecurrenceJson = json.encodeToString(
             RecurrenceRule(
                 mode = RecurrenceMode.FIXED_SCHEDULE,
                 interval = 1,
                 unit = RecurrenceUnit.WEEKS,
-                daysOfWeek = listOf(5)
+                daysOfWeek = listOf(1, 5)
+            )
+        )
+
+        // Things for Mac style After Completion recurrence (4 days after completion)
+        val afterCompletionRecurrenceJson = json.encodeToString(
+            RecurrenceRule(
+                mode = RecurrenceMode.AFTER_COMPLETION,
+                interval = 4,
+                unit = RecurrenceUnit.DAYS
             )
         )
 
@@ -500,7 +511,7 @@ class DatabaseSeeder(
                 completedAt = null,
                 projectId = projVacationId,
                 headingId = headBookingId,
-                areaId = areaPersonalId,
+                areaId = areaHomeId,
                 recurrenceRuleJson = null,
                 sortOrder = 1000.0,
                 tagIdsJson = json.encodeToString(listOf(tagImportantId, tagHomeId)),
@@ -521,14 +532,14 @@ class DatabaseSeeder(
                 completedAt = null,
                 projectId = projHomeId,
                 headingId = headEverydayId,
-                areaId = areaPersonalId,
-                recurrenceRuleJson = null,
+                areaId = areaWorkId,
+                recurrenceRuleJson = weeklyRecurrenceJson,
                 sortOrder = 2000.0,
-                tagIdsJson = json.encodeToString(listOf(tagErrandsId)),
+                tagIdsJson = json.encodeToString(listOf(tagOfficeId)),
                 createdAt = now,
                 updatedAt = now,
                 isDirty = true
-            ) to listOf(tagErrandsId),
+            ) to listOf(tagOfficeId),
 
             TaskEntity(
                 id = taskEvening1Id,
@@ -540,10 +551,10 @@ class DatabaseSeeder(
                 deadline = null,
                 reminderTime = null,
                 completedAt = null,
-                projectId = projHomeId,
-                headingId = headEverydayId,
-                areaId = areaPersonalId,
-                recurrenceRuleJson = null,
+                projectId = null,
+                headingId = null,
+                areaId = areaHomeId,
+                recurrenceRuleJson = afterCompletionRecurrenceJson,
                 sortOrder = 3000.0,
                 tagIdsJson = json.encodeToString(listOf(tagHomeId)),
                 createdAt = now,
@@ -563,7 +574,7 @@ class DatabaseSeeder(
                 completedAt = null,
                 projectId = projVacationId,
                 headingId = headBookingId,
-                areaId = areaPersonalId,
+                areaId = areaHomeId,
                 recurrenceRuleJson = weeklyRecurrenceJson,
                 sortOrder = 4000.0,
                 tagIdsJson = json.encodeToString(listOf(tagImportantId)),
@@ -584,7 +595,7 @@ class DatabaseSeeder(
                 completedAt = null,
                 projectId = projVacationId,
                 headingId = headPackingId,
-                areaId = areaPersonalId,
+                areaId = areaHomeId,
                 recurrenceRuleJson = null,
                 sortOrder = 5000.0,
                 tagIdsJson = json.encodeToString(listOf(tagHomeId)),
@@ -605,7 +616,7 @@ class DatabaseSeeder(
                 completedAt = null,
                 projectId = projVacationId,
                 headingId = headPackingId,
-                areaId = areaPersonalId,
+                areaId = areaHomeId,
                 recurrenceRuleJson = null,
                 sortOrder = 6000.0,
                 tagIdsJson = json.encodeToString(listOf(tagQuickId)),
@@ -626,14 +637,14 @@ class DatabaseSeeder(
                 completedAt = now - 3600_000L,
                 projectId = projHomeId,
                 headingId = headEverydayId,
-                areaId = areaPersonalId,
+                areaId = areaWorkId,
                 recurrenceRuleJson = null,
                 sortOrder = 500.0,
-                tagIdsJson = json.encodeToString(listOf(tagHomeId)),
+                tagIdsJson = json.encodeToString(listOf(tagOfficeId)),
                 createdAt = now - 7200_000L,
                 updatedAt = now,
                 isDirty = true
-            ) to listOf(tagHomeId)
+            ) to listOf(tagOfficeId)
         )
 
         val checklistItems = listOf(

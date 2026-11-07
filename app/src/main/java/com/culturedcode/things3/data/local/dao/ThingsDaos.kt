@@ -27,6 +27,12 @@ interface AreaDao {
     @Query("SELECT * FROM areas WHERE isDeleted = 0 ORDER BY sortOrder ASC")
     fun observeAreas(): Flow<List<AreaEntity>>
 
+    @Query("SELECT * FROM areas WHERE isDeleted = 0 ORDER BY sortOrder ASC")
+    suspend fun getActiveAreasList(): List<AreaEntity>
+
+    @Query("SELECT COUNT(*) FROM areas WHERE isDeleted = 0")
+    suspend fun getActiveAreaCount(): Int
+
     @Transaction
     @Query("SELECT * FROM areas WHERE isDeleted = 0 ORDER BY sortOrder ASC")
     fun observeAreasWithHierarchy(): Flow<List<AreaWithProjectsAndTasks>>
@@ -61,6 +67,9 @@ interface ProjectDao {
     )
     fun observeActiveProjectsWithProgress(): Flow<List<ProjectWithProgressTuple>>
 
+    @Query("SELECT * FROM projects WHERE isDeleted = 0 AND status = 'ACTIVE' ORDER BY sortOrder ASC")
+    suspend fun getActiveProjectsList(): List<ProjectEntity>
+
     @Transaction
     @Query("SELECT * FROM projects WHERE id = :projectId AND isDeleted = 0 LIMIT 1")
     fun observeProjectWithDetails(projectId: String): Flow<ProjectWithDetails?>
@@ -92,6 +101,9 @@ interface ProjectDao {
         }
     }
 
+    @Query("UPDATE projects SET areaId = NULL, updatedAt = :now, isDirty = 1 WHERE areaId = :areaId")
+    suspend fun clearAreaFromProjects(areaId: String, now: Long)
+
     @Query("UPDATE projects SET isDirty = 0 WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>)
 }
@@ -100,6 +112,12 @@ interface ProjectDao {
 interface HeadingDao {
     @Query("SELECT * FROM headings WHERE projectId = :projectId AND isDeleted = 0 AND isArchived = 0 ORDER BY sortOrder ASC")
     fun observeHeadingsForProject(projectId: String): Flow<List<HeadingEntity>>
+
+    @Query("SELECT * FROM headings WHERE isDeleted = 0 AND isArchived = 0 ORDER BY sortOrder ASC")
+    fun observeAllActiveHeadings(): Flow<List<HeadingEntity>>
+
+    @Query("SELECT * FROM headings WHERE projectId = :projectId AND isDeleted = 0 AND isArchived = 0 ORDER BY sortOrder ASC")
+    suspend fun getHeadingsForProjectList(projectId: String): List<HeadingEntity>
 
     @Query("SELECT * FROM headings WHERE isDirty = 1")
     suspend fun getDirtyHeadings(): List<HeadingEntity>
@@ -290,6 +308,15 @@ interface TaskDao {
         }
     }
 
+    @Query("UPDATE tasks SET areaId = NULL, updatedAt = :now, isDirty = 1 WHERE areaId = :areaId")
+    suspend fun clearAreaFromTasks(areaId: String, now: Long)
+
+    @Query("UPDATE tasks SET projectId = NULL, headingId = NULL, updatedAt = :now, isDirty = 1 WHERE projectId = :projectId")
+    suspend fun clearProjectFromTasks(projectId: String, now: Long)
+
+    @Query("UPDATE tasks SET headingId = NULL, updatedAt = :now, isDirty = 1 WHERE headingId = :headingId")
+    suspend fun clearHeadingFromTasks(headingId: String, now: Long)
+
     @Query("UPDATE tasks SET isDirty = 0 WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>)
 
@@ -313,6 +340,9 @@ interface TaskDao {
 interface ChecklistDao {
     @Query("SELECT * FROM checklist_items WHERE taskId = :taskId AND isDeleted = 0 ORDER BY sortOrder ASC")
     fun observeForTask(taskId: String): Flow<List<ChecklistItemEntity>>
+
+    @Query("SELECT * FROM checklist_items WHERE taskId = :taskId AND isDeleted = 0 ORDER BY sortOrder ASC")
+    suspend fun getForTaskSync(taskId: String): List<ChecklistItemEntity>
 
     @Query("SELECT * FROM checklist_items WHERE isDirty = 1")
     suspend fun getDirtyChecklistItems(): List<ChecklistItemEntity>

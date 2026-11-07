@@ -12,9 +12,9 @@ Eine eigenständige, native Android-Produktivitäts-App (für **Android-Smartpho
 
 ---
 
-## Direkt-Download (Installierbares Android-APK)
+## Direkt-Download (Installierbares Android-APK — Version 1.0.1)
 
-- **[Thingsbook-v1.0.0-full.apk herunterladen](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.0.0-full.apk)**
+- **[Thingsbook-v1.0.1-full.apk herunterladen (v1.0.1 — Bugfix Release)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.0.1-full.apk)**
 
 ---
 

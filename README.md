@@ -12,9 +12,9 @@ Eine eigenständige, native Android-Produktivitäts-App (für **Android-Smartpho
 
 ---
 
-## Direkt-Download (Installierbares Android-APK — Version 1.1.0)
+## Direkt-Download (Installierbares Android-APK — Version 1.1.1)
 
-- **[Thingsbook-v1.1.0-full.apk herunterladen (v1.1.0 — Kalender-Picker, Benachrichtigungen, Tag-Verwaltung & Neues App-Symbol)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.1.0-full.apk)**
+- **[Thingsbook-v1.1.1-full.apk herunterladen (v1.1.1 — Kompakter Kalender-Picker, Benachrichtigungen, Tag-Verwaltung & Neues App-Symbol)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.1.1-full.apk)**
 
 ---
 

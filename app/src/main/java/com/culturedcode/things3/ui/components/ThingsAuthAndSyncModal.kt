@@ -1,5 +1,9 @@
 package com.culturedcode.things3.ui.components
 
+import android.accounts.AccountManager
+import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -65,7 +69,7 @@ fun ThingsAuthAndSyncModal(
     onSignInEmailPassword: (String, String) -> Unit,
     onResetPassword: (String) -> Unit = {},
     onSignInWithGoogle: (String) -> Unit,
-    onSignInAnonymously: () -> Unit,
+    onSignInAnonymously: () -> Unit = {},
     onSignOut: () -> Unit,
     onTriggerDeltaSyncNow: () -> Unit,
     onDismiss: () -> Unit
@@ -75,6 +79,21 @@ fun ThingsAuthAndSyncModal(
 
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+
+    // Native Android System Google Account Picker ("com.google")
+    val googleAccountPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { activityResult ->
+        if (activityResult.resultCode == Activity.RESULT_OK) {
+            val pickedEmail = activityResult.data
+                ?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
+                ?.trim()
+            if (!pickedEmail.isNullOrBlank()) {
+                email = pickedEmail
+                onSignInWithGoogle(pickedEmail)
+            }
+        }
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -162,7 +181,7 @@ fun ThingsAuthAndSyncModal(
                         color = colors.primaryText
                     )
                     if (!currentUserIdentifier.isNullOrBlank()) {
-                        ThingsTagPill(title = currentUserIdentifier.take(24))
+                        ThingsTagPill(title = currentUserIdentifier.take(28))
                     }
                 }
 
@@ -319,7 +338,21 @@ fun ThingsAuthAndSyncModal(
                     Button(
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onSignInWithGoogle(email.trim())
+                            runCatching {
+                                @Suppress("DEPRECATION")
+                                val chooseIntent = AccountManager.newChooseAccountIntent(
+                                    null,
+                                    null,
+                                    arrayOf("com.google"),
+                                    null,
+                                    null,
+                                    null,
+                                    null
+                                )
+                                googleAccountPickerLauncher.launch(chooseIntent)
+                            }.onFailure {
+                                onSignInWithGoogle(email.trim())
+                            }
                         },
                         enabled = !isSigningIn,
                         colors = ButtonDefaults.buttonColors(containerColor = colors.primaryText),
@@ -345,23 +378,6 @@ fun ThingsAuthAndSyncModal(
                         Text(
                             text = stringResource(R.string.auth_sign_in_google),
                             color = colors.cardSurface
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    OutlinedButton(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onSignInAnonymously()
-                        },
-                        enabled = !isSigningIn,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = stringResource(R.string.auth_sign_in_anonymous),
-                            color = colors.secondaryText
                         )
                     }
                 } else {
@@ -407,3 +423,4 @@ fun ThingsAuthAndSyncModal(
         }
     }
 }
+

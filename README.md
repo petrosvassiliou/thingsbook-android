@@ -12,9 +12,9 @@ Eine eigenständige, native Android-Produktivitäts-App (für **Android-Smartpho
 
 ---
 
-## Direkt-Download (Installierbares Android-APK — Version 1.2.3)
+## Direkt-Download (Installierbares Android-APK — Version 1.2.4)
 
-- **[Thingsbook-v1.2.3-full.apk herunterladen (v1.2.3 — Tag-für-Tag-Gruppierung unter „Geplant / Upcoming“, Wiederkehrende Aufgaben erscheinen nicht mehr fälschlich unter „Anytime / Jederzeit“, Sofortiger Cursor-Fokus ohne „New To-Do“-Platzhalter beim Erstellen einer neuen Aufgabe, 5-Sprachen-Lokalisierung für „Bereiche / Areas“)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.2.3-full.apk)**
+- **[Thingsbook-v1.2.4-full.apk herunterladen (v1.2.4 — Echter Android Google-Konto-Auswahldialog statt künstlichem Platzhalter-Account, verbessertes Spacing zwischen Ansichtsname, Tag-Leiste & erster Aufgabe, Tag-für-Tag-Gruppierung unter „Geplant“, sofortiger Titel-Fokus)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.2.4-full.apk)**
 
 ---
 

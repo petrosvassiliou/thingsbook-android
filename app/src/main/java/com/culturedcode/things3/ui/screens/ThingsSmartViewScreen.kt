@@ -1139,7 +1139,7 @@ private fun TagFilterAndManageStrip(
     LazyRow(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(bottom = 6.dp),
+            .padding(top = 6.dp, bottom = 8.dp),
         contentPadding = PaddingValues(horizontal = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
@@ -1428,7 +1428,7 @@ private fun ViewTitleHeader(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 10.dp)
+            .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 14.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),

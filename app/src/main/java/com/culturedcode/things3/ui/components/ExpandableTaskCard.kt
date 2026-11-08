@@ -407,9 +407,13 @@ fun ExpandableTaskCard(
         completionExitProgress.value.coerceIn(0f, 1f)
     }
 
+    val isContextMenuTargeted = (!isExpanded && showContextMenu && !suppressCustomContextMenu) ||
+        (!isExpanded && (showWhenDialog || showDeadlineDialog || showRepeatDialog || showMoveDialog || showTagPickerDialog))
+
     val surfaceColor by animateColorAsState(
         targetValue = when {
             isExpanded -> colors.cardElevatedSurface
+            isContextMenuTargeted -> colors.thingsBlue.copy(alpha = 0.18f)
             isSelected -> colors.thingsBlue.copy(alpha = 0.14f)
             else -> Color.Transparent
         },
@@ -454,10 +458,10 @@ fun ExpandableTaskCard(
                 )
                 .clip(RoundedCornerShape(cornerRadius))
                 .then(
-                    if (isSelected && !isExpanded) {
+                    if ((isSelected || isContextMenuTargeted) && !isExpanded) {
                         Modifier.border(
-                            width = 1.dp,
-                            color = colors.thingsBlue.copy(alpha = 0.42f),
+                            width = if (isContextMenuTargeted) 1.25.dp else 1.dp,
+                            color = colors.thingsBlue.copy(alpha = if (isContextMenuTargeted) 0.72f else 0.42f),
                             shape = RoundedCornerShape(cornerRadius)
                         )
                     } else {
@@ -1387,12 +1391,39 @@ private fun TaskContextDropdownMenu(
     onDismiss: () -> Unit
 ) {
     val colors = ThingsTheme.colors
+    val targetTaskTitle = task.title.ifBlank { stringResource(R.string.placeholder_todo_title) }
     DropdownMenu(
         expanded = true,
         onDismissRequest = onDismiss,
         offset = offset,
         modifier = Modifier.background(colors.cardElevatedSurface)
     ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(colors.thingsBlueSoft.copy(alpha = 0.65f))
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(7.dp)
+                    .clip( RoundedCornerShape(50))
+                    .background(colors.thingsBlue)
+            )
+            Text(
+                text = targetTaskTitle,
+                style = MaterialTheme.typography.labelLarge.copy(
+                    fontWeight = FontWeight.SemiBold
+                ),
+                color = colors.primaryText,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        HorizontalDivider(color = colors.hairlineDivider)
+
         if (onToggleSelection != null) {
             DropdownMenuItem(
                 text = {

@@ -21,6 +21,7 @@
     <string name="entity_heading">Encabezado</string>
     <string name="entity_new_heading">Nuevo encabezado</string>
     <string name="entity_todo">Tarea</string>
+    <string name="entity_todos">Tareas</string>
     <string name="entity_new_todo">Nueva tarea</string>
     <string name="entity_checklist_item">Elemento de lista</string>
     <string name="entity_tag">Etiqueta</string>

@@ -21,6 +21,7 @@
     <string name="entity_heading">Heading</string>
     <string name="entity_new_heading">New Heading</string>
     <string name="entity_todo">To-Do</string>
+    <string name="entity_todos">To-Dos</string>
     <string name="entity_new_todo">New To-Do</string>
     <string name="entity_checklist_item">Checklist Item</string>
     <string name="entity_tag">Tag</string>

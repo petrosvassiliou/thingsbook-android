@@ -21,6 +21,7 @@
     <string name="entity_heading">Intestazione</string>
     <string name="entity_new_heading">Nuova intestazione</string>
     <string name="entity_todo">Attività</string>
+    <string name="entity_todos">Attività</string>
     <string name="entity_new_todo">Nuova attività</string>
     <string name="entity_checklist_item">Voce di controllo</string>
     <string name="entity_tag">Tag</string>

@@ -21,6 +21,7 @@
     <string name="entity_heading">Überschrift</string>
     <string name="entity_new_heading">Neue Überschrift</string>
     <string name="entity_todo">Aufgabe</string>
+    <string name="entity_todos">Aufgaben</string>
     <string name="entity_new_todo">Neue Aufgabe</string>
     <string name="entity_checklist_item">Checklistenpunkt</string>
     <string name="entity_tag">Tag</string>

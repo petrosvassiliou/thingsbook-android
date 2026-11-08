@@ -896,78 +896,87 @@ private fun ThingsMainTaskLazyList(
             }
         }
 
-        // If viewing an Area (e.g. Work or Home), show the Area's Projects section first!
+        // If viewing an Area (e.g. Work or Home), show the Area's Projects section only when projects exist (Things 3 style)
         if (isAreaView && currentArea != null) {
             val areaProjects = activeProjects.filter { it.areaId == currentArea.id }
-            item(key = "area_projects_header_${currentArea.id}") {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "${stringResource(R.string.entity_projects)} • ${currentArea.title} (${areaProjects.size})",
-                        style = MaterialTheme.typography.labelLarge.copy(
-                            color = colors.thingsBlue,
-                            fontWeight = FontWeight.Bold
-                        )
-                    )
+            if (areaProjects.isNotEmpty()) {
+                item(key = "area_projects_header_${currentArea.id}") {
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(colors.thingsBlueSoft)
-                            .clickable { onRequestCreateProjectInArea(currentArea.id) }
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Add,
-                            contentDescription = null,
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(14.dp)
-                        )
                         Text(
-                            text = stringResource(R.string.entity_new_project),
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = colors.thingsBlue
+                            text = "${stringResource(R.string.entity_projects)} • ${currentArea.title} (${areaProjects.size})",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                color = colors.secondaryText,
+                                fontWeight = FontWeight.Normal
+                            )
                         )
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(colors.thingsBlueSoft)
+                                .clickable { onRequestCreateProjectInArea(currentArea.id) }
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Add,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.entity_new_project),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                                color = colors.thingsBlue
+                            )
+                        }
                     }
+                }
+
+                itemsIndexed(
+                    items = areaProjects,
+                    key = { _, p -> "area_proj_card_${p.id}" }
+                ) { idx, proj ->
+                    AreaProjectOverviewRow(
+                        project = proj,
+                        canMoveUp = idx > 0,
+                        canMoveDown = idx < areaProjects.lastIndex,
+                        locale = activeLocale,
+                        onOpenProject = { viewModel.selectProject(proj.id) },
+                        onEditProject = { onRequestEditProject(proj) },
+                        onUpdateDeadline = { dl -> viewModel.updateProjectDeadline(proj.id, dl) },
+                        onMoveUp = { viewModel.moveProject(proj.id, true) },
+                        onMoveDown = { viewModel.moveProject(proj.id, false) }
+                    )
                 }
             }
 
-            itemsIndexed(
-                items = areaProjects,
-                key = { _, p -> "area_proj_card_${p.id}" }
-            ) { idx, proj ->
-                AreaProjectOverviewRow(
-                    project = proj,
-                    canMoveUp = idx > 0,
-                    canMoveDown = idx < areaProjects.lastIndex,
-                    locale = activeLocale,
-                    onOpenProject = { viewModel.selectProject(proj.id) },
-                    onEditProject = { onRequestEditProject(proj) },
-                    onUpdateDeadline = { dl -> viewModel.updateProjectDeadline(proj.id, dl) },
-                    onMoveUp = { viewModel.moveProject(proj.id, true) },
-                    onMoveDown = { viewModel.moveProject(proj.id, false) }
-                )
-            }
-
             item(key = "area_tasks_divider_${currentArea.id}") {
+                val tasksSectionWord = if (primaryTasks.size == 1) {
+                    stringResource(R.string.entity_todo)
+                } else {
+                    stringResource(R.string.entity_todos)
+                }
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 10.dp)
+                        .padding(horizontal = 20.dp, vertical = if (areaProjects.isNotEmpty()) 10.dp else 4.dp)
                 ) {
-                    HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
-                    Spacer(modifier = Modifier.height(8.dp))
+                    if (areaProjects.isNotEmpty()) {
+                        HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
                     Text(
-                        text = "${stringResource(R.string.entity_todo)} • ${currentArea.title} (${primaryTasks.size})",
+                        text = "$tasksSectionWord • ${currentArea.title} (${primaryTasks.size})",
                         style = MaterialTheme.typography.labelLarge.copy(
                             color = colors.secondaryText,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.Normal
                         )
                     )
                 }
@@ -1610,11 +1619,11 @@ private fun AreaProjectOverviewRow(
                 Column {
                     Text(
                         text = project.title,
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
                         color = colors.primaryText
                     )
                     Text(
-                        text = "${project.completedTaskCount}/${project.totalTaskCount} • ${stringResource(R.string.entity_todo)}",
+                        text = "${project.completedTaskCount}/${project.totalTaskCount} • ${if (project.totalTaskCount == 1) stringResource(R.string.entity_todo) else stringResource(R.string.entity_todos)}",
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.secondaryText
                     )

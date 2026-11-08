@@ -589,8 +589,11 @@ fun ExpandableTaskCard(
                         BasicTextField(
                             value = editedTitleField,
                             onValueChange = { newVal ->
+                                val textChanged = newVal.text != editedTitleField.text
                                 editedTitleField = newVal
-                                onTitleNotesChange(newVal.text, editedNotesField.text)
+                                if (textChanged) {
+                                    onTitleNotesChange(newVal.text, editedNotesField.text)
+                                }
                             },
                             textStyle = MaterialTheme.typography.titleMedium.copy(
                                 color = colors.primaryText
@@ -653,8 +656,11 @@ fun ExpandableTaskCard(
                         editedTitle = editedTitleField.text,
                         editedNotesField = editedNotesField,
                         onNotesFieldChange = { newVal ->
+                            val textChanged = newVal.text != editedNotesField.text
                             editedNotesField = newVal
-                            onTitleNotesChange(editedTitleField.text, newVal.text)
+                            if (textChanged) {
+                                onTitleNotesChange(editedTitleField.text, newVal.text)
+                            }
                         },
                         onNotesFocusChanged = { focused -> isNotesFocused = focused },
                         onNewChecklistFocusChanged = { focused -> isNewChecklistFocused = focused },
@@ -819,6 +825,13 @@ private fun CollapsedTaskInlineBadges(
         horizontalArrangement = Arrangement.spacedBy(5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (task.scheduleState == ScheduleState.THIS_EVENING) {
+            ThingsWhenBadge(
+                scheduleState = task.scheduleState,
+                whenDateEpochMillis = task.whenDate,
+                locale = locale
+            )
+        }
         task.recurrenceRule?.let { rr ->
             ThingsRepeatBadge(rule = rr)
         }

@@ -339,7 +339,12 @@ class ThingsRepository @Inject constructor(
         }
 
         val todayEpoch = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
-        val nextScheduleState = if (nextWhenEpoch <= todayEpoch) ScheduleState.TODAY else ScheduleState.UPCOMING
+        val nextScheduleState = when {
+            nextWhenEpoch <= todayEpoch && completedTask.scheduleState == ScheduleState.THIS_EVENING ->
+                ScheduleState.THIS_EVENING
+            nextWhenEpoch <= todayEpoch -> ScheduleState.TODAY
+            else -> ScheduleState.UPCOMING
+        }
 
         val nextTaskId = UUID.randomUUID().toString()
         val nextEntity = completedTask.copy(
@@ -374,6 +379,101 @@ class ThingsRepository @Inject constructor(
             }
             database.checklistDao().upsertAll(clonedSubtasks)
         }
+    }
+
+    suspend fun updateTaskTitleAndNotes(taskId: String, newTitle: String, newNotes: String) {
+        val existing = database.taskDao().getById(taskId) ?: return
+        if (existing.title == newTitle && existing.notes == newNotes) return
+        val now = System.currentTimeMillis()
+        database.taskDao().upsert(
+            existing.copy(
+                title = newTitle,
+                notes = newNotes,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun updateTaskSchedule(taskId: String, newState: ScheduleState, newWhenDate: Long?) {
+        val existing = database.taskDao().getById(taskId) ?: return
+        val now = System.currentTimeMillis()
+        database.taskDao().upsert(
+            existing.copy(
+                scheduleState = newState,
+                whenDate = newWhenDate,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun updateTaskScheduleWithReminder(
+        taskId: String,
+        newState: ScheduleState,
+        newWhenDate: Long?,
+        newReminderTime: Long?
+    ) {
+        val existing = database.taskDao().getById(taskId) ?: return
+        val now = System.currentTimeMillis()
+        val updated = existing.copy(
+            scheduleState = newState,
+            whenDate = newWhenDate,
+            reminderTime = newReminderTime,
+            updatedAt = now,
+            isDirty = true
+        )
+        database.taskDao().upsert(updated)
+        if (updated.status == TaskStatus.OPEN && newReminderTime != null && newReminderTime > now) {
+            reminderScheduler.scheduleExactReminder(taskId, updated.title, newReminderTime)
+        } else {
+            reminderScheduler.cancelReminder(taskId)
+        }
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun updateTaskDeadline(taskId: String, newDeadline: Long?) {
+        val existing = database.taskDao().getById(taskId) ?: return
+        val now = System.currentTimeMillis()
+        database.taskDao().upsert(
+            existing.copy(
+                deadline = newDeadline,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun updateTaskReminder(taskId: String, newReminderTime: Long?) {
+        val existing = database.taskDao().getById(taskId) ?: return
+        val now = System.currentTimeMillis()
+        val updated = existing.copy(
+            reminderTime = newReminderTime,
+            updatedAt = now,
+            isDirty = true
+        )
+        database.taskDao().upsert(updated)
+        if (updated.status == TaskStatus.OPEN && newReminderTime != null && newReminderTime > now) {
+            reminderScheduler.scheduleExactReminder(taskId, updated.title, newReminderTime)
+        } else {
+            reminderScheduler.cancelReminder(taskId)
+        }
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun updateTaskTags(taskId: String, newTagIds: List<String>) {
+        val existing = database.taskDao().getById(taskId) ?: return
+        val now = System.currentTimeMillis()
+        val updated = existing.copy(
+            tagIdsJson = json.encodeToString(newTagIds),
+            updatedAt = now,
+            isDirty = true
+        )
+        database.taskDao().upsertTaskWithTags(updated, newTagIds)
+        syncRepository.triggerBackgroundSync()
     }
 
     suspend fun updateTaskStatus(taskId: String, newStatus: TaskStatus) {

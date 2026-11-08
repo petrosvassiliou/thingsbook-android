@@ -1127,7 +1127,13 @@ private fun ThingsMainTaskLazyList(
         }
 
         // Today Smart View: "This Evening / Heute Abend / Stasera / Ce soir / Esta noche" Section
-        if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) && filteredEveningTasks.isNotEmpty()) {
+        val safeEveningTasks = if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY)) {
+            val primaryIds = primaryTasks.mapTo(HashSet()) { it.id }
+            filteredEveningTasks.filter { it.id !in primaryIds }
+        } else {
+            emptyList()
+        }
+        if (safeEveningTasks.isNotEmpty()) {
             item(key = "this_evening_header") {
                 Column(
                     modifier = Modifier
@@ -1141,8 +1147,8 @@ private fun ThingsMainTaskLazyList(
             }
 
             items(
-                items = filteredEveningTasks,
-                key = { "evening_${it.id}" }
+                items = safeEveningTasks,
+                key = { it.id }
             ) { eveningTask ->
                 ThingsTaskRowItem(
                     task = eveningTask,

@@ -442,63 +442,29 @@ class ThingsbookViewModel @Inject constructor(
 
     fun updateTaskTitleAndNotes(task: TaskItem, newTitle: String, newNotes: String) {
         safeVmScope.launch {
-            repository.createOrUpdateTask(
-                id = task.id,
-                title = newTitle,
-                notes = newNotes,
-                status = task.status,
-                scheduleState = task.scheduleState,
-                whenDate = task.whenDate,
-                deadline = task.deadline,
-                reminderTime = task.reminderTime,
-                projectId = task.projectId,
-                headingId = task.headingId,
-                areaId = task.areaId,
-                recurrenceRule = task.recurrenceRule,
-                sortOrder = task.sortOrder,
-                tagIds = task.tags.map { it.id }
+            repository.updateTaskTitleAndNotes(
+                taskId = task.id,
+                newTitle = newTitle,
+                newNotes = newNotes
             )
         }
     }
 
     fun updateTaskSchedule(task: TaskItem, newState: ScheduleState, newWhenDate: Long?) {
         safeVmScope.launch {
-            repository.createOrUpdateTask(
-                id = task.id,
-                title = task.title,
-                notes = task.notes,
-                status = task.status,
-                scheduleState = newState,
-                whenDate = newWhenDate,
-                deadline = task.deadline,
-                reminderTime = task.reminderTime,
-                projectId = task.projectId,
-                headingId = task.headingId,
-                areaId = task.areaId,
-                recurrenceRule = task.recurrenceRule,
-                sortOrder = task.sortOrder,
-                tagIds = task.tags.map { it.id }
+            repository.updateTaskSchedule(
+                taskId = task.id,
+                newState = newState,
+                newWhenDate = newWhenDate
             )
         }
     }
 
     fun updateTaskDeadline(task: TaskItem, newDeadline: Long?) {
         safeVmScope.launch {
-            repository.createOrUpdateTask(
-                id = task.id,
-                title = task.title,
-                notes = task.notes,
-                status = task.status,
-                scheduleState = task.scheduleState,
-                whenDate = task.whenDate,
-                deadline = newDeadline,
-                reminderTime = task.reminderTime,
-                projectId = task.projectId,
-                headingId = task.headingId,
-                areaId = task.areaId,
-                recurrenceRule = task.recurrenceRule,
-                sortOrder = task.sortOrder,
-                tagIds = task.tags.map { it.id }
+            repository.updateTaskDeadline(
+                taskId = task.id,
+                newDeadline = newDeadline
             )
         }
     }
@@ -1092,23 +1058,10 @@ class ThingsbookViewModel @Inject constructor(
 
     fun scheduleTaskReminder(task: TaskItem, triggerAtMillis: Long) {
         safeVmScope.launch {
-            repository.createOrUpdateTask(
-                id = task.id,
-                title = task.title,
-                notes = task.notes,
-                status = task.status,
-                scheduleState = task.scheduleState,
-                whenDate = task.whenDate,
-                deadline = task.deadline,
-                reminderTime = triggerAtMillis,
-                projectId = task.projectId,
-                headingId = task.headingId,
-                areaId = task.areaId,
-                recurrenceRule = task.recurrenceRule,
-                sortOrder = task.sortOrder,
-                tagIds = task.tags.map { it.id }
+            repository.updateTaskReminder(
+                taskId = task.id,
+                newReminderTime = triggerAtMillis
             )
-            reminderScheduler.scheduleExactReminder(task.id, task.title, triggerAtMillis)
         }
     }
 
@@ -1119,27 +1072,12 @@ class ThingsbookViewModel @Inject constructor(
         newReminderTime: Long?
     ) {
         safeVmScope.launch {
-            repository.createOrUpdateTask(
-                id = task.id,
-                title = task.title,
-                notes = task.notes,
-                status = task.status,
-                scheduleState = newState,
-                whenDate = newWhenDate,
-                deadline = task.deadline,
-                reminderTime = newReminderTime,
-                projectId = task.projectId,
-                headingId = task.headingId,
-                areaId = task.areaId,
-                recurrenceRule = task.recurrenceRule,
-                sortOrder = task.sortOrder,
-                tagIds = task.tags.map { it.id }
+            repository.updateTaskScheduleWithReminder(
+                taskId = task.id,
+                newState = newState,
+                newWhenDate = newWhenDate,
+                newReminderTime = newReminderTime
             )
-            if (newReminderTime != null) {
-                reminderScheduler.scheduleExactReminder(task.id, task.title, newReminderTime)
-            } else {
-                reminderScheduler.cancelReminder(task.id)
-            }
         }
     }
 
@@ -1178,21 +1116,9 @@ class ThingsbookViewModel @Inject constructor(
 
     fun updateTaskTags(task: TaskItem, newTagIds: List<String>) {
         safeVmScope.launch {
-            repository.createOrUpdateTask(
-                id = task.id,
-                title = task.title,
-                notes = task.notes,
-                status = task.status,
-                scheduleState = task.scheduleState,
-                whenDate = task.whenDate,
-                deadline = task.deadline,
-                reminderTime = task.reminderTime,
-                projectId = task.projectId,
-                headingId = task.headingId,
-                areaId = task.areaId,
-                recurrenceRule = task.recurrenceRule,
-                sortOrder = task.sortOrder,
-                tagIds = newTagIds
+            repository.updateTaskTags(
+                taskId = task.id,
+                newTagIds = newTagIds
             )
         }
     }
@@ -1201,21 +1127,9 @@ class ThingsbookViewModel @Inject constructor(
         safeVmScope.launch {
             val newId = repository.createOrUpdateTag(title = newTagTitle)
             val updatedTagIds = (task.tags.map { it.id } + newId).distinct()
-            repository.createOrUpdateTask(
-                id = task.id,
-                title = task.title,
-                notes = task.notes,
-                status = task.status,
-                scheduleState = task.scheduleState,
-                whenDate = task.whenDate,
-                deadline = task.deadline,
-                reminderTime = task.reminderTime,
-                projectId = task.projectId,
-                headingId = task.headingId,
-                areaId = task.areaId,
-                recurrenceRule = task.recurrenceRule,
-                sortOrder = task.sortOrder,
-                tagIds = updatedTagIds
+            repository.updateTaskTags(
+                taskId = task.id,
+                newTagIds = updatedTagIds
             )
         }
     }

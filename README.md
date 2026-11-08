@@ -12,9 +12,9 @@ Eine eigenständige, native Android-Produktivitäts-App (für **Android-Smartpho
 
 ---
 
-## Direkt-Download (Installierbares Android-APK — Version 1.6.3)
+## Direkt-Download (Installierbares Android-APK — Version 1.6.4)
 
-- **[Thingsbook-v1.6.3-full.apk herunterladen (v1.6.3 — Sauberes Thingsbook-Symbol in der Seitenleiste ohne rotes „Heute“-Badge, bereinigter Bereichs-Header ohne überflüssige Aktions-Chips, zuverlässiges Rechtsklick-Kontextmenü über PointerEventPass.Initial + MotionEvent.BUTTON_SECONDARY, kontextbezogene Tag-Filterleiste sowie vollständiges Backup & Restore)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.3-full.apk)**
+- **[Thingsbook-v1.6.4-full.apk herunterladen (v1.6.4 — Zuverlässige Sofort-Auswahl von „Heute Abend“ auch bei täglich wiederkehrenden Aufgaben & aktiven Erinnerungen, Schutz vor Fokus-Rücksprung-Überschreibungen durch atomare DB-Teil-Updates, sichtbares „Heute Abend“-Badge auf zugeklappten Aufgabenkarten sowie Rechtsklick-Kontextmenü & Backup/Restore)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.4-full.apk)**
 
 ---
 

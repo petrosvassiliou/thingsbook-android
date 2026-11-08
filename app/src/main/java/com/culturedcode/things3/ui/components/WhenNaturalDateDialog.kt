@@ -69,7 +69,6 @@ import com.culturedcode.things3.ui.theme.ThingsTheme
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalTime
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -99,7 +98,6 @@ fun WhenNaturalDateDialog(
     val zone = ZoneId.systemDefault()
     val today = LocalDate.now(zone)
     val todayEpoch = today.atStartOfDay(zone).toInstant().toEpochMilli()
-    val tomorrowEpoch = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
 
     val initialSelectedDate = remember(currentWhenDate) {
         currentWhenDate?.let { epoch ->
@@ -130,13 +128,13 @@ fun WhenNaturalDateDialog(
     var showCustomTimePicker by remember { mutableStateOf(false) }
 
     fun computeReminderEpoch(targetDate: LocalDate?): Long? {
-        if (!reminderEnabled || targetDate == null) return null
-        return runCatching {
-            targetDate.atTime(LocalTime.of(reminderHour.coerceIn(0, 23), reminderMinute.coerceIn(0, 59)))
-                .atZone(zone)
-                .toInstant()
-                .toEpochMilli()
-        }.getOrNull()
+        return com.culturedcode.things3.domain.model.WhenScheduleResolver.computeReminderEpoch(
+            targetDate = targetDate,
+            zone = zone,
+            reminderEnabled = reminderEnabled,
+            reminderHour = reminderHour,
+            reminderMinute = reminderMinute
+        )
     }
 
     fun applySelection(state: ScheduleState, dateEpoch: Long?, reminderEpoch: Long?) {
@@ -216,54 +214,101 @@ fun WhenNaturalDateDialog(
                         icon = Icons.Outlined.Star,
                         tint = colors.todayStarYellow,
                         label = stringResource(R.string.view_today),
+                        selected = currentScheduleState == ScheduleState.TODAY && selectedDate == today,
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            val resolved = com.culturedcode.things3.domain.model.WhenScheduleResolver.resolvePresetSelection(
+                                preset = ScheduleState.TODAY,
+                                todayDate = today,
+                                zone = zone,
+                                reminderEnabled = reminderEnabled,
+                                reminderHour = reminderHour,
+                                reminderMinute = reminderMinute
+                            )
                             selectedDate = today
-                            selectedScheduleState = ScheduleState.TODAY
+                            selectedScheduleState = resolved.scheduleState
                             visibleMonth = YearMonth.from(today)
-                            if (!reminderEnabled) {
-                                applySelection(ScheduleState.TODAY, todayEpoch, null)
-                                onDismiss()
-                            }
+                            applySelection(
+                                resolved.scheduleState,
+                                resolved.whenDateEpochMillis,
+                                resolved.reminderEpochMillis
+                            )
+                            onDismiss()
                         }
                     )
                     CompactPresetChip(
                         icon = Icons.Outlined.Bedtime,
                         tint = colors.eveningMoonIndigo,
                         label = stringResource(R.string.view_this_evening),
+                        selected = currentScheduleState == ScheduleState.THIS_EVENING,
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            val resolved = com.culturedcode.things3.domain.model.WhenScheduleResolver.resolvePresetSelection(
+                                preset = ScheduleState.THIS_EVENING,
+                                todayDate = today,
+                                zone = zone,
+                                reminderEnabled = reminderEnabled,
+                                reminderHour = reminderHour,
+                                reminderMinute = reminderMinute
+                            )
                             selectedDate = today
-                            selectedScheduleState = ScheduleState.THIS_EVENING
-                            if (!reminderEnabled) {
-                                applySelection(ScheduleState.THIS_EVENING, todayEpoch, null)
-                                onDismiss()
-                            }
+                            selectedScheduleState = resolved.scheduleState
+                            visibleMonth = YearMonth.from(today)
+                            applySelection(
+                                resolved.scheduleState,
+                                resolved.whenDateEpochMillis,
+                                resolved.reminderEpochMillis
+                            )
+                            onDismiss()
                         }
                     )
                     CompactPresetChip(
                         icon = Icons.Outlined.CalendarMonth,
                         tint = colors.upcomingCoralRed,
                         label = stringResource(R.string.date_tomorrow),
+                        selected = currentScheduleState == ScheduleState.UPCOMING && selectedDate == today.plusDays(1),
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             val tmw = today.plusDays(1)
+                            val resolved = com.culturedcode.things3.domain.model.WhenScheduleResolver.resolvePresetSelection(
+                                preset = ScheduleState.UPCOMING,
+                                todayDate = today,
+                                zone = zone,
+                                reminderEnabled = reminderEnabled,
+                                reminderHour = reminderHour,
+                                reminderMinute = reminderMinute
+                            )
                             selectedDate = tmw
-                            selectedScheduleState = ScheduleState.UPCOMING
+                            selectedScheduleState = resolved.scheduleState
                             visibleMonth = YearMonth.from(tmw)
-                            if (!reminderEnabled) {
-                                applySelection(ScheduleState.UPCOMING, tomorrowEpoch, null)
-                                onDismiss()
-                            }
+                            applySelection(
+                                resolved.scheduleState,
+                                resolved.whenDateEpochMillis,
+                                resolved.reminderEpochMillis
+                            )
+                            onDismiss()
                         }
                     )
                     CompactPresetChip(
                         icon = Icons.Outlined.Layers,
                         tint = colors.anytimeTeal,
                         label = stringResource(R.string.view_anytime),
+                        selected = currentScheduleState == ScheduleState.ANYTIME,
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            applySelection(ScheduleState.ANYTIME, null, null)
+                            val resolved = com.culturedcode.things3.domain.model.WhenScheduleResolver.resolvePresetSelection(
+                                preset = ScheduleState.ANYTIME,
+                                todayDate = today,
+                                zone = zone,
+                                reminderEnabled = reminderEnabled,
+                                reminderHour = reminderHour,
+                                reminderMinute = reminderMinute
+                            )
+                            applySelection(
+                                resolved.scheduleState,
+                                resolved.whenDateEpochMillis,
+                                resolved.reminderEpochMillis
+                            )
                             onDismiss()
                         }
                     )
@@ -271,9 +316,22 @@ fun WhenNaturalDateDialog(
                         icon = Icons.Outlined.Archive,
                         tint = colors.somedayWarmAmber,
                         label = stringResource(R.string.view_someday),
+                        selected = currentScheduleState == ScheduleState.SOMEDAY,
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            applySelection(ScheduleState.SOMEDAY, null, null)
+                            val resolved = com.culturedcode.things3.domain.model.WhenScheduleResolver.resolvePresetSelection(
+                                preset = ScheduleState.SOMEDAY,
+                                todayDate = today,
+                                zone = zone,
+                                reminderEnabled = reminderEnabled,
+                                reminderHour = reminderHour,
+                                reminderMinute = reminderMinute
+                            )
+                            applySelection(
+                                resolved.scheduleState,
+                                resolved.whenDateEpochMillis,
+                                resolved.reminderEpochMillis
+                            )
                             onDismiss()
                         }
                     )
@@ -450,8 +508,13 @@ fun WhenNaturalDateDialog(
                         } else {
                             ""
                         }
+                        val baseLabel = if (selectedScheduleState == ScheduleState.THIS_EVENING && selectedDate == today) {
+                            "🌙 ${stringResource(R.string.view_this_evening)} ($formattedSelectedDate)"
+                        } else {
+                            formattedSelectedDate
+                        }
                         Text(
-                            text = "$formattedSelectedDate$reminderSuffix",
+                            text = "$baseLabel$reminderSuffix",
                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                             color = Color.White
                         )
@@ -467,13 +530,21 @@ private fun CompactPresetChip(
     icon: ImageVector,
     tint: Color,
     label: String,
+    selected: Boolean = false,
     onClick: () -> Unit
 ) {
     val colors = ThingsTheme.colors
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(7.dp))
-            .background(colors.tagPillBg)
+            .background(if (selected) colors.thingsBlueSoft else colors.tagPillBg)
+            .then(
+                if (selected) {
+                    Modifier.border(1.dp, colors.thingsBlue, RoundedCornerShape(7.dp))
+                } else {
+                    Modifier
+                }
+            )
             .clickable(onClick = onClick)
             .padding(horizontal = 7.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -488,8 +559,8 @@ private fun CompactPresetChip(
         Text(
             text = label,
             fontSize = 11.sp,
-            fontWeight = FontWeight.Medium,
-            color = colors.primaryText
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) colors.thingsBlue else colors.primaryText
         )
     }
 }

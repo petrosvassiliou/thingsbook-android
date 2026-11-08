@@ -80,6 +80,9 @@ class ThingsRepository @Inject constructor(
     fun observeAllTags(): Flow<List<Tag>> =
         database.tagDao().observeAllTags().map { list -> list.map { it.toDomain() } }
 
+    fun observeAllTasksRaw(): Flow<List<TaskEntity>> =
+        database.taskDao().observeAllTasksRaw()
+
     suspend fun getTasksForWidgetView(viewName: String): List<TaskItem> {
         return when (viewName.uppercase()) {
             "INBOX" -> observeInboxTasks().first()
@@ -984,6 +987,324 @@ class ThingsRepository @Inject constructor(
 
         syncRepository.syncBidirectionalDeltas()
         return projectId
+    }
+
+    // =========================================================================
+    // CSV Export & Import (Tasks, Areas, Projects, Tags, Dates, Checklist)
+    // =========================================================================
+
+    suspend fun exportTasksToCsv(): String {
+        val tasksWithDetails = database.taskDao().getAllActiveTasksWithDetails()
+        val areasById = database.areaDao().getActiveAreasList().associateBy { it.id }
+        val projectsById = database.projectDao().getActiveProjectsList().associateBy { it.id }
+        val zone = ZoneId.systemDefault()
+
+        val sb = StringBuilder()
+        sb.appendLine("Title,Notes,Status,ScheduleState,WhenDate,Deadline,Area,Project,Tags,Checklist")
+
+        for (item in tasksWithDetails) {
+            val t = item.task
+            val proj = t.projectId?.let { projectsById[it] }
+            val areaId = proj?.areaId ?: t.areaId
+            val area = areaId?.let { areasById[it] }
+            val whenStr = t.whenDate?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate().toString() } ?: ""
+            val deadlineStr = t.deadline?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate().toString() } ?: ""
+            val tagsStr = item.tags.filter { !it.isDeleted }.joinToString("; ") { it.title }
+            val checklistStr = item.checklistItems
+                .filter { !it.isDeleted }
+                .sortedBy { it.sortOrder }
+                .joinToString("; ") { sub -> (if (sub.isCompleted) "[x] " else "[ ] ") + sub.title }
+
+            val row = listOf(
+                escapeCsvField(t.title),
+                escapeCsvField(t.notes),
+                escapeCsvField(t.status.name),
+                escapeCsvField(t.scheduleState.name),
+                escapeCsvField(whenStr),
+                escapeCsvField(deadlineStr),
+                escapeCsvField(area?.title ?: ""),
+                escapeCsvField(proj?.title ?: ""),
+                escapeCsvField(tagsStr),
+                escapeCsvField(checklistStr)
+            ).joinToString(",")
+            sb.appendLine(row)
+        }
+        return sb.toString()
+    }
+
+    suspend fun importTasksFromCsv(csvContent: String): Int {
+        val cleaned = csvContent.removePrefix("\uFEFF").trim()
+        if (cleaned.isEmpty()) return 0
+
+        val firstLine = cleaned.lineSequence().firstOrNull() ?: return 0
+        val delimiter = if (firstLine.count { it == ';' } > firstLine.count { it == ',' } && !firstLine.contains("Title,")) ';' else ','
+        val rows = parseCsvRows(cleaned, delimiter)
+        if (rows.isEmpty()) return 0
+
+        val header = rows.first().map { it.trim().lowercase() }
+        val hasHeader = header.any { it in setOf("title", "titel", "aufgabe", "task", "name") }
+        val dataRows = if (hasHeader) rows.drop(1) else rows
+        if (dataRows.isEmpty()) return 0
+
+        fun colIndex(vararg names: String, defaultIdx: Int): Int {
+            if (!hasHeader) return defaultIdx
+            val found = header.indexOfFirst { h -> names.any { h == it } }
+            return if (found >= 0) found else defaultIdx
+        }
+
+        val idxTitle = colIndex("title", "titel", "aufgabe", "task", "name", defaultIdx = 0)
+        val idxNotes = colIndex("notes", "notizen", "beschreibung", "description", defaultIdx = 1)
+        val idxStatus = colIndex("status", defaultIdx = 2)
+        val idxSchedule = colIndex("schedulestate", "schedule", "when", "ansicht", "view", defaultIdx = 3)
+        val idxWhenDate = colIndex("whendate", "startdatum", "date", "datum", defaultIdx = 4)
+        val idxDeadline = colIndex("deadline", "fälligkeit", "due", "duedate", "zieldatum", defaultIdx = 5)
+        val idxArea = colIndex("area", "bereich", defaultIdx = 6)
+        val idxProject = colIndex("project", "projekt", defaultIdx = 7)
+        val idxTags = colIndex("tags", "tag", defaultIdx = 8)
+        val idxChecklist = colIndex("checklist", "subtasks", "unteraufgaben", defaultIdx = 9)
+
+        val zone = ZoneId.systemDefault()
+        val now = System.currentTimeMillis()
+        var importedCount = 0
+
+        val existingAreas = database.areaDao().getActiveAreasList().toMutableList()
+        val existingProjects = database.projectDao().getActiveProjectsList().toMutableList()
+        val existingTags = database.tagDao().observeAllTags().first().toMutableList()
+
+        for ((rowIdx, cols) in dataRows.withIndex()) {
+            val rawTitle = cols.getOrNull(idxTitle)?.trim() ?: ""
+            if (rawTitle.isEmpty()) continue
+
+            val rawNotes = cols.getOrNull(idxNotes)?.trim() ?: ""
+            val rawStatus = cols.getOrNull(idxStatus)?.trim()?.uppercase() ?: "OPEN"
+            val rawSchedule = cols.getOrNull(idxSchedule)?.trim()?.uppercase() ?: "TODAY"
+            val rawWhen = cols.getOrNull(idxWhenDate)?.trim() ?: ""
+            val rawDeadline = cols.getOrNull(idxDeadline)?.trim() ?: ""
+            val rawArea = cols.getOrNull(idxArea)?.trim() ?: ""
+            val rawProject = cols.getOrNull(idxProject)?.trim() ?: ""
+            val rawTags = cols.getOrNull(idxTags)?.trim() ?: ""
+            val rawChecklist = cols.getOrNull(idxChecklist)?.trim() ?: ""
+
+            val status = runCatching { TaskStatus.valueOf(rawStatus) }.getOrDefault(TaskStatus.OPEN)
+            val parsedWhen = parseFlexibleCsvDate(rawWhen, zone)
+            val parsedDeadline = parseFlexibleCsvDate(rawDeadline, zone)
+
+            val scheduleState = runCatching { ScheduleState.valueOf(rawSchedule) }.getOrElse {
+                when {
+                    parsedWhen != null && parsedWhen > endOfTodayEpochMillis() -> ScheduleState.UPCOMING
+                    parsedWhen != null -> ScheduleState.TODAY
+                    else -> ScheduleState.INBOX
+                }
+            }
+
+            // Match or create Area (up to MAX_AREAS = 8)
+            var resolvedAreaId: String? = null
+            if (rawArea.isNotEmpty()) {
+                val matchArea = existingAreas.firstOrNull { it.title.equals(rawArea, ignoreCase = true) }
+                if (matchArea != null) {
+                    resolvedAreaId = matchArea.id
+                } else if (existingAreas.size < MAX_AREAS) {
+                    val newAreaId = UUID.randomUUID().toString()
+                    val newArea = AreaEntity(
+                        id = newAreaId,
+                        title = rawArea,
+                        sortOrder = (existingAreas.size + 1) * 1000.0,
+                        tagIdsJson = "[]",
+                        createdAt = now,
+                        updatedAt = now,
+                        isDeleted = false,
+                        isDirty = true
+                    )
+                    database.areaDao().upsert(newArea)
+                    existingAreas.add(newArea)
+                    resolvedAreaId = newAreaId
+                }
+            }
+
+            // Match or create Project
+            var resolvedProjectId: String? = null
+            if (rawProject.isNotEmpty()) {
+                val matchProj = existingProjects.firstOrNull { it.title.equals(rawProject, ignoreCase = true) }
+                if (matchProj != null) {
+                    resolvedProjectId = matchProj.id
+                    if (resolvedAreaId == null) resolvedAreaId = matchProj.areaId
+                } else {
+                    val newProjId = UUID.randomUUID().toString()
+                    val newProj = ProjectEntity(
+                        id = newProjId,
+                        areaId = resolvedAreaId,
+                        title = rawProject,
+                        notes = "",
+                        status = ProjectStatus.ACTIVE,
+                        scheduleState = ScheduleState.ANYTIME,
+                        whenDate = null,
+                        deadline = null,
+                        completedAt = null,
+                        sortOrder = (existingProjects.size + 1) * 1000.0,
+                        tagIdsJson = "[]",
+                        createdAt = now,
+                        updatedAt = now,
+                        isDeleted = false,
+                        isDirty = true
+                    )
+                    database.projectDao().upsert(newProj)
+                    existingProjects.add(newProj)
+                    resolvedProjectId = newProjId
+                }
+            }
+
+            // Match or create Tags
+            val tagIds = mutableListOf<String>()
+            if (rawTags.isNotEmpty()) {
+                val tagNames = rawTags.split(";", "|").map { it.trim() }.filter { it.isNotEmpty() }
+                for (tName in tagNames) {
+                    val matchTag = existingTags.firstOrNull { it.title.equals(tName, ignoreCase = true) }
+                    if (matchTag != null) {
+                        tagIds.add(matchTag.id)
+                    } else {
+                        val newTagId = createOrUpdateTag(title = tName)
+                        val createdTag = database.tagDao().getById(newTagId)
+                        if (createdTag != null) existingTags.add(createdTag)
+                        tagIds.add(newTagId)
+                    }
+                }
+            }
+
+            val taskId = UUID.randomUUID().toString()
+            val taskEntity = TaskEntity(
+                id = taskId,
+                title = rawTitle,
+                notes = rawNotes,
+                status = status,
+                scheduleState = scheduleState,
+                whenDate = parsedWhen,
+                deadline = parsedDeadline,
+                reminderTime = null,
+                completedAt = if (status == TaskStatus.COMPLETED || status == TaskStatus.CANCELED) now else null,
+                projectId = resolvedProjectId,
+                headingId = null,
+                areaId = resolvedAreaId,
+                recurrenceRuleJson = null,
+                sortOrder = (now % 100_000) + rowIdx * 50.0,
+                tagIdsJson = json.encodeToString(tagIds),
+                createdAt = now,
+                updatedAt = now,
+                isDeleted = false,
+                isDirty = true
+            )
+            database.taskDao().upsertTaskWithTags(taskEntity, tagIds)
+
+            if (rawChecklist.isNotEmpty()) {
+                val subParts = rawChecklist.split(";").map { it.trim() }.filter { it.isNotEmpty() }
+                val subEntities = subParts.mapIndexed { sIdx, part ->
+                    val completed = part.startsWith("[x]", ignoreCase = true)
+                    val cleanSubTitle = part
+                        .removePrefix("[x]")
+                        .removePrefix("[X]")
+                        .removePrefix("[ ]")
+                        .removePrefix("[]")
+                        .trim()
+                    ChecklistItemEntity(
+                        id = UUID.randomUUID().toString(),
+                        taskId = taskId,
+                        title = cleanSubTitle.ifEmpty { part },
+                        isCompleted = completed,
+                        sortOrder = (sIdx + 1) * 100.0,
+                        createdAt = now,
+                        updatedAt = now,
+                        isDeleted = false,
+                        isDirty = true
+                    )
+                }
+                if (subEntities.isNotEmpty()) {
+                    database.checklistDao().upsertAll(subEntities)
+                }
+            }
+            importedCount++
+        }
+
+        if (importedCount > 0) {
+            syncRepository.syncBidirectionalDeltas()
+        }
+        return importedCount
+    }
+
+    private fun escapeCsvField(value: String): String {
+        if (value.contains(",") || value.contains("\"") || value.contains("\n") || value.contains("\r")) {
+            return "\"" + value.replace("\"", "\"\"") + "\""
+        }
+        return value
+    }
+
+    private fun parseCsvRows(csv: String, delimiter: Char): List<List<String>> {
+        val result = mutableListOf<List<String>>()
+        var currentRow = mutableListOf<String>()
+        val currentField = StringBuilder()
+        var inQuotes = false
+        var i = 0
+        while (i < csv.length) {
+            val ch = csv[i]
+            if (inQuotes) {
+                if (ch == '"') {
+                    if (i + 1 < csv.length && csv[i + 1] == '"') {
+                        currentField.append('"')
+                        i++
+                    } else {
+                        inQuotes = false
+                    }
+                } else {
+                    currentField.append(ch)
+                }
+            } else {
+                when (ch) {
+                    '"' -> inQuotes = true
+                    delimiter -> {
+                        currentRow.add(currentField.toString())
+                        currentField.clear()
+                    }
+                    '\r' -> {
+                        if (i + 1 < csv.length && csv[i + 1] == '\n') i++
+                        currentRow.add(currentField.toString())
+                        currentField.clear()
+                        if (currentRow.any { it.isNotBlank() }) result.add(currentRow)
+                        currentRow = mutableListOf()
+                    }
+                    '\n' -> {
+                        currentRow.add(currentField.toString())
+                        currentField.clear()
+                        if (currentRow.any { it.isNotBlank() }) result.add(currentRow)
+                        currentRow = mutableListOf()
+                    }
+                    else -> currentField.append(ch)
+                }
+            }
+            i++
+        }
+        if (currentField.isNotEmpty() || currentRow.isNotEmpty()) {
+            currentRow.add(currentField.toString())
+            if (currentRow.any { it.isNotBlank() }) result.add(currentRow)
+        }
+        return result
+    }
+
+    private fun parseFlexibleCsvDate(raw: String, zone: ZoneId): Long? {
+        if (raw.isBlank()) return null
+        val trimmed = raw.trim()
+        // Try ISO YYYY-MM-DD
+        runCatching {
+            return LocalDate.parse(trimmed).atStartOfDay(zone).toInstant().toEpochMilli()
+        }
+        // Try DD.MM.YYYY
+        runCatching {
+            val parts = trimmed.split(".")
+            if (parts.size == 3) {
+                val d = parts[0].trim().toInt()
+                val m = parts[1].trim().toInt()
+                val y = parts[2].trim().toInt()
+                return LocalDate.of(y, m, d).atStartOfDay(zone).toInstant().toEpochMilli()
+            }
+        }
+        return null
     }
 
     private fun decodeStringList(raw: String): List<String> =

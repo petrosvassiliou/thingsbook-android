@@ -49,11 +49,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -72,7 +76,7 @@ import java.util.Locale
 /**
  * Things-for-Mac Areas of Responsibility Manager Modal:
  * - Preconfigured with "Work" and "Home"
- * - Supports up to 6 Areas (ThingsRepository.MAX_AREAS = 6)
+ * - Supports up to 8 Areas (ThingsRepository.MAX_AREAS = 8)
  * - Supports Rename, Move Up/Down (Reorder), Open Area, and Delete.
  */
 @OptIn(ExperimentalLayoutApi::class)
@@ -90,9 +94,9 @@ fun ThingsAreaManagerModal(
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
 
-    var newAreaTitle by remember { mutableStateOf("") }
+    var newAreaField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
     var editingAreaId by remember { mutableStateOf<String?>(null) }
-    var editingAreaTitle by remember { mutableStateOf("") }
+    var editingAreaField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
 
     val canAddMore = areas.size < ThingsRepository.MAX_AREAS
 
@@ -187,16 +191,25 @@ fun ThingsAreaManagerModal(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     OutlinedTextField(
-                                        value = editingAreaTitle,
-                                        onValueChange = { editingAreaTitle = it },
+                                        value = editingAreaField,
+                                        onValueChange = { editingAreaField = it },
                                         singleLine = true,
-                                        modifier = Modifier.weight(1f),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .onFocusChanged { focusState ->
+                                                if (focusState.isFocused) {
+                                                    val txt = editingAreaField.text
+                                                    editingAreaField = editingAreaField.copy(
+                                                        selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                                    )
+                                                }
+                                            },
                                         label = { Text(stringResource(R.string.areas_rename_label)) }
                                     )
                                     IconButton(
                                         onClick = {
-                                            if (editingAreaTitle.isNotBlank()) {
-                                                onRenameArea(area.id, editingAreaTitle.trim())
+                                            if (editingAreaField.text.isNotBlank()) {
+                                                onRenameArea(area.id, editingAreaField.text.trim())
                                                 editingAreaId = null
                                             }
                                         }
@@ -292,7 +305,10 @@ fun ThingsAreaManagerModal(
                                         IconButton(
                                             onClick = {
                                                 editingAreaId = area.id
-                                                editingAreaTitle = area.title
+                                                editingAreaField = TextFieldValue(
+                                                    text = area.title,
+                                                    selection = TextRange(0, area.title.length)
+                                                )
                                             },
                                             modifier = Modifier.size(28.dp)
                                         ) {
@@ -346,11 +362,26 @@ fun ThingsAreaManagerModal(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         OutlinedTextField(
-                            value = newAreaTitle,
-                            onValueChange = { newAreaTitle = it },
-                            placeholder = { Text(stringResource(R.string.entity_new_area)) },
+                            value = newAreaField,
+                            onValueChange = { newAreaField = it },
+                            placeholder = {
+                                Text(
+                                    text = stringResource(R.string.entity_new_area),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            },
                             singleLine = true,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .weight(1f)
+                                .onFocusChanged { focusState ->
+                                    if (focusState.isFocused) {
+                                        val txt = newAreaField.text
+                                        newAreaField = newAreaField.copy(
+                                            selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                        )
+                                    }
+                                }
                         )
                         Box(
                             modifier = Modifier
@@ -358,10 +389,10 @@ fun ThingsAreaManagerModal(
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(colors.thingsBlue)
                                 .clickable {
-                                    if (newAreaTitle.isNotBlank()) {
+                                    if (newAreaField.text.isNotBlank()) {
                                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        onCreateArea(newAreaTitle.trim())
-                                        newAreaTitle = ""
+                                        onCreateArea(newAreaField.text.trim())
+                                        newAreaField = TextFieldValue(text = "", selection = TextRange(0))
                                     }
                                 },
                             contentAlignment = Alignment.Center
@@ -375,9 +406,9 @@ fun ThingsAreaManagerModal(
                         }
                     }
 
-                    // Quick 1-tap Area suggestions if not yet present
+                    // Quick 1-tap Area suggestions if not yet present (up to 8 Areas)
                     val existingNamesLower = areas.map { it.title.lowercase() }.toSet()
-                    val suggestions = listOf("Work", "Home", "Finance", "Health", "Family", "Study")
+                    val suggestions = listOf("Work", "Home", "Finance", "Health", "Family", "Study", "Sport", "Hobby")
                         .filter { it.lowercase() !in existingNamesLower }
                     if (suggestions.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(8.dp))
@@ -431,7 +462,7 @@ fun ThingsAreaManagerModal(
 /**
  * Dialog to Create a New Project or Edit an Existing Project:
  * - Project Title & Notes
- * - Area Assignment (Work, Home, or any of the up to 6 Areas)
+ * - Area Assignment (Work, Home, or any of the up to 8 Areas)
  * - Project Target Date / Deadline (Zieldatum) via our compact calendar picker!
  */
 @Composable
@@ -447,8 +478,24 @@ fun CreateOrEditProjectDialog(
     val haptics = LocalHapticFeedback.current
     val zone = ZoneId.systemDefault()
 
-    var title by remember(existingProject) { mutableStateOf(existingProject?.title ?: "") }
-    var notes by remember(existingProject) { mutableStateOf(existingProject?.notes ?: "") }
+    var titleField by remember(existingProject) {
+        val initialTitle = existingProject?.title ?: ""
+        mutableStateOf(
+            TextFieldValue(
+                text = initialTitle,
+                selection = if (initialTitle.isEmpty()) TextRange(0) else TextRange(0, initialTitle.length)
+            )
+        )
+    }
+    var notesField by remember(existingProject) {
+        val initialNotes = existingProject?.notes ?: ""
+        mutableStateOf(
+            TextFieldValue(
+                text = initialNotes,
+                selection = if (initialNotes.isEmpty()) TextRange(0) else TextRange(0, initialNotes.length)
+            )
+        )
+    }
     var selectedAreaId by remember(existingProject, preselectedAreaId) {
         mutableStateOf(existingProject?.areaId ?: preselectedAreaId)
     }
@@ -508,22 +555,46 @@ fun CreateOrEditProjectDialog(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
+                    value = titleField,
+                    onValueChange = { titleField = it },
                     label = { Text(stringResource(R.string.entity_project)) },
-                    placeholder = { Text(stringResource(R.string.entity_new_project)) },
+                    placeholder = {
+                        Text(
+                            text = stringResource(R.string.entity_new_project),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { focusState ->
+                            if (focusState.isFocused) {
+                                val txt = titleField.text
+                                titleField = titleField.copy(
+                                    selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                )
+                            }
+                        }
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
 
                 OutlinedTextField(
-                    value = notes,
-                    onValueChange = { notes = it },
+                    value = notesField,
+                    onValueChange = { notesField = it },
                     label = { Text(stringResource(R.string.placeholder_notes)) },
                     maxLines = 3,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { focusState ->
+                            if (focusState.isFocused) {
+                                val txt = notesField.text
+                                notesField = notesField.copy(
+                                    selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                )
+                            }
+                        }
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -684,9 +755,14 @@ fun CreateOrEditProjectDialog(
                             .clip(RoundedCornerShape(9.dp))
                             .background(colors.thingsBlue)
                             .clickable {
-                                if (title.isNotBlank()) {
+                                if (titleField.text.isNotBlank()) {
                                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onSaveProject(title.trim(), notes.trim(), selectedAreaId, deadlineEpochMillis)
+                                    onSaveProject(
+                                        titleField.text.trim(),
+                                        notesField.text.trim(),
+                                        selectedAreaId,
+                                        deadlineEpochMillis
+                                    )
                                     onDismiss()
                                 }
                             },
@@ -702,6 +778,7 @@ fun CreateOrEditProjectDialog(
             }
         }
     }
+
 
     if (showDeadlineCalendar) {
         DeadlineDatePickerDialog(

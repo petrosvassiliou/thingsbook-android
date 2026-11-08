@@ -12,9 +12,9 @@ Eine eigenständige, native Android-Produktivitäts-App (für **Android-Smartpho
 
 ---
 
-## Direkt-Download (Installierbares Android-APK — Version 1.2.5)
+## Direkt-Download (Installierbares Android-APK — Version 1.3.0)
 
-- **[Thingsbook-v1.2.5-full.apk herunterladen (v1.2.5 — Neues interaktives Things-for-Mac Home-Screen-Widget mit direktem Ansichtswechsel, optimierter Abstand zwischen Seitenleiste und Hauptbereich, echter Android Google-Konto-Auswahldialog, verbessertes Ansichts-Spacing & Tag-für-Tag-Gruppierung unter „Geplant“)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.2.5-full.apk)**
+- **[Thingsbook-v1.3.0-full.apk herunterladen (v1.3.0 — Inline-Schnellsuche mit vollen Aufgabendetails, Einstellungen-Modal mit Live-Statistiken & CSV-Import/Export, ausblendbare Seitenleiste, bis zu 8 Bereiche, Rechtsklick/Long-Press-Kontextmenü, Things-for-iPhone-Wischgesten, Mehrfachauswahl per Maus & intelligente Textbox-Cursorsteuerung)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.3.0-full.apk)**
 
 ---
 

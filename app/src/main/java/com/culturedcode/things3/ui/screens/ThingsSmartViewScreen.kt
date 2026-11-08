@@ -27,12 +27,18 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.Close
@@ -44,11 +50,16 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.LocalOffer
+import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.MenuOpen
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.SelectAll
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -60,6 +71,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,6 +80,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.key.Key
@@ -81,10 +96,13 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
+import com.culturedcode.things3.BuildConfig
 import com.culturedcode.things3.R
 import com.culturedcode.things3.data.repository.CloudSyncStatus
 import com.culturedcode.things3.data.repository.ThingsRepository
@@ -93,8 +111,10 @@ import com.culturedcode.things3.domain.model.Heading
 import com.culturedcode.things3.domain.model.Project
 import com.culturedcode.things3.domain.model.RecurrenceMode
 import com.culturedcode.things3.domain.model.RecurrenceUnit
+import com.culturedcode.things3.domain.model.ScheduleState
 import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskItem
+import com.culturedcode.things3.domain.model.TaskStatus
 import com.culturedcode.things3.ui.components.CreateOrEditProjectDialog
 import com.culturedcode.things3.ui.components.DeadlineDatePickerDialog
 import com.culturedcode.things3.ui.components.ExpandableTaskCard
@@ -103,6 +123,7 @@ import com.culturedcode.things3.ui.components.GeminiLogbookReflectionCard
 import com.culturedcode.things3.ui.components.MagicPlusDragState
 import com.culturedcode.things3.ui.components.MagicPlusFab
 import com.culturedcode.things3.ui.components.MagicPlusInsertionGap
+import com.culturedcode.things3.ui.components.MoveTaskToProjectOrAreaDialog
 import com.culturedcode.things3.ui.components.ProjectProgressRing
 import com.culturedcode.things3.ui.components.SmartViewIcon
 import com.culturedcode.things3.ui.components.SmartViewType
@@ -110,8 +131,12 @@ import com.culturedcode.things3.ui.components.ThingsAreaManagerModal
 import com.culturedcode.things3.ui.components.ThingsAuthAndSyncModal
 import com.culturedcode.things3.ui.components.ThingsDeadlineBadge
 import com.culturedcode.things3.ui.components.ThingsNotificationSettingsModal
+import com.culturedcode.things3.ui.components.ThingsReminderBadge
+import com.culturedcode.things3.ui.components.ThingsRepeatBadge
+import com.culturedcode.things3.ui.components.ThingsSettingsModal
 import com.culturedcode.things3.ui.components.ThingsTagManagerModal
 import com.culturedcode.things3.ui.components.ThingsTagPill
+import com.culturedcode.things3.ui.components.ThingsWhenBadge
 import com.culturedcode.things3.ui.components.ThisEveningHeaderBadge
 import com.culturedcode.things3.ui.theme.ThingsTheme
 import com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget
@@ -174,14 +199,23 @@ fun ThingsSmartViewScreen(
     val authInfoMessage by viewModel.authInfoMessage.collectAsState()
     val currentUserIdentifier by viewModel.currentUserIdentifier.collectAsState()
 
+    // v1.3.0 States: Settings Modal, Collapsible Sidebar, Local DB Mode, Statistics, CSV, Multi-Selection
+    val isSettingsModalOpen by viewModel.isSettingsModalOpen.collectAsState()
+    val isSidebarVisible by viewModel.isSidebarVisible.collectAsState()
+    val isLocalOnlyDbMode by viewModel.isLocalOnlyDbMode.collectAsState()
+    val statistics by viewModel.statistics.collectAsState()
+    val csvStatusMessage by viewModel.csvStatusMessage.collectAsState()
+    val selectedTaskIds by viewModel.selectedTaskIds.collectAsState()
+
     var magicDragState by remember { mutableStateOf(MagicPlusDragState()) }
     var showLanguageMenu by remember { mutableStateOf(false) }
     var showCreateProjectDialog by remember { mutableStateOf(false) }
     var projectDialogPreselectedAreaId by remember { mutableStateOf<String?>(null) }
     var editingProject by remember { mutableStateOf<Project?>(null) }
+    var showBatchMoveDialog by remember { mutableStateOf(false) }
 
     val defaultNewTodoTitle = ""
-    val defaultNewHeadingTitle = stringResource(R.string.entity_new_heading)
+    val defaultNewHeadingTitle = ""
 
     // Determine primary task list for current view, filtered by selected tag if active
     val rawPrimaryTasks: List<TaskItem> = when (val target = navTarget) {
@@ -209,6 +243,17 @@ fun ThingsSmartViewScreen(
         else eveningTasks.filter { task -> task.tags.any { it.id == tagId } }
     }
 
+    val allVisibleViewTasks: List<TaskItem> = remember(primaryTasks, filteredEveningTasks, navTarget) {
+        if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY)) {
+            primaryTasks + filteredEveningTasks
+        } else {
+            primaryTasks
+        }
+    }
+    val allVisibleTaskIds: List<String> = remember(allVisibleViewTasks) {
+        allVisibleViewTasks.map { it.id }
+    }
+
     val isProjectView = navTarget is ActiveNavigationTarget.ProjectDetail
     val isAreaView = navTarget is ActiveNavigationTarget.AreaDetail
     val currentProject: Project? = (navTarget as? ActiveNavigationTarget.ProjectDetail)?.let { detail ->
@@ -220,6 +265,7 @@ fun ThingsSmartViewScreen(
 
     // Adaptive Layout Detection: Tablets & Foldables (>= 700dp) vs. Android Phones (< 700dp)
     val isWideScreen = configuration.screenWidthDp >= 700
+    val showSidebar = isWideScreen && isSidebarVisible
     val smartViewCounts = mapOf(
         SmartViewType.INBOX to inboxTasks.size,
         SmartViewType.TODAY to (todayTasks.size + eveningTasks.size),
@@ -238,6 +284,10 @@ fun ThingsSmartViewScreen(
             allProjects = activeProjects,
             allHeadings = allHeadings,
             isExpanded = expandedTaskId == task.id,
+            isSelected = task.id in selectedTaskIds,
+            isSelectionModeActive = selectedTaskIds.isNotEmpty(),
+            onToggleSelection = { viewModel.toggleTaskSelection(task.id) },
+            onRangeSelect = { viewModel.selectTaskRange(allVisibleTaskIds, task.id) },
             isGeneratingMagicBreakdown = magicBreakdownTaskId == task.id,
             onExpandToggle = { viewModel.toggleTaskExpansion(task.id) },
             onStatusChange = { viewModel.updateTaskStatus(task.id, it) },
@@ -276,7 +326,11 @@ fun ThingsSmartViewScreen(
                     val ctrlOrMeta = event.isCtrlPressed || event.isMetaPressed
                     when {
                         ctrlOrMeta && event.key == Key.F -> {
-                            viewModel.setQuickFindOpen(true)
+                            viewModel.setQuickFindOpen(!isQuickFindOpen)
+                            true
+                        }
+                        ctrlOrMeta && event.key == Key.A && expandedTaskId == null -> {
+                            viewModel.selectAllTasks(allVisibleTaskIds)
                             true
                         }
                         ctrlOrMeta && event.key == Key.N -> {
@@ -289,8 +343,16 @@ fun ThingsSmartViewScreen(
                         }
                         event.key == Key.Escape -> {
                             when {
+                                selectedTaskIds.isNotEmpty() -> {
+                                    viewModel.clearTaskSelection()
+                                    true
+                                }
                                 isQuickFindOpen -> {
                                     viewModel.setQuickFindOpen(false)
+                                    true
+                                }
+                                isSettingsModalOpen -> {
+                                    viewModel.setSettingsModalOpen(false)
                                     true
                                 }
                                 isGeminiModalOpen -> {
@@ -336,7 +398,7 @@ fun ThingsSmartViewScreen(
                     }
                 }
             )
-            // Swipe down gesture on any list opens Quick Find immediately
+            // Swipe down gesture on any list opens Quick Find inline immediately
             .pointerInput(Unit) {
                 var accumulatedPull = 0f
                 detectVerticalDragGestures(
@@ -359,7 +421,7 @@ fun ThingsSmartViewScreen(
                 .fillMaxSize()
                 .statusBarsPadding()
         ) {
-            if (isWideScreen) {
+            if (showSidebar) {
                 ThingsChromebookSidebar(
                     navTarget = navTarget,
                     smartViewCounts = smartViewCounts,
@@ -373,7 +435,8 @@ fun ThingsSmartViewScreen(
                         projectDialogPreselectedAreaId = areaId
                         editingProject = null
                         showCreateProjectDialog = true
-                    }
+                    },
+                    onToggleSidebar = { viewModel.toggleSidebarVisible() }
                 )
                 VerticalDivider(
                     color = colors.hairlineDivider,
@@ -391,32 +454,81 @@ fun ThingsSmartViewScreen(
                 Column(
                     modifier = Modifier
                         .padding(
-                            start = if (isWideScreen) 12.dp else 0.dp,
-                            end = if (isWideScreen) 20.dp else 0.dp
+                            start = if (showSidebar) 12.dp else 0.dp,
+                            end = if (showSidebar) 20.dp else 0.dp
                         )
                         .widthIn(max = if (isWideScreen) 1040.dp else 2000.dp)
                         .fillMaxSize()
                 ) {
-                    // Top Utility & Navigation Bar (Quick Find, Gemini AI ✨, Areas 📦, Tags 🏷️, Notifications 🔔, Language, Cloud Sync)
+                    // Top Utility & Navigation Bar (Sidebar Toggle, Quick Find, Gemini AI ✨, Areas 📦, Tags 🏷️, Notifications 🔔, Language, Cloud Sync, Settings ⚙️)
                     TopThingsbookBar(
+                        isWideScreen = isWideScreen,
+                        isSidebarVisible = isSidebarVisible,
+                        isQuickFindOpen = isQuickFindOpen,
                         syncStatus = syncStatus,
                         dailyDigestEnabled = dailyDigestConfig.enabled,
                         showLanguageMenu = showLanguageMenu,
+                        onToggleSidebar = { viewModel.toggleSidebarVisible() },
                         onToggleLanguageMenu = { showLanguageMenu = it },
                         onSelectLanguage = { tag ->
                             showLanguageMenu = false
                             viewModel.switchAppLanguage(tag)
                         },
-                        onOpenQuickFind = { viewModel.setQuickFindOpen(true) },
+                        onOpenQuickFind = { viewModel.setQuickFindOpen(!isQuickFindOpen) },
                         onOpenGeminiHub = { viewModel.setGeminiModalOpen(true) },
                         onOpenAreaManager = { viewModel.setAreaManagerOpen(true) },
                         onOpenTagManager = { viewModel.setTagManagerOpen(true) },
                         onOpenNotificationSettings = { viewModel.setNotificationSettingsOpen(true) },
-                        onManualSync = { viewModel.setAuthModalOpen(true) }
+                        onManualSync = { viewModel.setAuthModalOpen(true) },
+                        onOpenSettings = { viewModel.setSettingsModalOpen(true) }
                     )
 
-                    // On Android Phones (< 700dp), display the horizontal Smart Views, Areas (Work, Home) & Projects Strip
-                    if (!isWideScreen) {
+                    // Inline Quick Find Panel (expands directly below Top Bar with rich task details!)
+                    AnimatedVisibility(
+                        visible = isQuickFindOpen,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        InlineQuickFindSection(
+                            query = quickFindQuery,
+                            taskResults = quickFindTasks,
+                            projectResults = quickFindProjects,
+                            areas = areas,
+                            allProjects = activeProjects,
+                            locale = activeLocale,
+                            onQueryChange = { viewModel.updateQuickFindQuery(it) },
+                            onSelectSmartView = {
+                                viewModel.setQuickFindOpen(false)
+                                viewModel.selectSmartView(it)
+                            },
+                            onSelectArea = {
+                                viewModel.setQuickFindOpen(false)
+                                viewModel.selectArea(it)
+                            },
+                            onSelectProject = {
+                                viewModel.setQuickFindOpen(false)
+                                viewModel.selectProject(it)
+                            },
+                            onSelectTask = { task ->
+                                viewModel.setQuickFindOpen(false)
+                                when {
+                                    task.projectId != null -> viewModel.selectProject(task.projectId)
+                                    task.areaId != null && task.scheduleState == ScheduleState.ANYTIME -> viewModel.selectArea(task.areaId)
+                                    task.scheduleState == ScheduleState.INBOX -> viewModel.selectSmartView(SmartViewType.INBOX)
+                                    task.scheduleState == ScheduleState.TODAY || task.scheduleState == ScheduleState.THIS_EVENING ->
+                                        viewModel.selectSmartView(SmartViewType.TODAY)
+                                    task.scheduleState == ScheduleState.UPCOMING -> viewModel.selectSmartView(SmartViewType.UPCOMING)
+                                    task.scheduleState == ScheduleState.SOMEDAY -> viewModel.selectSmartView(SmartViewType.SOMEDAY)
+                                    else -> viewModel.selectSmartView(SmartViewType.ANYTIME)
+                                }
+                                viewModel.toggleTaskExpansion(task.id)
+                            },
+                            onClose = { viewModel.setQuickFindOpen(false) }
+                        )
+                    }
+
+                    // Show Horizontal View Switcher Strip on Phones (< 700dp) OR whenever the Sidebar is hidden!
+                    if (!showSidebar) {
                         SmartViewNavigationStrip(
                             navTarget = navTarget,
                             areas = areas,
@@ -706,6 +818,58 @@ fun ThingsSmartViewScreen(
             }
         }
 
+        // App Version Badge at bottom-left when Sidebar is hidden or on phones
+        if (!showSidebar) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = 16.dp, bottom = 14.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(colors.tagPillBg.copy(alpha = 0.72f))
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Text(
+                    text = "Thingsbook v${BuildConfig.VERSION_NAME}",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    color = colors.secondaryText
+                )
+            }
+        }
+
+        // Floating Multi-Task Selection Action Bar (Mouse Ctrl/Shift-Click & Things-for-iPhone Swipe)
+        if (selectedTaskIds.isNotEmpty()) {
+            ThingsMultiSelectionBar(
+                selectedCount = selectedTaskIds.size,
+                totalVisibleCount = allVisibleTaskIds.size,
+                onSelectAll = { viewModel.selectAllTasks(allVisibleTaskIds) },
+                onScheduleToday = {
+                    val todayStartMillis = LocalDate.now()
+                        .atStartOfDay(ZoneId.systemDefault())
+                        .toInstant()
+                        .toEpochMilli()
+                    viewModel.batchScheduleSelectedTasks(allVisibleViewTasks, ScheduleState.TODAY, todayStartMillis)
+                },
+                onScheduleTomorrow = {
+                    val tomorrowStartMillis = LocalDate.now()
+                        .plusDays(1)
+                        .atStartOfDay(ZoneId.systemDefault())
+                        .toInstant()
+                        .toEpochMilli()
+                    viewModel.batchScheduleSelectedTasks(allVisibleViewTasks, ScheduleState.UPCOMING, tomorrowStartMillis)
+                },
+                onOpenBatchMove = { showBatchMoveDialog = true },
+                onBatchComplete = { viewModel.batchCompleteSelectedTasks() },
+                onBatchDelete = { viewModel.batchDeleteSelectedTasks() },
+                onClearSelection = { viewModel.clearTaskSelection() },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 16.dp, vertical = 22.dp)
+            )
+        }
+
         // Draggable "Magic Plus" Floating Action Button (bottom-right)
         MagicPlusFab(
             itemCount = primaryTasks.size,
@@ -725,26 +889,46 @@ fun ThingsSmartViewScreen(
                 .padding(end = 24.dp, bottom = 28.dp)
         )
 
-        // Quick Find Modal (SQLite FTS5 unicode61 real-time search)
-        if (isQuickFindOpen) {
-            QuickFindDialog(
-                query = quickFindQuery,
-                taskResults = quickFindTasks,
-                projectResults = quickFindProjects,
-                onQueryChange = { viewModel.updateQuickFindQuery(it) },
-                onSelectSmartView = {
-                    viewModel.setQuickFindOpen(false)
-                    viewModel.selectSmartView(it)
+        // Batch Move Dialog for Multi-Selection
+        if (showBatchMoveDialog) {
+            MoveTaskToProjectOrAreaDialog(
+                currentProjectId = null,
+                currentHeadingId = null,
+                currentAreaId = null,
+                areas = areas,
+                projects = activeProjects,
+                headings = allHeadings,
+                onMoveTask = { pId, hId, aId ->
+                    viewModel.batchMoveSelectedTasks(allVisibleViewTasks, pId, hId, aId)
                 },
-                onSelectProject = {
-                    viewModel.setQuickFindOpen(false)
-                    viewModel.selectProject(it)
+                onDismiss = { showBatchMoveDialog = false }
+            )
+        }
+
+        // Comprehensive Settings Modal (⚙️ top-right: Local DB vs Cloud Sync, Account, Language, Statistics, CSV Import/Export)
+        if (isSettingsModalOpen) {
+            ThingsSettingsModal(
+                isLocalOnlyDbMode = isLocalOnlyDbMode,
+                syncStatus = syncStatus,
+                currentUserIdentifier = currentUserIdentifier,
+                statistics = statistics,
+                csvStatusMessage = csvStatusMessage,
+                onSetLocalOnlyDbMode = { viewModel.setLocalOnlyDbMode(it) },
+                onOpenAuthAndSyncModal = {
+                    viewModel.setSettingsModalOpen(false)
+                    viewModel.setAuthModalOpen(true)
                 },
-                onSelectTask = { task ->
-                    viewModel.setQuickFindOpen(false)
-                    viewModel.toggleTaskExpansion(task.id)
+                onOpenNotificationSettings = {
+                    viewModel.setSettingsModalOpen(false)
+                    viewModel.setNotificationSettingsOpen(true)
                 },
-                onDismiss = { viewModel.setQuickFindOpen(false) }
+                onTriggerImmediateSync = { viewModel.triggerManualCloudSync() },
+                onSignOutCloud = { viewModel.signOutCloud() },
+                onSelectLanguage = { viewModel.switchAppLanguage(it) },
+                onExportCsv = { onReady -> viewModel.exportTasksCsv(onReady) },
+                onImportCsv = { content -> viewModel.importTasksCsv(content) },
+                onClearCsvMessage = { viewModel.clearCsvStatusMessage() },
+                onDismiss = { viewModel.setSettingsModalOpen(false) }
             )
         }
 
@@ -790,7 +974,7 @@ fun ThingsSmartViewScreen(
             )
         }
 
-        // Areas of Responsibility Manager Modal (Work, Home, up to 6 Areas)
+        // Areas of Responsibility Manager Modal (Work, Home, up to 8 Areas)
         if (isAreaManagerOpen) {
             ThingsAreaManagerModal(
                 areas = areas,
@@ -838,6 +1022,131 @@ fun ThingsSmartViewScreen(
                 onSendTestNotificationNow = { viewModel.sendTestDailyDigestNotificationNow() },
                 onDismiss = { viewModel.setNotificationSettingsOpen(false) }
             )
+        }
+    }
+}
+
+@Composable
+private fun ThingsMultiSelectionBar(
+    selectedCount: Int,
+    totalVisibleCount: Int,
+    onSelectAll: () -> Unit,
+    onScheduleToday: () -> Unit,
+    onScheduleTomorrow: () -> Unit,
+    onOpenBatchMove: () -> Unit,
+    onBatchComplete: () -> Unit,
+    onBatchDelete: () -> Unit,
+    onClearSelection: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = ThingsTheme.colors
+    val haptics = LocalHapticFeedback.current
+
+    Surface(
+        modifier = modifier.clip(RoundedCornerShape(16.dp)),
+        color = colors.cardElevatedSurface,
+        shape = RoundedCornerShape(16.dp),
+        tonalElevation = 10.dp,
+        shadowElevation = 8.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(colors.thingsBlue)
+                    .padding(horizontal = 9.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = "$selectedCount ausgewählt",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White
+                )
+            }
+
+            if (selectedCount < totalVisibleCount) {
+                IconButton(
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onSelectAll()
+                    },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.SelectAll,
+                        contentDescription = "Alle auswählen",
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            ThingsTagPill(
+                title = "★ Heute",
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onScheduleToday()
+                }
+            )
+
+            ThingsTagPill(
+                title = "📅 Morgen",
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onScheduleTomorrow()
+                }
+            )
+
+            ThingsTagPill(
+                title = "📁 Verschieben",
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onOpenBatchMove()
+                }
+            )
+
+            ThingsTagPill(
+                title = "✓ Erledigen",
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onBatchComplete()
+                }
+            )
+
+            IconButton(
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onBatchDelete()
+                },
+                modifier = Modifier.size(30.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.DeleteOutline,
+                    contentDescription = "Ausgewählte löschen",
+                    tint = colors.deadlineUrgentRed,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+
+            IconButton(
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClearSelection()
+                },
+                modifier = Modifier.size(30.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Close,
+                    contentDescription = "Auswahl aufheben",
+                    tint = colors.secondaryText,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
     }
 }
@@ -955,9 +1264,13 @@ private fun AreaProjectOverviewRow(
 
 @Composable
 private fun TopThingsbookBar(
+    isWideScreen: Boolean,
+    isSidebarVisible: Boolean,
+    isQuickFindOpen: Boolean,
     syncStatus: CloudSyncStatus,
     dailyDigestEnabled: Boolean,
     showLanguageMenu: Boolean,
+    onToggleSidebar: () -> Unit,
     onToggleLanguageMenu: (Boolean) -> Unit,
     onSelectLanguage: (String) -> Unit,
     onOpenQuickFind: () -> Unit,
@@ -965,7 +1278,8 @@ private fun TopThingsbookBar(
     onOpenAreaManager: () -> Unit,
     onOpenTagManager: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
-    onManualSync: () -> Unit
+    onManualSync: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
     val colors = ThingsTheme.colors
     Row(
@@ -975,27 +1289,48 @@ private fun TopThingsbookBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        // Quick Find Trigger Pill
         Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(colors.tagPillBg)
-                .clickable(onClick = onOpenQuickFind)
-                .padding(horizontal = 12.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(
-                imageVector = Icons.Outlined.Search,
-                contentDescription = stringResource(R.string.quick_find_title),
-                tint = colors.secondaryText,
-                modifier = Modifier.size(16.dp)
-            )
-            Text(
-                text = stringResource(R.string.quick_find_title),
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.secondaryText
-            )
+            if (isWideScreen) {
+                IconButton(
+                    onClick = onToggleSidebar,
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isSidebarVisible) Icons.Outlined.MenuOpen else Icons.Outlined.Menu,
+                        contentDescription = if (isSidebarVisible) "Seitenleiste ausblenden" else "Seitenleiste einblenden",
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            // Quick Find Trigger Pill (opens inline!)
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (isQuickFindOpen) colors.thingsBlueSoft else colors.tagPillBg)
+                    .clickable(onClick = onOpenQuickFind)
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Search,
+                    contentDescription = stringResource(R.string.quick_find_title),
+                    tint = if (isQuickFindOpen) colors.thingsBlue else colors.secondaryText,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = stringResource(R.string.quick_find_title),
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = if (isQuickFindOpen) FontWeight.Bold else FontWeight.Medium
+                    ),
+                    color = if (isQuickFindOpen) colors.thingsBlue else colors.secondaryText
+                )
+            }
         }
 
         Row(
@@ -1025,7 +1360,7 @@ private fun TopThingsbookBar(
                 )
             }
 
-            // Areas Manager Button 📦 (Work, Home, max 6)
+            // Areas Manager Button 📦 (Work, Home, max 8)
             IconButton(
                 onClick = onOpenAreaManager,
                 modifier = Modifier.size(34.dp)
@@ -1109,7 +1444,7 @@ private fun TopThingsbookBar(
                 }
             }
 
-            // Cloud Delta-Sync Status Indicator
+            // Cloud Delta-Sync Status Indicator ☁️
             IconButton(
                 onClick = onManualSync,
                 modifier = Modifier.size(34.dp)
@@ -1123,6 +1458,19 @@ private fun TopThingsbookBar(
                     imageVector = syncIcon,
                     contentDescription = stringResource(R.string.sync_title),
                     tint = syncTint,
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+
+            // Additional Settings Button ⚙️ at the far top-right!
+            IconButton(
+                onClick = onOpenSettings,
+                modifier = Modifier.size(34.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Settings,
+                    contentDescription = "Einstellungen",
+                    tint = colors.primaryText,
                     modifier = Modifier.size(19.dp)
                 )
             }
@@ -1271,7 +1619,7 @@ private fun SmartViewNavigationStrip(
             }
         }
 
-        // 2. Areas (Work, Home, ... up to 6)
+        // 2. Areas (Work, Home, ... up to 8)
         items(areas, key = { "nav_area_${it.id}" }) { area ->
             val selected = navTarget == ActiveNavigationTarget.AreaDetail(area.id)
             Row(
@@ -1364,7 +1712,7 @@ private fun SmartViewNavigationStrip(
             }
         }
 
-        // 5. "Areas / Bereiche / Aree / Domaines / Áreas (X/6)" Quick Trigger
+        // 5. "Areas / Bereiche / Aree / Domaines / Áreas (X/8)" Quick Trigger
         item(key = "nav_manage_areas") {
             Row(
                 modifier = Modifier
@@ -1422,8 +1770,14 @@ private fun ViewTitleHeader(
     var showProjectDeadlineDialog by remember(currentProject?.id) { mutableStateOf(false) }
     var showProjectAreaMenu by remember(currentProject?.id) { mutableStateOf(false) }
     var isRenamingAreaInline by remember(currentArea?.id) { mutableStateOf(false) }
-    var inlineAreaTitle by remember(currentArea?.id, currentArea?.title) {
-        mutableStateOf(currentArea?.title ?: "")
+    var inlineAreaField by remember(currentArea?.id, currentArea?.title) {
+        val initial = currentArea?.title ?: ""
+        mutableStateOf(
+            TextFieldValue(
+                text = initial,
+                selection = if (initial.isEmpty()) TextRange(0) else TextRange(0, initial.length)
+            )
+        )
     }
 
     val areaWord = stringResource(R.string.entity_area)
@@ -1473,15 +1827,24 @@ private fun ViewTitleHeader(
                         )
                         if (isRenamingAreaInline && currentArea != null) {
                             OutlinedTextField(
-                                value = inlineAreaTitle,
-                                onValueChange = { inlineAreaTitle = it },
+                                value = inlineAreaField,
+                                onValueChange = { inlineAreaField = it },
                                 singleLine = true,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .onFocusChanged { focusState ->
+                                        if (focusState.isFocused) {
+                                            val txt = inlineAreaField.text
+                                            inlineAreaField = inlineAreaField.copy(
+                                                selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                            )
+                                        }
+                                    }
                             )
                             IconButton(
                                 onClick = {
-                                    if (inlineAreaTitle.isNotBlank()) {
-                                        onRenameArea(currentArea.id, inlineAreaTitle.trim())
+                                    if (inlineAreaField.text.isNotBlank()) {
+                                        onRenameArea(currentArea.id, inlineAreaField.text.trim())
                                         isRenamingAreaInline = false
                                     }
                                 }
@@ -1611,7 +1974,10 @@ private fun ViewTitleHeader(
                     }
                     IconButton(
                         onClick = {
-                            inlineAreaTitle = currentArea.title
+                            inlineAreaField = TextFieldValue(
+                                text = currentArea.title,
+                                selection = TextRange(0, currentArea.title.length)
+                            )
                             isRenamingAreaInline = true
                         },
                         modifier = Modifier.size(30.dp)
@@ -1774,8 +2140,22 @@ private fun ProjectHeadingSectionHeader(
     onDeleteHeading: () -> Unit
 ) {
     val colors = ThingsTheme.colors
-    var isEditing by remember(heading.id) { mutableStateOf(false) }
-    var editedTitle by remember(heading.id, heading.title) { mutableStateOf(heading.title) }
+    var isEditing by remember(heading.id) { mutableStateOf(heading.title.isEmpty()) }
+    var editedTitleField by remember(heading.id) {
+        mutableStateOf(
+            TextFieldValue(
+                text = heading.title,
+                selection = if (heading.title.isEmpty()) TextRange(0) else TextRange(0, heading.title.length)
+            )
+        )
+    }
+    val headingFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(isEditing) {
+        if (isEditing) {
+            runCatching { headingFocusRequester.requestFocus() }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -1789,15 +2169,32 @@ private fun ProjectHeadingSectionHeader(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 OutlinedTextField(
-                    value = editedTitle,
-                    onValueChange = { editedTitle = it },
+                    value = editedTitleField,
+                    onValueChange = { editedTitleField = it },
+                    placeholder = {
+                        Text(
+                            text = stringResource(R.string.entity_new_heading),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
                     singleLine = true,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(headingFocusRequester)
+                        .onFocusChanged { focusState ->
+                            if (focusState.isFocused) {
+                                val txt = editedTitleField.text
+                                editedTitleField = editedTitleField.copy(
+                                    selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                )
+                            }
+                        }
                 )
                 IconButton(
                     onClick = {
-                        if (editedTitle.isNotBlank()) {
-                            onRenameHeading(editedTitle.trim())
+                        if (editedTitleField.text.isNotBlank()) {
+                            onRenameHeading(editedTitleField.text.trim())
                             isEditing = false
                         }
                     }
@@ -1839,7 +2236,10 @@ private fun ProjectHeadingSectionHeader(
                 ) {
                     IconButton(
                         onClick = {
-                            editedTitle = heading.title
+                            editedTitleField = TextFieldValue(
+                                text = heading.title,
+                                selection = if (heading.title.isEmpty()) TextRange(0) else TextRange(0, heading.title.length)
+                            )
                             isEditing = true
                         },
                         modifier = Modifier.size(26.dp)
@@ -1875,35 +2275,77 @@ private fun ProjectHeadingSectionHeader(
     }
 }
 
+/**
+ * Inline Quick Find Section (`Schnellsuche`):
+ * Opens inline right under the Top Bar (no popup dialog) and displays rich details for every result:
+ * - Smart Views, Areas, Projects (with Area breadcrumb, progress, target date)
+ * - Tasks with Status/Schedule State badge, Area › Project breadcrumb, When Date, Reminder time,
+ *   Recurrence rule, Deadline, Subtasks count (`☑ X/Y`), Tags, and Notes preview!
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun QuickFindDialog(
+private fun InlineQuickFindSection(
     query: String,
     taskResults: List<TaskItem>,
     projectResults: List<Project>,
+    areas: List<Area>,
+    allProjects: List<Project>,
+    locale: Locale,
     onQueryChange: (String) -> Unit,
     onSelectSmartView: (SmartViewType) -> Unit,
+    onSelectArea: (String) -> Unit,
     onSelectProject: (String) -> Unit,
     onSelectTask: (TaskItem) -> Unit,
-    onDismiss: () -> Unit
+    onClose: () -> Unit
 ) {
     val colors = ThingsTheme.colors
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
+    val searchFocusRequester = remember { FocusRequester() }
+    var searchField by remember {
+        mutableStateOf(
+            TextFieldValue(
+                text = query,
+                selection = if (query.isEmpty()) TextRange(0) else TextRange(0, query.length)
+            )
+        )
+    }
+
+    LaunchedEffect(Unit) {
+        runCatching { searchFocusRequester.requestFocus() }
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(16.dp)),
+        color = colors.cardElevatedSurface,
+        shape = RoundedCornerShape(16.dp),
+        tonalElevation = 6.dp,
+        shadowElevation = 4.dp
+    ) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp)),
-            color = colors.cardSurface,
-            shape = RoundedCornerShape(16.dp)
+                .padding(14.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedTextField(
-                    value = query,
-                    onValueChange = onQueryChange,
-                    placeholder = { Text(stringResource(R.string.quick_find_placeholder)) },
+                    value = searchField,
+                    onValueChange = {
+                        searchField = it
+                        onQueryChange(it.text)
+                    },
+                    placeholder = {
+                        Text(
+                            text = stringResource(R.string.quick_find_placeholder),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Outlined.Search,
@@ -1911,68 +2353,287 @@ private fun QuickFindDialog(
                             tint = colors.thingsBlue
                         )
                     },
+                    trailingIcon = {
+                        if (searchField.text.isNotEmpty()) {
+                            IconButton(
+                                onClick = {
+                                    searchField = TextFieldValue(text = "", selection = TextRange(0))
+                                    onQueryChange("")
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Close,
+                                    contentDescription = "Suche leeren",
+                                    tint = colors.secondaryText,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(searchFocusRequester)
+                        .onFocusChanged { focusState ->
+                            if (focusState.isFocused) {
+                                val txt = searchField.text
+                                searchField = searchField.copy(
+                                    selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                )
+                            }
+                        }
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Filter localized Smart View names if query matches
-                val matchingViews = SmartViewType.entries.filter { viewType ->
-                    val localizedName = stringResource(viewType.titleRes)
-                    query.isNotBlank() && localizedName.contains(query, ignoreCase = true)
+                IconButton(onClick = onClose, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        imageVector = Icons.Outlined.Close,
+                        contentDescription = stringResource(R.string.action_cancel),
+                        tint = colors.secondaryText
+                    )
                 }
+            }
 
-                LazyColumn(modifier = Modifier.height(260.dp)) {
-                    items(matchingViews) { viewType ->
-                        Row(
+            // Matching Smart Views & Areas
+            val matchingViews = SmartViewType.entries.filter { viewType ->
+                val localizedName = stringResource(viewType.titleRes)
+                query.isNotBlank() && localizedName.contains(query, ignoreCase = true)
+            }
+            val matchingAreas = remember(query, areas) {
+                if (query.isBlank()) emptyList()
+                else areas.filter { it.title.contains(query, ignoreCase = true) }
+            }
+
+            if (query.isBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Tippe einen Suchbegriff ein, um Aufgaben (inkl. Notizen, Datum, Bereich, Projekt, Unteraufgaben & Tags), Projekte, Bereiche oder Ansichten sofort inline zu durchsuchen.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.secondaryText
+                )
+            } else {
+                Spacer(modifier = Modifier.height(10.dp))
+                val totalHits = matchingViews.size + matchingAreas.size + projectResults.size + taskResults.size
+                Text(
+                    text = "$totalHits Ergebnisse für „$query“",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = colors.thingsBlue
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(290.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // 1. Smart Views
+                    items(matchingViews, key = { "qf_view_${it.name}" }) { viewType ->
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = colors.tagPillBg.copy(alpha = 0.55f),
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
                                 .clickable { onSelectSmartView(viewType) }
-                                .padding(vertical = 8.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            SmartViewIcon(viewType = viewType, modifier = Modifier.size(20.dp))
-                            Text(
-                                text = stringResource(viewType.titleRes),
-                                style = MaterialTheme.typography.titleMedium,
-                                color = colors.primaryText
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                SmartViewIcon(viewType = viewType, modifier = Modifier.size(20.dp))
+                                Text(
+                                    text = stringResource(viewType.titleRes),
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = colors.primaryText
+                                )
+                                ThingsTagPill(title = "Ansicht")
+                            }
                         }
                     }
 
+                    // 2. Areas
+                    items(matchingAreas, key = { "qf_area_${it.id}" }) { area ->
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = colors.tagPillBg.copy(alpha = 0.55f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onSelectArea(area.id) }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Inventory2,
+                                    contentDescription = null,
+                                    tint = colors.anytimeTeal,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = area.title,
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = colors.primaryText
+                                )
+                                ThingsTagPill(title = stringResource(R.string.entity_area))
+                            }
+                        }
+                    }
+
+                    // 3. Projects (with Area, Progress & Target Date)
                     items(projectResults, key = { "qf_proj_${it.id}" }) { proj ->
-                        Row(
+                        val projArea = areas.find { it.id == proj.areaId }
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = colors.tagPillBg.copy(alpha = 0.55f),
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
                                 .clickable { onSelectProject(proj.id) }
-                                .padding(vertical = 8.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            ProjectProgressRing(progress = proj.progress, size = 18.dp)
-                            Text(
-                                text = proj.title,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = colors.primaryText
-                            )
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    ProjectProgressRing(progress = proj.progress, size = 18.dp)
+                                    Text(
+                                        text = proj.title,
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = colors.primaryText,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    ThingsTagPill(title = "📁 ${proj.completedTaskCount}/${proj.totalTaskCount}")
+                                    proj.deadline?.let { dl ->
+                                        ThingsDeadlineBadge(deadlineEpochMillis = dl, locale = locale)
+                                    }
+                                }
+                                if (projArea != null || proj.notes.isNotBlank()) {
+                                    Text(
+                                        text = listOfNotNull(
+                                            projArea?.let { "📦 ${it.title}" },
+                                            proj.notes.takeIf { it.isNotBlank() }
+                                        ).joinToString(" • "),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = colors.secondaryText,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
                         }
                     }
 
+                    // 4. Tasks with FULL Details (Status/Schedule, Area › Project, WhenDate, Reminder, Repeat, Deadline, Subtasks, Tags, Notes)
                     items(taskResults, key = { "qf_task_${it.id}" }) { task ->
-                        Row(
+                        val taskProject = allProjects.find { it.id == task.projectId }
+                        val taskArea = areas.find { it.id == (taskProject?.areaId ?: task.areaId) }
+                        val scheduleLabel = when {
+                            task.status == TaskStatus.COMPLETED -> "✅ Erledigt"
+                            task.status == TaskStatus.CANCELED -> "✕ Abgebrochen"
+                            task.scheduleState == ScheduleState.TODAY -> "★ Heute"
+                            task.scheduleState == ScheduleState.THIS_EVENING -> "🌙 Heute Abend"
+                            task.scheduleState == ScheduleState.UPCOMING -> "📅 Geplant"
+                            task.scheduleState == ScheduleState.INBOX -> "📥 Eingang"
+                            task.scheduleState == ScheduleState.SOMEDAY -> "📦 Irgendwann"
+                            else -> "🗂 Jederzeit"
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = colors.tagPillBg.copy(alpha = 0.65f),
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
                                 .clickable { onSelectTask(task) }
-                                .padding(vertical = 8.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = task.title,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = colors.primaryText
-                            )
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                                verticalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                // Title + Status/SmartView Badge
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = task.title.ifBlank { "(Ohne Titel)" },
+                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                                        color = colors.primaryText,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    ThingsTagPill(title = scheduleLabel)
+                                }
+
+                                // Rich Metadata Row: Area › Project, WhenDate, Reminder, Repeat, Deadline, Subtasks, Tags
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    if (taskArea != null || taskProject != null) {
+                                        val containerText = when {
+                                            taskArea != null && taskProject != null -> "📦 ${taskArea.title} › 📁 ${taskProject.title}"
+                                            taskProject != null -> "📁 ${taskProject.title}"
+                                            else -> "📦 ${taskArea!!.title}"
+                                        }
+                                        ThingsTagPill(title = containerText)
+                                    }
+
+                                    if (task.whenDate != null || task.scheduleState != ScheduleState.ANYTIME) {
+                                        ThingsWhenBadge(
+                                            scheduleState = task.scheduleState,
+                                            whenDateEpochMillis = task.whenDate,
+                                            locale = locale
+                                        )
+                                    }
+
+                                    task.reminderTime?.let { rt ->
+                                        ThingsReminderBadge(reminderEpochMillis = rt)
+                                    }
+
+                                    task.recurrenceRule?.let { rr ->
+                                        ThingsRepeatBadge(rule = rr)
+                                    }
+
+                                    task.deadline?.let { dl ->
+                                        ThingsDeadlineBadge(deadlineEpochMillis = dl, locale = locale)
+                                    }
+
+                                    if (task.checklistItems.isNotEmpty()) {
+                                        val doneCount = task.checklistItems.count { it.isCompleted }
+                                        ThingsTagPill(title = "☑ $doneCount/${task.checklistItems.size} Unteraufgaben")
+                                    }
+
+                                    task.tags.forEach { tag ->
+                                        ThingsTagPill(title = "🏷️ ${tag.title}")
+                                    }
+                                }
+
+                                // Notes Preview
+                                if (task.notes.isNotBlank()) {
+                                    Text(
+                                        text = task.notes,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = colors.secondaryText,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1991,7 +2652,8 @@ private fun ThingsChromebookSidebar(
     onSelectArea: (String) -> Unit,
     onSelectProject: (String) -> Unit,
     onOpenAreaManager: () -> Unit,
-    onCreateNewProject: (String?) -> Unit
+    onCreateNewProject: (String?) -> Unit,
+    onToggleSidebar: () -> Unit
 ) {
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
@@ -2002,17 +2664,35 @@ private fun ThingsChromebookSidebar(
             .width(264.dp)
             .fillMaxHeight()
             .background(colors.sidebarBackground)
-            .padding(horizontal = 14.dp, vertical = 18.dp),
+            .padding(horizontal = 14.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Text(
-            text = stringResource(R.string.app_name),
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            color = colors.primaryText,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = stringResource(R.string.app_name),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = colors.primaryText
+            )
+            IconButton(
+                onClick = onToggleSidebar,
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.MenuOpen,
+                    contentDescription = "Seitenleiste ausblenden",
+                    tint = colors.secondaryText,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
 
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(2.dp))
 
         SmartViewType.entries.forEach { viewType ->
             val selected = navTarget == ActiveNavigationTarget.SmartView(viewType)
@@ -2186,19 +2866,19 @@ private fun ThingsChromebookSidebar(
             }
         }
 
-        // Bottom Sidebar Actions: "+ New Project" & "Areas / Bereiche / Aree / Domaines / Áreas (X/6)"
+        // Bottom Sidebar Actions: "+ New Project" & "Areas / Bereiche (X/8)" + App Version at Bottom-Left!
         HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 6.dp),
+                .padding(top = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .clickable { onCreateNewProject(null) }
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
@@ -2219,7 +2899,7 @@ private fun ThingsChromebookSidebar(
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .clickable(onClick = onOpenAreaManager)
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
@@ -2236,6 +2916,17 @@ private fun ThingsChromebookSidebar(
                 )
             }
         }
+
+        // App Version displayed at the bottom-left of the Sidebar
+        Text(
+            text = "Thingsbook v${BuildConfig.VERSION_NAME}",
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 10.5.sp,
+                fontWeight = FontWeight.Medium
+            ),
+            color = colors.tertiaryText,
+            modifier = Modifier.padding(start = 8.dp, top = 2.dp)
+        )
     }
 }
 

@@ -1039,4 +1039,265 @@ class ThingsbookViewModel @Inject constructor(
     fun sendTestDailyDigestNotificationNow() {
         reminderScheduler.triggerDailyDigestNotificationNow()
     }
+
+    // =========================================================================
+    // v1.3.0: Settings Modal, Collapsible Sidebar, Local/Cloud DB Mode,
+    // Live Task Statistics, and CSV Import/Export
+    // =========================================================================
+
+    private val settingsPrefs = appContext.getSharedPreferences("thingsbook_ui_prefs", Context.MODE_PRIVATE)
+
+    private val _isSettingsModalOpen = MutableStateFlow(false)
+    val isSettingsModalOpen: StateFlow<Boolean> = _isSettingsModalOpen.asStateFlow()
+
+    private val _isSidebarVisible = MutableStateFlow(settingsPrefs.getBoolean("sidebar_visible", true))
+    val isSidebarVisible: StateFlow<Boolean> = _isSidebarVisible.asStateFlow()
+
+    private val _isLocalOnlyDbMode = MutableStateFlow(settingsPrefs.getBoolean("local_only_db_mode", false))
+    val isLocalOnlyDbMode: StateFlow<Boolean> = _isLocalOnlyDbMode.asStateFlow()
+
+    private val _csvStatusMessage = MutableStateFlow<String?>(null)
+    val csvStatusMessage: StateFlow<String?> = _csvStatusMessage.asStateFlow()
+
+    val statistics: StateFlow<ThingsbookStatistics> = combine(
+        repository.observeAllTasksRaw(),
+        activeProjects,
+        areas,
+        allTags
+    ) { allRawTasks, projectsList, areasList, tagsList ->
+        val nonDeleted = allRawTasks.filter { !it.isDeleted }
+        val deletedCount = allRawTasks.count { it.isDeleted }
+        val openTasks = nonDeleted.filter { it.status == TaskStatus.OPEN }
+        val completedCount = nonDeleted.count { it.status == TaskStatus.COMPLETED }
+        val canceledCount = nonDeleted.count { it.status == TaskStatus.CANCELED }
+
+        val todayEndMillis = LocalDate.now()
+            .plusDays(1)
+            .atStartOfDay(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli() - 1L
+
+        val todayCount = openTasks.count { t ->
+            t.scheduleState == ScheduleState.TODAY ||
+                t.scheduleState == ScheduleState.THIS_EVENING ||
+                (t.whenDate != null && t.whenDate <= todayEndMillis)
+        }
+        val upcomingCount = openTasks.count { t ->
+            t.scheduleState == ScheduleState.UPCOMING ||
+                (t.whenDate != null && t.whenDate > todayEndMillis)
+        }
+        val inboxCount = openTasks.count { t ->
+            t.scheduleState == ScheduleState.INBOX && t.projectId == null && t.areaId == null && t.whenDate == null
+        }
+        val anytimeCount = openTasks.count { t ->
+            t.scheduleState == ScheduleState.ANYTIME && t.whenDate == null && t.recurrenceRuleJson.isNullOrBlank()
+        }
+        val somedayCount = openTasks.count { t ->
+            t.scheduleState == ScheduleState.SOMEDAY
+        }
+        val recurringCount = openTasks.count { t ->
+            !t.recurrenceRuleJson.isNullOrBlank()
+        }
+
+        ThingsbookStatistics(
+            totalRecordsCount = allRawTasks.size,
+            openTasksCount = openTasks.size,
+            todayTasksCount = todayCount,
+            upcomingTasksCount = upcomingCount,
+            anytimeTasksCount = anytimeCount,
+            inboxTasksCount = inboxCount,
+            somedayTasksCount = somedayCount,
+            recurringTasksCount = recurringCount,
+            completedTasksCount = completedCount,
+            canceledTasksCount = canceledCount,
+            deletedTasksCount = deletedCount,
+            activeProjectsCount = projectsList.size,
+            areasCount = areasList.size,
+            tagsCount = tagsList.size
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ThingsbookStatistics())
+
+    fun setSettingsModalOpen(open: Boolean) {
+        _isSettingsModalOpen.value = open
+    }
+
+    fun toggleSidebarVisible() {
+        val next = !_isSidebarVisible.value
+        _isSidebarVisible.value = next
+        settingsPrefs.edit().putBoolean("sidebar_visible", next).apply()
+    }
+
+    fun setSidebarVisible(visible: Boolean) {
+        _isSidebarVisible.value = visible
+        settingsPrefs.edit().putBoolean("sidebar_visible", visible).apply()
+    }
+
+    fun setLocalOnlyDbMode(localOnly: Boolean) {
+        _isLocalOnlyDbMode.value = localOnly
+        settingsPrefs.edit().putBoolean("local_only_db_mode", localOnly).apply()
+        if (localOnly) {
+            viewModelScope.launch {
+                syncRepository.signOutAccount()
+            }
+        }
+    }
+
+    fun clearCsvStatusMessage() {
+        _csvStatusMessage.value = null
+    }
+
+    fun exportTasksCsv(onCsvReady: (String) -> Unit) {
+        viewModelScope.launch {
+            runCatching {
+                repository.exportTasksToCsv()
+            }.onSuccess { csv ->
+                _csvStatusMessage.value = "✅ CSV-Export erfolgreich erstellt (${statistics.value.openTasksCount + statistics.value.completedTasksCount} Aufgaben)."
+                onCsvReady(csv)
+            }.onFailure { err ->
+                _csvStatusMessage.value = "❌ CSV-Export fehlgeschlagen: ${err.localizedMessage ?: err.message}"
+            }
+        }
+    }
+
+    fun importTasksCsv(csvContent: String) {
+        viewModelScope.launch {
+            runCatching {
+                repository.importTasksFromCsv(csvContent)
+            }.onSuccess { count ->
+                _csvStatusMessage.value = "✅ $count Aufgaben erfolgreich aus der CSV-Datei importiert!"
+            }.onFailure { err ->
+                _csvStatusMessage.value = "❌ CSV-Import fehlgeschlagen: ${err.localizedMessage ?: err.message}"
+            }
+        }
+    }
+
+    // =========================================================================
+    // Multi-Task Selection (Mouse Ctrl/Shift-Click & Things-for-iPhone Swipe)
+    // =========================================================================
+
+    private val _selectedTaskIds = MutableStateFlow<Set<String>>(emptySet())
+    val selectedTaskIds: StateFlow<Set<String>> = _selectedTaskIds.asStateFlow()
+
+    private var lastSelectedAnchorTaskId: String? = null
+
+    fun toggleTaskSelection(taskId: String) {
+        val current = _selectedTaskIds.value
+        if (taskId in current) {
+            _selectedTaskIds.value = current - taskId
+        } else {
+            _selectedTaskIds.value = current + taskId
+            lastSelectedAnchorTaskId = taskId
+        }
+    }
+
+    fun selectTaskRange(visibleTaskIds: List<String>, targetTaskId: String) {
+        val anchor = lastSelectedAnchorTaskId
+        if (anchor == null || anchor !in visibleTaskIds || targetTaskId !in visibleTaskIds) {
+            toggleTaskSelection(targetTaskId)
+            return
+        }
+        val idx1 = visibleTaskIds.indexOf(anchor)
+        val idx2 = visibleTaskIds.indexOf(targetTaskId)
+        val rangeIds = visibleTaskIds.subList(minOf(idx1, idx2), maxOf(idx1, idx2) + 1).toSet()
+        _selectedTaskIds.value = _selectedTaskIds.value + rangeIds
+        lastSelectedAnchorTaskId = targetTaskId
+    }
+
+    fun selectAllTasks(visibleTaskIds: List<String>) {
+        _selectedTaskIds.value = visibleTaskIds.toSet()
+    }
+
+    fun clearTaskSelection() {
+        _selectedTaskIds.value = emptySet()
+        lastSelectedAnchorTaskId = null
+    }
+
+    fun batchCompleteSelectedTasks() {
+        val ids = _selectedTaskIds.value.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            ids.forEach { id ->
+                repository.updateTaskStatus(id, TaskStatus.COMPLETED)
+            }
+            _selectedTaskIds.value = emptySet()
+        }
+    }
+
+    fun batchDeleteSelectedTasks() {
+        val ids = _selectedTaskIds.value.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            ids.forEach { id ->
+                repository.softDeleteTask(id)
+            }
+            _selectedTaskIds.value = emptySet()
+        }
+    }
+
+    fun batchScheduleSelectedTasks(
+        allTasksInView: List<TaskItem>,
+        newState: ScheduleState,
+        newWhenDate: Long?
+    ) {
+        val ids = _selectedTaskIds.value
+        if (ids.isEmpty()) return
+        val targets = allTasksInView.filter { it.id in ids }
+        viewModelScope.launch {
+            targets.forEach { task ->
+                repository.createOrUpdateTask(
+                    id = task.id,
+                    title = task.title,
+                    notes = task.notes,
+                    status = task.status,
+                    scheduleState = newState,
+                    whenDate = newWhenDate,
+                    deadline = task.deadline,
+                    reminderTime = task.reminderTime,
+                    projectId = task.projectId,
+                    headingId = task.headingId,
+                    areaId = task.areaId,
+                    recurrenceRule = task.recurrenceRule,
+                    sortOrder = task.sortOrder,
+                    tagIds = task.tags.map { it.id }
+                )
+            }
+            _selectedTaskIds.value = emptySet()
+        }
+    }
+
+    fun batchMoveSelectedTasks(
+        allTasksInView: List<TaskItem>,
+        projectId: String?,
+        headingId: String?,
+        areaId: String?
+    ) {
+        val ids = _selectedTaskIds.value
+        if (ids.isEmpty()) return
+        val targets = allTasksInView.filter { it.id in ids }
+        viewModelScope.launch {
+            targets.forEach { task ->
+                repository.moveTaskToContainer(task.id, projectId, headingId, areaId)
+            }
+            _selectedTaskIds.value = emptySet()
+        }
+    }
 }
+
+data class ThingsbookStatistics(
+    val totalRecordsCount: Int = 0,
+    val openTasksCount: Int = 0,
+    val todayTasksCount: Int = 0,
+    val upcomingTasksCount: Int = 0,
+    val anytimeTasksCount: Int = 0,
+    val inboxTasksCount: Int = 0,
+    val somedayTasksCount: Int = 0,
+    val recurringTasksCount: Int = 0,
+    val completedTasksCount: Int = 0,
+    val canceledTasksCount: Int = 0,
+    val deletedTasksCount: Int = 0,
+    val activeProjectsCount: Int = 0,
+    val areasCount: Int = 0,
+    val tagsCount: Int = 0
+)
+
+

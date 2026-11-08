@@ -4,13 +4,18 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,8 +24,10 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -35,14 +42,18 @@ import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.LocalOffer
+import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -52,6 +63,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -61,15 +73,28 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isMetaPressed
+import androidx.compose.ui.input.pointer.isPrimaryPressed
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.isShiftPressed
+import androidx.compose.ui.input.pointer.isTertiaryPressed
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.culturedcode.things3.R
@@ -85,19 +110,13 @@ import com.culturedcode.things3.domain.model.TaskStatus
 import com.culturedcode.things3.ui.theme.ThingsTheme
 import kotlinx.coroutines.delay
 import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
- * The centerpiece of Things 3 UI/UX: Inline Card Expansion.
- *
- * - Tapping a collapsed row NEVER opens a new screen or bottom sheet.
- * - The row morphs in-place via spring physics (`spring(dampingRatio = 0.8f, stiffness = 400f)`)
- *   into a pure white card (`#FFFFFF` in Light / `#24262D` in Dark) with subtle elevation shadow,
- *   pushing neighboring rows smoothly apart.
- * - Includes integrated Compact Calendar Date Picker, Task-Specific Time Reminder Picker,
- *   Deadline Calendar Picker, Things-for-Mac Repeating Task Dialog, Full Subtasks (Add, Edit, Move, Delete),
- *   Project/Area Assignment ("Move"), Tag Assignment Dialog, and **Gemini Magic Breakdown (✨)**.
+ * The centerpiece of Things 3 UI/UX: Inline Card Expansion + Things-for-iPhone Swipe Gestures +
+ * Mouse/Touch Multi-Task Selection without altering the Things 3 aesthetic.
  */
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun ExpandableTaskCard(
     task: TaskItem,
@@ -106,6 +125,10 @@ fun ExpandableTaskCard(
     allProjects: List<Project> = emptyList(),
     allHeadings: List<Heading> = emptyList(),
     isExpanded: Boolean,
+    isSelected: Boolean = false,
+    isSelectionModeActive: Boolean = false,
+    onToggleSelection: (() -> Unit)? = null,
+    onRangeSelect: (() -> Unit)? = null,
     isGeneratingMagicBreakdown: Boolean,
     onExpandToggle: () -> Unit,
     onStatusChange: (TaskStatus) -> Unit,
@@ -130,8 +153,17 @@ fun ExpandableTaskCard(
 ) {
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
+    val density = LocalDensity.current
 
-    var editedTitle by remember(task.id) { mutableStateOf(task.title) }
+    var editedTitleField by remember(task.id) {
+        mutableStateOf(
+            TextFieldValue(
+                text = task.title,
+                selection = if (task.title.isEmpty()) TextRange(0) else TextRange(0, task.title.length)
+            )
+        )
+    }
+    val editedTitle = editedTitleField.text
     var editedNotes by remember(task.id) { mutableStateOf(task.notes) }
     var newChecklistText by remember(task.id) { mutableStateOf("") }
     var showWhenDialog by remember(task.id) { mutableStateOf(false) }
@@ -139,11 +171,27 @@ fun ExpandableTaskCard(
     var showRepeatDialog by remember(task.id) { mutableStateOf(false) }
     var showMoveDialog by remember(task.id) { mutableStateOf(false) }
     var showTagPickerDialog by remember(task.id) { mutableStateOf(false) }
+    var showContextMenu by remember(task.id) { mutableStateOf(false) }
+
+    // Things-for-iPhone Horizontal Swipe Gesture state (when collapsed)
+    var rawSwipeOffsetPx by remember(task.id, isExpanded) { mutableFloatStateOf(0f) }
+    val animatedSwipeOffsetPx by animateFloatAsState(
+        targetValue = rawSwipeOffsetPx,
+        animationSpec = spring(dampingRatio = 0.78f, stiffness = 450f),
+        label = "swipeOffsetPx"
+    )
+    val whenSwipeThresholdPx = with(density) { 68.dp.toPx() }
+    val selectSwipeThresholdPx = with(density) { -62.dp.toPx() }
+    val deleteSwipeThresholdPx = with(density) { -160.dp.toPx() }
 
     val titleFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(isExpanded, task.id) {
-        if (isExpanded && editedTitle.isBlank()) {
+        if (isExpanded) {
+            val txt = editedTitleField.text
+            editedTitleField = editedTitleField.copy(
+                selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+            )
             delay(60)
             runCatching { titleFocusRequester.requestFocus() }
         }
@@ -182,103 +230,235 @@ fun ExpandableTaskCard(
     )
 
     val surfaceColor by animateColorAsState(
-        targetValue = if (isExpanded) colors.cardElevatedSurface else Color.Transparent,
+        targetValue = when {
+            isExpanded -> colors.cardElevatedSurface
+            isSelected -> colors.thingsBlue.copy(alpha = 0.14f)
+            else -> Color.Transparent
+        },
         animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f),
         label = "cardSurfaceColor"
     )
 
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = horizontalPadding, vertical = verticalPadding)
-            .shadow(
-                elevation = shadowElevation,
-                shape = RoundedCornerShape(cornerRadius),
-                ambientColor = Color.Black.copy(alpha = 0.14f),
-                spotColor = Color.Black.copy(alpha = 0.18f)
-            )
-            .clip(RoundedCornerShape(cornerRadius))
-            .animateContentSize(
-                animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f)
-            )
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = {
-                    if (!isExpanded) {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onExpandToggle()
+    Box(modifier = modifier.fillMaxWidth()) {
+        // Things-for-iPhone Swipe Background Layer (visible when dragging horizontally)
+        if (!isExpanded && kotlin.math.abs(animatedSwipeOffsetPx) > 6f) {
+            val isSwipingRightForWhen = animatedSwipeOffsetPx > 0f
+            val isDeepSwipeLeftForDelete = animatedSwipeOffsetPx <= deleteSwipeThresholdPx
+            val bgHighlightColor = when {
+                isSwipingRightForWhen -> colors.todayStarYellow.copy(alpha = 0.90f)
+                isDeepSwipeLeftForDelete -> colors.deadlineUrgentRed.copy(alpha = 0.92f)
+                else -> colors.thingsBlue.copy(alpha = 0.90f)
+            }
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .padding(horizontal = horizontalPadding, vertical = verticalPadding)
+                    .clip(RoundedCornerShape(cornerRadius))
+                    .background(bgHighlightColor)
+                    .padding(horizontal = 14.dp),
+                contentAlignment = if (isSwipingRightForWhen) Alignment.CenterStart else Alignment.CenterEnd
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (isSwipingRightForWhen) {
+                        Icon(
+                            imageVector = Icons.Outlined.CalendarToday,
+                            contentDescription = "Wann?",
+                            tint = Color(0xFF1A1C1E),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "Wann?",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = Color(0xFF1A1C1E)
+                        )
+                    } else if (isDeepSwipeLeftForDelete) {
+                        Text(
+                            text = "Löschen",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = Color.White
+                        )
+                        Icon(
+                            imageVector = Icons.Outlined.DeleteOutline,
+                            contentDescription = "Löschen",
+                            tint = Color.White,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    } else {
+                        Text(
+                            text = if (isSelected) "Abwählen" else "Auswählen",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = Color.White
+                        )
+                        Icon(
+                            imageVector = Icons.Outlined.MoreHoriz,
+                            contentDescription = "Auswählen",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 }
-            ),
-        color = surfaceColor,
-        shape = RoundedCornerShape(cornerRadius)
-    ) {
-        Column(
+            }
+        }
+
+        Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(
-                    horizontal = if (isExpanded) 16.dp else 8.dp,
-                    vertical = if (isExpanded) 14.dp else 10.dp
+                .offset { IntOffset(animatedSwipeOffsetPx.roundToInt(), 0) }
+                .padding(horizontal = horizontalPadding, vertical = verticalPadding)
+                .shadow(
+                    elevation = shadowElevation,
+                    shape = RoundedCornerShape(cornerRadius),
+                    ambientColor = Color.Black.copy(alpha = 0.14f),
+                    spotColor = Color.Black.copy(alpha = 0.18f)
                 )
-        ) {
-            // Top Row: Animated Things Checkbox + Title + Inline Badges (when collapsed)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                ThingsCheckbox(
-                    status = task.status,
-                    onStatusChange = onStatusChange
+                .clip(RoundedCornerShape(cornerRadius))
+                .then(
+                    if (isSelected && !isExpanded) {
+                        Modifier.border(
+                            width = 1.dp,
+                            color = colors.thingsBlue.copy(alpha = 0.42f),
+                            shape = RoundedCornerShape(cornerRadius)
+                        )
+                    } else {
+                        Modifier
+                    }
                 )
-
-                Spacer(modifier = Modifier.width(10.dp))
-
-                if (isExpanded) {
-                    BasicTextField(
-                        value = editedTitle,
-                        onValueChange = {
-                            editedTitle = it
-                            onTitleNotesChange(it, editedNotes)
-                        },
-                        textStyle = MaterialTheme.typography.titleMedium.copy(
-                            color = colors.primaryText
-                        ),
-                        singleLine = true,
-                        cursorBrush = SolidColor(colors.thingsBlue),
-                        modifier = Modifier
-                            .weight(1f)
-                            .focusRequester(titleFocusRequester),
-                        decorationBox = { innerTextField ->
-                            Box {
-                                if (editedTitle.isEmpty()) {
-                                    Text(
-                                        text = stringResource(R.string.placeholder_todo_title),
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = colors.tertiaryText
-                                    )
+                .animateContentSize(
+                    animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f)
+                )
+                .pointerInput(task.id, isExpanded) {
+                    if (!isExpanded) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                when {
+                                    rawSwipeOffsetPx >= whenSwipeThresholdPx -> {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        showWhenDialog = true
+                                    }
+                                    rawSwipeOffsetPx <= deleteSwipeThresholdPx -> {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onDeleteTask()
+                                    }
+                                    rawSwipeOffsetPx <= selectSwipeThresholdPx -> {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onToggleSelection?.invoke()
+                                    }
                                 }
-                                innerTextField()
+                                rawSwipeOffsetPx = 0f
+                            },
+                            onDragCancel = {
+                                rawSwipeOffsetPx = 0f
+                            },
+                            onHorizontalDrag = { change, dragAmount ->
+                                change.consume()
+                                rawSwipeOffsetPx = (rawSwipeOffsetPx + dragAmount).coerceIn(-220f * density.density, 140f * density.density)
+                            }
+                        )
+                    }
+                }
+                .pointerInput(task.id) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            if (event.type == PointerEventType.Press) {
+                                if (event.buttons.isSecondaryPressed) {
+                                    event.changes.forEach { it.consume() }
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    showContextMenu = true
+                                } else if (event.buttons.isTertiaryPressed ||
+                                    (event.buttons.isPrimaryPressed && (event.keyboardModifiers.isCtrlPressed || event.keyboardModifiers.isMetaPressed))
+                                ) {
+                                    event.changes.forEach { it.consume() }
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onToggleSelection?.invoke()
+                                } else if (event.buttons.isPrimaryPressed && event.keyboardModifiers.isShiftPressed) {
+                                    event.changes.forEach { it.consume() }
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    if (onRangeSelect != null) onRangeSelect() else onToggleSelection?.invoke()
+                                }
                             }
                         }
+                    }
+                }
+                .combinedClickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {
+                        if (isSelectionModeActive && !isExpanded && onToggleSelection != null) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onToggleSelection()
+                        } else if (!isExpanded) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onExpandToggle()
+                        }
+                    },
+                    onLongClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        showContextMenu = true
+                    }
+                ),
+            color = surfaceColor,
+            shape = RoundedCornerShape(cornerRadius)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        horizontal = if (isExpanded) 16.dp else 8.dp,
+                        vertical = if (isExpanded) 14.dp else 10.dp
                     )
-                } else {
-                    val isDoneOrCanceled = task.status != TaskStatus.OPEN
-                    val hasTitle = task.title.isNotBlank()
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = if (hasTitle) task.title else stringResource(R.string.placeholder_todo_title),
-                            style = MaterialTheme.typography.bodyLarge.copy(
-                                textDecoration = if (isDoneOrCanceled) TextDecoration.LineThrough else TextDecoration.None
-                            ),
-                            color = when {
-                                isDoneOrCanceled -> colors.tertiaryText
-                                !hasTitle -> colors.tertiaryText
-                                else -> colors.primaryText
+            ) {
+                // Top Row: Animated Things Checkbox + Title + Inline Badges (when collapsed)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    ThingsCheckbox(
+                        status = task.status,
+                        onStatusChange = onStatusChange
+                    )
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    if (isExpanded) {
+                        BasicTextField(
+                            value = editedTitleField,
+                            onValueChange = { newVal ->
+                                editedTitleField = newVal
+                                onTitleNotesChange(newVal.text, editedNotes)
                             },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            textStyle = MaterialTheme.typography.titleMedium.copy(
+                                color = colors.primaryText
+                            ),
+                            singleLine = true,
+                            cursorBrush = SolidColor(colors.thingsBlue),
+                            modifier = Modifier
+                                .weight(1f)
+                                .focusRequester(titleFocusRequester)
+                                .onFocusChanged { focusState ->
+                                    if (focusState.isFocused) {
+                                        val txt = editedTitleField.text
+                                        editedTitleField = editedTitleField.copy(
+                                            selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                        )
+                                    }
+                                }
                         )
+                    } else {
+                        val isDoneOrCanceled = task.status != TaskStatus.OPEN
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = task.title,
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    textDecoration = if (isDoneOrCanceled) TextDecoration.LineThrough else TextDecoration.None
+                                ),
+                                color = if (isDoneOrCanceled) colors.tertiaryText else colors.primaryText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         // Subtle Project / Area breadcrumb under title when collapsed (just like Things 3!)
                         val contextSubtitle = when {
                             assignedProject != null && assignedArea != null -> "${assignedArea.title} › ${assignedProject.title}"
@@ -352,11 +532,20 @@ fun ExpandableTaskCard(
                         .padding(start = 38.dp, top = 8.dp)
                 ) {
                     // Markdown Notes Editor
+                    var editedNotesField by remember(task.id) {
+                        mutableStateOf(
+                            TextFieldValue(
+                                text = task.notes,
+                                selection = if (task.notes.isEmpty()) TextRange(0) else TextRange(0, task.notes.length)
+                            )
+                        )
+                    }
                     BasicTextField(
-                        value = editedNotes,
-                        onValueChange = {
-                            editedNotes = it
-                            onTitleNotesChange(editedTitle, it)
+                        value = editedNotesField,
+                        onValueChange = { newVal ->
+                            editedNotesField = newVal
+                            editedNotes = newVal.text
+                            onTitleNotesChange(editedTitle, newVal.text)
                         },
                         textStyle = MaterialTheme.typography.bodyMedium.copy(
                             color = colors.secondaryText
@@ -364,10 +553,18 @@ fun ExpandableTaskCard(
                         cursorBrush = SolidColor(colors.thingsBlue),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 4.dp),
+                            .padding(vertical = 4.dp)
+                            .onFocusChanged { focusState ->
+                                if (focusState.isFocused) {
+                                    val txt = editedNotesField.text
+                                    editedNotesField = editedNotesField.copy(
+                                        selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                    )
+                                }
+                            },
                         decorationBox = { innerTextField ->
                             Box {
-                                if (editedNotes.isEmpty()) {
+                                if (editedNotesField.text.isEmpty()) {
                                     Text(
                                         text = stringResource(R.string.placeholder_notes),
                                         style = MaterialTheme.typography.bodyMedium,
@@ -430,6 +627,9 @@ fun ExpandableTaskCard(
                     }
 
                     // Add new subtask inline field + explicit '+' Button
+                    var newChecklistField by remember(task.id) {
+                        mutableStateOf(TextFieldValue(text = "", selection = TextRange(0)))
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -446,23 +646,36 @@ fun ExpandableTaskCard(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         BasicTextField(
-                            value = newChecklistText,
-                            onValueChange = { newChecklistText = it },
+                            value = newChecklistField,
+                            onValueChange = {
+                                newChecklistField = it
+                                newChecklistText = it.text
+                            },
                             textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.primaryText),
                             cursorBrush = SolidColor(colors.thingsBlue),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                             keyboardActions = KeyboardActions(
                                 onDone = {
-                                    if (newChecklistText.isNotBlank()) {
-                                        onAddChecklistItem(newChecklistText.trim())
+                                    if (newChecklistField.text.isNotBlank()) {
+                                        onAddChecklistItem(newChecklistField.text.trim())
+                                        newChecklistField = TextFieldValue(text = "", selection = TextRange(0))
                                         newChecklistText = ""
                                     }
                                 }
                             ),
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .onFocusChanged { focusState ->
+                                    if (focusState.isFocused) {
+                                        val txt = newChecklistField.text
+                                        newChecklistField = newChecklistField.copy(
+                                            selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                        )
+                                    }
+                                },
                             decorationBox = { inner ->
                                 Box {
-                                    if (newChecklistText.isEmpty()) {
+                                    if (newChecklistField.text.isEmpty()) {
                                         Text(
                                             text = "Unteraufgabe hinzufügen…",
                                             style = MaterialTheme.typography.bodyMedium,
@@ -473,7 +686,7 @@ fun ExpandableTaskCard(
                                 }
                             }
                         )
-                        if (newChecklistText.isNotBlank()) {
+                        if (newChecklistField.text.isNotBlank()) {
                             Box(
                                 modifier = Modifier
                                     .size(24.dp)
@@ -481,7 +694,8 @@ fun ExpandableTaskCard(
                                     .background(colors.thingsBlue)
                                     .clickable {
                                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        onAddChecklistItem(newChecklistText.trim())
+                                        onAddChecklistItem(newChecklistField.text.trim())
+                                        newChecklistField = TextFieldValue(text = "", selection = TextRange(0))
                                         newChecklistText = ""
                                     },
                                 contentAlignment = Alignment.Center
@@ -566,78 +780,6 @@ fun ExpandableTaskCard(
                         ThingsTagPill(
                             title = "+ " + stringResource(R.string.action_tags),
                             onClick = { showTagPickerDialog = true }
-                        )
-                    }
-
-                    if (showWhenDialog) {
-                        WhenNaturalDateDialog(
-                            currentScheduleState = task.scheduleState,
-                            currentWhenDate = task.whenDate,
-                            currentReminderTime = task.reminderTime,
-                            locale = locale,
-                            onApplySchedule = { newState, newWhen ->
-                                onScheduleChange(newState, newWhen)
-                            },
-                            onApplyScheduleWithReminder = { newState, newWhen, newReminder ->
-                                if (onScheduleWithReminderChange != null) {
-                                    onScheduleWithReminderChange(newState, newWhen, newReminder)
-                                } else {
-                                    onScheduleChange(newState, newWhen)
-                                }
-                            },
-                            onDismiss = { showWhenDialog = false }
-                        )
-                    }
-
-                    if (showDeadlineDialog) {
-                        DeadlineDatePickerDialog(
-                            currentDeadline = task.deadline,
-                            locale = locale,
-                            onApplyDeadline = { newDl -> onDeadlineChange(newDl) },
-                            onDismiss = { showDeadlineDialog = false }
-                        )
-                    }
-
-                    if (showRepeatDialog) {
-                        ThingsRepeatDialog(
-                            currentRule = task.recurrenceRule,
-                            locale = locale,
-                            onApplyRecurrence = { newRule ->
-                                onRecurrenceChange?.invoke(newRule)
-                            },
-                            onDismiss = { showRepeatDialog = false }
-                        )
-                    }
-
-                    if (showMoveDialog) {
-                        MoveTaskToProjectOrAreaDialog(
-                            currentProjectId = task.projectId,
-                            currentHeadingId = task.headingId,
-                            currentAreaId = task.areaId,
-                            areas = allAreas,
-                            projects = allProjects,
-                            headings = allHeadings,
-                            onMoveTask = { pId, hId, aId ->
-                                onMoveTaskToContainer?.invoke(pId, hId, aId)
-                            },
-                            onDismiss = { showMoveDialog = false }
-                        )
-                    }
-
-                    if (showTagPickerDialog) {
-                        TaskTagPickerDialog(
-                            allTags = allTags,
-                            selectedTagIds = task.tags.map { it.id },
-                            onUpdateSelectedTags = { updatedIds ->
-                                onUpdateTaskTags?.invoke(updatedIds)
-                            },
-                            onCreateAndAssignTag = { newTagTitle ->
-                                onCreateAndAssignTag?.invoke(newTagTitle)
-                            },
-                            onOpenFullTagManager = {
-                                onOpenFullTagManager?.invoke()
-                            },
-                            onDismiss = { showTagPickerDialog = false }
                         )
                     }
 
@@ -798,6 +940,302 @@ fun ExpandableTaskCard(
                 }
             }
         }
+        }
+
+        // Right-Click (Mouse) & Long-Press (Phone) Context Menu
+        DropdownMenu(
+            expanded = showContextMenu,
+            onDismissRequest = { showContextMenu = false },
+            modifier = Modifier.background(colors.cardElevatedSurface)
+        ) {
+            if (onToggleSelection != null) {
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = if (isSelected) "Auswahl aufheben" else "Aufgabe auswählen (Mehrfachauswahl)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.thingsBlue
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.CheckCircleOutline,
+                            contentDescription = null,
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    onClick = {
+                        showContextMenu = false
+                        onToggleSelection()
+                    }
+                )
+            }
+            val isCompleted = task.status == TaskStatus.COMPLETED
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = if (isCompleted) "Als offen markieren" else "Als erledigt markieren",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.primaryText
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.Check,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    showContextMenu = false
+                    onStatusChange(if (isCompleted) TaskStatus.OPEN else TaskStatus.COMPLETED)
+                }
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = "Wann? (Datum & Erinnerung)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.primaryText
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.CalendarToday,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    showContextMenu = false
+                    showWhenDialog = true
+                }
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = "Fälligkeit / Deadline anpassen",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.primaryText
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.Flag,
+                        contentDescription = null,
+                        tint = colors.deadlineUrgentRed,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    showContextMenu = false
+                    showDeadlineDialog = true
+                }
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = "Wiederholung konfigurieren",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.primaryText
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.Repeat,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    showContextMenu = false
+                    showRepeatDialog = true
+                }
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = "Verschieben (Bereich / Projekt)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.primaryText
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.Folder,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    showContextMenu = false
+                    showMoveDialog = true
+                }
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = "Tags zuweisen",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.primaryText
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.LocalOffer,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    showContextMenu = false
+                    showTagPickerDialog = true
+                }
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = "In Teilaufgaben zerlegen (Gemini ✨)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.thingsBlue
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.AutoAwesome,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    showContextMenu = false
+                    onTriggerGeminiMagicBreakdown()
+                }
+            )
+            HorizontalDivider(color = colors.hairlineDivider)
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = "Als abgebrochen markieren",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.secondaryText
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.Close,
+                        contentDescription = null,
+                        tint = colors.secondaryText,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    showContextMenu = false
+                    onStatusChange(TaskStatus.CANCELED)
+                }
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = "Aufgabe löschen",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.deadlineUrgentRed
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.DeleteOutline,
+                        contentDescription = null,
+                        tint = colors.deadlineUrgentRed,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    showContextMenu = false
+                    onDeleteTask()
+                }
+            )
+        }
+    }
+
+    // Dialogs available whether card is collapsed (via Context Menu) or expanded
+    if (showWhenDialog) {
+        WhenNaturalDateDialog(
+            currentScheduleState = task.scheduleState,
+            currentWhenDate = task.whenDate,
+            currentReminderTime = task.reminderTime,
+            locale = locale,
+            onApplySchedule = { newState, newWhen ->
+                onScheduleChange(newState, newWhen)
+            },
+            onApplyScheduleWithReminder = { newState, newWhen, newReminder ->
+                if (onScheduleWithReminderChange != null) {
+                    onScheduleWithReminderChange(newState, newWhen, newReminder)
+                } else {
+                    onScheduleChange(newState, newWhen)
+                }
+            },
+            onDismiss = { showWhenDialog = false }
+        )
+    }
+
+    if (showDeadlineDialog) {
+        DeadlineDatePickerDialog(
+            currentDeadline = task.deadline,
+            locale = locale,
+            onApplyDeadline = { newDl -> onDeadlineChange(newDl) },
+            onDismiss = { showDeadlineDialog = false }
+        )
+    }
+
+    if (showRepeatDialog) {
+        ThingsRepeatDialog(
+            currentRule = task.recurrenceRule,
+            locale = locale,
+            onApplyRecurrence = { newRule ->
+                onRecurrenceChange?.invoke(newRule)
+            },
+            onDismiss = { showRepeatDialog = false }
+        )
+    }
+
+    if (showMoveDialog) {
+        MoveTaskToProjectOrAreaDialog(
+            currentProjectId = task.projectId,
+            currentHeadingId = task.headingId,
+            currentAreaId = task.areaId,
+            areas = allAreas,
+            projects = allProjects,
+            headings = allHeadings,
+            onMoveTask = { pId, hId, aId ->
+                onMoveTaskToContainer?.invoke(pId, hId, aId)
+            },
+            onDismiss = { showMoveDialog = false }
+        )
+    }
+
+    if (showTagPickerDialog) {
+        TaskTagPickerDialog(
+            allTags = allTags,
+            selectedTagIds = task.tags.map { it.id },
+            onUpdateSelectedTags = { updatedIds ->
+                onUpdateTaskTags?.invoke(updatedIds)
+            },
+            onCreateAndAssignTag = { newTagTitle ->
+                onCreateAndAssignTag?.invoke(newTagTitle)
+            },
+            onOpenFullTagManager = {
+                onOpenFullTagManager?.invoke()
+            },
+            onDismiss = { showTagPickerDialog = false }
+        )
     }
 }
 
@@ -813,7 +1251,14 @@ private fun InlineChecklistRow(
     onDelete: () -> Unit
 ) {
     val colors = ThingsTheme.colors
-    var editedSubtaskTitle by remember(item.id, item.title) { mutableStateOf(item.title) }
+    var editedSubtaskField by remember(item.id) {
+        mutableStateOf(
+            TextFieldValue(
+                text = item.title,
+                selection = if (item.title.isEmpty()) TextRange(0) else TextRange(0, item.title.length)
+            )
+        )
+    }
 
     Row(
         modifier = Modifier
@@ -829,17 +1274,26 @@ private fun InlineChecklistRow(
         )
         Spacer(modifier = Modifier.width(8.dp))
         BasicTextField(
-            value = editedSubtaskTitle,
+            value = editedSubtaskField,
             onValueChange = {
-                editedSubtaskTitle = it
-                onRename(it)
+                editedSubtaskField = it
+                onRename(it.text)
             },
             textStyle = MaterialTheme.typography.bodyMedium.copy(
                 color = if (item.isCompleted) colors.tertiaryText else colors.primaryText,
                 textDecoration = if (item.isCompleted) TextDecoration.LineThrough else TextDecoration.None
             ),
             cursorBrush = SolidColor(colors.thingsBlue),
-            modifier = Modifier.weight(1f)
+            modifier = Modifier
+                .weight(1f)
+                .onFocusChanged { focusState ->
+                    if (focusState.isFocused) {
+                        val txt = editedSubtaskField.text
+                        editedSubtaskField = editedSubtaskField.copy(
+                            selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                        )
+                    }
+                }
         )
         if (canMoveUp) {
             IconButton(
@@ -880,3 +1334,4 @@ private fun InlineChecklistRow(
         }
     }
 }
+

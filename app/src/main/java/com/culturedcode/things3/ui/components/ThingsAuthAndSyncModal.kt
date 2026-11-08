@@ -166,22 +166,31 @@ fun ThingsAuthAndSyncModal(
                     CloudSyncStatus.OFFLINE -> stringResource(R.string.sync_status_offline)
                 }
 
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
                         .background(colors.tagPillBg)
                         .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text(
-                        text = statusLabel,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.primaryText
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = statusLabel,
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                            color = colors.primaryText
+                        )
+                    }
                     if (!currentUserIdentifier.isNullOrBlank()) {
-                        ThingsTagPill(title = currentUserIdentifier.take(28))
+                        Text(
+                            text = currentUserIdentifier,
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.thingsBlue
+                        )
                     }
                 }
 

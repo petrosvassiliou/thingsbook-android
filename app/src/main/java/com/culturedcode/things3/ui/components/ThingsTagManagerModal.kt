@@ -47,12 +47,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.culturedcode.things3.R
@@ -74,11 +78,11 @@ fun ThingsTagManagerModal(
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
 
-    var newTagName by remember { mutableStateOf("") }
-    var newTagShortcut by remember { mutableStateOf("") }
+    var newTagNameField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
+    var newTagShortcutField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
     var editingTagId by remember { mutableStateOf<String?>(null) }
-    var editingTagTitle by remember { mutableStateOf("") }
-    var editingTagShortcut by remember { mutableStateOf("") }
+    var editingTagTitleField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
+    var editingTagShortcutField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -136,40 +140,65 @@ fun ThingsTagManagerModal(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     OutlinedTextField(
-                        value = newTagName,
-                        onValueChange = { newTagName = it },
+                        value = newTagNameField,
+                        onValueChange = { newTagNameField = it },
                         placeholder = {
                             Text(
                                 text = stringResource(R.string.tags_new_placeholder),
-                                style = MaterialTheme.typography.bodySmall
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                         keyboardActions = KeyboardActions(
                             onDone = {
-                                if (newTagName.isNotBlank()) {
+                                if (newTagNameField.text.isNotBlank()) {
                                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onCreateTag(newTagName.trim(), newTagShortcut.trim().ifEmpty { null })
-                                    newTagName = ""
-                                    newTagShortcut = ""
+                                    onCreateTag(
+                                        newTagNameField.text.trim(),
+                                        newTagShortcutField.text.trim().ifEmpty { null }
+                                    )
+                                    newTagNameField = TextFieldValue(text = "", selection = TextRange(0))
+                                    newTagShortcutField = TextFieldValue(text = "", selection = TextRange(0))
                                 }
                             }
                         ),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .onFocusChanged { focusState ->
+                                if (focusState.isFocused) {
+                                    val txt = newTagNameField.text
+                                    newTagNameField = newTagNameField.copy(
+                                        selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                    )
+                                }
+                            }
                     )
 
                     OutlinedTextField(
-                        value = newTagShortcut,
-                        onValueChange = { if (it.length <= 2) newTagShortcut = it },
+                        value = newTagShortcutField,
+                        onValueChange = { if (it.text.length <= 2) newTagShortcutField = it },
                         placeholder = {
                             Text(
                                 text = stringResource(R.string.tags_shortcut_placeholder),
-                                style = MaterialTheme.typography.bodySmall
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         },
                         singleLine = true,
-                        modifier = Modifier.width(78.dp)
+                        modifier = Modifier
+                            .width(82.dp)
+                            .onFocusChanged { focusState ->
+                                if (focusState.isFocused) {
+                                    val txt = newTagShortcutField.text
+                                    newTagShortcutField = newTagShortcutField.copy(
+                                        selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                    )
+                                }
+                            }
                     )
                 }
 
@@ -177,14 +206,17 @@ fun ThingsTagManagerModal(
 
                 Button(
                     onClick = {
-                        if (newTagName.isNotBlank()) {
+                        if (newTagNameField.text.isNotBlank()) {
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onCreateTag(newTagName.trim(), newTagShortcut.trim().ifEmpty { null })
-                            newTagName = ""
-                            newTagShortcut = ""
+                            onCreateTag(
+                                newTagNameField.text.trim(),
+                                newTagShortcutField.text.trim().ifEmpty { null }
+                            )
+                            newTagNameField = TextFieldValue(text = "", selection = TextRange(0))
+                            newTagShortcutField = TextFieldValue(text = "", selection = TextRange(0))
                         }
                     },
-                    enabled = newTagName.isNotBlank(),
+                    enabled = newTagNameField.text.isNotBlank(),
                     colors = ButtonDefaults.buttonColors(containerColor = colors.thingsBlue),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth()
@@ -237,25 +269,43 @@ fun ThingsTagManagerModal(
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
                                         OutlinedTextField(
-                                            value = editingTagTitle,
-                                            onValueChange = { editingTagTitle = it },
+                                            value = editingTagTitleField,
+                                            onValueChange = { editingTagTitleField = it },
                                             singleLine = true,
-                                            modifier = Modifier.weight(1f)
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .onFocusChanged { focusState ->
+                                                    if (focusState.isFocused) {
+                                                        val txt = editingTagTitleField.text
+                                                        editingTagTitleField = editingTagTitleField.copy(
+                                                            selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                                        )
+                                                    }
+                                                }
                                         )
                                         OutlinedTextField(
-                                            value = editingTagShortcut,
-                                            onValueChange = { if (it.length <= 2) editingTagShortcut = it },
-                                            placeholder = { Text("Key") },
+                                            value = editingTagShortcutField,
+                                            onValueChange = { if (it.text.length <= 2) editingTagShortcutField = it },
+                                            placeholder = { Text("Key", maxLines = 1) },
                                             singleLine = true,
-                                            modifier = Modifier.width(64.dp)
+                                            modifier = Modifier
+                                                .width(68.dp)
+                                                .onFocusChanged { focusState ->
+                                                    if (focusState.isFocused) {
+                                                        val txt = editingTagShortcutField.text
+                                                        editingTagShortcutField = editingTagShortcutField.copy(
+                                                            selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                                        )
+                                                    }
+                                                }
                                         )
                                         IconButton(
                                             onClick = {
-                                                if (editingTagTitle.isNotBlank()) {
+                                                if (editingTagTitleField.text.isNotBlank()) {
                                                     onRenameTag(
                                                         tag.id,
-                                                        editingTagTitle.trim(),
-                                                        editingTagShortcut.trim().ifEmpty { null }
+                                                        editingTagTitleField.text.trim(),
+                                                        editingTagShortcutField.text.trim().ifEmpty { null }
                                                     )
                                                 }
                                                 editingTagId = null
@@ -300,7 +350,7 @@ fun ThingsTagManagerModal(
                                                         .padding(horizontal = 6.dp, vertical = 2.dp)
                                                 ) {
                                                     Text(
-                                                        text = "⌘${tag.shortcut}",
+                                                        text = "Ctrl+${tag.shortcut.uppercase()}",
                                                         style = MaterialTheme.typography.labelSmall,
                                                         color = colors.thingsBlue
                                                     )
@@ -315,8 +365,15 @@ fun ThingsTagManagerModal(
                                             IconButton(
                                                 onClick = {
                                                     editingTagId = tag.id
-                                                    editingTagTitle = tag.title
-                                                    editingTagShortcut = tag.shortcut ?: ""
+                                                    editingTagTitleField = TextFieldValue(
+                                                        text = tag.title,
+                                                        selection = TextRange(0, tag.title.length)
+                                                    )
+                                                    val sc = tag.shortcut ?: ""
+                                                    editingTagShortcutField = TextFieldValue(
+                                                        text = sc,
+                                                        selection = if (sc.isEmpty()) TextRange(0) else TextRange(0, sc.length)
+                                                    )
                                                 },
                                                 modifier = Modifier.size(30.dp)
                                             ) {
@@ -371,7 +428,7 @@ fun TaskTagPickerDialog(
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
     var currentSelection by remember(selectedTagIds) { mutableStateOf(selectedTagIds.toSet()) }
-    var quickNewTagTitle by remember { mutableStateOf("") }
+    var quickNewTagField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -427,36 +484,47 @@ fun TaskTagPickerDialog(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     OutlinedTextField(
-                        value = quickNewTagTitle,
-                        onValueChange = { quickNewTagTitle = it },
+                        value = quickNewTagField,
+                        onValueChange = { quickNewTagField = it },
                         placeholder = {
                             Text(
                                 text = stringResource(R.string.tags_new_placeholder),
-                                style = MaterialTheme.typography.bodySmall
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         },
                         singleLine = true,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .onFocusChanged { focusState ->
+                                if (focusState.isFocused) {
+                                    val txt = quickNewTagField.text
+                                    quickNewTagField = quickNewTagField.copy(
+                                        selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                    )
+                                }
+                            }
                     )
 
                     IconButton(
                         onClick = {
-                            if (quickNewTagTitle.isNotBlank()) {
+                            if (quickNewTagField.text.isNotBlank()) {
                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onCreateAndAssignTag(quickNewTagTitle.trim())
-                                quickNewTagTitle = ""
+                                onCreateAndAssignTag(quickNewTagField.text.trim())
+                                quickNewTagField = TextFieldValue(text = "", selection = TextRange(0))
                             }
                         },
-                        enabled = quickNewTagTitle.isNotBlank(),
+                        enabled = quickNewTagField.text.isNotBlank(),
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
-                            .background(if (quickNewTagTitle.isNotBlank()) colors.thingsBlue else colors.tagPillBg)
+                            .background(if (quickNewTagField.text.isNotBlank()) colors.thingsBlue else colors.tagPillBg)
                             .size(42.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Add,
                             contentDescription = stringResource(R.string.tags_add_button),
-                            tint = if (quickNewTagTitle.isNotBlank()) Color.White else colors.secondaryText
+                            tint = if (quickNewTagField.text.isNotBlank()) Color.White else colors.secondaryText
                         )
                     }
                 }
@@ -507,7 +575,7 @@ fun TaskTagPickerDialog(
                             }
 
                             if (!tag.shortcut.isNullOrBlank()) {
-                                ThingsTagPill(title = "⌘${tag.shortcut}")
+                                ThingsTagPill(title = "Ctrl+${tag.shortcut.uppercase()}")
                             }
                         }
                     }
@@ -551,3 +619,4 @@ fun TaskTagPickerDialog(
         }
     }
 }
+

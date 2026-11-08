@@ -347,6 +347,13 @@ interface TaskDao {
         """
     )
     suspend fun getMisclassifiedAnytimeTasks(): List<TaskEntity>
+
+    @Query("SELECT * FROM tasks")
+    fun observeAllTasksRaw(): Flow<List<TaskEntity>>
+
+    @Transaction
+    @Query("SELECT * FROM tasks WHERE isDeleted = 0 ORDER BY sortOrder ASC")
+    suspend fun getAllActiveTasksWithDetails(): List<TaskWithDetails>
 }
 
 @Dao

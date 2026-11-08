@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.outlined.Archive
@@ -43,6 +44,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimeInput
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -100,7 +102,9 @@ fun WhenNaturalDateDialog(
     val tomorrowEpoch = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
 
     val initialSelectedDate = remember(currentWhenDate) {
-        currentWhenDate?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() } ?: today
+        currentWhenDate?.let { epoch ->
+            runCatching { Instant.ofEpochMilli(epoch).atZone(zone).toLocalDate() }.getOrNull()
+        } ?: today
     }
 
     var selectedDate by remember { mutableStateOf(initialSelectedDate) }
@@ -116,19 +120,23 @@ fun WhenNaturalDateDialog(
     var visibleMonth by remember { mutableStateOf(YearMonth.from(initialSelectedDate)) }
 
     val initialTime = remember(currentReminderTime) {
-        currentReminderTime?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalTime() }
+        currentReminderTime?.let { epoch ->
+            runCatching { Instant.ofEpochMilli(epoch).atZone(zone).toLocalTime() }.getOrNull()
+        }
     }
     var reminderEnabled by remember { mutableStateOf(initialTime != null) }
-    var reminderHour by remember { mutableStateOf(initialTime?.hour ?: 9) }
-    var reminderMinute by remember { mutableStateOf(initialTime?.minute ?: 0) }
+    var reminderHour by remember { mutableStateOf((initialTime?.hour ?: 9).coerceIn(0, 23)) }
+    var reminderMinute by remember { mutableStateOf((initialTime?.minute ?: 0).coerceIn(0, 59)) }
     var showCustomTimePicker by remember { mutableStateOf(false) }
 
     fun computeReminderEpoch(targetDate: LocalDate?): Long? {
         if (!reminderEnabled || targetDate == null) return null
-        return targetDate.atTime(LocalTime.of(reminderHour, reminderMinute))
-            .atZone(zone)
-            .toInstant()
-            .toEpochMilli()
+        return runCatching {
+            targetDate.atTime(LocalTime.of(reminderHour.coerceIn(0, 23), reminderMinute.coerceIn(0, 59)))
+                .atZone(zone)
+                .toInstant()
+                .toEpochMilli()
+        }.getOrNull()
     }
 
     fun applySelection(state: ScheduleState, dateEpoch: Long?, reminderEpoch: Long?) {
@@ -155,6 +163,7 @@ fun WhenNaturalDateDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 12.dp, vertical = 10.dp)
             ) {
                 // Compact Header Row
@@ -280,8 +289,12 @@ fun WhenNaturalDateDialog(
                     selectedDate = selectedDate,
                     today = today,
                     locale = locale,
-                    onPreviousMonth = { visibleMonth = visibleMonth.minusMonths(1) },
-                    onNextMonth = { visibleMonth = visibleMonth.plusMonths(1) },
+                    onPreviousMonth = {
+                        runCatching { visibleMonth.minusMonths(1) }.onSuccess { visibleMonth = it }
+                    },
+                    onNextMonth = {
+                        runCatching { visibleMonth.plusMonths(1) }.onSuccess { visibleMonth = it }
+                    },
                     onSelectDate = { pickedDate ->
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         selectedDate = pickedDate
@@ -291,9 +304,13 @@ fun WhenNaturalDateDialog(
                             ScheduleState.UPCOMING
                         }
                         if (!reminderEnabled) {
-                            val epoch = pickedDate.atStartOfDay(zone).toInstant().toEpochMilli()
-                            applySelection(selectedScheduleState, epoch, null)
-                            onDismiss()
+                            val epoch = runCatching {
+                                pickedDate.atStartOfDay(zone).toInstant().toEpochMilli()
+                            }.getOrNull()
+                            if (epoch != null) {
+                                applySelection(selectedScheduleState, epoch, null)
+                                onDismiss()
+                            }
                         }
                     }
                 )
@@ -361,25 +378,28 @@ fun WhenNaturalDateDialog(
                 if (showCustomTimePicker && reminderEnabled) {
                     Spacer(modifier = Modifier.height(6.dp))
                     val timePickerState = rememberTimePickerState(
-                        initialHour = reminderHour,
-                        initialMinute = reminderMinute,
+                        initialHour = reminderHour.coerceIn(0, 23),
+                        initialMinute = reminderMinute.coerceIn(0, 59),
                         is24Hour = true
                     )
+                    LaunchedEffect(timePickerState.hour, timePickerState.minute) {
+                        reminderHour = timePickerState.hour.coerceIn(0, 23)
+                        reminderMinute = timePickerState.minute.coerceIn(0, 59)
+                    }
                     Box(
                         modifier = Modifier.fillMaxWidth(),
                         contentAlignment = Alignment.Center
                     ) {
                         TimeInput(state = timePickerState)
                     }
-                    reminderHour = timePickerState.hour
-                    reminderMinute = timePickerState.minute
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // Compact Single-Line Footer Actions (Clear on left, Apply on right)
                 val formattedSelectedDate = remember(selectedDate, locale) {
-                    selectedDate.format(DateTimeFormatter.ofPattern("d. MMM", locale))
+                    runCatching { selectedDate.format(DateTimeFormatter.ofPattern("d. MMM", locale)) }
+                        .getOrElse { selectedDate.toString() }
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -408,7 +428,9 @@ fun WhenNaturalDateDialog(
                     Button(
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            val targetEpoch = selectedDate.atStartOfDay(zone).toInstant().toEpochMilli()
+                            val targetEpoch = runCatching {
+                                selectedDate.atStartOfDay(zone).toInstant().toEpochMilli()
+                            }.getOrElse { todayEpoch }
                             val finalState = when {
                                 selectedScheduleState == ScheduleState.THIS_EVENING && selectedDate == today ->
                                     ScheduleState.THIS_EVENING
@@ -512,7 +534,9 @@ fun DeadlineDatePickerDialog(
     val today = LocalDate.now(zone)
 
     val initialDate = remember(currentDeadline) {
-        currentDeadline?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() } ?: today.plusDays(3)
+        currentDeadline?.let { epoch ->
+            runCatching { Instant.ofEpochMilli(epoch).atZone(zone).toLocalDate() }.getOrNull()
+        } ?: today.plusDays(3)
     }
     var selectedDate by remember { mutableStateOf(initialDate) }
     var visibleMonth by remember { mutableStateOf(YearMonth.from(initialDate)) }
@@ -533,6 +557,7 @@ fun DeadlineDatePickerDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 12.dp, vertical = 10.dp)
             ) {
                 Row(

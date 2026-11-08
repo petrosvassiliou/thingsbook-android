@@ -25,6 +25,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -120,25 +121,39 @@ fun ThingsCheckbox(
     ) {
         Canvas(modifier = Modifier.size(size)) {
             val strokePx = 1.75.dp.toPx()
+            val rectWidth = (this.size.width - strokePx).coerceAtLeast(0f)
+            val rectHeight = (this.size.height - strokePx).coerceAtLeast(0f)
+            if (rectWidth <= 0f || rectHeight <= 0f) return@Canvas
+
             val cornerPx = if (shape == ThingsCheckboxShape.CIRCLE) {
                 this.size.minDimension / 2f
             } else {
                 5.5.dp.toPx()
             }
 
+            val borderStroke = if (isDashedSomeday && status == TaskStatus.OPEN) {
+                Stroke(
+                    width = strokePx,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 4f), 0f)
+                )
+            } else {
+                Stroke(width = strokePx)
+            }
+
             // Outer border
             drawRoundRect(
                 color = borderColor,
                 topLeft = Offset(strokePx / 2f, strokePx / 2f),
-                size = Size(this.size.width - strokePx, this.size.height - strokePx),
+                size = Size(rectWidth, rectHeight),
                 cornerRadius = CornerRadius(cornerPx, cornerPx),
-                style = Stroke(width = strokePx)
+                style = borderStroke
             )
 
-            // Animated fill
-            if (fillFraction > 0.01f) {
+            // Animated fill (clamped against spring overshoot > 1f or < 0f)
+            val clampedAlpha = (if (fillFraction.isFinite()) fillFraction else 0f).coerceIn(0f, 1f)
+            if (clampedAlpha > 0.01f) {
                 drawRoundRect(
-                    color = fillColor.copy(alpha = fillFraction),
+                    color = fillColor.copy(alpha = clampedAlpha),
                     topLeft = Offset.Zero,
                     size = this.size,
                     cornerRadius = CornerRadius(cornerPx, cornerPx)
@@ -157,7 +172,7 @@ fun ThingsCheckbox(
                     }
                     drawPath(
                         path = checkPath,
-                        color = Color.White.copy(alpha = fillFraction),
+                        color = Color.White.copy(alpha = clampedAlpha),
                         style = Stroke(
                             width = iconStroke,
                             cap = StrokeCap.Round,
@@ -168,14 +183,14 @@ fun ThingsCheckbox(
                     // Draw Things 3 Canceled 'X' icon
                     val pad = w * 0.30f
                     drawLine(
-                        color = Color.White.copy(alpha = fillFraction),
+                        color = Color.White.copy(alpha = clampedAlpha),
                         start = Offset(pad, pad),
                         end = Offset(w - pad, h - pad),
                         strokeWidth = iconStroke,
                         cap = StrokeCap.Round
                     )
                     drawLine(
-                        color = Color.White.copy(alpha = fillFraction),
+                        color = Color.White.copy(alpha = clampedAlpha),
                         start = Offset(w - pad, pad),
                         end = Offset(pad, h - pad),
                         strokeWidth = iconStroke,

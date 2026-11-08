@@ -77,9 +77,10 @@ abstract class ThingsDatabase : RoomDatabase() {
                     """.trimIndent()
                 )
 
+                db.execSQL("DROP TRIGGER IF EXISTS tasks_fts_au")
                 db.execSQL(
                     """
-                    CREATE TRIGGER IF NOT EXISTS tasks_fts_au AFTER UPDATE ON tasks BEGIN
+                    CREATE TRIGGER IF NOT EXISTS tasks_fts_au AFTER UPDATE OF id, title, notes ON tasks BEGIN
                         DELETE FROM tasks_fts WHERE task_id = old.id;
                         INSERT INTO tasks_fts(task_id, title, notes)
                         VALUES (new.id, new.title, new.notes);
@@ -115,9 +116,10 @@ abstract class ThingsDatabase : RoomDatabase() {
                     """.trimIndent()
                 )
 
+                db.execSQL("DROP TRIGGER IF EXISTS projects_fts_au")
                 db.execSQL(
                     """
-                    CREATE TRIGGER IF NOT EXISTS projects_fts_au AFTER UPDATE ON projects BEGIN
+                    CREATE TRIGGER IF NOT EXISTS projects_fts_au AFTER UPDATE OF id, title, notes ON projects BEGIN
                         DELETE FROM projects_fts WHERE project_id = old.id;
                         INSERT INTO projects_fts(project_id, title, notes)
                         VALUES (new.id, new.title, new.notes);
@@ -133,25 +135,49 @@ abstract class ThingsDatabase : RoomDatabase() {
                     """.trimIndent()
                 )
 
+                // Ensure any pre-existing tasks or projects are indexed in FTS5
+                db.execSQL(
+                    """
+                    INSERT INTO tasks_fts(task_id, title, notes)
+                    SELECT t.id, t.title, t.notes FROM tasks t
+                    WHERE NOT EXISTS (SELECT 1 FROM tasks_fts f WHERE f.task_id = t.id)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO projects_fts(project_id, title, notes)
+                    SELECT p.id, p.title, p.notes FROM projects p
+                    WHERE NOT EXISTS (SELECT 1 FROM projects_fts f WHERE f.project_id = p.id)
+                    """.trimIndent()
+                )
+
                 fts5Available = true
             }.onFailure {
                 fts5Available = false
             }
         }
 
+        private val ftsTokenRegex = Regex("[\\p{L}\\p{N}_]+")
+
+        /**
+         * Strictly extracts Unicode alphanumeric/underscore tokens for FTS5 prefix matching (`"token"*`),
+         * eliminating any risk of FTS5 syntax errors on quotes, operators (`AND`, `OR`, `NOT`, `NEAR`),
+         * NUL bytes, or punctuation-only queries (e.g. `"`, `*`, `C++`, `#tag`).
+         */
         fun sanitizeFts5Query(rawQuery: String): String {
-            return rawQuery
-                .trim()
-                .replace(Regex("[\"'*():^\\-]"), " ")
-                .split(Regex("\\s+"))
+            val cleaned = rawQuery.replace("\u0000", "").trim()
+            if (cleaned.isEmpty()) return ""
+            return ftsTokenRegex.findAll(cleaned)
+                .map { it.value }
                 .filter { it.isNotBlank() }
+                .take(16)
                 .joinToString(" ") { "\"$it\"*" }
         }
 
         fun buildTasksFts5SqlQuery(rawQuery: String): SupportSQLiteQuery {
-            val cleaned = rawQuery.trim()
-            if (fts5Available && cleaned.isNotBlank()) {
-                val ftsMatch = sanitizeFts5Query(cleaned)
+            val cleaned = rawQuery.replace("\u0000", "").trim()
+            val ftsMatch = if (fts5Available && cleaned.isNotBlank()) sanitizeFts5Query(cleaned) else ""
+            if (fts5Available && ftsMatch.isNotBlank()) {
                 return SimpleSQLiteQuery(
                     """
                     SELECT t.* FROM tasks t
@@ -176,9 +202,9 @@ abstract class ThingsDatabase : RoomDatabase() {
         }
 
         fun buildProjectsFts5SqlQuery(rawQuery: String): SupportSQLiteQuery {
-            val cleaned = rawQuery.trim()
-            if (fts5Available && cleaned.isNotBlank()) {
-                val ftsMatch = sanitizeFts5Query(cleaned)
+            val cleaned = rawQuery.replace("\u0000", "").trim()
+            val ftsMatch = if (fts5Available && cleaned.isNotBlank()) sanitizeFts5Query(cleaned) else ""
+            if (fts5Available && ftsMatch.isNotBlank()) {
                 return SimpleSQLiteQuery(
                     """
                     SELECT p.* FROM projects p

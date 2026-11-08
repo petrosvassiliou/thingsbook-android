@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowDownward
@@ -407,9 +408,9 @@ fun ThingsAreaManagerModal(
                     }
 
                     // Quick 1-tap Area suggestions if not yet present (up to 8 Areas)
-                    val existingNamesLower = areas.map { it.title.lowercase() }.toSet()
+                    val existingNamesLower = areas.map { it.title.lowercase(Locale.ROOT) }.toSet()
                     val suggestions = listOf("Work", "Home", "Finance", "Health", "Family", "Study", "Sport", "Hobby")
-                        .filter { it.lowercase() !in existingNamesLower }
+                        .filter { it.lowercase(Locale.ROOT) !in existingNamesLower }
                     if (suggestions.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(8.dp))
                         FlowRow(
@@ -520,6 +521,7 @@ fun CreateOrEditProjectDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(16.dp)
             ) {
                 Row(
@@ -677,9 +679,11 @@ fun CreateOrEditProjectDialog(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    val formattedTargetDate = deadlineEpochMillis?.let {
-                        Instant.ofEpochMilli(it).atZone(zone).toLocalDate()
-                            .format(DateTimeFormatter.ofPattern("EEE, d. MMM yyyy", locale))
+                    val formattedTargetDate = deadlineEpochMillis?.let { epoch ->
+                        runCatching {
+                            Instant.ofEpochMilli(epoch).atZone(zone).toLocalDate()
+                                .format(DateTimeFormatter.ofPattern("EEE, d. MMM yyyy", locale))
+                        }.getOrNull()
                     } ?: stringResource(R.string.project_set_target_date)
 
                     Row(

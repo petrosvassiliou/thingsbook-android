@@ -89,19 +89,21 @@ object MultilingualDateParser {
     )
 
     private val isoDateRegex = Regex("""^(\d{4})-(\d{1,2})-(\d{1,2})$""")
-    private val euroDateRegex = Regex("""^(\d{1,2})\.(\d{1,2})\.(?:(\d{2,4}))?$""")
+    private val euroDateRegex = Regex("""^(\d{1,2})\.(\d{1,2})\.(?:(\d{4}|\d{2}))?$""")
 
     fun parse(
         rawInput: String,
         locale: Locale = Locale.getDefault(),
         referenceDate: LocalDate = LocalDate.now(ZoneId.systemDefault())
-    ): ParsedNaturalDate? {
+    ): ParsedNaturalDate? = runCatching {
         val trimmed = rawInput.trim()
         if (trimmed.isEmpty()) return null
 
         val normalized = normalizeDiacritics(trimmed.lowercase(locale))
         val zone = ZoneId.systemDefault()
-        val formatter = DateTimeFormatter.ofPattern("EEEE, d MMM yyyy", locale)
+        val formatter = runCatching {
+            DateTimeFormatter.ofPattern("EEEE, d MMM yyyy", locale)
+        }.getOrDefault(DateTimeFormatter.ISO_LOCAL_DATE)
 
         fun epochFor(date: LocalDate): Long =
             date.atStartOfDay(zone).toInstant().toEpochMilli()
@@ -227,8 +229,9 @@ object MultilingualDateParser {
         relativeWeeksRegex.matchEntire(normalized)?.let { match ->
             val weeks = match.groupValues[1].toLongOrNull() ?: return@let
             val targetDate = referenceDate.plusWeeks(weeks)
+            val state = if (weeks == 0L) ScheduleState.TODAY else ScheduleState.UPCOMING
             return ParsedNaturalDate(
-                scheduleState = ScheduleState.UPCOMING,
+                scheduleState = state,
                 whenDateEpochMillis = epochFor(targetDate),
                 formattedPreview = targetDate.format(formatter),
                 matchedExpression = trimmed
@@ -238,7 +241,10 @@ object MultilingualDateParser {
         // 9. Next Weekday or Standalone Weekday in EN, DE, IT, FR, ES
         // Examples: "next friday", "nächsten freitag", "venerdì prossimo", "vendredi prochain", "próximo viernes"
         val cleanedWeekdayToken = normalized
-            .replace(Regex("""^(?:next|nachsten|nachster|naechsten|proximo|proxima|prochain|prochaine)\s+"""), "")
+            .replace(
+                Regex("""^(?:next|nachsten|nachster|nachste|naechsten|naechste|diesen|kommenden|am|prossimo|prossima|proximo|proxima|prochain|prochaine)\s+"""),
+                ""
+            )
             .replace(Regex("""\s+(?:prossimo|prossima|prochain|prochaine|proximo|proxima)$"""), "")
             .trim()
 
@@ -254,7 +260,7 @@ object MultilingualDateParser {
 
         // 10. Explicit ISO (YYYY-MM-DD) or European (DD.MM.YYYY) date
         isoDateRegex.matchEntire(normalized)?.let { match ->
-            val y = match.groupValues[1].toIntOrNull() ?: return@let
+            val y = match.groupValues[1].toIntOrNull()?.takeIf { it in 1970..2100 } ?: return@let
             val m = match.groupValues[2].toIntOrNull() ?: return@let
             val d = match.groupValues[3].toIntOrNull() ?: return@let
             val date = runCatching { LocalDate.of(y, m, d) }.getOrNull() ?: return@let
@@ -272,10 +278,13 @@ object MultilingualDateParser {
             val rawYear = match.groupValues[3]
             val y = when {
                 rawYear.isEmpty() -> referenceDate.year
-                rawYear.length == 2 -> 2000 + (rawYear.toIntOrNull() ?: 26)
-                else -> rawYear.toIntOrNull() ?: referenceDate.year
+                rawYear.length == 2 -> 2000 + (rawYear.toIntOrNull() ?: return@let)
+                else -> rawYear.toIntOrNull()?.takeIf { it in 1970..2100 } ?: return@let
             }
-            val date = runCatching { LocalDate.of(y, m, d) }.getOrNull() ?: return@let
+            var date = runCatching { LocalDate.of(y, m, d) }.getOrNull() ?: return@let
+            if (rawYear.isEmpty() && date.isBefore(referenceDate)) {
+                date = date.plusYears(1)
+            }
             return ParsedNaturalDate(
                 scheduleState = if (date <= referenceDate) ScheduleState.TODAY else ScheduleState.UPCOMING,
                 whenDateEpochMillis = epochFor(date),
@@ -285,10 +294,11 @@ object MultilingualDateParser {
         }
 
         return null
-    }
+    }.getOrNull()
 
     private fun normalizeDiacritics(input: String): String {
-        val decomposed = Normalizer.normalize(input, Normalizer.Form.NFD)
+        val unifiedQuotes = input.replace(Regex("[\\u2018\\u2019\\u02BC`]"), "'")
+        val decomposed = Normalizer.normalize(unifiedQuotes, Normalizer.Form.NFD)
         return decomposed.replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
     }
 }

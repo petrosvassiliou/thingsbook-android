@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
@@ -114,12 +115,13 @@ fun ThingsRepeatDialog(
     }
     var selectedDaysOfWeek by remember(currentRule) {
         mutableStateOf(
-            currentRule?.daysOfWeek?.takeIf { it.isNotEmpty() }?.toSet()
+            currentRule?.daysOfWeek?.filter { it in 1..7 }?.takeIf { it.isNotEmpty() }?.toSet()
                 ?: setOf(LocalDate.now(zone).dayOfWeek.value)
         )
     }
     var selectedDayOfMonth by remember(currentRule) {
-        mutableStateOf(currentRule?.dayOfMonth ?: LocalDate.now(zone).dayOfMonth)
+        val rawDom = currentRule?.dayOfMonth ?: LocalDate.now(zone).dayOfMonth
+        mutableStateOf(if (rawDom == -1) -1 else rawDom.coerceIn(1, 31))
     }
     var endDateEpochMillis by remember(currentRule) {
         mutableStateOf(currentRule?.endDateEpochMillis)
@@ -159,6 +161,7 @@ fun ThingsRepeatDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 14.dp, vertical = 12.dp)
             ) {
                 // Header
@@ -523,9 +526,11 @@ fun ThingsRepeatDialog(
                             )
                         }
 
-                        val endDateText = endDateEpochMillis?.let {
-                            Instant.ofEpochMilli(it).atZone(zone).toLocalDate()
-                                .format(DateTimeFormatter.ofPattern("d. MMM yyyy", locale))
+                        val endDateText = endDateEpochMillis?.let { epoch ->
+                            runCatching {
+                                Instant.ofEpochMilli(epoch).atZone(zone).toLocalDate()
+                                    .format(DateTimeFormatter.ofPattern("d. MMM yyyy", locale))
+                            }.getOrNull()
                         } ?: "Datum wählen…"
                         Box(
                             modifier = Modifier

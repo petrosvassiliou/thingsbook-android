@@ -69,7 +69,6 @@ fun ThingsAuthAndSyncModal(
     onSignInEmailPassword: (String, String) -> Unit,
     onResetPassword: (String) -> Unit = {},
     onSignInWithGoogle: (String) -> Unit,
-    onSignInAnonymously: () -> Unit = {},
     onSignOut: () -> Unit,
     onTriggerDeltaSyncNow: () -> Unit,
     onDismiss: () -> Unit

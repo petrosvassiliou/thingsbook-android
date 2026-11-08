@@ -1,6 +1,9 @@
 package com.culturedcode.things3.ui.viewmodel
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.util.Log
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.ViewModel
@@ -22,18 +25,17 @@ import com.culturedcode.things3.domain.model.ScheduleState
 import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
+import com.culturedcode.things3.domain.util.runCatchingCancellable
 import com.culturedcode.things3.ui.components.SmartViewType
-import com.google.firebase.FirebaseApp
-import com.google.firebase.FirebaseOptions
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -45,7 +47,9 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Locale
@@ -65,16 +69,35 @@ class ThingsbookViewModel @Inject constructor(
     private val database: ThingsDatabase,
     private val syncRepository: SyncRepository,
     private val geminiService: ThingsbookGeminiService,
-    private val firebaseAuth: FirebaseAuth,
     private val reminderScheduler: ReminderScheduler
 ) : ViewModel() {
 
+    private val _uiErrorMessage = MutableStateFlow<String?>(null)
+    val uiErrorMessage: StateFlow<String?> = _uiErrorMessage.asStateFlow()
+
+    private val _geminiErrorMessage = MutableStateFlow<String?>(null)
+    val geminiErrorMessage: StateFlow<String?> = _geminiErrorMessage.asStateFlow()
+
     private val safeVmScope = CoroutineScope(
-        viewModelScope.coroutineContext + SupervisorJob() + CoroutineExceptionHandler { _, _ -> }
+        viewModelScope.coroutineContext +
+            SupervisorJob(viewModelScope.coroutineContext[Job]) +
+            CoroutineExceptionHandler { _, throwable ->
+                if (throwable !is CancellationException) {
+                    Log.e(TAG, "Unhandled ViewModel coroutine error", throwable)
+                    _uiErrorMessage.value = throwable.localizedMessage
+                        ?: throwable.message
+                        ?: "Ein unerwarteter Fehler ist aufgetreten."
+                }
+            }
     )
 
-    @Volatile
-    private var activeAuth: FirebaseAuth = firebaseAuth
+    fun clearUiErrorMessage() {
+        _uiErrorMessage.value = null
+    }
+
+    fun clearGeminiErrorMessage() {
+        _geminiErrorMessage.value = null
+    }
 
     private val _navigationTarget = MutableStateFlow<ActiveNavigationTarget>(
         ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
@@ -336,24 +359,39 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun setGeminiModalOpen(open: Boolean) {
+        if (!open) _geminiErrorMessage.value = null
         _isGeminiModalOpen.value = open
     }
 
     fun updateGeminiApiKey(key: String) {
-        _geminiApiKey.value = key
-        geminiService.customApiKey = key
+        val trimmed = key.trim()
+        _geminiApiKey.value = trimmed
+        geminiService.customApiKey = trimmed
+        runCatching {
+            appContext.getSharedPreferences("thingsbook_settings_prefs", Context.MODE_PRIVATE)
+                .edit()
+                .putString("gemini_api_key", trimmed)
+                .apply()
+        }.onFailure { err ->
+            Log.w(TAG, "Failed persisting Gemini API key", err)
+        }
     }
 
     /**
      * Switches app language live via AndroidX `AppCompatDelegate.setApplicationLocales` (EN, DE, IT, FR, ES).
      */
     fun switchAppLanguage(languageTag: String) {
-        val localeList = if (languageTag.isBlank()) {
-            LocaleListCompat.getEmptyLocaleList()
-        } else {
-            LocaleListCompat.forLanguageTags(languageTag)
+        runCatching {
+            val localeList = if (languageTag.isBlank()) {
+                LocaleListCompat.getEmptyLocaleList()
+            } else {
+                LocaleListCompat.forLanguageTags(languageTag)
+            }
+            AppCompatDelegate.setApplicationLocales(localeList)
+        }.onFailure { err ->
+            Log.w(TAG, "Failed switching language to '$languageTag'", err)
+            _uiErrorMessage.value = err.localizedMessage ?: "Sprache konnte nicht geändert werden."
         }
-        AppCompatDelegate.setApplicationLocales(localeList)
     }
 
     fun updateTaskStatus(taskId: String, status: TaskStatus) {
@@ -581,14 +619,20 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun createArea(title: String) {
+        val trimmed = title.trim()
+        if (trimmed.isEmpty()) return
         safeVmScope.launch {
-            repository.createArea(title)
+            repository.createArea(trimmed).onFailure { err ->
+                _uiErrorMessage.value = err.localizedMessage ?: err.message ?: "Bereich konnte nicht erstellt werden."
+            }
         }
     }
 
     fun renameArea(areaId: String, newTitle: String) {
+        val trimmed = newTitle.trim()
+        if (trimmed.isEmpty()) return
         safeVmScope.launch {
-            repository.renameArea(areaId, newTitle)
+            repository.renameArea(areaId, trimmed)
         }
     }
 
@@ -620,18 +664,20 @@ class ThingsbookViewModel @Inject constructor(
         deadlineEpochMillis: Long?,
         navigateToProject: Boolean = true
     ) {
+        val trimmedTitle = title.trim()
+        if (trimmedTitle.isEmpty()) return
         safeVmScope.launch {
             val savedId = if (id != null) {
                 repository.createOrUpdateProject(
                     id = id,
-                    title = title,
+                    title = trimmedTitle,
                     notes = notes,
                     areaId = areaId,
                     deadline = deadlineEpochMillis
                 )
             } else {
                 repository.createOrUpdateProject(
-                    title = title,
+                    title = trimmedTitle,
                     notes = notes,
                     areaId = areaId,
                     deadline = deadlineEpochMillis
@@ -691,13 +737,26 @@ class ThingsbookViewModel @Inject constructor(
     fun triggerGeminiMagicBreakdown(task: TaskItem, locale: Locale = Locale.getDefault()) {
         safeVmScope.launch {
             _magicBreakdownTaskId.value = task.id
-            val steps = geminiService.generateMagicChecklist(
-                taskTitle = task.title,
-                taskNotes = task.notes,
-                locale = locale
-            )
-            repository.addChecklistItemsBatch(task.id, steps)
-            _magicBreakdownTaskId.value = null
+            _geminiErrorMessage.value = null
+            try {
+                val steps = geminiService.generateMagicChecklist(
+                    taskTitle = task.title,
+                    taskNotes = task.notes,
+                    locale = locale
+                )
+                if (steps.isNotEmpty()) {
+                    repository.addChecklistItemsBatch(task.id, steps)
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                Log.w(TAG, "Gemini Magic Breakdown failed", t)
+                val msg = t.localizedMessage ?: t.message ?: "KI-Teilaufgaben konnten nicht erstellt werden."
+                _geminiErrorMessage.value = msg
+                _uiErrorMessage.value = msg
+            } finally {
+                _magicBreakdownTaskId.value = null
+            }
         }
     }
 
@@ -705,41 +764,64 @@ class ThingsbookViewModel @Inject constructor(
      * Feature 2: Gemini Brain Dump -> Structured GTD Tasks with automatic ScheduleState, whenDate, deadline & checklist.
      */
     fun submitGeminiBrainDump(rawText: String, locale: Locale = Locale.getDefault()) {
+        if (rawText.isBlank()) return
         safeVmScope.launch {
             _isGeminiBusy.value = true
-            val parsedTasks = geminiService.parseBrainDumpToTasks(rawText, locale)
-            val zone = ZoneId.systemDefault()
-            val today = LocalDate.now(zone)
+            _geminiErrorMessage.value = null
+            try {
+                val parsedTasks = geminiService.parseBrainDumpToTasks(rawText, locale)
+                val zone = ZoneId.systemDefault()
+                val today = LocalDate.now(zone)
 
-            var lastCreatedId: String? = null
-            parsedTasks.forEachIndexed { idx, dto ->
-                val state = runCatching { ScheduleState.valueOf(dto.scheduleState) }
-                    .getOrDefault(ScheduleState.TODAY)
-                val whenEpoch = dto.whenDaysOffset?.let {
-                    today.plusDays(it.toLong()).atStartOfDay(zone).toInstant().toEpochMilli()
-                }
-                val deadlineEpoch = dto.deadlineDaysOffset?.let {
-                    today.plusDays(it.toLong()).atStartOfDay(zone).toInstant().toEpochMilli()
+                var lastCreatedId: String? = null
+                parsedTasks.forEachIndexed { idx, dto ->
+                    val normalizedState = dto.scheduleState.trim().uppercase(Locale.ROOT)
+                    val state = runCatching { ScheduleState.valueOf(normalizedState) }
+                        .getOrDefault(ScheduleState.TODAY)
+                    val whenEpoch = dto.whenDaysOffset?.let { offset ->
+                        runCatching {
+                            today.plusDays(offset.coerceIn(-365, 3650).toLong())
+                                .atStartOfDay(zone)
+                                .toInstant()
+                                .toEpochMilli()
+                        }.getOrNull()
+                    }
+                    val deadlineEpoch = dto.deadlineDaysOffset?.let { offset ->
+                        runCatching {
+                            today.plusDays(offset.coerceIn(-365, 3650).toLong())
+                                .atStartOfDay(zone)
+                                .toInstant()
+                                .toEpochMilli()
+                        }.getOrNull()
+                    }
+
+                    val taskId = repository.createOrUpdateTask(
+                        title = dto.title,
+                        notes = dto.notes,
+                        status = TaskStatus.OPEN,
+                        scheduleState = state,
+                        whenDate = whenEpoch,
+                        deadline = deadlineEpoch,
+                        sortOrder = (idx + 1) * 500.0 + (System.currentTimeMillis() % 1000)
+                    )
+                    if (dto.checklist.isNotEmpty()) {
+                        repository.addChecklistItemsBatch(taskId, dto.checklist)
+                    }
+                    if (idx == 0) lastCreatedId = taskId
                 }
 
-                val taskId = repository.createOrUpdateTask(
-                    title = dto.title,
-                    notes = dto.notes,
-                    status = TaskStatus.OPEN,
-                    scheduleState = state,
-                    whenDate = whenEpoch,
-                    deadline = deadlineEpoch,
-                    sortOrder = (idx + 1) * 500.0 + (System.currentTimeMillis() % 1000)
-                )
-                if (dto.checklist.isNotEmpty()) {
-                    repository.addChecklistItemsBatch(taskId, dto.checklist)
-                }
-                if (idx == 0) lastCreatedId = taskId
+                _isGeminiModalOpen.value = false
+                lastCreatedId?.let { _expandedTaskId.value = it }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                Log.w(TAG, "Gemini Brain Dump failed", t)
+                val msg = t.localizedMessage ?: t.message ?: "Brain-Dump-Analyse fehlgeschlagen."
+                _geminiErrorMessage.value = msg
+                _uiErrorMessage.value = msg
+            } finally {
+                _isGeminiBusy.value = false
             }
-
-            _isGeminiBusy.value = false
-            _isGeminiModalOpen.value = false
-            lastCreatedId?.let { _expandedTaskId.value = it }
         }
     }
 
@@ -747,17 +829,29 @@ class ThingsbookViewModel @Inject constructor(
      * Feature 3: Gemini AI Project Architect -> Generates Project + Headings + To-Dos and navigates to it.
      */
     fun submitGeminiProjectArchitect(goalPrompt: String, locale: Locale = Locale.getDefault()) {
+        if (goalPrompt.isBlank()) return
         safeVmScope.launch {
             _isGeminiBusy.value = true
-            val blueprint = geminiService.generateProjectBlueprint(goalPrompt, locale)
-            val projectId = repository.createProjectFromBlueprint(
-                title = blueprint.projectTitle,
-                notes = blueprint.projectNotes,
-                headingsWithTasks = blueprint.headings.map { it.title to it.tasks }
-            )
-            _isGeminiBusy.value = false
-            _isGeminiModalOpen.value = false
-            _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(projectId)
+            _geminiErrorMessage.value = null
+            try {
+                val blueprint = geminiService.generateProjectBlueprint(goalPrompt, locale)
+                val projectId = repository.createProjectFromBlueprint(
+                    title = blueprint.projectTitle,
+                    notes = blueprint.projectNotes,
+                    headingsWithTasks = blueprint.headings.map { it.title to it.tasks }
+                )
+                _isGeminiModalOpen.value = false
+                _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(projectId)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                Log.w(TAG, "Gemini Project Architect failed", t)
+                val msg = t.localizedMessage ?: t.message ?: "Projekt-Erstellung mit Gemini fehlgeschlagen."
+                _geminiErrorMessage.value = msg
+                _uiErrorMessage.value = msg
+            } finally {
+                _isGeminiBusy.value = false
+            }
         }
     }
 
@@ -767,18 +861,31 @@ class ThingsbookViewModel @Inject constructor(
     fun generateGeminiLogbookReflection(locale: Locale = Locale.getDefault()) {
         safeVmScope.launch {
             _isGeminiBusy.value = true
-            val completedTitles = logbookTasks.value.map { it.title }
-            _logbookAiReview.value = geminiService.generateLogbookReflection(completedTitles, locale)
-            _isGeminiBusy.value = false
+            _geminiErrorMessage.value = null
+            try {
+                val completedTitles = logbookTasks.value.map { it.title }
+                _logbookAiReview.value = geminiService.generateLogbookReflection(completedTitles, locale)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                Log.w(TAG, "Gemini Logbook Reflection failed", t)
+                val msg = t.localizedMessage ?: t.message ?: "Logbuch-Reflexion fehlgeschlagen."
+                _geminiErrorMessage.value = msg
+                _uiErrorMessage.value = msg
+            } finally {
+                _isGeminiBusy.value = false
+            }
         }
     }
 
     fun adoptSuggestedFocusTaskForToday(title: String) {
+        val trimmed = title.trim()
+        if (trimmed.isEmpty()) return
         safeVmScope.launch {
             val zone = ZoneId.systemDefault()
             val todayEpoch = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
             repository.createOrUpdateTask(
-                title = title,
+                title = trimmed,
                 scheduleState = ScheduleState.TODAY,
                 whenDate = todayEpoch,
                 sortOrder = 250.0
@@ -787,8 +894,15 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun triggerManualCloudSync() {
+        if (_isLocalOnlyDbMode.value) {
+            _uiErrorMessage.value = "Lokaler Datenbank-Modus ist aktiv. Wechsle in den Einstellungen auf Cloud-Sync, um zu synchronisieren."
+            return
+        }
         safeVmScope.launch {
-            syncRepository.syncBidirectionalDeltas()
+            syncRepository.syncBidirectionalDeltas().onFailure { err ->
+                Log.w(TAG, "Manual cloud sync failed", err)
+                _uiErrorMessage.value = err.localizedMessage ?: err.message ?: "Cloud-Synchronisierung fehlgeschlagen."
+            }
         }
     }
 
@@ -807,14 +921,18 @@ class ThingsbookViewModel @Inject constructor(
             _isSigningIn.value = true
             _authErrorMessage.value = null
             _authInfoMessage.value = null
-            syncRepository.registerAccount(email, password)
-                .onSuccess {
-                    _isAuthModalOpen.value = false
-                }
-                .onFailure { err ->
-                    _authErrorMessage.value = err.localizedMessage ?: err.message
-                }
-            _isSigningIn.value = false
+            try {
+                if (_isLocalOnlyDbMode.value) setLocalOnlyDbMode(false)
+                syncRepository.registerAccount(email, password)
+                    .onSuccess {
+                        _isAuthModalOpen.value = false
+                    }
+                    .onFailure { err ->
+                        _authErrorMessage.value = err.localizedMessage ?: err.message
+                    }
+            } finally {
+                _isSigningIn.value = false
+            }
         }
     }
 
@@ -828,14 +946,18 @@ class ThingsbookViewModel @Inject constructor(
             _isSigningIn.value = true
             _authErrorMessage.value = null
             _authInfoMessage.value = null
-            syncRepository.signInAccount(email, password)
-                .onSuccess {
-                    _isAuthModalOpen.value = false
-                }
-                .onFailure { err ->
-                    _authErrorMessage.value = err.localizedMessage ?: err.message
-                }
-            _isSigningIn.value = false
+            try {
+                if (_isLocalOnlyDbMode.value) setLocalOnlyDbMode(false)
+                syncRepository.signInAccount(email, password)
+                    .onSuccess {
+                        _isAuthModalOpen.value = false
+                    }
+                    .onFailure { err ->
+                        _authErrorMessage.value = err.localizedMessage ?: err.message
+                    }
+            } finally {
+                _isSigningIn.value = false
+            }
         }
     }
 
@@ -847,14 +969,17 @@ class ThingsbookViewModel @Inject constructor(
             _isSigningIn.value = true
             _authErrorMessage.value = null
             _authInfoMessage.value = null
-            syncRepository.sendPasswordResetEmail(email)
-                .onSuccess { msg ->
-                    _authInfoMessage.value = msg
-                }
-                .onFailure { err ->
-                    _authErrorMessage.value = err.localizedMessage ?: err.message
-                }
-            _isSigningIn.value = false
+            try {
+                syncRepository.sendPasswordResetEmail(email)
+                    .onSuccess { msg ->
+                        _authInfoMessage.value = msg
+                    }
+                    .onFailure { err ->
+                        _authErrorMessage.value = err.localizedMessage ?: err.message
+                    }
+            } finally {
+                _isSigningIn.value = false
+            }
         }
     }
 
@@ -867,14 +992,18 @@ class ThingsbookViewModel @Inject constructor(
             _isSigningIn.value = true
             _authErrorMessage.value = null
             _authInfoMessage.value = null
-            syncRepository.signInInstantCloudAccount(optionalEmail)
-                .onSuccess {
-                    _isAuthModalOpen.value = false
-                }
-                .onFailure { err ->
-                    _authErrorMessage.value = err.localizedMessage ?: err.message
-                }
-            _isSigningIn.value = false
+            try {
+                if (_isLocalOnlyDbMode.value) setLocalOnlyDbMode(false)
+                syncRepository.signInInstantCloudAccount(optionalEmail)
+                    .onSuccess {
+                        _isAuthModalOpen.value = false
+                    }
+                    .onFailure { err ->
+                        _authErrorMessage.value = err.localizedMessage ?: err.message
+                    }
+            } finally {
+                _isSigningIn.value = false
+            }
         }
     }
 
@@ -883,14 +1012,18 @@ class ThingsbookViewModel @Inject constructor(
             _isSigningIn.value = true
             _authErrorMessage.value = null
             _authInfoMessage.value = null
-            syncRepository.signInInstantCloudAccount(null)
-                .onSuccess {
-                    _isAuthModalOpen.value = false
-                }
-                .onFailure { err ->
-                    _authErrorMessage.value = err.localizedMessage ?: err.message
-                }
-            _isSigningIn.value = false
+            try {
+                if (_isLocalOnlyDbMode.value) setLocalOnlyDbMode(false)
+                syncRepository.signInInstantCloudAccount(null)
+                    .onSuccess {
+                        _isAuthModalOpen.value = false
+                    }
+                    .onFailure { err ->
+                        _authErrorMessage.value = err.localizedMessage ?: err.message
+                    }
+            } finally {
+                _isSigningIn.value = false
+            }
         }
     }
 
@@ -1036,26 +1169,41 @@ class ThingsbookViewModel @Inject constructor(
 
     fun setNotificationSettingsOpen(open: Boolean) {
         if (open) {
-            _dailyDigestConfig.value = reminderScheduler.getDailyDigestConfig()
+            runCatching {
+                _dailyDigestConfig.value = reminderScheduler.getDailyDigestConfig()
+            }.onFailure { err ->
+                Log.w(TAG, "Failed loading daily digest config", err)
+            }
         }
         _isNotificationSettingsOpen.value = open
     }
 
     fun updateDailyDigestConfig(enabled: Boolean, hour: Int, minute: Int) {
-        reminderScheduler.updateDailyDigestSchedule(enabled, hour, minute)
-        _dailyDigestConfig.value = reminderScheduler.getDailyDigestConfig()
+        runCatching {
+            reminderScheduler.updateDailyDigestSchedule(enabled, hour, minute)
+            _dailyDigestConfig.value = reminderScheduler.getDailyDigestConfig()
+        }.onFailure { err ->
+            Log.w(TAG, "Failed updating daily digest config", err)
+            _uiErrorMessage.value = err.localizedMessage ?: "Benachrichtigungen konnten nicht gespeichert werden."
+        }
     }
 
     fun sendTestDailyDigestNotificationNow() {
-        reminderScheduler.triggerDailyDigestNotificationNow()
+        runCatching {
+            reminderScheduler.triggerDailyDigestNotificationNow()
+        }.onFailure { err ->
+            Log.w(TAG, "Failed triggering test notification", err)
+            _uiErrorMessage.value = err.localizedMessage ?: "Test-Benachrichtigung fehlgeschlagen."
+        }
     }
 
     // =========================================================================
-    // v1.3.0: Settings Modal, Collapsible Sidebar, Local/Cloud DB Mode,
-    // Live Task Statistics, and CSV Import/Export
+    // v1.3.0 / v1.4.0: Settings Modal, Collapsible Sidebar, Local/Cloud DB Mode,
+    // Live Task Statistics, and Off-Main-Thread CSV Import/Export/Share
     // =========================================================================
 
     private val settingsPrefs = appContext.getSharedPreferences("thingsbook_ui_prefs", Context.MODE_PRIVATE)
+    private val coreSettingsPrefs = appContext.getSharedPreferences("thingsbook_settings_prefs", Context.MODE_PRIVATE)
 
     private val _isSettingsModalOpen = MutableStateFlow(false)
     val isSettingsModalOpen: StateFlow<Boolean> = _isSettingsModalOpen.asStateFlow()
@@ -1063,7 +1211,10 @@ class ThingsbookViewModel @Inject constructor(
     private val _isSidebarVisible = MutableStateFlow(settingsPrefs.getBoolean("sidebar_visible", true))
     val isSidebarVisible: StateFlow<Boolean> = _isSidebarVisible.asStateFlow()
 
-    private val _isLocalOnlyDbMode = MutableStateFlow(settingsPrefs.getBoolean("local_only_db_mode", false))
+    private val _isLocalOnlyDbMode = MutableStateFlow(
+        settingsPrefs.getBoolean("local_only_db_mode", false) ||
+            coreSettingsPrefs.getBoolean("local_only_db_mode", false)
+    )
     val isLocalOnlyDbMode: StateFlow<Boolean> = _isLocalOnlyDbMode.asStateFlow()
 
     private val _csvStatusMessage = MutableStateFlow<String?>(null)
@@ -1138,24 +1289,23 @@ class ThingsbookViewModel @Inject constructor(
     fun toggleSidebarVisible() {
         val next = !_isSidebarVisible.value
         _isSidebarVisible.value = next
-        settingsPrefs.edit().putBoolean("sidebar_visible", next).apply()
+        runCatching { settingsPrefs.edit().putBoolean("sidebar_visible", next).apply() }
     }
 
     fun setSidebarVisible(visible: Boolean) {
         _isSidebarVisible.value = visible
-        settingsPrefs.edit().putBoolean("sidebar_visible", visible).apply()
+        runCatching { settingsPrefs.edit().putBoolean("sidebar_visible", visible).apply() }
     }
 
     fun setLocalOnlyDbMode(localOnly: Boolean) {
         _isLocalOnlyDbMode.value = localOnly
-        settingsPrefs.edit().putBoolean("local_only_db_mode", localOnly).apply()
-        appContext.getSharedPreferences("thingsbook_settings_prefs", Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean("local_only_db_mode", localOnly)
-            .apply()
+        runCatching {
+            settingsPrefs.edit().putBoolean("local_only_db_mode", localOnly).apply()
+            coreSettingsPrefs.edit().putBoolean("local_only_db_mode", localOnly).apply()
+        }
         if (localOnly) {
             safeVmScope.launch {
-                runCatching { syncRepository.signOutAccount() }
+                runCatchingCancellable { syncRepository.signOutAccount() }
             }
         }
     }
@@ -1166,25 +1316,114 @@ class ThingsbookViewModel @Inject constructor(
 
     fun exportTasksCsv(onCsvReady: (String) -> Unit) {
         safeVmScope.launch {
-            runCatching {
+            runCatchingCancellable {
                 repository.exportTasksToCsv()
             }.onSuccess { csv ->
                 _csvStatusMessage.value = "✅ CSV-Export erfolgreich erstellt (${statistics.value.openTasksCount + statistics.value.completedTasksCount} Aufgaben)."
                 onCsvReady(csv)
             }.onFailure { err ->
-                _csvStatusMessage.value = "❌ CSV-Export fehlgeschlagen: ${err.localizedMessage ?: err.message}"
+                val msg = "❌ CSV-Export fehlgeschlagen: ${err.localizedMessage ?: err.message}"
+                _csvStatusMessage.value = msg
+                _uiErrorMessage.value = msg
+            }
+        }
+    }
+
+    fun exportTasksCsvToUri(uri: Uri) {
+        safeVmScope.launch {
+            runCatchingCancellable {
+                val csvContent = repository.exportTasksToCsv()
+                withContext(Dispatchers.IO) {
+                    val outputStream = runCatching {
+                        appContext.contentResolver.openOutputStream(uri, "wt")
+                    }.getOrNull() ?: appContext.contentResolver.openOutputStream(uri)
+                        ?: throw IllegalStateException("Zieldatei konnte nicht zum Schreiben geöffnet werden.")
+                    outputStream.use { out ->
+                        out.write(csvContent.toByteArray(Charsets.UTF_8))
+                        out.flush()
+                    }
+                }
+            }.onSuccess {
+                val totalExported = statistics.value.openTasksCount + statistics.value.completedTasksCount
+                _csvStatusMessage.value = "✅ CSV-Datei erfolgreich gespeichert ($totalExported Aufgaben)."
+            }.onFailure { err ->
+                Log.w(TAG, "CSV export to URI failed", err)
+                val msg = "❌ CSV-Export fehlgeschlagen: ${err.localizedMessage ?: err.message}"
+                _csvStatusMessage.value = msg
+                _uiErrorMessage.value = msg
+            }
+        }
+    }
+
+    fun shareTasksCsv() {
+        safeVmScope.launch {
+            runCatchingCancellable {
+                val csvContent = repository.exportTasksToCsv()
+                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/csv"
+                    putExtra(Intent.EXTRA_SUBJECT, "Thingsbook Aufgaben Export (${LocalDate.now()})")
+                    putExtra(Intent.EXTRA_TEXT, csvContent)
+                }
+                val chooser = Intent.createChooser(sendIntent, "CSV teilen").apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                appContext.startActivity(chooser)
+            }.onSuccess {
+                _csvStatusMessage.value = "✅ CSV-Export zum Teilen geöffnet."
+            }.onFailure { err ->
+                Log.w(TAG, "Sharing CSV failed", err)
+                val msg = "❌ Teilen fehlgeschlagen: ${err.localizedMessage ?: err.message}"
+                _csvStatusMessage.value = msg
+                _uiErrorMessage.value = msg
             }
         }
     }
 
     fun importTasksCsv(csvContent: String) {
         safeVmScope.launch {
-            runCatching {
+            runCatchingCancellable {
                 repository.importTasksFromCsv(csvContent)
             }.onSuccess { count ->
                 _csvStatusMessage.value = "✅ $count Aufgaben erfolgreich aus der CSV-Datei importiert!"
             }.onFailure { err ->
-                _csvStatusMessage.value = "❌ CSV-Import fehlgeschlagen: ${err.localizedMessage ?: err.message}"
+                val msg = "❌ CSV-Import fehlgeschlagen: ${err.localizedMessage ?: err.message}"
+                _csvStatusMessage.value = msg
+                _uiErrorMessage.value = msg
+            }
+        }
+    }
+
+    fun importTasksCsvFromUri(uri: Uri) {
+        safeVmScope.launch {
+            runCatchingCancellable {
+                val csvText = withContext(Dispatchers.IO) {
+                    val inputStream = appContext.contentResolver.openInputStream(uri)
+                        ?: throw IllegalStateException("Ausgewählte CSV-Datei konnte nicht geöffnet werden.")
+                    inputStream.use { stream ->
+                        val reader = BufferedReader(InputStreamReader(stream, Charsets.UTF_8))
+                        val sb = StringBuilder()
+                        val buffer = CharArray(8192)
+                        var totalChars = 0
+                        while (true) {
+                            val read = reader.read(buffer)
+                            if (read == -1) break
+                            totalChars += read
+                            if (totalChars > MAX_CSV_IMPORT_CHARS) {
+                                throw IllegalArgumentException("Die ausgewählte CSV-Datei ist zu groß (maximal 10 MB).")
+                            }
+                            sb.append(buffer, 0, read)
+                        }
+                        sb.toString()
+                    }
+                }
+                repository.importTasksFromCsv(csvText)
+            }.onSuccess { count ->
+                _csvStatusMessage.value = "✅ $count Aufgaben erfolgreich aus der CSV-Datei importiert!"
+            }.onFailure { err ->
+                Log.w(TAG, "CSV import from URI failed", err)
+                val msg = "❌ CSV-Import fehlgeschlagen: ${err.localizedMessage ?: err.message}"
+                _csvStatusMessage.value = msg
+                _uiErrorMessage.value = msg
             }
         }
     }
@@ -1302,6 +1541,10 @@ class ThingsbookViewModel @Inject constructor(
 
     fun dismissTopmostOverlay(): Boolean {
         return when {
+            _uiErrorMessage.value != null -> {
+                _uiErrorMessage.value = null
+                true
+            }
             _selectedTaskIds.value.isNotEmpty() -> {
                 _selectedTaskIds.value = emptySet()
                 true
@@ -1343,20 +1586,34 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     init {
-        safeVmScope.launch {
-            runCatching {
-                repository.ensureDefaultWorkAndHomeAreas()
+        runCatching {
+            val savedKey = coreSettingsPrefs.getString("gemini_api_key", "")?.trim().orEmpty()
+            if (savedKey.isNotEmpty()) {
+                _geminiApiKey.value = savedKey
+                geminiService.customApiKey = savedKey
             }
         }
         safeVmScope.launch {
-            runCatching {
+            runCatchingCancellable {
+                repository.ensureDefaultWorkAndHomeAreas()
+            }.onFailure { err ->
+                Log.w(TAG, "Failed ensuring default areas", err)
+            }
+            runCatchingCancellable {
+                repository.rescheduleAllOpenTaskReminders()
+            }.onFailure { err ->
+                Log.w(TAG, "Failed rescheduling open task reminders", err)
+            }
+        }
+        safeVmScope.launch {
+            runCatchingCancellable {
                 combine(
                     inboxTasks,
                     todayDaytimeTasks,
                     thisEveningTasks,
                     upcomingTasks,
-                    anytimeTasks
-                ) { a, b, c, d, e -> a.size + b.size + c.size + d.size + e.size }
+                    combine(anytimeTasks, somedayTasks) { a, s -> a.size + s.size }
+                ) { a, b, c, d, e -> a.size + b.size + c.size + d.size + e }
                     .catch { emit(0) }
                     .collect {
                         runCatching {
@@ -1365,6 +1622,11 @@ class ThingsbookViewModel @Inject constructor(
                     }
             }
         }
+    }
+
+    companion object {
+        private const val TAG = "ThingsbookVM"
+        private const val MAX_CSV_IMPORT_CHARS = 10 * 1024 * 1024
     }
 }
 

@@ -6,7 +6,6 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
@@ -59,19 +58,20 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
 
-        <!-- Things-for-Mac Style Interactive Home Screen Widget (Switch Views + Direct Task Completion) -->
+        <!-- Things-for-Mac Style Interactive Home Screen Widget (explicit PendingIntents handle custom actions securely) -->
         <receiver
             android:name=".ui.widget.ThingsbookWidgetProvider"
             android:exported="true"
             android:label="@string/app_name">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.culturedcode.things3.widget.ACTION_SWITCH_VIEW" />
-                <action android:name="com.culturedcode.things3.widget.ACTION_ITEM_INTERACTION" />
-                <action android:name="com.culturedcode.things3.widget.ACTION_REFRESH_ALL" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"

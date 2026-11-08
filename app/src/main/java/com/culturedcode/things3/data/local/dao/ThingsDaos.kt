@@ -51,6 +51,12 @@ interface AreaDao {
 
     @Query("UPDATE areas SET isDirty = 0 WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>)
+
+    suspend fun markSyncedSafe(ids: List<String>) {
+        ids.chunked(500).forEach { chunk ->
+            if (chunk.isNotEmpty()) markSynced(chunk)
+        }
+    }
 }
 
 @Dao
@@ -69,6 +75,9 @@ interface ProjectDao {
 
     @Query("SELECT * FROM projects WHERE isDeleted = 0 AND status = 'ACTIVE' ORDER BY sortOrder ASC")
     suspend fun getActiveProjectsList(): List<ProjectEntity>
+
+    @Query("SELECT * FROM projects WHERE isDeleted = 0 ORDER BY sortOrder ASC")
+    suspend fun getAllNonDeletedProjectsList(): List<ProjectEntity>
 
     @Transaction
     @Query("SELECT * FROM projects WHERE id = :projectId AND isDeleted = 0 LIMIT 1")
@@ -106,6 +115,12 @@ interface ProjectDao {
 
     @Query("UPDATE projects SET isDirty = 0 WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>)
+
+    suspend fun markSyncedSafe(ids: List<String>) {
+        ids.chunked(500).forEach { chunk ->
+            if (chunk.isNotEmpty()) markSynced(chunk)
+        }
+    }
 }
 
 @Dao
@@ -133,6 +148,12 @@ interface HeadingDao {
 
     @Query("UPDATE headings SET isDirty = 0 WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>)
+
+    suspend fun markSyncedSafe(ids: List<String>) {
+        ids.chunked(500).forEach { chunk ->
+            if (chunk.isNotEmpty()) markSynced(chunk)
+        }
+    }
 }
 
 @Dao
@@ -268,7 +289,7 @@ interface TaskDao {
      * Full-Text Search (SQLite FTS5 with unicode61 tokenizer) for Quick Find.
      */
     @Transaction
-    @RawQuery(observedEntities = [TaskEntity::class, ChecklistItemEntity::class, TagEntity::class])
+    @RawQuery(observedEntities = [TaskEntity::class, ChecklistItemEntity::class, TagEntity::class, TaskTagCrossRef::class])
     fun searchTasksFts5(query: SupportSQLiteQuery): Flow<List<TaskWithDetails>>
 
     @RawQuery(observedEntities = [ProjectEntity::class])
@@ -322,6 +343,12 @@ interface TaskDao {
     @Query("UPDATE tasks SET isDirty = 0 WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>)
 
+    suspend fun markSyncedSafe(ids: List<String>) {
+        ids.chunked(500).forEach { chunk ->
+            if (chunk.isNotEmpty()) markSynced(chunk)
+        }
+    }
+
     @Query(
         """
         SELECT * FROM tasks
@@ -336,6 +363,17 @@ interface TaskDao {
         """
     )
     suspend fun getOpenActiveTasksForToday(endOfTodayMillis: Long): List<TaskEntity>
+
+    @Query(
+        """
+        SELECT * FROM tasks
+        WHERE isDeleted = 0
+          AND status = 'OPEN'
+          AND reminderTime IS NOT NULL
+          AND reminderTime > :nowMillis
+        """
+    )
+    suspend fun getOpenTasksWithFutureReminders(nowMillis: Long): List<TaskEntity>
 
     @Query(
         """
@@ -378,6 +416,12 @@ interface ChecklistDao {
 
     @Query("UPDATE checklist_items SET isDirty = 0 WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>)
+
+    suspend fun markSyncedSafe(ids: List<String>) {
+        ids.chunked(500).forEach { chunk ->
+            if (chunk.isNotEmpty()) markSynced(chunk)
+        }
+    }
 }
 
 @Dao
@@ -405,4 +449,10 @@ interface TagDao {
 
     @Query("UPDATE tags SET isDirty = 0 WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>)
+
+    suspend fun markSyncedSafe(ids: List<String>) {
+        ids.chunked(500).forEach { chunk ->
+            if (chunk.isNotEmpty()) markSynced(chunk)
+        }
+    }
 }

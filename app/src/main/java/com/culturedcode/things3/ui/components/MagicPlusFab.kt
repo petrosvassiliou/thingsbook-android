@@ -161,15 +161,15 @@ fun MagicPlusFab(
         label = "magicPlusElevation"
     )
 
-    val rowHeightPx = with(density) { 58.dp.toPx() }
+    val rowHeightPx = with(density) { 58.dp.toPx() }.coerceAtLeast(1f)
     val leftEdgeThresholdPx = with(density) { (-210).dp.toPx() }
 
     Box(
         modifier = modifier
             .offset {
                 IntOffset(
-                    x = dragOffset.x.roundToInt(),
-                    y = dragOffset.y.roundToInt()
+                    x = dragOffset.x.takeIf { it.isFinite() }?.roundToInt() ?: 0,
+                    y = dragOffset.y.takeIf { it.isFinite() }?.roundToInt() ?: 0
                 )
             }
             .graphicsLayer {
@@ -226,10 +226,15 @@ fun MagicPlusFab(
                     },
                     onDrag = { change, dragAmount ->
                         change.consume()
-                        dragOffset += dragAmount
+                        if (dragAmount.x.isFinite() && dragAmount.y.isFinite()) {
+                            dragOffset += dragAmount
+                        }
 
                         // Calculate how many rows upward the user dragged from the bottom-right corner
-                        val rowsUp = ((-dragOffset.y) / rowHeightPx).roundToInt().coerceAtLeast(0)
+                        val rawRows = if (dragOffset.y.isFinite() && rowHeightPx > 0f) {
+                            ((-dragOffset.y) / rowHeightPx).roundToInt()
+                        } else 0
+                        val rowsUp = rawRows.coerceAtLeast(0)
                         val computedSlot = (itemCount - rowsUp).coerceIn(0, itemCount.coerceAtLeast(0))
 
                         val mode = if (allowHeadingDrop && dragOffset.x <= leftEdgeThresholdPx) {

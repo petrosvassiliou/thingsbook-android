@@ -35,23 +35,38 @@ object CrashGuardian {
     private var installed = false
 
     @Volatile
+    private var storedAppContext: Context? = null
+
+    @Volatile
     var lastCaughtCrashTrace: String? = null
         private set
 
     fun install(context: Context?) {
-        if (installed) return
-        installed = true
-        val appCtx = context?.applicationContext ?: context
-
-        runCatching {
-            if (appCtx != null) {
-                val prefs = appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                lastCaughtCrashTrace = prefs.getString(KEY_LAST_CRASH, null)
+        val candidateCtx = context?.applicationContext ?: context
+        if (candidateCtx != null && (storedAppContext == null || context?.applicationContext != null)) {
+            storedAppContext = candidateCtx
+            runCatching {
+                val prefs = candidateCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                if (lastCaughtCrashTrace == null) {
+                    lastCaughtCrashTrace = prefs.getString(KEY_LAST_CRASH, null)
+                }
             }
         }
 
+        if (installed) return
+        installed = true
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            val appCtx = storedAppContext
             recordCrash(appCtx, thread, throwable)
+
+            // Never attempt to spin Looper on unrecoverable JVM VirtualMachineError (OutOfMemoryError, StackOverflowError)
+            if (throwable is VirtualMachineError) {
+                previousHandler?.uncaughtException(thread, throwable)
+                return@setDefaultUncaughtExceptionHandler
+            }
+
             val isMainThread = runCatching {
                 Looper.getMainLooper()?.thread === thread
             }.getOrDefault(false)
@@ -62,17 +77,35 @@ object CrashGuardian {
                 return@setDefaultUncaughtExceptionHandler
             }
 
-            // Main UI Thread exception: notify MainActivity and keep Looper alive!
+            // Main UI Thread exception: notify MainActivity and keep Looper alive with ANR circuit breaker!
             Log.e(TAG, "Caught Main UI Thread exception — keeping Looper alive", throwable)
             MainActivity.notifyMainThreadCrash(throwable)
 
+            var rapidCrashCount = 0
+            var windowStartMs = System.currentTimeMillis()
             while (true) {
                 try {
                     Looper.loop()
                 } catch (loopErr: Throwable) {
-                    recordCrash(appCtx, Thread.currentThread(), loopErr)
-                    Log.e(TAG, "Caught subsequent Main UI Thread exception inside Looper guard", loopErr)
+                    recordCrash(storedAppContext, Thread.currentThread(), loopErr)
+                    if (loopErr is VirtualMachineError) {
+                        previousHandler?.uncaughtException(thread, loopErr)
+                        break
+                    }
+                    val now = System.currentTimeMillis()
+                    if (now - windowStartMs < 2000L) {
+                        rapidCrashCount += 1
+                    } else {
+                        rapidCrashCount = 1
+                        windowStartMs = now
+                    }
+                    Log.e(TAG, "Caught subsequent Main UI Thread exception (#$rapidCrashCount) inside Looper guard", loopErr)
                     MainActivity.notifyMainThreadCrash(loopErr)
+                    if (rapidCrashCount > 5) {
+                        Log.e(TAG, "Rapid Main UI Thread crash loop detected — delegating to system handler to avoid ANR")
+                        previousHandler?.uncaughtException(thread, loopErr)
+                        break
+                    }
                 }
             }
         }
@@ -80,13 +113,14 @@ object CrashGuardian {
 
     fun recordCrash(context: Context?, thread: Thread, throwable: Throwable) {
         runCatching {
+            val targetCtx = context ?: storedAppContext
             val sw = StringWriter()
             throwable.printStackTrace(PrintWriter(sw))
             val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
             val fullReport = "[$timestamp] Thread: ${thread.name}\n" +
                 "${throwable::class.java.name}: ${throwable.message}\n$sw"
             lastCaughtCrashTrace = fullReport
-            context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            targetCtx?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 ?.edit()
                 ?.putString(KEY_LAST_CRASH, fullReport)
                 ?.apply()
@@ -96,7 +130,8 @@ object CrashGuardian {
     fun clearCrashLog(context: Context?) {
         lastCaughtCrashTrace = null
         runCatching {
-            context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val targetCtx = context ?: storedAppContext
+            targetCtx?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 ?.edit()
                 ?.remove(KEY_LAST_CRASH)
                 ?.apply()

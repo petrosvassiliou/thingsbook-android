@@ -27,8 +27,9 @@ fun ProjectProgressRing(
     size: Dp = 20.dp,
     tintColor: Color = ThingsTheme.colors.thingsBlue
 ) {
+    val safeTarget = (if (progress.isFinite()) progress else 0f).coerceIn(0f, 1f)
     val animatedProgress by animateFloatAsState(
-        targetValue = progress.coerceIn(0f, 1f),
+        targetValue = safeTarget,
         animationSpec = spring(dampingRatio = 0.82f, stiffness = 360f),
         label = "projectPieProgress"
     )
@@ -36,6 +37,7 @@ fun ProjectProgressRing(
     Canvas(modifier = modifier.size(size)) {
         val strokeWidth = 1.65.dp.toPx()
         val outerRadius = (this.size.minDimension - strokeWidth) / 2f
+        if (outerRadius <= 0f) return@Canvas
 
         // Outer circular border
         drawCircle(
@@ -46,14 +48,15 @@ fun ProjectProgressRing(
         )
 
         // Inner Pie-Chart fill with subtle breathing gap from outer ring
-        if (animatedProgress > 0.005f) {
+        val clampedProgress = (if (animatedProgress.isFinite()) animatedProgress else 0f).coerceIn(0f, 1f)
+        if (clampedProgress > 0.005f) {
             val piePadding = strokeWidth * 1.9f
             val pieDiameter = this.size.minDimension - (piePadding * 2f)
             if (pieDiameter > 0f) {
                 drawArc(
                     color = tintColor,
                     startAngle = -90f,
-                    sweepAngle = animatedProgress * 360f,
+                    sweepAngle = clampedProgress * 360f,
                     useCenter = true,
                     topLeft = Offset(piePadding, piePadding),
                     size = Size(pieDiameter, pieDiameter)

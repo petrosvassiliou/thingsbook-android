@@ -155,6 +155,9 @@ fun ExpandableTaskCard(
     val haptics = LocalHapticFeedback.current
     val density = LocalDensity.current
 
+    var isTitleFocused by remember(task.id) { mutableStateOf(false) }
+    var isNotesFocused by remember(task.id) { mutableStateOf(false) }
+
     var editedTitleField by remember(task.id) {
         mutableStateOf(
             TextFieldValue(
@@ -164,8 +167,35 @@ fun ExpandableTaskCard(
         )
     }
     val editedTitle = editedTitleField.text
-    var editedNotes by remember(task.id) { mutableStateOf(task.notes) }
-    var newChecklistText by remember(task.id) { mutableStateOf("") }
+
+    var editedNotesField by remember(task.id) {
+        mutableStateOf(
+            TextFieldValue(
+                text = task.notes,
+                selection = if (task.notes.isEmpty()) TextRange(0) else TextRange(0, task.notes.length)
+            )
+        )
+    }
+    val editedNotes = editedNotesField.text
+
+    LaunchedEffect(task.id, task.title) {
+        if (!isTitleFocused && editedTitleField.text != task.title) {
+            editedTitleField = TextFieldValue(
+                text = task.title,
+                selection = if (task.title.isEmpty()) TextRange(0) else TextRange(0, task.title.length)
+            )
+        }
+    }
+
+    LaunchedEffect(task.id, task.notes) {
+        if (!isNotesFocused && editedNotesField.text != task.notes) {
+            editedNotesField = TextFieldValue(
+                text = task.notes,
+                selection = if (task.notes.isEmpty()) TextRange(0) else TextRange(0, task.notes.length)
+            )
+        }
+    }
+
     var showWhenDialog by remember(task.id) { mutableStateOf(false) }
     var showDeadlineDialog by remember(task.id) { mutableStateOf(false) }
     var showRepeatDialog by remember(task.id) { mutableStateOf(false) }
@@ -306,7 +336,10 @@ fun ExpandableTaskCard(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .offset { IntOffset(animatedSwipeOffsetPx.roundToInt(), 0) }
+                .offset {
+                    val safeX = if (animatedSwipeOffsetPx.isFinite()) animatedSwipeOffsetPx.roundToInt() else 0
+                    IntOffset(safeX, 0)
+                }
                 .padding(horizontal = horizontalPadding, vertical = verticalPadding)
                 .shadow(
                     elevation = shadowElevation,
@@ -439,6 +472,7 @@ fun ExpandableTaskCard(
                                 .weight(1f)
                                 .focusRequester(titleFocusRequester)
                                 .onFocusChanged { focusState ->
+                                    isTitleFocused = focusState.isFocused
                                     if (focusState.isFocused) {
                                         val txt = editedTitleField.text
                                         editedTitleField = editedTitleField.copy(
@@ -532,19 +566,10 @@ fun ExpandableTaskCard(
                         .padding(start = 38.dp, top = 8.dp)
                 ) {
                     // Markdown Notes Editor
-                    var editedNotesField by remember(task.id) {
-                        mutableStateOf(
-                            TextFieldValue(
-                                text = task.notes,
-                                selection = if (task.notes.isEmpty()) TextRange(0) else TextRange(0, task.notes.length)
-                            )
-                        )
-                    }
                     BasicTextField(
                         value = editedNotesField,
                         onValueChange = { newVal ->
                             editedNotesField = newVal
-                            editedNotes = newVal.text
                             onTitleNotesChange(editedTitle, newVal.text)
                         },
                         textStyle = MaterialTheme.typography.bodyMedium.copy(
@@ -555,6 +580,7 @@ fun ExpandableTaskCard(
                             .fillMaxWidth()
                             .padding(vertical = 4.dp)
                             .onFocusChanged { focusState ->
+                                isNotesFocused = focusState.isFocused
                                 if (focusState.isFocused) {
                                     val txt = editedNotesField.text
                                     editedNotesField = editedNotesField.copy(
@@ -584,7 +610,7 @@ fun ExpandableTaskCard(
                     if (task.checklistItems.isNotEmpty()) {
                         val doneCount = task.checklistItems.count { it.isCompleted }
                         Text(
-                            text = "Unteraufgaben ($doneCount/${task.checklistItems.size} erledigt)",
+                            text = "${stringResource(R.string.placeholder_checklist)} ($doneCount/${task.checklistItems.size})",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 11.sp
@@ -649,7 +675,6 @@ fun ExpandableTaskCard(
                             value = newChecklistField,
                             onValueChange = {
                                 newChecklistField = it
-                                newChecklistText = it.text
                             },
                             textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.primaryText),
                             cursorBrush = SolidColor(colors.thingsBlue),
@@ -659,7 +684,6 @@ fun ExpandableTaskCard(
                                     if (newChecklistField.text.isNotBlank()) {
                                         onAddChecklistItem(newChecklistField.text.trim())
                                         newChecklistField = TextFieldValue(text = "", selection = TextRange(0))
-                                        newChecklistText = ""
                                     }
                                 }
                             ),
@@ -677,7 +701,7 @@ fun ExpandableTaskCard(
                                 Box {
                                     if (newChecklistField.text.isEmpty()) {
                                         Text(
-                                            text = "Unteraufgabe hinzufügen…",
+                                            text = stringResource(R.string.placeholder_add_checklist_item),
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = colors.tertiaryText
                                         )
@@ -696,13 +720,12 @@ fun ExpandableTaskCard(
                                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         onAddChecklistItem(newChecklistField.text.trim())
                                         newChecklistField = TextFieldValue(text = "", selection = TextRange(0))
-                                        newChecklistText = ""
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.Add,
-                                    contentDescription = "Unteraufgabe hinzufügen",
+                                    contentDescription = stringResource(R.string.placeholder_add_checklist_item),
                                     tint = Color.White,
                                     modifier = Modifier.size(15.dp)
                                 )
@@ -1339,6 +1362,7 @@ private fun InlineChecklistRow(
     onDelete: () -> Unit
 ) {
     val colors = ThingsTheme.colors
+    var isSubtaskFocused by remember(item.id) { mutableStateOf(false) }
     var editedSubtaskField by remember(item.id) {
         mutableStateOf(
             TextFieldValue(
@@ -1346,6 +1370,15 @@ private fun InlineChecklistRow(
                 selection = if (item.title.isEmpty()) TextRange(0) else TextRange(0, item.title.length)
             )
         )
+    }
+
+    LaunchedEffect(item.id, item.title) {
+        if (!isSubtaskFocused && editedSubtaskField.text != item.title) {
+            editedSubtaskField = TextFieldValue(
+                text = item.title,
+                selection = if (item.title.isEmpty()) TextRange(0) else TextRange(0, item.title.length)
+            )
+        }
     }
 
     Row(
@@ -1375,6 +1408,7 @@ private fun InlineChecklistRow(
             modifier = Modifier
                 .weight(1f)
                 .onFocusChanged { focusState ->
+                    isSubtaskFocused = focusState.isFocused
                     if (focusState.isFocused) {
                         val txt = editedSubtaskField.text
                         editedSubtaskField = editedSubtaskField.copy(

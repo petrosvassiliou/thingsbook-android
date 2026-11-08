@@ -8,19 +8,24 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
+import android.util.Log
 import android.widget.RemoteViews
 import com.culturedcode.things3.MainActivity
 import com.culturedcode.things3.R
 import com.culturedcode.things3.data.repository.ThingsRepository
+import com.culturedcode.things3.domain.util.runCatchingCancellable
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.Locale
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
@@ -31,7 +36,9 @@ interface ThingsWidgetEntryPoint {
 class ThingsbookWidgetProvider : AppWidgetProvider() {
 
     private val widgetScope = CoroutineScope(
-        SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, _ -> }
+        SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, throwable ->
+            Log.w(TAG, "Uncaught widget coroutine error", throwable)
+        }
     )
 
     override fun onUpdate(
@@ -46,12 +53,19 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
         val pendingResult = runCatching { goAsync() }.getOrNull()
         widgetScope.launch {
             try {
-                for (widgetId in ids) {
-                    runCatching {
-                        updateSingleWidget(context, mgr, widgetId)
+                withTimeoutOrNull(RECEIVER_TIMEOUT_MS) {
+                    for (widgetId in ids) {
+                        runCatchingCancellable {
+                            updateSingleWidget(context, mgr, widgetId)
+                        }.onFailure { err ->
+                            Log.w(TAG, "Failed updating widget $widgetId", err)
+                        }
                     }
                 }
-            } catch (_: Throwable) {
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                Log.w(TAG, "onUpdate failed", t)
             } finally {
                 runCatching { pendingResult?.finish() }
             }
@@ -62,6 +76,8 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
         if (intent == null) return
         runCatching {
             super.onReceive(context, intent)
+        }.onFailure { err ->
+            Log.w(TAG, "super.onReceive failed for ${intent.action}", err)
         }
         when (intent.action) {
             ACTION_SWITCH_VIEW -> {
@@ -69,18 +85,25 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
                     AppWidgetManager.EXTRA_APPWIDGET_ID,
                     AppWidgetManager.INVALID_APPWIDGET_ID
                 )
-                val targetView = intent.getStringExtra(EXTRA_TARGET_VIEW) ?: VIEW_TODAY
+                val targetView = normalizeWidgetView(intent.getStringExtra(EXTRA_TARGET_VIEW))
                 if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
                     setSelectedViewForWidget(context, widgetId, targetView)
                     val pendingResult = runCatching { goAsync() }.getOrNull()
                     widgetScope.launch {
                         try {
-                            val mgr: AppWidgetManager? = runCatching { AppWidgetManager.getInstance(context) }.getOrNull()
-                            if (mgr != null) {
-                                mgr.notifyAppWidgetViewDataChanged(widgetId, R.id.widget_task_list)
-                                updateSingleWidget(context, mgr, widgetId)
+                            withTimeoutOrNull(RECEIVER_TIMEOUT_MS) {
+                                val mgr: AppWidgetManager? = runCatching { AppWidgetManager.getInstance(context) }.getOrNull()
+                                if (mgr != null) {
+                                    // Required for minSdk = 26..30 RemoteViewsService adapter refresh
+                                    @Suppress("DEPRECATION")
+                                    mgr.notifyAppWidgetViewDataChanged(widgetId, R.id.widget_task_list)
+                                    updateSingleWidget(context, mgr, widgetId)
+                                }
                             }
-                        } catch (_: Throwable) {
+                        } catch (ce: CancellationException) {
+                            throw ce
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "ACTION_SWITCH_VIEW failed", t)
                         } finally {
                             runCatching { pendingResult?.finish() }
                         }
@@ -91,22 +114,27 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
             ACTION_ITEM_INTERACTION -> {
                 val interactionType = intent.getStringExtra(EXTRA_INTERACTION_TYPE)
                 val taskId = intent.getStringExtra(EXTRA_TASK_ID)
-                val viewName = intent.getStringExtra(EXTRA_TARGET_VIEW) ?: VIEW_TODAY
+                val viewName = normalizeWidgetView(intent.getStringExtra(EXTRA_TARGET_VIEW))
 
                 if (interactionType == INTERACTION_COMPLETE_TASK && !taskId.isNullOrBlank()) {
                     val pendingResult = runCatching { goAsync() }.getOrNull()
                     widgetScope.launch {
                         try {
-                            val entryPoint = EntryPointAccessors.fromApplication(
-                                context.applicationContext,
-                                ThingsWidgetEntryPoint::class.java
-                            )
-                            entryPoint.thingsRepository().updateTaskStatus(
-                                taskId,
-                                com.culturedcode.things3.domain.model.TaskStatus.COMPLETED
-                            )
-                            refreshAllWidgetsSync(context)
-                        } catch (_: Throwable) {
+                            withTimeoutOrNull(RECEIVER_TIMEOUT_MS) {
+                                val entryPoint = EntryPointAccessors.fromApplication(
+                                    context.applicationContext,
+                                    ThingsWidgetEntryPoint::class.java
+                                )
+                                entryPoint.thingsRepository().updateTaskStatus(
+                                    taskId,
+                                    com.culturedcode.things3.domain.model.TaskStatus.COMPLETED
+                                )
+                                refreshAllWidgetsSync(context)
+                            }
+                        } catch (ce: CancellationException) {
+                            throw ce
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "ACTION_ITEM_INTERACTION complete failed", t)
                         } finally {
                             runCatching { pendingResult?.finish() }
                         }
@@ -121,6 +149,8 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
                             }
                         }
                         context.startActivity(openIntent)
+                    }.onFailure { err ->
+                        Log.w(TAG, "Failed launching MainActivity from widget", err)
                     }
                 }
             }
@@ -129,8 +159,13 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
                 val pendingResult = runCatching { goAsync() }.getOrNull()
                 widgetScope.launch {
                     try {
-                        refreshAllWidgetsSync(context)
-                    } catch (_: Throwable) {
+                        withTimeoutOrNull(RECEIVER_TIMEOUT_MS) {
+                            refreshAllWidgetsSync(context)
+                        }
+                    } catch (ce: CancellationException) {
+                        throw ce
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "ACTION_REFRESH_ALL failed", t)
                     } finally {
                         runCatching { pendingResult?.finish() }
                     }
@@ -148,10 +183,15 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
                 prefs.remove(prefKeyForWidget(id))
             }
             prefs.apply()
+        }.onFailure { err ->
+            Log.w(TAG, "onDeleted cleanup failed", err)
         }
     }
 
     companion object {
+        private const val TAG = "ThingsWidget"
+        private const val RECEIVER_TIMEOUT_MS = 8_000L
+
         const val PREFS_NAME = "thingsbook_widget_prefs"
         const val ACTION_SWITCH_VIEW = "com.culturedcode.things3.widget.ACTION_SWITCH_VIEW"
         const val ACTION_ITEM_INTERACTION = "com.culturedcode.things3.widget.ACTION_ITEM_INTERACTION"
@@ -172,18 +212,29 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
         const val VIEW_ANYTIME = "ANYTIME"
         const val VIEW_SOMEDAY = "SOMEDAY"
 
+        private val VALID_VIEWS = setOf(VIEW_TODAY, VIEW_INBOX, VIEW_UPCOMING, VIEW_ANYTIME, VIEW_SOMEDAY)
+
+        private fun normalizeWidgetView(raw: String?): String {
+            val normalized = raw?.trim()?.uppercase(Locale.ROOT) ?: VIEW_TODAY
+            return if (normalized in VALID_VIEWS) normalized else VIEW_TODAY
+        }
+
         private fun prefKeyForWidget(widgetId: Int) = "selected_view_$widgetId"
 
         fun getSelectedViewForWidget(context: Context, widgetId: Int): String {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            return prefs.getString(prefKeyForWidget(widgetId), VIEW_TODAY) ?: VIEW_TODAY
+            return normalizeWidgetView(prefs.getString(prefKeyForWidget(widgetId), VIEW_TODAY))
         }
 
         fun setSelectedViewForWidget(context: Context, widgetId: Int, viewName: String) {
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit()
-                .putString(prefKeyForWidget(widgetId), viewName)
-                .apply()
+            runCatching {
+                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(prefKeyForWidget(widgetId), normalizeWidgetView(viewName))
+                    .apply()
+            }.onFailure { err ->
+                Log.w(TAG, "Failed saving widget view preference", err)
+            }
         }
 
         fun refreshAllWidgets(context: Context) {
@@ -195,23 +246,31 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
 
                 val intent = Intent(context, ThingsbookWidgetProvider::class.java).apply {
                     action = ACTION_REFRESH_ALL
+                    setPackage(context.packageName)
                 }
                 context.sendBroadcast(intent)
+            }.onFailure { err ->
+                Log.w(TAG, "refreshAllWidgets broadcast failed", err)
             }
         }
 
         suspend fun refreshAllWidgetsSync(context: Context) {
-            runCatching {
+            runCatchingCancellable {
                 val mgr: AppWidgetManager? = AppWidgetManager.getInstance(context)
                 if (mgr == null) return
                 val ids: IntArray? = mgr.getAppWidgetIds(ComponentName(context, ThingsbookWidgetProvider::class.java))
                 if (ids == null || ids.isEmpty()) return
+                @Suppress("DEPRECATION")
                 mgr.notifyAppWidgetViewDataChanged(ids, R.id.widget_task_list)
                 for (id in ids) {
-                    runCatching {
+                    runCatchingCancellable {
                         updateSingleWidget(context, mgr, id)
+                    }.onFailure { err ->
+                        Log.w(TAG, "updateSingleWidget failed for $id", err)
                     }
                 }
+            }.onFailure { err ->
+                Log.w(TAG, "refreshAllWidgetsSync failed", err)
             }
         }
 
@@ -226,7 +285,7 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
                 context.applicationContext,
                 ThingsWidgetEntryPoint::class.java
             )
-            val tasks = runCatching {
+            val tasks = runCatchingCancellable {
                 entryPoint.thingsRepository().getTasksForWidgetView(selectedView)
             }.getOrDefault(emptyList())
 
@@ -310,11 +369,12 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
             )
             views.setOnClickPendingIntent(R.id.widget_btn_add_task, quickAddPending)
 
-            // 5. Bind RemoteViewsService Adapter for Scrollable Task List
+            // 5. Bind RemoteViewsService Adapter for Scrollable Task List (minSdk = 26..35)
             val serviceIntent = Intent(context, ThingsbookWidgetService::class.java).apply {
                 putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
                 data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
             }
+            @Suppress("DEPRECATION")
             views.setRemoteAdapter(R.id.widget_task_list, serviceIntent)
             views.setEmptyView(R.id.widget_task_list, R.id.widget_empty_view)
 

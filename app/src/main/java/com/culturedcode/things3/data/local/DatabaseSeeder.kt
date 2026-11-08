@@ -1,6 +1,8 @@
 package com.culturedcode.things3.data.local
 
+import android.util.Log
 import androidx.room.RoomDatabase
+import androidx.room.withTransaction
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.culturedcode.things3.data.local.entity.AreaEntity
 import com.culturedcode.things3.data.local.entity.ChecklistItemEntity
@@ -14,6 +16,7 @@ import com.culturedcode.things3.domain.model.RecurrenceRule
 import com.culturedcode.things3.domain.model.RecurrenceUnit
 import com.culturedcode.things3.domain.model.ScheduleState
 import com.culturedcode.things3.domain.model.TaskStatus
+import com.culturedcode.things3.domain.util.runCatchingCancellable
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,7 +40,9 @@ class DatabaseSeeder(
     private val databaseProvider: Provider<ThingsDatabase>
 ) : RoomDatabase.Callback() {
 
-    private val exceptionHandler = CoroutineExceptionHandler { _, _ -> }
+    private val exceptionHandler = CoroutineExceptionHandler { _, err ->
+        Log.w("ThingsbookSeeder", "DatabaseSeeder background error", err)
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + exceptionHandler)
     private val json = Json { encodeDefaults = true }
 
@@ -45,11 +50,13 @@ class DatabaseSeeder(
         super.onCreate(db)
         runCatching {
             ThingsDatabase.installFts5Triggers(db)
+        }.onFailure { err ->
+            Log.w("ThingsbookSeeder", "Failed to install FTS5 triggers onCreate", err)
         }
         scope.launch {
             delay(250L)
-            runCatching {
-                seedIfNeeded(Locale.getDefault().language)
+            seedIfNeeded(Locale.getDefault().language).onFailure { err ->
+                Log.w("ThingsbookSeeder", "Initial sample data seed skipped or failed", err)
             }
         }
     }
@@ -58,42 +65,46 @@ class DatabaseSeeder(
         super.onOpen(db)
         runCatching {
             ThingsDatabase.installFts5Triggers(db)
+        }.onFailure { err ->
+            Log.w("ThingsbookSeeder", "Failed to install FTS5 triggers onOpen", err)
         }
     }
 
-    suspend fun seedIfNeeded(languageCode: String = Locale.getDefault().language) = runCatching {
+    suspend fun seedIfNeeded(languageCode: String = Locale.getDefault().language) = runCatchingCancellable {
         val db = databaseProvider.get()
-        if (db.taskDao().getTotalTaskCount() > 0) return@runCatching
+        db.withTransaction {
+            if (db.taskDao().getTotalTaskCount() > 0) return@withTransaction
 
-        val zone = ZoneId.systemDefault()
-        val today = LocalDate.now(zone)
-        val todayEpoch = today.atStartOfDay(zone).toInstant().toEpochMilli()
-        val now = todayEpoch
-        val todayReminder15h = today.atTime(LocalTime.of(15, 0)).atZone(zone).toInstant().toEpochMilli()
-        val tomorrowEpoch = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-        val inThreeDaysEpoch = today.plusDays(3).atStartOfDay(zone).toInstant().toEpochMilli()
-        val inFiveDaysEpoch = today.plusDays(5).atStartOfDay(zone).toInstant().toEpochMilli()
+            val zone = ZoneId.systemDefault()
+            val today = LocalDate.now(zone)
+            val todayEpoch = today.atStartOfDay(zone).toInstant().toEpochMilli()
+            val now = System.currentTimeMillis()
+            val todayReminder15h = today.atTime(LocalTime.of(15, 0)).atZone(zone).toInstant().toEpochMilli()
+            val tomorrowEpoch = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+            val inThreeDaysEpoch = today.plusDays(3).atStartOfDay(zone).toInstant().toEpochMilli()
+            val inFiveDaysEpoch = today.plusDays(5).atStartOfDay(zone).toInstant().toEpochMilli()
 
-        val bundle = buildLocalizedSeedBundle(
-            lang = languageCode.lowercase(Locale.ROOT),
-            now = now,
-            todayEpoch = todayEpoch,
-            todayReminder15h = todayReminder15h,
-            tomorrowEpoch = tomorrowEpoch,
-            inThreeDaysEpoch = inThreeDaysEpoch,
-            inFiveDaysEpoch = inFiveDaysEpoch
-        )
+            val bundle = buildLocalizedSeedBundle(
+                lang = languageCode.lowercase(Locale.ROOT),
+                now = now,
+                todayEpoch = todayEpoch,
+                todayReminder15h = todayReminder15h,
+                tomorrowEpoch = tomorrowEpoch,
+                inThreeDaysEpoch = inThreeDaysEpoch,
+                inFiveDaysEpoch = inFiveDaysEpoch
+            )
 
-        db.tagDao().upsertAll(bundle.tags)
-        db.areaDao().upsertAll(bundle.areas)
-        bundle.projects.forEach { (project, tagIds) ->
-            db.projectDao().upsertProjectWithTags(project, tagIds)
+            db.tagDao().upsertAll(bundle.tags)
+            db.areaDao().upsertAll(bundle.areas)
+            bundle.projects.forEach { (project, tagIds) ->
+                db.projectDao().upsertProjectWithTags(project, tagIds)
+            }
+            db.headingDao().upsertAll(bundle.headings)
+            bundle.tasks.forEach { (task, tagIds) ->
+                db.taskDao().upsertTaskWithTags(task, tagIds)
+            }
+            db.checklistDao().upsertAll(bundle.checklistItems)
         }
-        db.headingDao().upsertAll(bundle.headings)
-        bundle.tasks.forEach { (task, tagIds) ->
-            db.taskDao().upsertTaskWithTags(task, tagIds)
-        }
-        db.checklistDao().upsertAll(bundle.checklistItems)
     }
 
     private data class LocalizedSeedBundle(

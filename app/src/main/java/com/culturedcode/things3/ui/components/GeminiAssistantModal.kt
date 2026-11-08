@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Close
@@ -59,6 +61,8 @@ import com.culturedcode.things3.ui.theme.ThingsTheme
 fun GeminiAssistantModal(
     isProcessing: Boolean,
     currentApiKey: String,
+    errorMessage: String? = null,
+    onClearError: (() -> Unit)? = null,
     onUpdateApiKey: (String) -> Unit,
     onSubmitBrainDump: (String) -> Unit,
     onSubmitProjectArchitect: (String) -> Unit,
@@ -85,6 +89,7 @@ fun GeminiAssistantModal(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(20.dp)
             ) {
                 // Header
@@ -137,6 +142,36 @@ fun GeminiAssistantModal(
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
+
+                if (!errorMessage.isNullOrBlank()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(colors.deadlineUrgentRed.copy(alpha = 0.12f))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = errorMessage,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colors.deadlineUrgentRed,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (onClearError != null) {
+                            IconButton(onClick = onClearError, modifier = Modifier.size(22.dp)) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Close,
+                                    contentDescription = stringResource(R.string.action_cancel),
+                                    tint = colors.deadlineUrgentRed,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
 
                 // Mode Switcher Pills (Brain Dump vs Project Architect)
                 Row(
@@ -313,6 +348,7 @@ fun GeminiAssistantModal(
 fun GeminiLogbookReflectionCard(
     review: GeminiLogbookReviewResponse?,
     isGenerating: Boolean,
+    errorMessage: String? = null,
     onGenerateReflection: () -> Unit,
     onAdoptSuggestedFocusTask: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -379,6 +415,15 @@ fun GeminiLogbookReflectionCard(
                         )
                     }
                 }
+            }
+
+            if (!errorMessage.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = errorMessage,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.deadlineUrgentRed
+                )
             }
 
             if (review != null) {

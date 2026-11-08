@@ -1,6 +1,6 @@
 package com.culturedcode.things3.ui.components
 
-import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatDelegate
@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -50,16 +49,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -73,8 +67,6 @@ import com.culturedcode.things3.data.repository.CloudSyncStatus
 import com.culturedcode.things3.data.repository.ThingsRepository
 import com.culturedcode.things3.ui.theme.ThingsTheme
 import com.culturedcode.things3.ui.viewmodel.ThingsbookStatistics
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.time.LocalDate
 
 /**
@@ -84,7 +76,7 @@ import java.time.LocalDate
  * 3. App Language Selection: System Default, Deutsch, English, Italiano, Français, Español
  * 4. Live Task & Productivity Statistics: Open, Today, Upcoming, Anytime, Inbox, Someday, Recurring, Completed, Canceled, Deleted, Projects, Areas (X/8), Tags
  * 5. CSV Import & Export: Export all tasks to `.csv` file or share via Intent; Import tasks from `.csv` file
- * 6. App Version Info (`Thingsbook v1.3.0`)
+ * 6. App Version Info (`Thingsbook v1.4.0`)
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -100,44 +92,30 @@ fun ThingsSettingsModal(
     onTriggerImmediateSync: () -> Unit,
     onSignOutCloud: () -> Unit,
     onSelectLanguage: (String) -> Unit,
-    onExportCsv: ((String) -> Unit) -> Unit,
-    onImportCsv: (String) -> Unit,
+    onExportCsvToUri: (Uri) -> Unit,
+    onShareCsv: () -> Unit,
+    onImportCsvFromUri: (Uri) -> Unit,
     onClearCsvMessage: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
-    val context = LocalContext.current
 
-    var pendingCsvContentToSave by remember { mutableStateOf<String?>(null) }
-
-    // Android Storage Access Framework Launcher for saving CSV file
+    // Android Storage Access Framework Launcher for saving CSV file (I/O runs on Dispatchers.IO in ViewModel)
     val createCsvDocumentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/csv")
     ) { uri ->
-        val content = pendingCsvContentToSave
-        if (uri != null && content != null) {
-            runCatching {
-                context.contentResolver.openOutputStream(uri)?.use { out ->
-                    out.write(content.toByteArray(Charsets.UTF_8))
-                }
-            }
+        if (uri != null) {
+            onExportCsvToUri(uri)
         }
-        pendingCsvContentToSave = null
     }
 
-    // Android Storage Access Framework Launcher for importing CSV file
+    // Android Storage Access Framework Launcher for importing CSV file (I/O runs on Dispatchers.IO in ViewModel)
     val openCsvDocumentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
-            runCatching {
-                context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                    BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8)).readText()
-                }
-            }.getOrNull()?.let { csvText ->
-                onImportCsv(csvText)
-            }
+            onImportCsvFromUri(uri)
         }
     }
 
@@ -626,11 +604,8 @@ fun ThingsSettingsModal(
                     Button(
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onExportCsv { csvContent ->
-                                pendingCsvContentToSave = csvContent
-                                val fileName = "thingsbook-export-${LocalDate.now()}.csv"
-                                createCsvDocumentLauncher.launch(fileName)
-                            }
+                            val fileName = "thingsbook-export-${LocalDate.now()}.csv"
+                            runCatching { createCsvDocumentLauncher.launch(fileName) }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = colors.thingsBlue),
                         shape = RoundedCornerShape(10.dp),
@@ -654,14 +629,7 @@ fun ThingsSettingsModal(
                     OutlinedButton(
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onExportCsv { csvContent ->
-                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/csv"
-                                    putExtra(Intent.EXTRA_SUBJECT, "Thingsbook Aufgaben Export (${LocalDate.now()})")
-                                    putExtra(Intent.EXTRA_TEXT, csvContent)
-                                }
-                                context.startActivity(Intent.createChooser(sendIntent, "CSV teilen"))
-                            }
+                            onShareCsv()
                         },
                         shape = RoundedCornerShape(10.dp)
                     ) {
@@ -677,9 +645,11 @@ fun ThingsSettingsModal(
                     OutlinedButton(
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            openCsvDocumentLauncher.launch(
-                                arrayOf("text/csv", "text/comma-separated-values", "text/plain", "*/*")
-                            )
+                            runCatching {
+                                openCsvDocumentLauncher.launch(
+                                    arrayOf("text/csv", "text/comma-separated-values", "text/plain", "*/*")
+                                )
+                            }
                         },
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.weight(1f)

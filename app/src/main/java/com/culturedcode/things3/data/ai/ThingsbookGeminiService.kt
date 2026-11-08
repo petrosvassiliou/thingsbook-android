@@ -1,23 +1,52 @@
 package com.culturedcode.things3.data.ai
 
-import com.culturedcode.things3.domain.model.ScheduleState
+import com.culturedcode.things3.domain.util.runCatchingCancellable
 import com.google.firebase.Firebase
 import com.google.firebase.vertexai.type.generationConfig
 import com.google.firebase.vertexai.vertexAI
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
-import java.time.LocalDate
-import java.time.ZoneId
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
+
+class GeminiApiException(message: String, val httpCode: Int? = null) : Exception(message)
+
+@Serializable
+private data class GeminiRestPartDto(val text: String = "")
+
+@Serializable
+private data class GeminiRestContentDto(val parts: List<GeminiRestPartDto> = emptyList())
+
+@Serializable
+private data class GeminiRestGenerationConfigDto(
+    val responseMimeType: String = "application/json",
+    val temperature: Float = 0.35f
+)
+
+@Serializable
+private data class GeminiRestRequestDto(
+    val contents: List<GeminiRestContentDto>,
+    val generationConfig: GeminiRestGenerationConfigDto = GeminiRestGenerationConfigDto()
+)
+
+@Serializable
+private data class GeminiRestCandidateDto(
+    val content: GeminiRestContentDto? = null
+)
+
+@Serializable
+private data class GeminiRestResponseDto(
+    val candidates: List<GeminiRestCandidateDto> = emptyList()
+)
 
 @Serializable
 data class GeminiChecklistResponse(
@@ -95,13 +124,15 @@ class ThingsbookGeminiService @Inject constructor() {
         taskNotes: String,
         locale: Locale = Locale.getDefault()
     ): List<String> = withContext(Dispatchers.IO) {
+        val safeTitle = taskTitle.trim().take(500)
+        val safeNotes = taskNotes.trim().take(2000)
         val langName = languageDisplayName(locale)
         val prompt = """
             You are the calm, precise GTD assistant inside Thingsbook (Things 3 style).
             Respond strictly in $langName (Locale: ${locale.language}).
             Break down the following To-Do into 4 to 5 concise, actionable checklist sub-steps.
-            To-Do Title: "$taskTitle"
-            To-Do Notes: "$taskNotes"
+            To-Do Title: "$safeTitle"
+            To-Do Notes: "$safeNotes"
             Return ONLY valid JSON matching: {"items": ["Step 1", "Step 2", "Step 3", "Step 4"]}
         """.trimIndent()
 
@@ -110,13 +141,14 @@ class ThingsbookGeminiService @Inject constructor() {
             val parsed = runCatching {
                 json.decodeFromString<GeminiChecklistResponse>(extractJsonObject(rawJson))
             }.getOrNull()
-            if (parsed != null && parsed.items.isNotEmpty()) {
-                return@withContext parsed.items
+            val validItems = parsed?.items?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+            if (validItems.isNotEmpty()) {
+                return@withContext validItems
             }
         }
 
         // Offline-First Localized Fallback in EN, DE, IT, FR, ES
-        offlineLocalizedBreakdown(taskTitle, locale)
+        offlineLocalizedBreakdown(safeTitle, locale)
     }
 
     /**
@@ -126,12 +158,13 @@ class ThingsbookGeminiService @Inject constructor() {
         rawBrainDump: String,
         locale: Locale = Locale.getDefault()
     ): List<GeminiBrainDumpTaskDto> = withContext(Dispatchers.IO) {
+        val safeDump = rawBrainDump.trim().take(4000)
         val langName = languageDisplayName(locale)
         val prompt = """
             You are the Thingsbook GTD Brain Dump parser.
             Respond strictly in $langName (Locale: ${locale.language}).
             Extract individual actionable To-Dos from the user's brain dump text:
-            "$rawBrainDump"
+            "$safeDump"
             For each task, determine:
             - title (concise action in $langName)
             - notes (optional context in $langName)
@@ -148,12 +181,13 @@ class ThingsbookGeminiService @Inject constructor() {
             val parsed = runCatching {
                 json.decodeFromString<GeminiBrainDumpResponse>(extractJsonObject(rawJson))
             }.getOrNull()
-            if (parsed != null && parsed.tasks.isNotEmpty()) {
-                return@withContext parsed.tasks
+            val validTasks = parsed?.tasks?.filter { it.title.isNotBlank() }.orEmpty()
+            if (validTasks.isNotEmpty()) {
+                return@withContext validTasks
             }
         }
 
-        offlineLocalizedBrainDumpParser(rawBrainDump, locale)
+        offlineLocalizedBrainDumpParser(safeDump, locale)
     }
 
     /**
@@ -163,11 +197,12 @@ class ThingsbookGeminiService @Inject constructor() {
         goalPrompt: String,
         locale: Locale = Locale.getDefault()
     ): GeminiProjectBlueprintResponse = withContext(Dispatchers.IO) {
+        val safeGoal = goalPrompt.trim().take(1500)
         val langName = languageDisplayName(locale)
         val prompt = """
             You are the Thingsbook Project Architect.
             Respond strictly in $langName (Locale: ${locale.language}).
-            Create a structured Things 3 GTD project for the goal: "$goalPrompt".
+            Create a structured Things 3 GTD project for the goal: "$safeGoal".
             Include a clear projectTitle, brief inspiring projectNotes, and 3 logical headings, each with 3 concrete tasks.
             Return ONLY valid JSON matching:
             {
@@ -184,12 +219,12 @@ class ThingsbookGeminiService @Inject constructor() {
             val parsed = runCatching {
                 json.decodeFromString<GeminiProjectBlueprintResponse>(extractJsonObject(rawJson))
             }.getOrNull()
-            if (parsed != null && parsed.headings.isNotEmpty()) {
+            if (parsed != null && parsed.projectTitle.isNotBlank() && parsed.headings.isNotEmpty()) {
                 return@withContext parsed
             }
         }
 
-        offlineLocalizedProjectBlueprint(goalPrompt, locale)
+        offlineLocalizedProjectBlueprint(safeGoal, locale)
     }
 
     /**
@@ -200,7 +235,7 @@ class ThingsbookGeminiService @Inject constructor() {
         locale: Locale = Locale.getDefault()
     ): GeminiLogbookReviewResponse = withContext(Dispatchers.IO) {
         val langName = languageDisplayName(locale)
-        val joinedTitles = completedTaskTitles.take(25).joinToString("; ")
+        val joinedTitles = completedTaskTitles.take(25).joinToString("; ") { it.take(160) }
         val prompt = """
             You are the calm Thingsbook Logbook reflection assistant.
             Respond strictly in $langName (Locale: ${locale.language}).
@@ -227,12 +262,16 @@ class ThingsbookGeminiService @Inject constructor() {
         // 1. If user supplied a direct Gemini Developer API key in Settings, call REST endpoint
         val key = customApiKey.trim()
         if (key.isNotEmpty()) {
-            val restResult = runCatching { callGeminiRestApi(key, prompt) }.getOrNull()
+            val restResult = runCatchingCancellable { callGeminiRestApi(key, prompt) }
+                .getOrElse { err ->
+                    if (err is GeminiApiException) throw err
+                    null
+                }
             if (!restResult.isNullOrBlank()) return restResult
         }
 
         // 2. Otherwise call Firebase Vertex AI Gemini 2.5 Flash
-        return runCatching {
+        return runCatchingCancellable {
             val model = Firebase.vertexAI.generativeModel(
                 modelName = "gemini-2.5-flash",
                 generationConfig = generationConfig {
@@ -245,36 +284,50 @@ class ThingsbookGeminiService @Inject constructor() {
     }
 
     private fun callGeminiRestApi(apiKey: String, prompt: String): String? {
-        val endpoint = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey")
+        val endpoint = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent")
         val conn = (endpoint.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 8000
-            readTimeout = 12000
+            readTimeout = 15000
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+            setRequestProperty("x-goog-api-key", apiKey)
         }
-        val escapedPrompt = prompt
-            .replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", "\\n")
-        val payload = """
-            {
-              "contents": [{"parts": [{"text": "$escapedPrompt"}]}],
-              "generationConfig": {"responseMimeType": "application/json", "temperature": 0.35}
+        try {
+            val payload = json.encodeToString(
+                GeminiRestRequestDto(
+                    contents = listOf(
+                        GeminiRestContentDto(parts = listOf(GeminiRestPartDto(text = prompt)))
+                    )
+                )
+            )
+
+            OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { it.write(payload) }
+            val code = conn.responseCode
+            if (code !in 200..299) {
+                if (code == 400 || code == 401 || code == 403 || code == 429) {
+                    val hint = if (code == 429) {
+                        "Gemini API Rate-Limit erreicht (HTTP 429)."
+                    } else {
+                        "Gemini API-Schlüssel ungültig oder abgelehnt (HTTP $code)."
+                    }
+                    throw GeminiApiException(hint, code)
+                }
+                return null
             }
-        """.trimIndent()
 
-        OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { it.write(payload) }
-        if (conn.responseCode !in 200..299) return null
-
-        val responseBody = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8)).use { it.readText() }
-        // Extract first text field from candidates[0].content.parts[0].text
-        val regex = Regex("\"text\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"")
-        val match = regex.find(responseBody)?.groupValues?.getOrNull(1) ?: return null
-        return match
-            .replace("\\n", "\n")
-            .replace("\\\"", "\"")
-            .replace("\\\\", "\\")
+            val responseBody = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
+                .use { it.readText() }
+            val responseDto = json.decodeFromString<GeminiRestResponseDto>(responseBody)
+            return responseDto.candidates
+                .firstOrNull()
+                ?.content
+                ?.parts
+                ?.firstOrNull { it.text.isNotBlank() }
+                ?.text
+        } finally {
+            runCatching { conn.disconnect() }
+        }
     }
 
     private fun extractJsonObject(raw: String): String {

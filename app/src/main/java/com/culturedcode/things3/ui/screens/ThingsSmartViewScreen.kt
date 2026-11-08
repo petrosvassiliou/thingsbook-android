@@ -34,6 +34,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.MenuOpen
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
@@ -47,6 +48,7 @@ import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Flag
@@ -55,7 +57,6 @@ import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.LocalOffer
 import androidx.compose.material.icons.outlined.Menu
-import androidx.compose.material.icons.outlined.MenuOpen
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SelectAll
@@ -141,6 +142,7 @@ import com.culturedcode.things3.ui.components.ThisEveningHeaderBadge
 import com.culturedcode.things3.ui.theme.ThingsTheme
 import com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget
 import com.culturedcode.things3.ui.viewmodel.ThingsbookViewModel
+import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -514,7 +516,7 @@ fun ThingsSmartViewScreen(
                 viewModel.createTaskAtPosition(primaryTasks, dropIdx, "")
             },
             onDropCreateHeadingAt = { dropIdx ->
-                viewModel.createHeadingInCurrentProject(dropIdx, "")
+                viewModel.createHeadingInCurrentProject(dropIdx.coerceIn(0, projectHeadings.size), "")
             },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -542,6 +544,56 @@ fun ThingsSmartViewScreen(
 }
 
 @Composable
+private fun ThingsErrorBanner(
+    message: String,
+    onDismiss: () -> Unit
+) {
+    val colors = ThingsTheme.colors
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp)),
+        color = colors.deadlineUrgentRed.copy(alpha = 0.12f),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.ErrorOutline,
+                contentDescription = null,
+                tint = colors.deadlineUrgentRed,
+                modifier = Modifier.size(18.dp)
+            )
+            Text(
+                text = message,
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                color = colors.deadlineUrgentRed,
+                modifier = Modifier.weight(1f),
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
+            )
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.size(26.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Close,
+                    contentDescription = stringResource(R.string.action_cancel),
+                    tint = colors.deadlineUrgentRed,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ThingsTopHeaderAndQuickFindSection(
     viewModel: ThingsbookViewModel,
     isWideScreen: Boolean,
@@ -556,6 +608,7 @@ private fun ThingsTopHeaderAndQuickFindSection(
     val quickFindQuery by viewModel.quickFindQuery.collectAsState()
     val quickFindTasks by viewModel.quickFindTaskResults.collectAsState()
     val quickFindProjects by viewModel.quickFindProjectResults.collectAsState()
+    val uiErrorMessage by viewModel.uiErrorMessage.collectAsState()
     var showLanguageMenu by remember { mutableStateOf(false) }
 
     // Top Utility & Navigation Bar (Sidebar Toggle, Quick Find, Gemini AI ✨, Areas 📦, Tags 🏷️, Notifications 🔔, Language, Cloud Sync, Settings ⚙️)
@@ -580,6 +633,17 @@ private fun ThingsTopHeaderAndQuickFindSection(
         onManualSync = { viewModel.setAuthModalOpen(true) },
         onOpenSettings = { viewModel.setSettingsModalOpen(true) }
     )
+
+    AnimatedVisibility(
+        visible = !uiErrorMessage.isNullOrBlank(),
+        enter = expandVertically() + fadeIn(),
+        exit = shrinkVertically() + fadeOut()
+    ) {
+        ThingsErrorBanner(
+            message = uiErrorMessage.orEmpty(),
+            onDismiss = { viewModel.clearUiErrorMessage() }
+        )
+    }
 
     // Inline Quick Find Panel (expands directly below Top Bar with rich task details!)
     AnimatedVisibility(
@@ -1014,6 +1078,7 @@ private fun ThingsModalsOverlay(
     val isGeminiModalOpen by viewModel.isGeminiModalOpen.collectAsState()
     val isGeminiBusy by viewModel.isGeminiBusy.collectAsState()
     val geminiApiKey by viewModel.geminiApiKey.collectAsState()
+    val geminiErrorMessage by viewModel.geminiErrorMessage.collectAsState()
 
     val isAuthModalOpen by viewModel.isAuthModalOpen.collectAsState()
     val isSigningIn by viewModel.isSigningIn.collectAsState()
@@ -1061,8 +1126,9 @@ private fun ThingsModalsOverlay(
             onTriggerImmediateSync = { viewModel.triggerManualCloudSync() },
             onSignOutCloud = { viewModel.signOutCloud() },
             onSelectLanguage = { viewModel.switchAppLanguage(it) },
-            onExportCsv = { onReady -> viewModel.exportTasksCsv(onReady) },
-            onImportCsv = { content -> viewModel.importTasksCsv(content) },
+            onExportCsvToUri = { uri -> viewModel.exportTasksCsvToUri(uri) },
+            onShareCsv = { viewModel.shareTasksCsv() },
+            onImportCsvFromUri = { uri -> viewModel.importTasksCsvFromUri(uri) },
             onClearCsvMessage = { viewModel.clearCsvStatusMessage() },
             onDismiss = { viewModel.setSettingsModalOpen(false) }
         )
@@ -1073,6 +1139,8 @@ private fun ThingsModalsOverlay(
         GeminiAssistantModal(
             isProcessing = isGeminiBusy,
             currentApiKey = geminiApiKey,
+            errorMessage = geminiErrorMessage,
+            onClearError = { viewModel.clearGeminiErrorMessage() },
             onUpdateApiKey = { viewModel.updateGeminiApiKey(it) },
             onSubmitBrainDump = { raw -> viewModel.submitGeminiBrainDump(raw, activeLocale) },
             onSubmitProjectArchitect = { goal -> viewModel.submitGeminiProjectArchitect(goal, activeLocale) },
@@ -1092,7 +1160,6 @@ private fun ThingsModalsOverlay(
             onSignInEmailPassword = { email, pw -> viewModel.signInWithEmailPassword(email, pw) },
             onResetPassword = { email -> viewModel.sendPasswordReset(email) },
             onSignInWithGoogle = { enteredEmail -> viewModel.signInWithGoogleAccount(enteredEmail) },
-            onSignInAnonymously = { viewModel.signInAnonymouslyAndSync() },
             onSignOut = { viewModel.signOutCloud() },
             onTriggerDeltaSyncNow = { viewModel.triggerManualCloudSync() },
             onDismiss = { viewModel.setAuthModalOpen(false) }
@@ -1431,7 +1498,7 @@ private fun TopThingsbookBar(
                     modifier = Modifier.size(34.dp)
                 ) {
                     Icon(
-                        imageVector = if (isSidebarVisible) Icons.Outlined.MenuOpen else Icons.Outlined.Menu,
+                        imageVector = if (isSidebarVisible) Icons.AutoMirrored.Outlined.MenuOpen else Icons.Outlined.Menu,
                         contentDescription = if (isSidebarVisible) "Seitenleiste ausblenden" else "Seitenleiste einblenden",
                         tint = colors.thingsBlue,
                         modifier = Modifier.size(20.dp)
@@ -2155,10 +2222,12 @@ private fun ViewTitleHeader(
             ) {
                 // Project Target Date (Zieldatum) Badge — opens compact calendar picker on tap!
                 if (currentProject.deadline != null) {
-                    val formattedTargetDate = Instant.ofEpochMilli(currentProject.deadline)
-                        .atZone(zone)
-                        .toLocalDate()
-                        .format(DateTimeFormatter.ofPattern("d. MMM yyyy", locale))
+                    val formattedTargetDate = runCatching {
+                        Instant.ofEpochMilli(currentProject.deadline)
+                            .atZone(zone)
+                            .toLocalDate()
+                            .format(DateTimeFormatter.ofPattern("d. MMM yyyy", locale))
+                    }.getOrDefault("—")
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -2285,6 +2354,7 @@ private fun ProjectHeadingSectionHeader(
 
     LaunchedEffect(isEditing) {
         if (isEditing) {
+            delay(50)
             runCatching { headingFocusRequester.requestFocus() }
         }
     }
@@ -2337,7 +2407,15 @@ private fun ProjectHeadingSectionHeader(
                         tint = colors.thingsBlue
                     )
                 }
-                IconButton(onClick = { isEditing = false }) {
+                IconButton(
+                    onClick = {
+                        if (heading.title.isEmpty() && editedTitleField.text.isBlank()) {
+                            onDeleteHeading()
+                        } else {
+                            isEditing = false
+                        }
+                    }
+                ) {
                     Icon(
                         imageVector = Icons.Outlined.Close,
                         contentDescription = stringResource(R.string.action_cancel),
@@ -2442,6 +2520,7 @@ private fun InlineQuickFindSection(
     }
 
     LaunchedEffect(Unit) {
+        delay(40)
         runCatching { searchFocusRequester.requestFocus() }
     }
 
@@ -2720,9 +2799,12 @@ private fun InlineQuickFindSection(
                                         val containerText = when {
                                             taskArea != null && taskProject != null -> "📦 ${taskArea.title} › 📁 ${taskProject.title}"
                                             taskProject != null -> "📁 ${taskProject.title}"
-                                            else -> "📦 ${taskArea!!.title}"
+                                            taskArea != null -> "📦 ${taskArea.title}"
+                                            else -> ""
                                         }
-                                        ThingsTagPill(title = containerText)
+                                        if (containerText.isNotEmpty()) {
+                                            ThingsTagPill(title = containerText)
+                                        }
                                     }
 
                                     if (task.whenDate != null || task.scheduleState != ScheduleState.ANYTIME) {
@@ -2816,7 +2898,7 @@ private fun ThingsChromebookSidebar(
                 modifier = Modifier.size(28.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Outlined.MenuOpen,
+                    imageVector = Icons.AutoMirrored.Outlined.MenuOpen,
                     contentDescription = "Seitenleiste ausblenden",
                     tint = colors.secondaryText,
                     modifier = Modifier.size(18.dp)
@@ -3066,23 +3148,27 @@ private fun computeUpcomingTargetDate(
     task: TaskItem,
     todayDate: LocalDate,
     zone: ZoneId
-): LocalDate {
-    val whenLocal = task.whenDate?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() }
-    val deadlineLocal = task.deadline?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() }
+): LocalDate = runCatching {
+    val whenLocal = task.whenDate?.let {
+        runCatching { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() }.getOrNull()
+    }
+    val deadlineLocal = task.deadline?.let {
+        runCatching { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() }.getOrNull()
+    }
 
     if (whenLocal != null && whenLocal.isAfter(todayDate)) {
-        return whenLocal
+        return@runCatching whenLocal
     }
 
     val rule = task.recurrenceRule
     if (rule != null) {
-        val safeInterval = rule.interval.coerceAtLeast(1).toLong()
+        val safeInterval = rule.interval.coerceIn(1, 3650).toLong()
         val baseDate = if (whenLocal != null && !whenLocal.isAfter(todayDate)) todayDate else (whenLocal ?: todayDate)
-        return when (rule.unit) {
+        return@runCatching when (rule.unit) {
             RecurrenceUnit.DAYS -> baseDate.plusDays(safeInterval)
             RecurrenceUnit.WEEKS -> {
-                if (rule.mode == RecurrenceMode.FIXED_SCHEDULE && rule.daysOfWeek.isNotEmpty()) {
-                    val sortedDays = rule.daysOfWeek.map { it.coerceIn(1, 7) }.distinct().sorted()
+                val sortedDays = rule.daysOfWeek.filter { it in 1..7 }.distinct().sorted()
+                if (rule.mode == RecurrenceMode.FIXED_SCHEDULE && sortedDays.isNotEmpty()) {
                     val currentDow = baseDate.dayOfWeek.value
                     val nextInSameWeek = sortedDays.firstOrNull { it > currentDow }
                     if (nextInSameWeek != null) {
@@ -3108,15 +3194,17 @@ private fun computeUpcomingTargetDate(
                     nextMonth
                 }
             }
-            RecurrenceUnit.YEARS -> baseDate.plusYears(safeInterval)
+            RecurrenceUnit.YEARS -> baseDate.plusYears(safeInterval.coerceAtMost(100L))
         }
     }
 
     if (deadlineLocal != null && deadlineLocal.isAfter(todayDate)) {
-        return deadlineLocal
+        return@runCatching deadlineLocal
     }
 
-    return whenLocal ?: deadlineLocal ?: todayDate.plusDays(1)
+    whenLocal ?: deadlineLocal ?: todayDate.plusDays(1)
+}.getOrElse {
+    todayDate.plusDays(1)
 }
 
 @Composable

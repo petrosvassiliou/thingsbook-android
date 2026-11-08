@@ -1,10 +1,13 @@
 package com.culturedcode.things3.data.repository
 
 import android.content.Context
+import android.util.Log
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import androidx.room.withTransaction
 import com.culturedcode.things3.data.local.ThingsDatabase
 import com.culturedcode.things3.data.remote.dto.AreaFirestoreDto
 import com.culturedcode.things3.data.remote.dto.ChecklistItemFirestoreDto
@@ -14,11 +17,13 @@ import com.culturedcode.things3.data.remote.dto.HeadingFirestoreDto
 import com.culturedcode.things3.data.remote.dto.ProjectFirestoreDto
 import com.culturedcode.things3.data.remote.dto.TagFirestoreDto
 import com.culturedcode.things3.data.remote.dto.TaskFirestoreDto
+import com.culturedcode.things3.domain.util.runCatchingCancellable
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,16 +33,20 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.BufferedReader
+import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.DatagramPacket
@@ -45,6 +54,7 @@ import java.net.DatagramSocket
 import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.SocketTimeoutException
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -77,11 +87,16 @@ class SyncRepository @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val firebaseAuth: FirebaseAuth
 ) {
-    private val exceptionHandler = CoroutineExceptionHandler { _, _ -> }
+    private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        Log.w("SyncRepository", "Unhandled background sync exception", throwable)
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + exceptionHandler)
+    private val syncMutex = Mutex()
     private val activeListeners = java.util.Collections.synchronizedList(mutableListOf<ListenerRegistration>())
     private var realtimeCloudPollJob: Job? = null
     private var lanUdpListenerJob: Job? = null
+    @Volatile
+    private var activeUdpSocket: DatagramSocket? = null
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -105,13 +120,15 @@ class SyncRepository @Inject constructor(
     init {
         scope.launch {
             delay(800L)
-            runCatching {
+            runCatchingCancellable {
                 restoreBuiltInCloudSession()
+            }.onFailure { err ->
+                Log.w("SyncRepository", "Failed to restore cloud session on startup", err)
             }
         }
     }
 
-    private fun isLocalOnlyDbModeEnabled(): Boolean = runCatching {
+    fun isLocalOnlyDbModeEnabled(): Boolean = runCatching {
         val uiPrefs = context.getSharedPreferences("thingsbook_ui_prefs", Context.MODE_PRIVATE)
             .getBoolean("local_only_db_mode", false)
         val settingsPrefs = context.getSharedPreferences("thingsbook_settings_prefs", Context.MODE_PRIVATE)
@@ -119,12 +136,26 @@ class SyncRepository @Inject constructor(
         uiPrefs || settingsPrefs
     }.getOrDefault(false)
 
+    fun triggerBackgroundSync() {
+        if (isLocalOnlyDbModeEnabled()) {
+            _syncStatus.value = CloudSyncStatus.OFFLINE
+            return
+        }
+        scope.launch {
+            syncBidirectionalDeltas()
+        }
+    }
+
     private suspend fun getOrCreateDeviceId(): String {
-        val prefs = context.syncDataStore.data.first()
+        val prefs = context.syncDataStore.data
+            .catch { emit(emptyPreferences()) }
+            .first()
         val existing = prefs[KEY_DEVICE_ID]
         if (!existing.isNullOrBlank()) return existing
         val created = UUID.randomUUID().toString()
-        context.syncDataStore.edit { it[KEY_DEVICE_ID] = created }
+        runCatchingCancellable {
+            context.syncDataStore.edit { it[KEY_DEVICE_ID] = created }
+        }
         return created
     }
 
@@ -133,12 +164,13 @@ class SyncRepository @Inject constructor(
             _syncStatus.value = CloudSyncStatus.OFFLINE
             return
         }
-        val prefs = context.syncDataStore.data.first()
+        val prefs = context.syncDataStore.data
+            .catch { emit(emptyPreferences()) }
+            .first()
         val userId = prefs[KEY_ACTIVE_USER_ID]
         val email = prefs[KEY_ACTIVE_USER_EMAIL]
         val channelTopic = prefs[KEY_ACTIVE_CHANNEL_TOPIC]
 
-        // Automatically clean up any legacy synthetic @thingsbook.app account so only real accounts remain
         if (email != null && email.endsWith("@thingsbook.app")) {
             signOutAccount()
             return
@@ -146,7 +178,6 @@ class SyncRepository @Inject constructor(
 
         if (!userId.isNullOrBlank() && !channelTopic.isNullOrBlank()) {
             _activeUserIdentifier.value = email ?: userId
-            _syncStatus.value = CloudSyncStatus.SYNCED
             syncBidirectionalDeltas()
             startRealtimeMultiDeviceSync(userId, channelTopic)
         } else {
@@ -181,10 +212,6 @@ class SyncRepository @Inject constructor(
     private fun deriveDeltaChannelTopic(normalizedEmail: String, passwordVerifier: String): String =
         "tb_sync_${sha256Hex("thingsbook-chan-v1:$normalizedEmail:$passwordVerifier").take(28)}"
 
-    /**
-     * Helper that signs in or creates an account via Firebase Email/Password provider,
-     * avoiding restricted Anonymous Auth ('This operation is restricted to administrators only').
-     */
     private suspend fun authenticateFirebaseEmailWithFallback(
         email: String,
         password: String,
@@ -193,11 +220,15 @@ class SyncRepository @Inject constructor(
         return try {
             val signInRes = firebaseAuth.signInWithEmailAndPassword(email, password).await()
             signInRes.user?.uid ?: deriveUserId(email)
+        } catch (ce: CancellationException) {
+            throw ce
         } catch (signInErr: Exception) {
             if (allowAutoCreateOnSignIn) {
                 try {
                     val createRes = firebaseAuth.createUserWithEmailAndPassword(email, password).await()
                     createRes.user?.uid ?: deriveUserId(email)
+                } catch (ce: CancellationException) {
+                    throw ce
                 } catch (createErr: Exception) {
                     val msg = (createErr.message ?: signInErr.message ?: "").lowercase(Locale.ROOT)
                     if (msg.contains("password") || msg.contains("credential") || msg.contains("already in use")) {
@@ -213,13 +244,8 @@ class SyncRepository @Inject constructor(
         }
     }
 
-    /**
-     * Multi-Device Account Registration (Email & Password).
-     * Automatically uses native Firebase Authentication + Cloud Firestore (`users/{userId}/...`)
-     * when a real `google-services.json` is baked into the app, with fallback to the built-in cloud relay.
-     */
     suspend fun registerAccount(rawEmail: String, password: String): Result<String> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val email = rawEmail.trim().lowercase(Locale.ROOT)
             require(email.contains("@") && email.contains(".")) { "Bitte gib eine gültige E-Mail-Adresse ein." }
             require(password.length >= 6) { "Das Passwort muss mindestens 6 Zeichen lang sein." }
@@ -234,8 +260,9 @@ class SyncRepository @Inject constructor(
                 try {
                     val authResult = firebaseAuth.createUserWithEmailAndPassword(email, password).await()
                     authResult.user?.uid ?: deriveUserId(email)
-                } catch (e: Exception) {
-                    // If account already exists in Firebase, try signing in with the provided password
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (_: Exception) {
                     authenticateFirebaseEmailWithFallback(email, password, allowAutoCreateOnSignIn = false)
                 }
             } else {
@@ -256,7 +283,6 @@ class SyncRepository @Inject constructor(
                 derivedId
             }
 
-            // Persist active session
             context.syncDataStore.edit { prefs ->
                 prefs[KEY_ACTIVE_USER_ID] = userId
                 prefs[KEY_ACTIVE_USER_EMAIL] = email
@@ -265,29 +291,28 @@ class SyncRepository @Inject constructor(
             }
             _activeUserIdentifier.value = email
 
-            if (isLiveFirebaseConfigured()) {
-                pullDeltaRecordsFromFirestore(userId, 0L)
-                pushDirtyRecordsToFirestore(userId)
+            if (!isLocalOnlyDbModeEnabled()) {
+                if (isLiveFirebaseConfigured()) {
+                    pullDeltaRecordsFromFirestore(userId, 0L)
+                    pushDirtyRecordsToFirestore(userId)
+                }
+                pullDeltaRecordsFromBuiltInCloud(userId, channelTopic, 0L)
+                pushDirtyRecordsToBuiltInCloud(userId, channelTopic)
+                saveLastSyncTimestamp(userId, System.currentTimeMillis())
+                _syncStatus.value = CloudSyncStatus.SYNCED
+                startRealtimeMultiDeviceSync(userId, channelTopic)
+            } else {
+                _syncStatus.value = CloudSyncStatus.OFFLINE
             }
-            pullDeltaRecordsFromBuiltInCloud(userId, channelTopic, 0L)
-            pushDirtyRecordsToBuiltInCloud(userId, channelTopic)
-            saveLastSyncTimestamp(userId, System.currentTimeMillis())
-
-            _syncStatus.value = CloudSyncStatus.SYNCED
-            startRealtimeMultiDeviceSync(userId, channelTopic)
             email
-        }.onFailure {
+        }.onFailure { err ->
+            Log.w("SyncRepository", "registerAccount failed", err)
             _syncStatus.value = CloudSyncStatus.OFFLINE
         }
     }
 
-    /**
-     * Multi-Device Sign-In (Email & Password) on a 2nd, 3rd, or Nth device.
-     * Uses native Firebase Auth + Firestore (`users/{userId}/...`) when configured, pulling all cloud deltas
-     * (`updatedAt > lastSyncTimestamp`) into Room and attaching real-time SnapshotListeners.
-     */
     suspend fun signInAccount(rawEmail: String, password: String): Result<String> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val email = rawEmail.trim().lowercase(Locale.ROOT)
             require(email.contains("@") && email.contains(".")) { "Bitte gib eine gültige E-Mail-Adresse ein." }
             require(password.length >= 6) { "Das Passwort muss mindestens 6 Zeichen lang sein." }
@@ -317,7 +342,6 @@ class SyncRepository @Inject constructor(
                 derivedId
             }
 
-            // Persist active session
             context.syncDataStore.edit { prefs ->
                 prefs[KEY_ACTIVE_USER_ID] = userId
                 prefs[KEY_ACTIVE_USER_EMAIL] = email
@@ -326,31 +350,29 @@ class SyncRepository @Inject constructor(
             }
             _activeUserIdentifier.value = email
 
-            // 1. PULL FIRST on Sign-In so changes from Device 1 overwrite fresh seed defaults on Device 2
-            var maxPulled = 0L
-            if (isLiveFirebaseConfigured()) {
-                maxPulled = maxOf(maxPulled, pullDeltaRecordsFromFirestore(userId, 0L))
-                pushDirtyRecordsToFirestore(userId)
+            if (!isLocalOnlyDbModeEnabled()) {
+                var maxPulled = 0L
+                if (isLiveFirebaseConfigured()) {
+                    maxPulled = maxOf(maxPulled, pullDeltaRecordsFromFirestore(userId, 0L))
+                    pushDirtyRecordsToFirestore(userId)
+                }
+                maxPulled = maxOf(maxPulled, pullDeltaRecordsFromBuiltInCloud(userId, channelTopic, 0L))
+                pushDirtyRecordsToBuiltInCloud(userId, channelTopic)
+                saveLastSyncTimestamp(userId, maxOf(maxPulled, System.currentTimeMillis()))
+                _syncStatus.value = CloudSyncStatus.SYNCED
+                startRealtimeMultiDeviceSync(userId, channelTopic)
+            } else {
+                _syncStatus.value = CloudSyncStatus.OFFLINE
             }
-            maxPulled = maxOf(maxPulled, pullDeltaRecordsFromBuiltInCloud(userId, channelTopic, 0L))
-
-            // 2. PUSH any local dirty records
-            pushDirtyRecordsToBuiltInCloud(userId, channelTopic)
-
-            saveLastSyncTimestamp(userId, maxOf(maxPulled, System.currentTimeMillis()))
-            _syncStatus.value = CloudSyncStatus.SYNCED
-            startRealtimeMultiDeviceSync(userId, channelTopic)
             email
-        }.onFailure {
+        }.onFailure { err ->
+            Log.w("SyncRepository", "signInAccount failed", err)
             _syncStatus.value = CloudSyncStatus.OFFLINE
         }
     }
 
-    /**
-     * Sends a password reset email via Firebase Auth (`sendPasswordResetEmail`) for Email/Password accounts.
-     */
     suspend fun sendPasswordResetEmail(rawEmail: String): Result<String> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val email = rawEmail.trim().lowercase(Locale.ROOT)
             require(email.contains("@") && email.contains(".")) {
                 "Bitte gib oben zuerst deine E-Mail-Adresse ein und tippe dann auf 'Passwort zurücksetzen'."
@@ -362,12 +384,8 @@ class SyncRepository @Inject constructor(
         }
     }
 
-    /**
-     * Signs in using the user's real Google Account email selected via Android's native Google Account Picker
-     * (`AccountManager.newChooseAccountIntent`). Never creates synthetic `google-...@thingsbook.app` accounts.
-     */
     suspend fun signInInstantCloudAccount(preferredEmail: String? = null): Result<String> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val googleEmail = preferredEmail?.trim()?.lowercase(Locale.ROOT)
                 ?.takeIf { it.contains("@") && it.contains(".") && !it.endsWith("@thingsbook.app") }
                 ?: throw IllegalArgumentException(
@@ -385,6 +403,8 @@ class SyncRepository @Inject constructor(
                         password = generatedPassword,
                         allowAutoCreateOnSignIn = true
                     )
+                } catch (ce: CancellationException) {
+                    throw ce
                 } catch (_: Exception) {
                     throw IllegalArgumentException(
                         "Für $googleEmail wurde bereits ein eigenes Passwort vergeben. Bitte gib oben dein Passwort ein und tippe auf 'Mit E-Mail anmelden' (oder nutze 'Passwort vergessen?')."
@@ -402,32 +422,36 @@ class SyncRepository @Inject constructor(
             }
             _activeUserIdentifier.value = googleEmail
 
-            if (isLiveFirebaseConfigured()) {
-                pullDeltaRecordsFromFirestore(uid, 0L)
-                pushDirtyRecordsToFirestore(uid)
-            }
-            pullDeltaRecordsFromBuiltInCloud(uid, channelTopic, 0L)
-            pushDirtyRecordsToBuiltInCloud(uid, channelTopic)
-            saveLastSyncTimestamp(uid, System.currentTimeMillis())
+            if (!isLocalOnlyDbModeEnabled()) {
+                if (isLiveFirebaseConfigured()) {
+                    pullDeltaRecordsFromFirestore(uid, 0L)
+                    pushDirtyRecordsToFirestore(uid)
+                }
+                pullDeltaRecordsFromBuiltInCloud(uid, channelTopic, 0L)
+                pushDirtyRecordsToBuiltInCloud(uid, channelTopic)
+                saveLastSyncTimestamp(uid, System.currentTimeMillis())
 
-            _syncStatus.value = CloudSyncStatus.SYNCED
-            startRealtimeMultiDeviceSync(uid, channelTopic)
+                _syncStatus.value = CloudSyncStatus.SYNCED
+                startRealtimeMultiDeviceSync(uid, channelTopic)
+            } else {
+                _syncStatus.value = CloudSyncStatus.OFFLINE
+            }
             googleEmail
-        }.onFailure {
+        }.onFailure { err ->
+            Log.w("SyncRepository", "signInInstantCloudAccount failed", err)
             _syncStatus.value = CloudSyncStatus.OFFLINE
         }
     }
 
-    /**
-     * Signs out the active user and stops background delta listeners.
-     */
     suspend fun signOutAccount() {
         detachRealtimeDeltaListeners()
         runCatching { firebaseAuth.signOut() }
-        context.syncDataStore.edit { prefs ->
-            prefs.remove(KEY_ACTIVE_USER_ID)
-            prefs.remove(KEY_ACTIVE_USER_EMAIL)
-            prefs.remove(KEY_ACTIVE_CHANNEL_TOPIC)
+        runCatchingCancellable {
+            context.syncDataStore.edit { prefs ->
+                prefs.remove(KEY_ACTIVE_USER_ID)
+                prefs.remove(KEY_ACTIVE_USER_EMAIL)
+                prefs.remove(KEY_ACTIVE_CHANNEL_TOPIC)
+            }
         }
         _activeUserIdentifier.value = null
         _syncStatus.value = CloudSyncStatus.OFFLINE
@@ -438,59 +462,86 @@ class SyncRepository @Inject constructor(
 
     suspend fun getLastSyncTimestamp(userId: String): Long {
         return context.syncDataStore.data
+            .catch { emit(emptyPreferences()) }
             .map { prefs -> prefs[lastSyncKeyForUser(userId)] ?: 0L }
             .first()
     }
 
     private suspend fun saveLastSyncTimestamp(userId: String, timestamp: Long) {
-        context.syncDataStore.edit { prefs ->
-            prefs[lastSyncKeyForUser(userId)] = timestamp
+        runCatchingCancellable {
+            context.syncDataStore.edit { prefs ->
+                prefs[lastSyncKeyForUser(userId)] = timestamp
+            }
         }
         _lastSyncedAt.value = timestamp
     }
 
-    /**
-     * Executes a full bidirectional Delta-Sync:
-     * 1. Pushes all local Room records with `isDirty = true` to the built-in Thingsbook Cloud & LAN peers
-     *    (and Firestore if configured).
-     * 2. Pulls all remote delta batches with `updatedAt > lastSyncTimestamp` and applies Last-Write-Wins upserts into Room.
-     */
     suspend fun syncBidirectionalDeltas(): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
-            val prefs = context.syncDataStore.data.first()
-            val userId = prefs[KEY_ACTIVE_USER_ID] ?: firebaseAuth.currentUser?.uid ?: return@runCatching
-            val channelTopic = prefs[KEY_ACTIVE_CHANNEL_TOPIC] ?: "tb_sync_${sha256Hex(userId).take(28)}"
+        if (isLocalOnlyDbModeEnabled()) {
+            _syncStatus.value = CloudSyncStatus.OFFLINE
+            return@withContext Result.success(Unit)
+        }
+        syncMutex.withLock {
+            runCatchingCancellable {
+                if (isLocalOnlyDbModeEnabled()) {
+                    _syncStatus.value = CloudSyncStatus.OFFLINE
+                    return@runCatchingCancellable
+                }
+                val prefs = context.syncDataStore.data
+                    .catch { emit(emptyPreferences()) }
+                    .first()
+                val userId = prefs[KEY_ACTIVE_USER_ID]
+                    ?: runCatching { firebaseAuth.currentUser?.uid }.getOrNull()
+                    ?: return@runCatchingCancellable
+                val channelTopic = prefs[KEY_ACTIVE_CHANNEL_TOPIC] ?: "tb_sync_${sha256Hex(userId).take(28)}"
 
-            _syncStatus.value = CloudSyncStatus.SYNCING
+                _syncStatus.value = CloudSyncStatus.SYNCING
 
-            // 1. PUSH PHASE: Upload all local Room records with isDirty = true (Firestore WriteBatch primary when configured)
-            if (isLiveFirebaseConfigured()) {
-                runCatching { pushDirtyRecordsToFirestore(userId) }
-            }
-            pushDirtyRecordsToBuiltInCloud(userId, channelTopic)
+                val liveFb = isLiveFirebaseConfigured()
+                var anyTransportSucceeded = false
 
-            // 2. PULL PHASE: Fetch all remote delta records where updatedAt > lastSyncTimestamp (Last-Write-Wins)
-            val lastSync = getLastSyncTimestamp(userId)
-            var maxObservedTimestamp = lastSync
-            if (isLiveFirebaseConfigured()) {
-                val fbMax = runCatching { pullDeltaRecordsFromFirestore(userId, lastSync) }.getOrDefault(lastSync)
-                if (fbMax > maxObservedTimestamp) maxObservedTimestamp = fbMax
-            }
-            val cloudMax = pullDeltaRecordsFromBuiltInCloud(userId, channelTopic, lastSync)
-            if (cloudMax > maxObservedTimestamp) maxObservedTimestamp = cloudMax
+                if (liveFb) {
+                    val fbPushOk = runCatchingCancellable { pushDirtyRecordsToFirestore(userId) }.isSuccess
+                    if (fbPushOk) anyTransportSucceeded = true
+                }
+                val cloudPushOk = pushDirtyRecordsToBuiltInCloud(userId, channelTopic)
+                if (cloudPushOk) anyTransportSucceeded = true
 
-            if (maxObservedTimestamp > lastSync) {
-                saveLastSyncTimestamp(userId, maxObservedTimestamp)
-            } else if (lastSync == 0L) {
-                saveLastSyncTimestamp(userId, System.currentTimeMillis())
-            }
+                val lastSync = getLastSyncTimestamp(userId)
+                var maxObservedTimestamp = lastSync
+                if (liveFb) {
+                    runCatchingCancellable { pullDeltaRecordsFromFirestore(userId, lastSync) }
+                        .onSuccess { fbMax ->
+                            anyTransportSucceeded = true
+                            if (fbMax > maxObservedTimestamp) maxObservedTimestamp = fbMax
+                        }
+                }
+                fetchDeltaBatchesResultFromBuiltInCloud(channelTopic).onSuccess { batches ->
+                    anyTransportSucceeded = true
+                    val localDeviceId = getOrCreateDeviceId()
+                    for (batch in batches) {
+                        if (batch.userId != userId) continue
+                        if (batch.deviceId == localDeviceId && lastSync > 0L && batch.batchTimestamp <= lastSync) {
+                            continue
+                        }
+                        val batchMax = applyDeltaBatchToRoom(batch, maxObservedTimestamp)
+                        if (batchMax > maxObservedTimestamp) maxObservedTimestamp = batchMax
+                    }
+                }
 
-            _syncStatus.value = CloudSyncStatus.SYNCED
-        }.onFailure {
-            // Even if momentary network loss occurs, if user is signed in we keep local queue ready
-            if (_activeUserIdentifier.value != null) {
+                if (!anyTransportSucceeded) {
+                    throw IOException("Cloud-Relay ist derzeit offline oder nicht erreichbar.")
+                }
+
+                if (maxObservedTimestamp > lastSync) {
+                    saveLastSyncTimestamp(userId, maxObservedTimestamp)
+                } else if (lastSync == 0L) {
+                    saveLastSyncTimestamp(userId, System.currentTimeMillis())
+                }
+
                 _syncStatus.value = CloudSyncStatus.SYNCED
-            } else {
+            }.onFailure { err ->
+                Log.w("SyncRepository", "syncBidirectionalDeltas failed", err)
                 _syncStatus.value = CloudSyncStatus.OFFLINE
             }
         }
@@ -499,16 +550,15 @@ class SyncRepository @Inject constructor(
     private fun isLiveFirebaseConfigured(): Boolean {
         return runCatching {
             val apiKey = firestore.app.options.apiKey
-            !apiKey.isNullOrBlank() && !apiKey.contains("DummyKey")
+            !apiKey.isNullOrBlank() &&
+                !apiKey.contains("DummyKey") &&
+                !apiKey.contains("OfflinePlaceholderKey")
         }.getOrDefault(false)
     }
 
-    /**
-     * Built-In Cloud PUSH Phase:
-     * Reads all `isDirty = true` entities across all 6 tables, serializes them into a `CloudDeltaBatchPayload`,
-     * posts to the built-in HTTPS Cloud stream + LAN UDP peers, and resets `isDirty = false` in Room.
-     */
-    private suspend fun pushDirtyRecordsToBuiltInCloud(userId: String, channelTopic: String) {
+    private suspend fun pushDirtyRecordsToBuiltInCloud(userId: String, channelTopic: String): Boolean {
+        if (isLocalOnlyDbModeEnabled()) return false
+
         val dirtyAreas = database.areaDao().getDirtyAreas()
         val dirtyProjects = database.projectDao().getDirtyProjects()
         val dirtyHeadings = database.headingDao().getDirtyHeadings()
@@ -524,13 +574,13 @@ class SyncRepository @Inject constructor(
             dirtyChecklists.isEmpty() &&
             dirtyTags.isEmpty()
         ) {
-            return
+            return true
         }
 
         val deviceId = getOrCreateDeviceId()
         val now = System.currentTimeMillis()
 
-        val payload = CloudDeltaBatchPayload(
+        val fullPayload = CloudDeltaBatchPayload(
             userId = userId,
             deviceId = deviceId,
             batchTimestamp = now,
@@ -542,41 +592,86 @@ class SyncRepository @Inject constructor(
             checklistItems = dirtyChecklists.map { ChecklistItemFirestoreDto.fromEntity(it) }
         )
 
-        val serializedPayload = json.encodeToString(payload)
+        val serializedFull = json.encodeToString(fullPayload)
+        broadcastDeltaOverLanUdp(serializedFull)
 
-        // 1. Broadcast over LAN UDP for instant (<50ms) local multi-device sync
-        broadcastDeltaOverLanUdp(serializedPayload)
-
-        // 2. Push to built-in HTTPS Cloud Relay (ntfy.sh JSON channel)
-        val pushedToCloud = postJsonToBuiltInCloud(channelTopic, serializedPayload)
-
-        if (pushedToCloud) {
-            if (dirtyAreas.isNotEmpty()) database.areaDao().markSynced(dirtyAreas.map { it.id })
-            if (dirtyProjects.isNotEmpty()) database.projectDao().markSynced(dirtyProjects.map { it.id })
-            if (dirtyHeadings.isNotEmpty()) database.headingDao().markSynced(dirtyHeadings.map { it.id })
-            if (dirtyTasks.isNotEmpty()) database.taskDao().markSynced(dirtyTasks.map { it.id })
-            if (dirtyChecklists.isNotEmpty()) database.checklistDao().markSynced(dirtyChecklists.map { it.id })
-            if (dirtyTags.isNotEmpty()) database.tagDao().markSynced(dirtyTags.map { it.id })
+        val payloadsToPost: List<String> = if (serializedFull.toByteArray(StandardCharsets.UTF_8).size <= 3800) {
+            listOf(serializedFull)
+        } else {
+            buildList {
+                if (fullPayload.tags.isNotEmpty() || fullPayload.areas.isNotEmpty() || fullPayload.projects.isNotEmpty() || fullPayload.headings.isNotEmpty()) {
+                    add(
+                        json.encodeToString(
+                            CloudDeltaBatchPayload(
+                                userId = userId,
+                                deviceId = deviceId,
+                                batchTimestamp = now,
+                                tags = fullPayload.tags,
+                                areas = fullPayload.areas,
+                                projects = fullPayload.projects,
+                                headings = fullPayload.headings
+                            )
+                        )
+                    )
+                }
+                fullPayload.tasks.chunked(12).forEach { taskChunk ->
+                    add(
+                        json.encodeToString(
+                            CloudDeltaBatchPayload(
+                                userId = userId,
+                                deviceId = deviceId,
+                                batchTimestamp = now,
+                                tasks = taskChunk
+                            )
+                        )
+                    )
+                }
+                fullPayload.checklistItems.chunked(25).forEach { clChunk ->
+                    add(
+                        json.encodeToString(
+                            CloudDeltaBatchPayload(
+                                userId = userId,
+                                deviceId = deviceId,
+                                batchTimestamp = now,
+                                checklistItems = clChunk
+                            )
+                        )
+                    )
+                }
+            }
         }
+
+        var allSucceeded = true
+        for (body in payloadsToPost) {
+            if (!postJsonToBuiltInCloud(channelTopic, body)) {
+                allSucceeded = false
+                break
+            }
+        }
+
+        if (allSucceeded) {
+            if (dirtyAreas.isNotEmpty()) database.areaDao().markSyncedSafe(dirtyAreas.map { it.id })
+            if (dirtyProjects.isNotEmpty()) database.projectDao().markSyncedSafe(dirtyProjects.map { it.id })
+            if (dirtyHeadings.isNotEmpty()) database.headingDao().markSyncedSafe(dirtyHeadings.map { it.id })
+            if (dirtyTasks.isNotEmpty()) database.taskDao().markSyncedSafe(dirtyTasks.map { it.id })
+            if (dirtyChecklists.isNotEmpty()) database.checklistDao().markSyncedSafe(dirtyChecklists.map { it.id })
+            if (dirtyTags.isNotEmpty()) database.tagDao().markSyncedSafe(dirtyTags.map { it.id })
+        }
+        return allSucceeded
     }
 
-    /**
-     * Built-In Cloud PULL Phase:
-     * Fetches cached delta batches from the built-in HTTPS Cloud Relay (`?poll=1&since=all`),
-     * filters records with `updatedAt >= local.updatedAt` (Last-Write-Wins), and upserts them into Room.
-     */
     private suspend fun pullDeltaRecordsFromBuiltInCloud(
         userId: String,
         channelTopic: String,
         lastSyncTimestamp: Long
     ): Long {
+        if (isLocalOnlyDbModeEnabled()) return lastSyncTimestamp
         var maxTimestamp = lastSyncTimestamp
         val localDeviceId = getOrCreateDeviceId()
 
         val batches = fetchDeltaBatchesFromBuiltInCloud(channelTopic)
         for (batch in batches) {
             if (batch.userId != userId) continue
-            // If we already synced this batch from ourselves and lastSyncTimestamp > 0, skip
             if (batch.deviceId == localDeviceId && lastSyncTimestamp > 0L && batch.batchTimestamp <= lastSyncTimestamp) {
                 continue
             }
@@ -592,58 +687,60 @@ class SyncRepository @Inject constructor(
     ): Long {
         var maxTimestamp = currentMaxTimestamp
 
-        // 1. Tags
-        for (dto in batch.tags) {
-            val local = database.tagDao().getById(dto.id)
-            if (local == null || dto.updatedAt >= local.updatedAt) {
-                database.tagDao().upsert(dto.toEntity())
+        database.withTransaction {
+            for (dto in batch.tags) {
+                if (dto.id.isBlank()) continue
+                val local = database.tagDao().getById(dto.id)
+                if (local == null || dto.updatedAt >= local.updatedAt) {
+                    database.tagDao().upsert(dto.toEntity())
+                }
+                if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
             }
-            if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
-        }
 
-        // 2. Areas
-        for (dto in batch.areas) {
-            val local = database.areaDao().getById(dto.id)
-            if (local == null || dto.updatedAt >= local.updatedAt) {
-                database.areaDao().upsert(dto.toEntity())
+            for (dto in batch.areas) {
+                if (dto.id.isBlank()) continue
+                val local = database.areaDao().getById(dto.id)
+                if (local == null || dto.updatedAt >= local.updatedAt) {
+                    database.areaDao().upsert(dto.toEntity())
+                }
+                if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
             }
-            if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
-        }
 
-        // 3. Projects (with project_tags Junction sync)
-        for (dto in batch.projects) {
-            val local = database.projectDao().getById(dto.id)
-            if (local == null || dto.updatedAt >= local.updatedAt) {
-                database.projectDao().upsertProjectWithTags(dto.toEntity(), dto.tagIds)
+            for (dto in batch.projects) {
+                if (dto.id.isBlank()) continue
+                val local = database.projectDao().getById(dto.id)
+                if (local == null || dto.updatedAt >= local.updatedAt) {
+                    database.projectDao().upsertProjectWithTags(dto.toEntity(), dto.tagIds)
+                }
+                if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
             }
-            if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
-        }
 
-        // 4. Headings
-        for (dto in batch.headings) {
-            val local = database.headingDao().getById(dto.id)
-            if (local == null || dto.updatedAt >= local.updatedAt) {
-                database.headingDao().upsert(dto.toEntity())
+            for (dto in batch.headings) {
+                if (dto.id.isBlank() || dto.projectId.isBlank()) continue
+                val local = database.headingDao().getById(dto.id)
+                if (local == null || dto.updatedAt >= local.updatedAt) {
+                    database.headingDao().upsert(dto.toEntity())
+                }
+                if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
             }
-            if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
-        }
 
-        // 5. Tasks (with task_tags Junction sync)
-        for (dto in batch.tasks) {
-            val local = database.taskDao().getById(dto.id)
-            if (local == null || dto.updatedAt >= local.updatedAt) {
-                database.taskDao().upsertTaskWithTags(dto.toEntity(), dto.tagIds)
+            for (dto in batch.tasks) {
+                if (dto.id.isBlank()) continue
+                val local = database.taskDao().getById(dto.id)
+                if (local == null || dto.updatedAt >= local.updatedAt) {
+                    database.taskDao().upsertTaskWithTags(dto.toEntity(), dto.tagIds)
+                }
+                if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
             }
-            if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
-        }
 
-        // 6. Checklist Items
-        for (dto in batch.checklistItems) {
-            val local = database.checklistDao().getById(dto.id)
-            if (local == null || dto.updatedAt >= local.updatedAt) {
-                database.checklistDao().upsert(dto.toEntity())
+            for (dto in batch.checklistItems) {
+                if (dto.id.isBlank() || dto.taskId.isBlank()) continue
+                val local = database.checklistDao().getById(dto.id)
+                if (local == null || dto.updatedAt >= local.updatedAt) {
+                    database.checklistDao().upsert(dto.toEntity())
+                }
+                if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
             }
-            if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
         }
 
         if (batch.batchTimestamp > maxTimestamp) {
@@ -663,13 +760,15 @@ class SyncRepository @Inject constructor(
                 setRequestProperty("Content-Type", "text/plain; charset=utf-8")
                 setRequestProperty("Cache", "yes")
             }
-            OutputStreamWriter(conn.outputStream, StandardCharsets.UTF_8).use { writer ->
-                writer.write(bodyJson)
-                writer.flush()
+            try {
+                OutputStreamWriter(conn.outputStream, StandardCharsets.UTF_8).use { writer ->
+                    writer.write(bodyJson)
+                    writer.flush()
+                }
+                conn.responseCode in 200..299
+            } finally {
+                conn.disconnect()
             }
-            val code = conn.responseCode
-            conn.disconnect()
-            code in 200..299
         }.getOrDefault(false)
     }
 
@@ -681,29 +780,32 @@ class SyncRepository @Inject constructor(
                 connectTimeout = 7000
                 readTimeout = 7000
             }
-            var latestEnvelope: CloudUserAuthEnvelope? = null
-            BufferedReader(InputStreamReader(conn.inputStream, StandardCharsets.UTF_8)).use { reader ->
-                var line: String?
-                while (reader.readLine().also { line = it } != null) {
-                    val raw = line?.trim().orEmpty()
-                    if (raw.isEmpty()) continue
-                    val streamLine = runCatching { json.decodeFromString<NtfyStreamLine>(raw) }.getOrNull()
-                    if (streamLine != null && streamLine.event == "message" && streamLine.message.isNotBlank()) {
-                        val env = runCatching {
-                            json.decodeFromString<CloudUserAuthEnvelope>(streamLine.message)
-                        }.getOrNull()
-                        if (env != null && env.userId.isNotBlank()) {
-                            latestEnvelope = env
+            try {
+                var latestEnvelope: CloudUserAuthEnvelope? = null
+                BufferedReader(InputStreamReader(conn.inputStream, StandardCharsets.UTF_8)).use { reader ->
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        val raw = line?.trim().orEmpty()
+                        if (raw.isEmpty()) continue
+                        val streamLine = runCatching { json.decodeFromString<NtfyStreamLine>(raw) }.getOrNull()
+                        if (streamLine != null && streamLine.event == "message" && streamLine.message.isNotBlank()) {
+                            val env = runCatching {
+                                json.decodeFromString<CloudUserAuthEnvelope>(streamLine.message)
+                            }.getOrNull()
+                            if (env != null && env.userId.isNotBlank()) {
+                                latestEnvelope = env
+                            }
                         }
                     }
                 }
+                latestEnvelope
+            } finally {
+                conn.disconnect()
             }
-            conn.disconnect()
-            latestEnvelope
         }.getOrNull()
     }
 
-    private fun fetchDeltaBatchesFromBuiltInCloud(channelTopic: String): List<CloudDeltaBatchPayload> {
+    private fun fetchDeltaBatchesResultFromBuiltInCloud(channelTopic: String): Result<List<CloudDeltaBatchPayload>> {
         return runCatching {
             val url = URL("https://ntfy.sh/$channelTopic/json?poll=1&since=all")
             val conn = (url.openConnection() as HttpURLConnection).apply {
@@ -711,29 +813,36 @@ class SyncRepository @Inject constructor(
                 connectTimeout = 8000
                 readTimeout = 8000
             }
-            val result = mutableListOf<CloudDeltaBatchPayload>()
-            BufferedReader(InputStreamReader(conn.inputStream, StandardCharsets.UTF_8)).use { reader ->
-                var line: String?
-                while (reader.readLine().also { line = it } != null) {
-                    val raw = line?.trim().orEmpty()
-                    if (raw.isEmpty()) continue
-                    val streamLine = runCatching { json.decodeFromString<NtfyStreamLine>(raw) }.getOrNull()
-                    if (streamLine != null && streamLine.event == "message" && streamLine.message.isNotBlank()) {
-                        val batch = runCatching {
-                            json.decodeFromString<CloudDeltaBatchPayload>(streamLine.message)
-                        }.getOrNull()
-                        if (batch != null && batch.userId.isNotBlank()) {
-                            result += batch
+            try {
+                val result = mutableListOf<CloudDeltaBatchPayload>()
+                BufferedReader(InputStreamReader(conn.inputStream, StandardCharsets.UTF_8)).use { reader ->
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        val raw = line?.trim().orEmpty()
+                        if (raw.isEmpty()) continue
+                        val streamLine = runCatching { json.decodeFromString<NtfyStreamLine>(raw) }.getOrNull()
+                        if (streamLine != null && streamLine.event == "message" && streamLine.message.isNotBlank()) {
+                            val batch = runCatching {
+                                json.decodeFromString<CloudDeltaBatchPayload>(streamLine.message)
+                            }.getOrNull()
+                            if (batch != null && batch.userId.isNotBlank()) {
+                                result += batch
+                            }
                         }
                     }
                 }
+                result
+            } finally {
+                conn.disconnect()
             }
-            conn.disconnect()
-            result
-        }.getOrDefault(emptyList())
+        }
     }
 
+    private fun fetchDeltaBatchesFromBuiltInCloud(channelTopic: String): List<CloudDeltaBatchPayload> =
+        fetchDeltaBatchesResultFromBuiltInCloud(channelTopic).getOrDefault(emptyList())
+
     private fun broadcastDeltaOverLanUdp(serializedPayload: String) {
+        if (isLocalOnlyDbModeEnabled()) return
         runCatching {
             val bytes = serializedPayload.toByteArray(StandardCharsets.UTF_8)
             if (bytes.size > 60000) return
@@ -750,42 +859,36 @@ class SyncRepository @Inject constructor(
         }
     }
 
-    /**
-     * Starts real-time background listeners for both Built-In HTTPS Cloud Deltas and LAN Peer Deltas
-     * (plus Firestore SnapshotListeners if configured).
-     */
     private fun startRealtimeMultiDeviceSync(userId: String, channelTopic: String) {
         if (isLocalOnlyDbModeEnabled()) return
-        realtimeCloudPollJob?.cancel()
-        lanUdpListenerJob?.cancel()
+        detachRealtimeDeltaListeners()
 
-        // 1. Periodic Cloud Delta Stream Poll (every 6 seconds while app is active)
         realtimeCloudPollJob = scope.launch {
             while (isActive) {
-                delay(6000L)
+                delay(8000L)
                 if (isLocalOnlyDbModeEnabled()) break
-                runCatching {
-                    pushDirtyRecordsToBuiltInCloud(userId, channelTopic)
-                    val lastSync = getLastSyncTimestamp(userId)
-                    val newMax = pullDeltaRecordsFromBuiltInCloud(userId, channelTopic, lastSync)
-                    if (newMax > lastSync) {
-                        saveLastSyncTimestamp(userId, newMax)
-                    }
-                }
+                syncBidirectionalDeltas()
             }
         }
 
-        // 2. Instant LAN UDP Multi-Device Listener on port 45833
         lanUdpListenerJob = scope.launch {
-            runCatching {
+            runCatchingCancellable {
                 val localDeviceId = getOrCreateDeviceId()
-                DatagramSocket(null).use { socket ->
-                    socket.reuseAddress = true
-                    socket.bind(InetSocketAddress(45833))
+                val socket = DatagramSocket(null).apply {
+                    reuseAddress = true
+                    soTimeout = 3000
+                    bind(InetSocketAddress(45833))
+                }
+                activeUdpSocket = socket
+                try {
                     val buffer = ByteArray(65507)
                     while (isActive && !isLocalOnlyDbModeEnabled()) {
                         val packet = DatagramPacket(buffer, buffer.size)
-                        socket.receive(packet)
+                        try {
+                            socket.receive(packet)
+                        } catch (_: SocketTimeoutException) {
+                            continue
+                        }
                         val text = String(packet.data, 0, packet.length, StandardCharsets.UTF_8)
                         val batch = runCatching { json.decodeFromString<CloudDeltaBatchPayload>(text) }.getOrNull()
                         if (batch != null && batch.userId == userId && batch.deviceId != localDeviceId) {
@@ -796,23 +899,26 @@ class SyncRepository @Inject constructor(
                             }
                         }
                     }
+                } finally {
+                    runCatching { socket.close() }
+                    if (activeUdpSocket === socket) {
+                        activeUdpSocket = null
+                    }
                 }
+            }.onFailure { err ->
+                Log.w("SyncRepository", "LAN UDP listener stopped", err)
             }
         }
 
-        // 3. Native Firestore SnapshotListeners if live Firebase is configured
         if (isLiveFirebaseConfigured()) {
             scope.launch {
-                runCatching { attachRealtimeDeltaListeners(userId) }
+                runCatchingCancellable { attachRealtimeDeltaListeners(userId) }
             }
         }
     }
 
-    /**
-     * Native Firestore PUSH PHASE: Reads all `isDirty = true` entities across all 6 tables, writes them to
-     * `users/{userId}/{collection}/{id}` using `SetOptions.merge()`, and resets `isDirty = false` in Room.
-     */
     suspend fun pushDirtyRecordsToFirestore(userId: String) {
+        if (isLocalOnlyDbModeEnabled()) return
         val userDoc = firestore.collection("users").document(userId)
 
         val dirtyAreas = database.areaDao().getDirtyAreas()
@@ -844,19 +950,16 @@ class SyncRepository @Inject constructor(
             batch.commit().await()
         }
 
-        if (dirtyAreas.isNotEmpty()) database.areaDao().markSynced(dirtyAreas.map { it.id })
-        if (dirtyProjects.isNotEmpty()) database.projectDao().markSynced(dirtyProjects.map { it.id })
-        if (dirtyHeadings.isNotEmpty()) database.headingDao().markSynced(dirtyHeadings.map { it.id })
-        if (dirtyTasks.isNotEmpty()) database.taskDao().markSynced(dirtyTasks.map { it.id })
-        if (dirtyChecklists.isNotEmpty()) database.checklistDao().markSynced(dirtyChecklists.map { it.id })
-        if (dirtyTags.isNotEmpty()) database.tagDao().markSynced(dirtyTags.map { it.id })
+        if (dirtyAreas.isNotEmpty()) database.areaDao().markSyncedSafe(dirtyAreas.map { it.id })
+        if (dirtyProjects.isNotEmpty()) database.projectDao().markSyncedSafe(dirtyProjects.map { it.id })
+        if (dirtyHeadings.isNotEmpty()) database.headingDao().markSyncedSafe(dirtyHeadings.map { it.id })
+        if (dirtyTasks.isNotEmpty()) database.taskDao().markSyncedSafe(dirtyTasks.map { it.id })
+        if (dirtyChecklists.isNotEmpty()) database.checklistDao().markSyncedSafe(dirtyChecklists.map { it.id })
+        if (dirtyTags.isNotEmpty()) database.tagDao().markSyncedSafe(dirtyTags.map { it.id })
     }
 
-    /**
-     * Native Firestore PULL PHASE: Queries only deltas (`whereGreaterThan("updatedAt", lastSyncTimestamp)`)
-     * from each user subcollection and applies Last-Write-Wins upserts into Room.
-     */
     suspend fun pullDeltaRecordsFromFirestore(userId: String, lastSyncTimestamp: Long): Long {
+        if (isLocalOnlyDbModeEnabled()) return lastSyncTimestamp
         val userDoc = firestore.collection("users").document(userId)
         var maxTimestamp = lastSyncTimestamp
 
@@ -908,7 +1011,7 @@ class SyncRepository @Inject constructor(
             .await()
         for (doc in headingSnapshots.documents) {
             val dto = runCatching { HeadingFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
-            if (dto.id.isBlank()) continue
+            if (dto.id.isBlank() || dto.projectId.isBlank()) continue
             val local = database.headingDao().getById(dto.id)
             if (local == null || dto.updatedAt >= local.updatedAt) {
                 database.headingDao().upsert(dto.toEntity())
@@ -936,7 +1039,7 @@ class SyncRepository @Inject constructor(
             .await()
         for (doc in checklistSnapshots.documents) {
             val dto = runCatching { ChecklistItemFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
-            if (dto.id.isBlank()) continue
+            if (dto.id.isBlank() || dto.taskId.isBlank()) continue
             val local = database.checklistDao().getById(dto.id)
             if (local == null || dto.updatedAt >= local.updatedAt) {
                 database.checklistDao().upsert(dto.toEntity())
@@ -948,7 +1051,8 @@ class SyncRepository @Inject constructor(
     }
 
     suspend fun attachRealtimeDeltaListeners(userId: String) {
-        runCatching {
+        if (isLocalOnlyDbModeEnabled()) return
+        runCatchingCancellable {
             synchronized(activeListeners) {
                 activeListeners.forEach { runCatching { it.remove() } }
                 activeListeners.clear()
@@ -961,11 +1065,11 @@ class SyncRepository @Inject constructor(
                 .whereGreaterThan("updatedAt", sinceTimestamp)
                 .addSnapshotListener { snapshot, error ->
                     try {
-                        if (error != null || snapshot == null) return@addSnapshotListener
+                        if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
                             for (change in snapshot.documentChanges) {
-                                runCatching {
-                                    val dto = TaskFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatching
+                                runCatchingCancellable {
+                                    val dto = TaskFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
                                     if (dto.id.isNotBlank()) {
                                         val local = database.taskDao().getById(dto.id)
                                         if (local == null || dto.updatedAt >= local.updatedAt) {
@@ -983,11 +1087,11 @@ class SyncRepository @Inject constructor(
                 .whereGreaterThan("updatedAt", sinceTimestamp)
                 .addSnapshotListener { snapshot, error ->
                     try {
-                        if (error != null || snapshot == null) return@addSnapshotListener
+                        if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
                             for (change in snapshot.documentChanges) {
-                                runCatching {
-                                    val dto = ProjectFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatching
+                                runCatchingCancellable {
+                                    val dto = ProjectFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
                                     if (dto.id.isNotBlank()) {
                                         val local = database.projectDao().getById(dto.id)
                                         if (local == null || dto.updatedAt >= local.updatedAt) {
@@ -1005,11 +1109,11 @@ class SyncRepository @Inject constructor(
                 .whereGreaterThan("updatedAt", sinceTimestamp)
                 .addSnapshotListener { snapshot, error ->
                     try {
-                        if (error != null || snapshot == null) return@addSnapshotListener
+                        if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
                             for (change in snapshot.documentChanges) {
-                                runCatching {
-                                    val dto = AreaFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatching
+                                runCatchingCancellable {
+                                    val dto = AreaFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
                                     if (dto.id.isNotBlank()) {
                                         val local = database.areaDao().getById(dto.id)
                                         if (local == null || dto.updatedAt >= local.updatedAt) {
@@ -1026,12 +1130,12 @@ class SyncRepository @Inject constructor(
                 .whereGreaterThan("updatedAt", sinceTimestamp)
                 .addSnapshotListener { snapshot, error ->
                     try {
-                        if (error != null || snapshot == null) return@addSnapshotListener
+                        if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
                             for (change in snapshot.documentChanges) {
-                                runCatching {
-                                    val dto = HeadingFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatching
-                                    if (dto.id.isNotBlank()) {
+                                runCatchingCancellable {
+                                    val dto = HeadingFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
+                                    if (dto.id.isNotBlank() && dto.projectId.isNotBlank()) {
                                         val local = database.headingDao().getById(dto.id)
                                         if (local == null || dto.updatedAt >= local.updatedAt) {
                                             database.headingDao().upsert(dto.toEntity())
@@ -1047,12 +1151,12 @@ class SyncRepository @Inject constructor(
                 .whereGreaterThan("updatedAt", sinceTimestamp)
                 .addSnapshotListener { snapshot, error ->
                     try {
-                        if (error != null || snapshot == null) return@addSnapshotListener
+                        if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
                             for (change in snapshot.documentChanges) {
-                                runCatching {
-                                    val dto = ChecklistItemFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatching
-                                    if (dto.id.isNotBlank()) {
+                                runCatchingCancellable {
+                                    val dto = ChecklistItemFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
+                                    if (dto.id.isNotBlank() && dto.taskId.isNotBlank()) {
                                         val local = database.checklistDao().getById(dto.id)
                                         if (local == null || dto.updatedAt >= local.updatedAt) {
                                             database.checklistDao().upsert(dto.toEntity())
@@ -1068,11 +1172,11 @@ class SyncRepository @Inject constructor(
                 .whereGreaterThan("updatedAt", sinceTimestamp)
                 .addSnapshotListener { snapshot, error ->
                     try {
-                        if (error != null || snapshot == null) return@addSnapshotListener
+                        if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
                             for (change in snapshot.documentChanges) {
-                                runCatching {
-                                    val dto = TagFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatching
+                                runCatchingCancellable {
+                                    val dto = TagFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
                                     if (dto.id.isNotBlank()) {
                                         val local = database.tagDao().getById(dto.id)
                                         if (local == null || dto.updatedAt >= local.updatedAt) {
@@ -1089,7 +1193,11 @@ class SyncRepository @Inject constructor(
 
     fun detachRealtimeDeltaListeners() {
         runCatching { realtimeCloudPollJob?.cancel() }
+        realtimeCloudPollJob = null
         runCatching { lanUdpListenerJob?.cancel() }
+        lanUdpListenerJob = null
+        runCatching { activeUdpSocket?.close() }
+        activeUdpSocket = null
         synchronized(activeListeners) {
             activeListeners.forEach { runCatching { it.remove() } }
             activeListeners.clear()

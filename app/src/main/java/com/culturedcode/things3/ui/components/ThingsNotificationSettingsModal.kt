@@ -34,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TimeInput
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,8 +70,8 @@ fun ThingsNotificationSettingsModal(
     val haptics = LocalHapticFeedback.current
 
     var enabled by remember(config) { mutableStateOf(config.enabled) }
-    var selectedHour by remember(config) { mutableStateOf(config.hour) }
-    var selectedMinute by remember(config) { mutableStateOf(config.minute) }
+    var selectedHour by remember(config) { mutableStateOf(config.hour.coerceIn(0, 23)) }
+    var selectedMinute by remember(config) { mutableStateOf(config.minute.coerceIn(0, 59)) }
     var showCustomTimeInput by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -148,7 +149,7 @@ fun ThingsNotificationSettingsModal(
                         onCheckedChange = {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             enabled = it
-                            onSaveDailyDigestConfig(it, selectedHour, selectedMinute)
+                            onSaveDailyDigestConfig(it, selectedHour.coerceIn(0, 23), selectedMinute.coerceIn(0, 59))
                         },
                         colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = colors.thingsBlue)
                     )
@@ -249,18 +250,20 @@ fun ThingsNotificationSettingsModal(
                     if (showCustomTimeInput) {
                         Spacer(modifier = Modifier.height(12.dp))
                         val timeState = rememberTimePickerState(
-                            initialHour = selectedHour,
-                            initialMinute = selectedMinute,
+                            initialHour = selectedHour.coerceIn(0, 23),
+                            initialMinute = selectedMinute.coerceIn(0, 59),
                             is24Hour = true
                         )
+                        LaunchedEffect(timeState.hour, timeState.minute) {
+                            selectedHour = timeState.hour.coerceIn(0, 23)
+                            selectedMinute = timeState.minute.coerceIn(0, 59)
+                        }
                         Box(
                             modifier = Modifier.fillMaxWidth(),
                             contentAlignment = Alignment.Center
                         ) {
                             TimeInput(state = timeState)
                         }
-                        selectedHour = timeState.hour
-                        selectedMinute = timeState.minute
                     }
                 }
 

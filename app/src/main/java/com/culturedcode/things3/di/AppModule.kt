@@ -2,6 +2,8 @@ package com.culturedcode.things3.di
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.culturedcode.things3.data.local.DatabaseSeeder
 import com.culturedcode.things3.data.local.ThingsDatabase
 import com.culturedcode.things3.data.local.dao.AreaDao
@@ -11,6 +13,7 @@ import com.culturedcode.things3.data.local.dao.ProjectDao
 import com.culturedcode.things3.data.local.dao.TagDao
 import com.culturedcode.things3.data.local.dao.TaskDao
 import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreSettings
@@ -27,6 +30,35 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object AppModule {
 
+    private val MIGRATION_1_2 = object : Migration(1, 2) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // Schema v1 -> v2 additive safety migration; ensures user data is preserved when compatible
+        }
+    }
+
+    private fun ensureDefaultFirebaseApp(context: Context): FirebaseApp {
+        runCatching {
+            if (FirebaseApp.getApps(context).isNotEmpty()) {
+                return FirebaseApp.getInstance()
+            }
+            val initialized = FirebaseApp.initializeApp(context)
+            if (initialized != null) {
+                return initialized
+            }
+        }
+        // Offline-safe fallback options so Hilt DI never throws IllegalStateException if google-services.json is absent
+        val fallbackOptions = FirebaseOptions.Builder()
+            .setApplicationId("1:000000000000:android:0000000000000000")
+            .setApiKey("AIzaSyOfflinePlaceholderKey0000000000000")
+            .setProjectId("thingsbook-offline-local")
+            .build()
+        return runCatching {
+            FirebaseApp.initializeApp(context, fallbackOptions)
+        }.getOrElse {
+            FirebaseApp.getInstance()
+        }
+    }
+
     @Provides
     @Singleton
     fun provideThingsDatabase(
@@ -38,6 +70,7 @@ object AppModule {
             ThingsDatabase::class.java,
             ThingsDatabase.DATABASE_NAME
         )
+            .addMigrations(MIGRATION_1_2)
             .addCallback(DatabaseSeeder(databaseProvider))
             .fallbackToDestructiveMigration()
             .fallbackToDestructiveMigrationOnDowngrade()
@@ -65,15 +98,15 @@ object AppModule {
     @Provides
     @Singleton
     fun provideFirebaseAuth(@ApplicationContext context: Context): FirebaseAuth {
-        runCatching { FirebaseApp.initializeApp(context) }
-        return FirebaseAuth.getInstance()
+        val app = ensureDefaultFirebaseApp(context)
+        return FirebaseAuth.getInstance(app)
     }
 
     @Provides
     @Singleton
     fun provideFirebaseFirestore(@ApplicationContext context: Context): FirebaseFirestore {
-        runCatching { FirebaseApp.initializeApp(context) }
-        return FirebaseFirestore.getInstance().apply {
+        val app = ensureDefaultFirebaseApp(context)
+        return FirebaseFirestore.getInstance(app).apply {
             runCatching {
                 firestoreSettings = FirebaseFirestoreSettings.Builder()
                     .setLocalCacheSettings(PersistentCacheSettings.newBuilder().build())

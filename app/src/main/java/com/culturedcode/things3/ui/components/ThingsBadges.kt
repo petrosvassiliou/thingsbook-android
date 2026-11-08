@@ -22,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -132,8 +133,12 @@ fun ThingsDeadlineBadge(
     val colors = ThingsTheme.colors
     val zone = ZoneId.systemDefault()
     val today = LocalDate.now(zone)
-    val deadlineDate = Instant.ofEpochMilli(deadlineEpochMillis).atZone(zone).toLocalDate()
-    val daysDiff = ChronoUnit.DAYS.between(today, deadlineDate).toInt()
+    val deadlineDate = runCatching {
+        Instant.ofEpochMilli(deadlineEpochMillis).atZone(zone).toLocalDate()
+    }.getOrDefault(today)
+    val daysDiff = runCatching {
+        ChronoUnit.DAYS.between(today, deadlineDate).coerceIn(-9999L, 9999L).toInt()
+    }.getOrDefault(0)
 
     val isUrgentOrOverdue = daysDiff <= 2
     val textColor = if (isUrgentOrOverdue) colors.deadlineUrgentRed else colors.secondaryText
@@ -178,7 +183,10 @@ fun ThingsWhenBadge(
 ) {
     val colors = ThingsTheme.colors
     val zone = ZoneId.systemDefault()
-    val formatter = DateTimeFormatter.ofPattern("EEE, d MMM", locale)
+    val formatter = remember(locale) {
+        runCatching { DateTimeFormatter.ofPattern("EEE, d MMM", locale) }
+            .getOrDefault(DateTimeFormatter.ISO_LOCAL_DATE)
+    }
 
     val (icon, tint, label) = when (scheduleState) {
         ScheduleState.TODAY -> Triple(
@@ -192,8 +200,10 @@ fun ThingsWhenBadge(
             stringResource(R.string.view_this_evening)
         )
         ScheduleState.UPCOMING -> {
-            val formattedDate = whenDateEpochMillis?.let {
-                Instant.ofEpochMilli(it).atZone(zone).toLocalDate().format(formatter)
+            val formattedDate = whenDateEpochMillis?.let { millis ->
+                runCatching {
+                    Instant.ofEpochMilli(millis).atZone(zone).toLocalDate().format(formatter)
+                }.getOrNull()
             } ?: stringResource(R.string.view_upcoming)
             Triple(Icons.Outlined.CalendarMonth, colors.upcomingCoralRed, formattedDate)
         }
@@ -245,11 +255,13 @@ fun ThingsReminderBadge(
 ) {
     val colors = ThingsTheme.colors
     val zone = ZoneId.systemDefault()
-    val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-    val formattedTime = Instant.ofEpochMilli(reminderEpochMillis)
-        .atZone(zone)
-        .toLocalTime()
-        .format(timeFormatter)
+    val timeFormatter = remember { DateTimeFormatter.ofPattern("HH:mm", Locale.ROOT) }
+    val formattedTime = runCatching {
+        Instant.ofEpochMilli(reminderEpochMillis)
+            .atZone(zone)
+            .toLocalTime()
+            .format(timeFormatter)
+    }.getOrDefault("--:--")
 
     Row(
         modifier = modifier

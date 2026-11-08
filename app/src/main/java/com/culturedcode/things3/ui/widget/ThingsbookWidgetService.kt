@@ -3,6 +3,7 @@ package com.culturedcode.things3.ui.widget
 import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
@@ -10,10 +11,12 @@ import com.culturedcode.things3.R
 import com.culturedcode.things3.domain.model.TaskItem
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.UUID
 
 class ThingsbookWidgetService : RemoteViewsService() {
     override fun onGetViewFactory(intent: Intent): RemoteViewsFactory {
@@ -52,8 +55,12 @@ private class ThingsbookRemoteViewsFactory(
                 ThingsWidgetEntryPoint::class.java
             )
             runBlocking {
-                entryPoint.thingsRepository().getTasksForWidgetView(selectedView)
+                withTimeoutOrNull(5_000L) {
+                    entryPoint.thingsRepository().getTasksForWidgetView(selectedView)
+                } ?: emptyList()
             }
+        }.onFailure { err ->
+            Log.w("ThingsWidgetSvc", "Failed loading widget tasks for view $selectedView", err)
         }.getOrDefault(emptyList())
     }
 
@@ -102,9 +109,11 @@ private class ThingsbookRemoteViewsFactory(
         rv.setOnClickFillInIntent(R.id.widget_item_row_root, openFillIn)
 
         rv
+    }.onFailure { err ->
+        Log.w("ThingsWidgetSvc", "Failed inflating RemoteViews at position $position", err)
     }.getOrNull()
 
-    private fun buildTaskMetadataBadge(task: TaskItem): String? {
+    private fun buildTaskMetadataBadge(task: TaskItem): String? = runCatching {
         val zone = ZoneId.systemDefault()
         val locale = Locale.getDefault()
 
@@ -114,12 +123,12 @@ private class ThingsbookRemoteViewsFactory(
                 .toLocalTime()
                 .format(DateTimeFormatter.ofPattern("HH:mm", locale))
             val prefix = if (task.recurrenceRule != null) "↻ 🔔 " else "🔔 "
-            return "$prefix$timeStr"
+            return@runCatching "$prefix$timeStr"
         }
 
         if (task.recurrenceRule != null) {
             val firstTag = task.tags.firstOrNull()?.title
-            return if (firstTag != null) "↻ $firstTag" else "↻"
+            return@runCatching if (firstTag != null) "↻ $firstTag" else "↻"
         }
 
         if (selectedView == ThingsbookWidgetProvider.VIEW_UPCOMING && task.whenDate != null) {
@@ -127,7 +136,7 @@ private class ThingsbookRemoteViewsFactory(
                 .atZone(zone)
                 .toLocalDate()
                 .format(DateTimeFormatter.ofPattern("d. MMM", locale))
-            return dateStr
+            return@runCatching dateStr
         }
 
         if (task.deadline != null) {
@@ -135,18 +144,25 @@ private class ThingsbookRemoteViewsFactory(
                 .atZone(zone)
                 .toLocalDate()
                 .format(DateTimeFormatter.ofPattern("d. MMM", locale))
-            return "🏁 $dlStr"
+            return@runCatching "🏁 $dlStr"
         }
 
-        return task.tags.firstOrNull()?.title
-    }
+        task.tags.firstOrNull()?.title
+    }.getOrNull()
 
     override fun getLoadingView(): RemoteViews? = null
 
     override fun getViewTypeCount(): Int = 1
 
-    override fun getItemId(position: Int): Long =
-        tasks.getOrNull(position)?.id?.hashCode()?.toLong() ?: position.toLong()
+    override fun getItemId(position: Int): Long {
+        val id = tasks.getOrNull(position)?.id ?: return position.toLong()
+        return runCatching {
+            val uuid = UUID.fromString(id)
+            uuid.mostSignificantBits xor uuid.leastSignificantBits
+        }.getOrElse {
+            id.hashCode().toLong()
+        }
+    }
 
     override fun hasStableIds(): Boolean = true
 }

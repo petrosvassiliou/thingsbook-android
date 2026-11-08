@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
@@ -24,12 +25,17 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.culturedcode.things3.ui.screens.ThingsSmartViewScreen
 import com.culturedcode.things3.ui.theme.Things3Theme
 import com.culturedcode.things3.ui.viewmodel.ThingsbookViewModel
+import com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider
 import dagger.hilt.android.AndroidEntryPoint
 import java.io.PrintWriter
 import java.io.StringWriter
@@ -37,6 +43,8 @@ import java.lang.ref.WeakReference
 
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
+
+    private var launchIntentState by mutableStateOf<Intent?>(null)
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -46,9 +54,16 @@ class MainActivity : AppCompatActivity() {
         CrashGuardian.install(applicationContext)
         activeActivityRef = WeakReference(this)
         super.onCreate(savedInstanceState)
+        launchIntentState = intent
         runCatching { enableEdgeToEdge() }
         requestNotificationPermissionIfNeeded()
         mountComposeContent()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        launchIntentState = intent
     }
 
     override fun onResume() {
@@ -68,25 +83,29 @@ class MainActivity : AppCompatActivity() {
             setContent {
                 Things3Theme {
                     val viewModel: ThingsbookViewModel = hiltViewModel()
-                    androidx.compose.runtime.LaunchedEffect(intent) {
-                        runCatching {
-                            val widgetView = intent?.getStringExtra(
-                                com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.EXTRA_WIDGET_SMART_VIEW
-                            )
-                            val widgetTaskId = intent?.getStringExtra(
-                                com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.EXTRA_TASK_ID
-                            )
-                            val widgetQuickAdd = intent?.getBooleanExtra(
-                                com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.EXTRA_WIDGET_QUICK_ADD,
-                                false
-                            ) ?: false
+                    val currentIntent = launchIntentState
+                    LaunchedEffect(currentIntent) {
+                        if (currentIntent != null) {
+                            runCatching {
+                                val widgetView = currentIntent.getStringExtra(
+                                    ThingsbookWidgetProvider.EXTRA_WIDGET_SMART_VIEW
+                                )
+                                val widgetTaskId = currentIntent.getStringExtra(
+                                    ThingsbookWidgetProvider.EXTRA_TASK_ID
+                                )
+                                val widgetQuickAdd = currentIntent.getBooleanExtra(
+                                    ThingsbookWidgetProvider.EXTRA_WIDGET_QUICK_ADD,
+                                    false
+                                )
 
-                            if (widgetView != null || widgetTaskId != null || widgetQuickAdd) {
-                                viewModel.handleWidgetLaunchIntent(widgetView, widgetTaskId, widgetQuickAdd)
-                                intent?.removeExtra(com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.EXTRA_WIDGET_SMART_VIEW)
-                                intent?.removeExtra(com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.EXTRA_TASK_ID)
-                                intent?.removeExtra(com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.EXTRA_WIDGET_QUICK_ADD)
+                                if (widgetView != null || widgetTaskId != null || widgetQuickAdd) {
+                                    viewModel.handleWidgetLaunchIntent(widgetView, widgetTaskId, widgetQuickAdd)
+                                    currentIntent.removeExtra(ThingsbookWidgetProvider.EXTRA_WIDGET_SMART_VIEW)
+                                    currentIntent.removeExtra(ThingsbookWidgetProvider.EXTRA_TASK_ID)
+                                    currentIntent.removeExtra(ThingsbookWidgetProvider.EXTRA_WIDGET_QUICK_ADD)
+                                }
                             }
+                            launchIntentState = null
                         }
                     }
                     ThingsSmartViewScreen(
@@ -102,6 +121,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun mountNativeRecoveryScreen(throwable: Throwable) {
+        if (isFinishing || isDestroyed) return
         runCatching {
             val dp = resources.displayMetrics.density
             fun Int.dp(): Int = (this * dp).toInt()
@@ -174,6 +194,10 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener {
                     runCatching {
                         getSharedPreferences("thingsbook_settings_prefs", Context.MODE_PRIVATE)
+                            .edit()
+                            .putBoolean("local_only_db_mode", true)
+                            .commit()
+                        getSharedPreferences("thingsbook_ui_prefs", Context.MODE_PRIVATE)
                             .edit()
                             .putBoolean("local_only_db_mode", true)
                             .commit()
@@ -264,11 +288,10 @@ class MainActivity : AppCompatActivity() {
             val activity = activeActivityRef?.get() ?: return
             Handler(Looper.getMainLooper()).post {
                 runCatching {
+                    if (activity.isFinishing || activity.isDestroyed) return@runCatching
                     val now = System.currentTimeMillis()
                     if (now - lastRecoveryAttemptMillis > 4000L) {
                         lastRecoveryAttemptMillis = now
-                        activity.mountNativeRecoveryScreen(throwable)
-                    } else {
                         activity.mountNativeRecoveryScreen(throwable)
                     }
                 }

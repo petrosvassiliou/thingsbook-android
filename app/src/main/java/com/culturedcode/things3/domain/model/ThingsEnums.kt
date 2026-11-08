@@ -50,21 +50,23 @@ data class RecurrenceRule(
     val endDateEpochMillis: Long? = null // Optional end date
 ) {
     fun formatShortLabel(): String {
-        val safeInterval = interval.coerceAtLeast(1)
+        val safeInterval = interval.coerceIn(1, 999)
         val unitLabel = when (unit) {
             RecurrenceUnit.DAYS -> if (safeInterval == 1) "Täglich" else "Alle $safeInterval Tg."
             RecurrenceUnit.WEEKS -> {
-                val daysStr = if (daysOfWeek.isNotEmpty()) {
+                val validDays = daysOfWeek.filter { it in 1..7 }.distinct().sorted()
+                val daysStr = if (validDays.isNotEmpty()) {
                     val names = mapOf(1 to "Mo", 2 to "Di", 3 to "Mi", 4 to "Do", 5 to "Fr", 6 to "Sa", 7 to "So")
-                    " (" + daysOfWeek.sorted().mapNotNull { names[it] }.joinToString(",") + ")"
+                    " (" + validDays.mapNotNull { names[it] }.joinToString(",") + ")"
                 } else ""
                 if (safeInterval == 1) "Wöchentlich$daysStr" else "Alle $safeInterval Wo.$daysStr"
             }
             RecurrenceUnit.MONTHS -> {
-                val domStr = when (dayOfMonth) {
-                    null -> ""
-                    -1 -> " (Letzter Tag)"
-                    else -> " ($dayOfMonth.)"
+                val domStr = when {
+                    dayOfMonth == null -> ""
+                    dayOfMonth == -1 -> " (Letzter Tag)"
+                    dayOfMonth in 1..31 -> " ($dayOfMonth.)"
+                    else -> ""
                 }
                 if (safeInterval == 1) "Monatlich$domStr" else "Alle $safeInterval Mon.$domStr"
             }

@@ -1,10 +1,6 @@
 package com.culturedcode.things3.data.local.entity
 
-import androidx.room.ColumnInfo
 import androidx.room.Entity
-import androidx.room.ForeignKey
-import androidx.room.Fts4
-import androidx.room.FtsOptions
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.culturedcode.things3.domain.model.ProjectStatus

@@ -1,16 +1,16 @@
 package com.culturedcode.things3.data.repository
 
+import androidx.room.withTransaction
 import com.culturedcode.things3.data.local.ThingsDatabase
 import com.culturedcode.things3.data.local.entity.AreaEntity
-import com.culturedcode.things3.data.local.entity.AreaWithProjectsAndTasks
 import com.culturedcode.things3.data.local.entity.ChecklistItemEntity
 import com.culturedcode.things3.data.local.entity.HeadingEntity
 import com.culturedcode.things3.data.local.entity.ProjectEntity
-import com.culturedcode.things3.data.local.entity.ProjectWithDetails
 import com.culturedcode.things3.data.local.entity.ProjectWithProgressTuple
 import com.culturedcode.things3.data.local.entity.TagEntity
 import com.culturedcode.things3.data.local.entity.TaskEntity
 import com.culturedcode.things3.data.local.entity.TaskWithDetails
+import com.culturedcode.things3.data.notifications.ReminderScheduler
 import com.culturedcode.things3.domain.model.Area
 import com.culturedcode.things3.domain.model.ChecklistItem
 import com.culturedcode.things3.domain.model.Heading
@@ -23,6 +23,7 @@ import com.culturedcode.things3.domain.model.ScheduleState
 import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
+import com.culturedcode.things3.domain.util.runCatchingCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
@@ -31,15 +32,19 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.ZoneId
+import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.math.abs
 
 @Singleton
 class ThingsRepository @Inject constructor(
     private val database: ThingsDatabase,
-    private val syncRepository: SyncRepository
+    private val syncRepository: SyncRepository,
+    private val reminderScheduler: ReminderScheduler
 ) {
     private val json = Json {
         ignoreUnknownKeys = true
@@ -106,8 +111,8 @@ class ThingsRepository @Inject constructor(
             .catch { emit(emptyList()) }
 
     suspend fun getTasksForWidgetView(viewName: String): List<TaskItem> {
-        return runCatching {
-            when (viewName.uppercase()) {
+        return runCatchingCancellable {
+            when (viewName.trim().uppercase(Locale.ROOT)) {
                 "INBOX" -> observeInboxTasks().first()
                 "UPCOMING" -> observeUpcomingTasks().first()
                 "ANYTIME" -> observeAnytimeTasks().first()
@@ -176,16 +181,15 @@ class ThingsRepository @Inject constructor(
             .catch { emit(emptyList()) }
     }
 
-    /**
-     * Computes a LexoRank-style midpoint `sortOrder` between two neighboring tasks so drag-and-drop
-     * or Magic Plus insertion between two rows never requires re-indexing the entire table.
-     */
     fun computeMidpointSortOrder(previousSortOrder: Double?, nextSortOrder: Double?): Double {
+        val prev = previousSortOrder?.takeIf { it.isFinite() }
+        val next = nextSortOrder?.takeIf { it.isFinite() }
         return when {
-            previousSortOrder == null && nextSortOrder == null -> 1000.0
-            previousSortOrder == null -> nextSortOrder!! - 500.0
-            nextSortOrder == null -> previousSortOrder + 1000.0
-            else -> (previousSortOrder + nextSortOrder) / 2.0
+            prev == null && next == null -> 1000.0
+            prev == null -> next!! - 500.0
+            next == null -> prev + 1000.0
+            abs(next - prev) < 1e-6 -> prev + 0.001
+            else -> (prev + next) / 2.0
         }
     }
 
@@ -226,7 +230,7 @@ class ThingsRepository @Inject constructor(
             headingId = headingId,
             areaId = areaId,
             recurrenceRuleJson = recurrenceRule?.let { json.encodeToString(it) },
-            sortOrder = sortOrder,
+            sortOrder = if (sortOrder.isFinite()) sortOrder else 1000.0,
             tagIdsJson = json.encodeToString(tagIds),
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
@@ -236,12 +240,17 @@ class ThingsRepository @Inject constructor(
 
         database.taskDao().upsertTaskWithTags(entity, tagIds)
 
-        // If a recurring task was just completed, spawn the next occurrence automatically
+        if (status == TaskStatus.OPEN && reminderTime != null && reminderTime > now) {
+            reminderScheduler.scheduleExactReminder(id, title, reminderTime)
+        } else {
+            reminderScheduler.cancelReminder(id)
+        }
+
         if (existing?.status == TaskStatus.OPEN && status == TaskStatus.COMPLETED && recurrenceRule != null) {
             spawnNextRecurrenceInstance(entity, recurrenceRule, tagIds, now)
         }
 
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
         return id
     }
 
@@ -252,24 +261,25 @@ class ThingsRepository @Inject constructor(
         now: Long
     ) {
         val zone = ZoneId.systemDefault()
-        val safeInterval = rule.interval.coerceAtLeast(1).toLong()
+        val safeInterval = rule.interval.coerceIn(1, 3650).toLong()
         val baseEpoch = when (rule.mode) {
             RecurrenceMode.AFTER_COMPLETION -> now
             RecurrenceMode.FIXED_SCHEDULE -> completedTask.whenDate ?: now
         }
-        val baseDate = Instant.ofEpochMilli(baseEpoch).atZone(zone).toLocalDate()
+        val baseDate = runCatching { Instant.ofEpochMilli(baseEpoch).atZone(zone).toLocalDate() }
+            .getOrElse { LocalDate.now(zone) }
 
         val nextDate: LocalDate = when (rule.unit) {
             RecurrenceUnit.DAYS -> baseDate.plusDays(safeInterval)
             RecurrenceUnit.WEEKS -> {
-                if (rule.mode == RecurrenceMode.FIXED_SCHEDULE && rule.daysOfWeek.isNotEmpty()) {
-                    val sortedDays = rule.daysOfWeek.map { it.coerceIn(1, 7) }.distinct().sorted()
-                    val currentDow = baseDate.dayOfWeek.value // 1 (Mon) .. 7 (Sun)
-                    val nextDaySameWeek = sortedDays.firstOrNull { it > currentDow }
+                val validDays = rule.daysOfWeek.filter { it in 1..7 }.distinct().sorted()
+                if (rule.mode == RecurrenceMode.FIXED_SCHEDULE && validDays.isNotEmpty()) {
+                    val currentDow = baseDate.dayOfWeek.value
+                    val nextDaySameWeek = validDays.firstOrNull { it > currentDow }
                     if (nextDaySameWeek != null) {
                         baseDate.plusDays((nextDaySameWeek - currentDow).toLong())
                     } else {
-                        val firstDow = sortedDays.first()
+                        val firstDow = validDays.first()
                         val startOfTargetWeek = baseDate
                             .minusDays((currentDow - 1).toLong())
                             .plusWeeks(safeInterval)
@@ -294,17 +304,22 @@ class ThingsRepository @Inject constructor(
 
         val nextWhenEpoch = nextDate.atStartOfDay(zone).toInstant().toEpochMilli()
 
-        // Respect optional endDateEpochMillis ("Endet am")
         if (rule.endDateEpochMillis != null && nextWhenEpoch > rule.endDateEpochMillis) {
             return
         }
 
-        // Shift deadline by the same number of days if the task had both whenDate and deadline
         val nextDeadlineEpoch = if (completedTask.deadline != null && completedTask.whenDate != null) {
             val deltaMillis = nextWhenEpoch - completedTask.whenDate
             completedTask.deadline + deltaMillis
         } else {
             completedTask.deadline
+        }
+
+        val nextReminderTime = completedTask.reminderTime?.let { prevReminder ->
+            runCatching {
+                val prevLocalTime = Instant.ofEpochMilli(prevReminder).atZone(zone).toLocalTime()
+                LocalDateTime.of(nextDate, prevLocalTime).atZone(zone).toInstant().toEpochMilli()
+            }.getOrNull()
         }
 
         val todayEpoch = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
@@ -317,6 +332,7 @@ class ThingsRepository @Inject constructor(
             scheduleState = nextScheduleState,
             whenDate = nextWhenEpoch,
             deadline = nextDeadlineEpoch,
+            reminderTime = nextReminderTime,
             completedAt = null,
             createdAt = now,
             updatedAt = now,
@@ -324,7 +340,10 @@ class ThingsRepository @Inject constructor(
         )
         database.taskDao().upsertTaskWithTags(nextEntity, tagIds)
 
-        // Clone subtasks (ChecklistItems) reset to uncompleted (isCompleted = false), just like Things for Mac!
+        if (nextReminderTime != null && nextReminderTime > now) {
+            reminderScheduler.scheduleExactReminder(nextTaskId, nextEntity.title, nextReminderTime)
+        }
+
         val existingSubtasks = database.checklistDao().getForTaskSync(completedTask.id)
         if (existingSubtasks.isNotEmpty()) {
             val clonedSubtasks = existingSubtasks.map { item ->
@@ -352,7 +371,12 @@ class ThingsRepository @Inject constructor(
         )
         database.taskDao().upsert(updated)
 
-        // If an open recurring task was just checked off, spawn the next occurrence!
+        if (newStatus != TaskStatus.OPEN) {
+            reminderScheduler.cancelReminder(taskId)
+        } else if (existing.reminderTime != null && existing.reminderTime > now) {
+            reminderScheduler.scheduleExactReminder(taskId, existing.title, existing.reminderTime)
+        }
+
         if (existing.status == TaskStatus.OPEN && newStatus == TaskStatus.COMPLETED && existing.recurrenceRuleJson != null) {
             val rule = runCatching { json.decodeFromString<RecurrenceRule>(existing.recurrenceRuleJson) }.getOrNull()
             if (rule != null) {
@@ -361,7 +385,36 @@ class ThingsRepository @Inject constructor(
             }
         }
 
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun deferTaskToThisEvening(taskId: String) {
+        val existing = database.taskDao().getById(taskId) ?: return
+        val now = System.currentTimeMillis()
+        val zone = ZoneId.systemDefault()
+        val todayEpoch = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
+        reminderScheduler.cancelReminder(taskId)
+        database.taskDao().upsert(
+            existing.copy(
+                scheduleState = ScheduleState.THIS_EVENING,
+                whenDate = todayEpoch,
+                reminderTime = null,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun rescheduleAllOpenTaskReminders() {
+        val now = System.currentTimeMillis()
+        val tasks = database.taskDao().getOpenTasksWithFutureReminders(now)
+        for (task in tasks) {
+            val triggerAt = task.reminderTime ?: continue
+            if (triggerAt > now) {
+                reminderScheduler.scheduleExactReminder(task.id, task.title, triggerAt)
+            }
+        }
     }
 
     suspend fun updateTaskRecurrence(taskId: String, recurrenceRule: RecurrenceRule?) {
@@ -372,17 +425,17 @@ class ThingsRepository @Inject constructor(
         val todayEpoch = todayDate.atStartOfDay(zone).toInstant().toEpochMilli()
 
         val updatedWhen = if (recurrenceRule != null && existing.whenDate == null) {
+            val validDays = recurrenceRule.daysOfWeek.filter { it in 1..7 }.distinct().sorted()
             if (recurrenceRule.mode == RecurrenceMode.FIXED_SCHEDULE &&
                 recurrenceRule.unit == RecurrenceUnit.WEEKS &&
-                recurrenceRule.daysOfWeek.isNotEmpty()
+                validDays.isNotEmpty()
             ) {
-                val sortedDays = recurrenceRule.daysOfWeek.map { it.coerceIn(1, 7) }.distinct().sorted()
                 val currentDow = todayDate.dayOfWeek.value
-                val nextInWeek = sortedDays.firstOrNull { it >= currentDow }
+                val nextInWeek = validDays.firstOrNull { it >= currentDow }
                 val targetDate = if (nextInWeek != null) {
                     todayDate.plusDays((nextInWeek - currentDow).toLong())
                 } else {
-                    todayDate.minusDays((currentDow - 1).toLong()).plusWeeks(1).plusDays((sortedDays.first() - 1).toLong())
+                    todayDate.minusDays((currentDow - 1).toLong()).plusWeeks(1).plusDays((validDays.first() - 1).toLong())
                 }
                 targetDate.atStartOfDay(zone).toInstant().toEpochMilli()
             } else {
@@ -413,7 +466,7 @@ class ThingsRepository @Inject constructor(
                 isDirty = true
             )
         )
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
     }
 
     suspend fun moveTaskToContainer(
@@ -449,12 +502,8 @@ class ThingsRepository @Inject constructor(
                 isDirty = true
             )
         )
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
     }
-
-    // =========================================================================
-    // Areas of Responsibility (Bereiche — Work, Home, max 6, Rename, Move, Delete)
-    // =========================================================================
 
     suspend fun ensureDefaultWorkAndHomeAreas() {
         val activeAreas = database.areaDao().getActiveAreasList()
@@ -486,7 +535,6 @@ class ThingsRepository @Inject constructor(
             )
         }
 
-        // Normalize any existing open tasks that have a recurrence rule or whenDate but still had scheduleState = ANYTIME
         val misclassified = database.taskDao().getMisclassifiedAnytimeTasks()
         if (misclassified.isNotEmpty()) {
             val now = System.currentTimeMillis()
@@ -529,7 +577,7 @@ class ThingsRepository @Inject constructor(
                 isDirty = true
             )
         )
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
         return Result.success(id)
     }
 
@@ -545,7 +593,7 @@ class ThingsRepository @Inject constructor(
                 isDirty = true
             )
         )
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
     }
 
     suspend fun moveArea(areaId: String, moveUp: Boolean) {
@@ -571,27 +619,25 @@ class ThingsRepository @Inject constructor(
                 neighbor.copy(sortOrder = currentSort, updatedAt = now, isDirty = true)
             )
         )
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
     }
 
     suspend fun softDeleteArea(areaId: String) {
         val existing = database.areaDao().getById(areaId) ?: return
         val now = System.currentTimeMillis()
-        database.projectDao().clearAreaFromProjects(areaId, now)
-        database.taskDao().clearAreaFromTasks(areaId, now)
-        database.areaDao().upsert(
-            existing.copy(
-                isDeleted = true,
-                updatedAt = now,
-                isDirty = true
+        database.withTransaction {
+            database.projectDao().clearAreaFromProjects(areaId, now)
+            database.taskDao().clearAreaFromTasks(areaId, now)
+            database.areaDao().upsert(
+                existing.copy(
+                    isDeleted = true,
+                    updatedAt = now,
+                    isDirty = true
+                )
             )
-        )
-        syncRepository.syncBidirectionalDeltas()
+        }
+        syncRepository.triggerBackgroundSync()
     }
-
-    // =========================================================================
-    // Projects (with Target Date / Deadline, Area Assignment, Move, Complete, Delete)
-    // =========================================================================
 
     suspend fun createOrUpdateProject(
         id: String = UUID.randomUUID().toString(),
@@ -632,7 +678,7 @@ class ThingsRepository @Inject constructor(
             isDirty = true
         )
         database.projectDao().upsertProjectWithTags(entity, tagIds)
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
         return id
     }
 
@@ -646,7 +692,7 @@ class ThingsRepository @Inject constructor(
                 isDirty = true
             )
         )
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
     }
 
     suspend fun updateProjectArea(projectId: String, areaId: String?) {
@@ -659,7 +705,7 @@ class ThingsRepository @Inject constructor(
                 isDirty = true
             )
         )
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
     }
 
     suspend fun updateProjectStatus(projectId: String, status: ProjectStatus) {
@@ -673,7 +719,7 @@ class ThingsRepository @Inject constructor(
                 isDirty = true
             )
         )
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
     }
 
     suspend fun moveProject(projectId: String, moveUp: Boolean) {
@@ -699,26 +745,24 @@ class ThingsRepository @Inject constructor(
                 neighbor.copy(sortOrder = currentSort, updatedAt = now, isDirty = true)
             )
         )
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
     }
 
     suspend fun softDeleteProject(projectId: String) {
         val existing = database.projectDao().getById(projectId) ?: return
         val now = System.currentTimeMillis()
-        database.taskDao().clearProjectFromTasks(projectId, now)
-        database.projectDao().upsert(
-            existing.copy(
-                isDeleted = true,
-                updatedAt = now,
-                isDirty = true
+        database.withTransaction {
+            database.taskDao().clearProjectFromTasks(projectId, now)
+            database.projectDao().upsert(
+                existing.copy(
+                    isDeleted = true,
+                    updatedAt = now,
+                    isDirty = true
+                )
             )
-        )
-        syncRepository.syncBidirectionalDeltas()
+        }
+        syncRepository.triggerBackgroundSync()
     }
-
-    // =========================================================================
-    // Project Headings (Abschnitte — Create, Rename, Move, Delete)
-    // =========================================================================
 
     suspend fun createHeadingInProject(
         projectId: String,
@@ -732,7 +776,7 @@ class ThingsRepository @Inject constructor(
                 id = id,
                 projectId = projectId,
                 title = title,
-                sortOrder = sortOrder,
+                sortOrder = if (sortOrder.isFinite()) sortOrder else 1000.0,
                 isArchived = false,
                 createdAt = now,
                 updatedAt = now,
@@ -740,7 +784,7 @@ class ThingsRepository @Inject constructor(
                 isDirty = true
             )
         )
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
         return id
     }
 
@@ -756,26 +800,24 @@ class ThingsRepository @Inject constructor(
                 isDirty = true
             )
         )
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
     }
 
     suspend fun softDeleteHeading(headingId: String) {
         val existing = database.headingDao().getById(headingId) ?: return
         val now = System.currentTimeMillis()
-        database.taskDao().clearHeadingFromTasks(headingId, now)
-        database.headingDao().upsert(
-            existing.copy(
-                isDeleted = true,
-                updatedAt = now,
-                isDirty = true
+        database.withTransaction {
+            database.taskDao().clearHeadingFromTasks(headingId, now)
+            database.headingDao().upsert(
+                existing.copy(
+                    isDeleted = true,
+                    updatedAt = now,
+                    isDirty = true
+                )
             )
-        )
-        syncRepository.syncBidirectionalDeltas()
+        }
+        syncRepository.triggerBackgroundSync()
     }
-
-    // =========================================================================
-    // Subtasks (Unteraufgaben / Checklist Items — Create, Toggle, Rename, Move, Delete)
-    // =========================================================================
 
     suspend fun addChecklistItem(
         taskId: String,
@@ -790,14 +832,14 @@ class ThingsRepository @Inject constructor(
                 taskId = taskId,
                 title = title,
                 isCompleted = false,
-                sortOrder = sortOrder,
+                sortOrder = if (sortOrder.isFinite()) sortOrder else now.toDouble(),
                 createdAt = now,
                 updatedAt = now,
                 isDeleted = false,
                 isDirty = true
             )
         )
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
         return id
     }
 
@@ -818,7 +860,7 @@ class ThingsRepository @Inject constructor(
             )
         }
         database.checklistDao().upsertAll(entities)
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
     }
 
     suspend fun toggleChecklistItem(itemId: String, isCompleted: Boolean) {
@@ -831,7 +873,7 @@ class ThingsRepository @Inject constructor(
                 isDirty = true
             )
         )
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
     }
 
     suspend fun updateChecklistItemTitle(itemId: String, newTitle: String) {
@@ -844,7 +886,7 @@ class ThingsRepository @Inject constructor(
                 isDirty = true
             )
         )
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
     }
 
     suspend fun moveChecklistItem(taskId: String, itemId: String, moveUp: Boolean) {
@@ -870,7 +912,7 @@ class ThingsRepository @Inject constructor(
                 neighbor.copy(sortOrder = currentSort, updatedAt = now, isDirty = true)
             )
         )
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
     }
 
     suspend fun softDeleteChecklistItem(itemId: String) {
@@ -883,12 +925,13 @@ class ThingsRepository @Inject constructor(
                 isDirty = true
             )
         )
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
     }
 
     suspend fun softDeleteTask(taskId: String) {
         val existing = database.taskDao().getById(taskId) ?: return
         val now = System.currentTimeMillis()
+        reminderScheduler.cancelReminder(taskId)
         database.taskDao().upsert(
             existing.copy(
                 isDeleted = true,
@@ -896,7 +939,7 @@ class ThingsRepository @Inject constructor(
                 isDirty = true
             )
         )
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
     }
 
     suspend fun createOrUpdateTag(
@@ -921,23 +964,25 @@ class ThingsRepository @Inject constructor(
             isDirty = true
         )
         database.tagDao().upsert(tagEntity)
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
         return id
     }
 
     suspend fun softDeleteTag(tagId: String) {
         val existing = database.tagDao().getById(tagId) ?: return
         val now = System.currentTimeMillis()
-        database.tagDao().deleteTaskTagCrossRefsForTag(tagId)
-        database.tagDao().deleteProjectTagCrossRefsForTag(tagId)
-        database.tagDao().upsert(
-            existing.copy(
-                isDeleted = true,
-                updatedAt = now,
-                isDirty = true
+        database.withTransaction {
+            database.tagDao().deleteTaskTagCrossRefsForTag(tagId)
+            database.tagDao().deleteProjectTagCrossRefsForTag(tagId)
+            database.tagDao().upsert(
+                existing.copy(
+                    isDeleted = true,
+                    updatedAt = now,
+                    isDirty = true
+                )
             )
-        )
-        syncRepository.syncBidirectionalDeltas()
+        }
+        syncRepository.triggerBackgroundSync()
     }
 
     suspend fun getOpenActiveTasksForToday(): List<String> {
@@ -952,6 +997,7 @@ class ThingsRepository @Inject constructor(
         areaId: String? = null,
         headingsWithTasks: List<Pair<String, List<String>>>
     ): String {
+        val trimmedTitle = title.trim().ifEmpty { "Neues Projekt" }
         val now = System.currentTimeMillis()
         val projectId = UUID.randomUUID().toString()
         val todayEpoch = LocalDate.now(ZoneId.systemDefault())
@@ -959,67 +1005,72 @@ class ThingsRepository @Inject constructor(
             .toInstant()
             .toEpochMilli()
 
-        val projectEntity = ProjectEntity(
-            id = projectId,
-            areaId = areaId,
-            title = title,
-            notes = notes,
-            status = ProjectStatus.ACTIVE,
-            scheduleState = ScheduleState.TODAY,
-            whenDate = todayEpoch,
-            deadline = null,
-            completedAt = null,
-            sortOrder = now.toDouble(),
-            tagIdsJson = "[]",
-            createdAt = now,
-            updatedAt = now,
-            isDeleted = false,
-            isDirty = true
-        )
-        database.projectDao().upsert(projectEntity)
-
-        headingsWithTasks.forEachIndexed { hIndex, (headingTitle, taskTitles) ->
-            val headingId = UUID.randomUUID().toString()
-            database.headingDao().upsert(
-                HeadingEntity(
-                    id = headingId,
-                    projectId = projectId,
-                    title = headingTitle,
-                    sortOrder = (hIndex + 1) * 1000.0,
-                    isArchived = false,
-                    createdAt = now,
-                    updatedAt = now,
-                    isDeleted = false,
-                    isDirty = true
-                )
+        database.withTransaction {
+            val projectEntity = ProjectEntity(
+                id = projectId,
+                areaId = areaId,
+                title = trimmedTitle,
+                notes = notes,
+                status = ProjectStatus.ACTIVE,
+                scheduleState = ScheduleState.TODAY,
+                whenDate = todayEpoch,
+                deadline = null,
+                completedAt = null,
+                sortOrder = now.toDouble(),
+                tagIdsJson = "[]",
+                createdAt = now,
+                updatedAt = now,
+                isDeleted = false,
+                isDirty = true
             )
-            val tasks = taskTitles.mapIndexed { tIndex, taskTitle ->
-                TaskEntity(
-                    id = UUID.randomUUID().toString(),
-                    title = taskTitle,
-                    notes = "",
-                    status = TaskStatus.OPEN,
-                    scheduleState = if (hIndex == 0 && tIndex == 0) ScheduleState.TODAY else ScheduleState.ANYTIME,
-                    whenDate = if (hIndex == 0 && tIndex == 0) todayEpoch else null,
-                    deadline = null,
-                    reminderTime = null,
-                    completedAt = null,
-                    projectId = projectId,
-                    headingId = headingId,
-                    areaId = areaId,
-                    recurrenceRuleJson = null,
-                    sortOrder = (hIndex + 1) * 1000.0 + (tIndex + 1) * 100.0,
-                    tagIdsJson = "[]",
-                    createdAt = now,
-                    updatedAt = now,
-                    isDeleted = false,
-                    isDirty = true
+            database.projectDao().upsert(projectEntity)
+
+            headingsWithTasks.forEachIndexed { hIndex, (headingTitle, taskTitles) ->
+                val headingId = UUID.randomUUID().toString()
+                database.headingDao().upsert(
+                    HeadingEntity(
+                        id = headingId,
+                        projectId = projectId,
+                        title = headingTitle.trim().ifEmpty { "Abschnitt ${hIndex + 1}" },
+                        sortOrder = (hIndex + 1) * 1000.0,
+                        isArchived = false,
+                        createdAt = now,
+                        updatedAt = now,
+                        isDeleted = false,
+                        isDirty = true
+                    )
                 )
+                val tasks = taskTitles.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }
+                    .mapIndexed { tIndex, taskTitle ->
+                        TaskEntity(
+                            id = UUID.randomUUID().toString(),
+                            title = taskTitle,
+                            notes = "",
+                            status = TaskStatus.OPEN,
+                            scheduleState = if (hIndex == 0 && tIndex == 0) ScheduleState.TODAY else ScheduleState.ANYTIME,
+                            whenDate = if (hIndex == 0 && tIndex == 0) todayEpoch else null,
+                            deadline = null,
+                            reminderTime = null,
+                            completedAt = null,
+                            projectId = projectId,
+                            headingId = headingId,
+                            areaId = areaId,
+                            recurrenceRuleJson = null,
+                            sortOrder = (hIndex + 1) * 1000.0 + (tIndex + 1) * 100.0,
+                            tagIdsJson = "[]",
+                            createdAt = now,
+                            updatedAt = now,
+                            isDeleted = false,
+                            isDirty = true
+                        )
+                    }
+                if (tasks.isNotEmpty()) {
+                    database.taskDao().upsertAll(tasks)
+                }
             }
-            database.taskDao().upsertAll(tasks)
         }
 
-        syncRepository.syncBidirectionalDeltas()
+        syncRepository.triggerBackgroundSync()
         return projectId
     }
 
@@ -1030,7 +1081,7 @@ class ThingsRepository @Inject constructor(
     suspend fun exportTasksToCsv(): String {
         val tasksWithDetails = database.taskDao().getAllActiveTasksWithDetails()
         val areasById = database.areaDao().getActiveAreasList().associateBy { it.id }
-        val projectsById = database.projectDao().getActiveProjectsList().associateBy { it.id }
+        val projectsById = database.projectDao().getAllNonDeletedProjectsList().associateBy { it.id }
         val zone = ZoneId.systemDefault()
 
         val sb = StringBuilder()
@@ -1041,8 +1092,12 @@ class ThingsRepository @Inject constructor(
             val proj = t.projectId?.let { projectsById[it] }
             val areaId = proj?.areaId ?: t.areaId
             val area = areaId?.let { areasById[it] }
-            val whenStr = t.whenDate?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate().toString() } ?: ""
-            val deadlineStr = t.deadline?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate().toString() } ?: ""
+            val whenStr = t.whenDate?.let { epoch ->
+                runCatching { Instant.ofEpochMilli(epoch).atZone(zone).toLocalDate().toString() }.getOrDefault("")
+            } ?: ""
+            val deadlineStr = t.deadline?.let { epoch ->
+                runCatching { Instant.ofEpochMilli(epoch).atZone(zone).toLocalDate().toString() }.getOrDefault("")
+            } ?: ""
             val tagsStr = item.tags.filter { !it.isDeleted }.joinToString("; ") { it.title }
             val checklistStr = item.checklistItems
                 .filter { !it.isDeleted }
@@ -1050,16 +1105,16 @@ class ThingsRepository @Inject constructor(
                 .joinToString("; ") { sub -> (if (sub.isCompleted) "[x] " else "[ ] ") + sub.title }
 
             val row = listOf(
-                escapeCsvField(t.title),
-                escapeCsvField(t.notes),
-                escapeCsvField(t.status.name),
-                escapeCsvField(t.scheduleState.name),
-                escapeCsvField(whenStr),
-                escapeCsvField(deadlineStr),
-                escapeCsvField(area?.title ?: ""),
-                escapeCsvField(proj?.title ?: ""),
-                escapeCsvField(tagsStr),
-                escapeCsvField(checklistStr)
+                CsvParserUtils.escapeCsvField(t.title),
+                CsvParserUtils.escapeCsvField(t.notes),
+                CsvParserUtils.escapeCsvField(t.status.name),
+                CsvParserUtils.escapeCsvField(t.scheduleState.name),
+                CsvParserUtils.escapeCsvField(whenStr),
+                CsvParserUtils.escapeCsvField(deadlineStr),
+                CsvParserUtils.escapeCsvField(area?.title ?: ""),
+                CsvParserUtils.escapeCsvField(proj?.title ?: ""),
+                CsvParserUtils.escapeCsvField(tagsStr),
+                CsvParserUtils.escapeCsvField(checklistStr)
             ).joinToString(",")
             sb.appendLine(row)
         }
@@ -1072,21 +1127,20 @@ class ThingsRepository @Inject constructor(
 
         val firstLine = cleaned.lineSequence().firstOrNull() ?: return 0
         val delimiter = if (firstLine.count { it == ';' } > firstLine.count { it == ',' } && !firstLine.contains("Title,")) ';' else ','
-        val rows = parseCsvRows(cleaned, delimiter)
+        val rows = CsvParserUtils.parseCsvRows(cleaned, delimiter)
         if (rows.isEmpty()) return 0
 
-        val header = rows.first().map { it.trim().lowercase() }
+        val header = rows.first().map { it.trim().lowercase(Locale.ROOT) }
         val hasHeader = header.any { it in setOf("title", "titel", "aufgabe", "task", "name") }
-        val dataRows = if (hasHeader) rows.drop(1) else rows
+        val dataRows = (if (hasHeader) rows.drop(1) else rows).take(10_000)
         if (dataRows.isEmpty()) return 0
 
         fun colIndex(vararg names: String, defaultIdx: Int): Int {
             if (!hasHeader) return defaultIdx
-            val found = header.indexOfFirst { h -> names.any { h == it } }
-            return if (found >= 0) found else defaultIdx
+            return header.indexOfFirst { h -> names.any { h == it } }
         }
 
-        val idxTitle = colIndex("title", "titel", "aufgabe", "task", "name", defaultIdx = 0)
+        val idxTitle = colIndex("title", "titel", "aufgabe", "task", "name", defaultIdx = 0).let { if (it >= 0) it else 0 }
         val idxNotes = colIndex("notes", "notizen", "beschreibung", "description", defaultIdx = 1)
         val idxStatus = colIndex("status", defaultIdx = 2)
         val idxSchedule = colIndex("schedulestate", "schedule", "when", "ansicht", "view", defaultIdx = 3)
@@ -1099,246 +1153,202 @@ class ThingsRepository @Inject constructor(
 
         val zone = ZoneId.systemDefault()
         val now = System.currentTimeMillis()
+        val endOfToday = endOfTodayEpochMillis()
         var importedCount = 0
 
-        val existingAreas = database.areaDao().getActiveAreasList().toMutableList()
-        val existingProjects = database.projectDao().getActiveProjectsList().toMutableList()
-        val existingTags = database.tagDao().observeAllTags().first().toMutableList()
+        database.withTransaction {
+            val existingAreas = database.areaDao().getActiveAreasList().toMutableList()
+            val existingProjects = database.projectDao().getAllNonDeletedProjectsList().toMutableList()
+            val existingTags = database.tagDao().observeAllTags().first().toMutableList()
 
-        for ((rowIdx, cols) in dataRows.withIndex()) {
-            val rawTitle = cols.getOrNull(idxTitle)?.trim() ?: ""
-            if (rawTitle.isEmpty()) continue
+            for ((rowIdx, cols) in dataRows.withIndex()) {
+                fun colVal(idx: Int): String = if (idx >= 0) cols.getOrNull(idx)?.trim().orEmpty() else ""
 
-            val rawNotes = cols.getOrNull(idxNotes)?.trim() ?: ""
-            val rawStatus = cols.getOrNull(idxStatus)?.trim()?.uppercase() ?: "OPEN"
-            val rawSchedule = cols.getOrNull(idxSchedule)?.trim()?.uppercase() ?: "TODAY"
-            val rawWhen = cols.getOrNull(idxWhenDate)?.trim() ?: ""
-            val rawDeadline = cols.getOrNull(idxDeadline)?.trim() ?: ""
-            val rawArea = cols.getOrNull(idxArea)?.trim() ?: ""
-            val rawProject = cols.getOrNull(idxProject)?.trim() ?: ""
-            val rawTags = cols.getOrNull(idxTags)?.trim() ?: ""
-            val rawChecklist = cols.getOrNull(idxChecklist)?.trim() ?: ""
+                val rawTitle = colVal(idxTitle)
+                if (rawTitle.isEmpty()) continue
 
-            val status = runCatching { TaskStatus.valueOf(rawStatus) }.getOrDefault(TaskStatus.OPEN)
-            val parsedWhen = parseFlexibleCsvDate(rawWhen, zone)
-            val parsedDeadline = parseFlexibleCsvDate(rawDeadline, zone)
+                val rawNotes = colVal(idxNotes)
+                val rawStatus = colVal(idxStatus).uppercase(Locale.ROOT).ifEmpty { "OPEN" }
+                val rawSchedule = colVal(idxSchedule).uppercase(Locale.ROOT)
+                val rawWhen = colVal(idxWhenDate)
+                val rawDeadline = colVal(idxDeadline)
+                val rawArea = colVal(idxArea)
+                val rawProject = colVal(idxProject)
+                val rawTags = colVal(idxTags)
+                val rawChecklist = colVal(idxChecklist)
 
-            val scheduleState = runCatching { ScheduleState.valueOf(rawSchedule) }.getOrElse {
-                when {
-                    parsedWhen != null && parsedWhen > endOfTodayEpochMillis() -> ScheduleState.UPCOMING
-                    parsedWhen != null -> ScheduleState.TODAY
-                    else -> ScheduleState.INBOX
-                }
-            }
+                val status = runCatching { TaskStatus.valueOf(rawStatus) }.getOrDefault(TaskStatus.OPEN)
+                val parsedWhen = CsvParserUtils.parseFlexibleCsvDate(rawWhen, zone)
+                val parsedDeadline = CsvParserUtils.parseFlexibleCsvDate(rawDeadline, zone)
 
-            // Match or create Area (up to MAX_AREAS = 8)
-            var resolvedAreaId: String? = null
-            if (rawArea.isNotEmpty()) {
-                val matchArea = existingAreas.firstOrNull { it.title.equals(rawArea, ignoreCase = true) }
-                if (matchArea != null) {
-                    resolvedAreaId = matchArea.id
-                } else if (existingAreas.size < MAX_AREAS) {
-                    val newAreaId = UUID.randomUUID().toString()
-                    val newArea = AreaEntity(
-                        id = newAreaId,
-                        title = rawArea,
-                        sortOrder = (existingAreas.size + 1) * 1000.0,
-                        tagIdsJson = "[]",
-                        createdAt = now,
-                        updatedAt = now,
-                        isDeleted = false,
-                        isDirty = true
-                    )
-                    database.areaDao().upsert(newArea)
-                    existingAreas.add(newArea)
-                    resolvedAreaId = newAreaId
-                }
-            }
-
-            // Match or create Project
-            var resolvedProjectId: String? = null
-            if (rawProject.isNotEmpty()) {
-                val matchProj = existingProjects.firstOrNull { it.title.equals(rawProject, ignoreCase = true) }
-                if (matchProj != null) {
-                    resolvedProjectId = matchProj.id
-                    if (resolvedAreaId == null) resolvedAreaId = matchProj.areaId
+                val scheduleState = if (rawSchedule.isNotEmpty()) {
+                    runCatching { ScheduleState.valueOf(rawSchedule) }.getOrElse {
+                        when {
+                            parsedWhen != null && parsedWhen > endOfToday -> ScheduleState.UPCOMING
+                            parsedWhen != null -> ScheduleState.TODAY
+                            else -> ScheduleState.INBOX
+                        }
+                    }
                 } else {
-                    val newProjId = UUID.randomUUID().toString()
-                    val newProj = ProjectEntity(
-                        id = newProjId,
-                        areaId = resolvedAreaId,
-                        title = rawProject,
-                        notes = "",
-                        status = ProjectStatus.ACTIVE,
-                        scheduleState = ScheduleState.ANYTIME,
-                        whenDate = null,
-                        deadline = null,
-                        completedAt = null,
-                        sortOrder = (existingProjects.size + 1) * 1000.0,
-                        tagIdsJson = "[]",
-                        createdAt = now,
-                        updatedAt = now,
-                        isDeleted = false,
-                        isDirty = true
-                    )
-                    database.projectDao().upsert(newProj)
-                    existingProjects.add(newProj)
-                    resolvedProjectId = newProjId
-                }
-            }
-
-            // Match or create Tags
-            val tagIds = mutableListOf<String>()
-            if (rawTags.isNotEmpty()) {
-                val tagNames = rawTags.split(";", "|").map { it.trim() }.filter { it.isNotEmpty() }
-                for (tName in tagNames) {
-                    val matchTag = existingTags.firstOrNull { it.title.equals(tName, ignoreCase = true) }
-                    if (matchTag != null) {
-                        tagIds.add(matchTag.id)
-                    } else {
-                        val newTagId = createOrUpdateTag(title = tName)
-                        val createdTag = database.tagDao().getById(newTagId)
-                        if (createdTag != null) existingTags.add(createdTag)
-                        tagIds.add(newTagId)
+                    when {
+                        parsedWhen != null && parsedWhen > endOfToday -> ScheduleState.UPCOMING
+                        parsedWhen != null -> ScheduleState.TODAY
+                        else -> ScheduleState.INBOX
                     }
                 }
-            }
 
-            val taskId = UUID.randomUUID().toString()
-            val taskEntity = TaskEntity(
-                id = taskId,
-                title = rawTitle,
-                notes = rawNotes,
-                status = status,
-                scheduleState = scheduleState,
-                whenDate = parsedWhen,
-                deadline = parsedDeadline,
-                reminderTime = null,
-                completedAt = if (status == TaskStatus.COMPLETED || status == TaskStatus.CANCELED) now else null,
-                projectId = resolvedProjectId,
-                headingId = null,
-                areaId = resolvedAreaId,
-                recurrenceRuleJson = null,
-                sortOrder = (now % 100_000) + rowIdx * 50.0,
-                tagIdsJson = json.encodeToString(tagIds),
-                createdAt = now,
-                updatedAt = now,
-                isDeleted = false,
-                isDirty = true
-            )
-            database.taskDao().upsertTaskWithTags(taskEntity, tagIds)
+                // Match or create Area (up to MAX_AREAS = 8)
+                var resolvedAreaId: String? = null
+                if (rawArea.isNotEmpty()) {
+                    val matchArea = existingAreas.firstOrNull { it.title.equals(rawArea, ignoreCase = true) }
+                    if (matchArea != null) {
+                        resolvedAreaId = matchArea.id
+                    } else if (existingAreas.size < MAX_AREAS) {
+                        val newAreaId = UUID.randomUUID().toString()
+                        val newArea = AreaEntity(
+                            id = newAreaId,
+                            title = rawArea,
+                            sortOrder = (existingAreas.size + 1) * 1000.0,
+                            tagIdsJson = "[]",
+                            createdAt = now,
+                            updatedAt = now,
+                            isDeleted = false,
+                            isDirty = true
+                        )
+                        database.areaDao().upsert(newArea)
+                        existingAreas.add(newArea)
+                        resolvedAreaId = newAreaId
+                    }
+                }
 
-            if (rawChecklist.isNotEmpty()) {
-                val subParts = rawChecklist.split(";").map { it.trim() }.filter { it.isNotEmpty() }
-                val subEntities = subParts.mapIndexed { sIdx, part ->
-                    val completed = part.startsWith("[x]", ignoreCase = true)
-                    val cleanSubTitle = part
-                        .removePrefix("[x]")
-                        .removePrefix("[X]")
-                        .removePrefix("[ ]")
-                        .removePrefix("[]")
-                        .trim()
-                    ChecklistItemEntity(
-                        id = UUID.randomUUID().toString(),
-                        taskId = taskId,
-                        title = cleanSubTitle.ifEmpty { part },
-                        isCompleted = completed,
-                        sortOrder = (sIdx + 1) * 100.0,
-                        createdAt = now,
-                        updatedAt = now,
-                        isDeleted = false,
-                        isDirty = true
-                    )
+                // Match or create Project
+                var resolvedProjectId: String? = null
+                if (rawProject.isNotEmpty()) {
+                    val matchProj = existingProjects.firstOrNull { it.title.equals(rawProject, ignoreCase = true) }
+                    if (matchProj != null) {
+                        resolvedProjectId = matchProj.id
+                        if (resolvedAreaId == null) resolvedAreaId = matchProj.areaId
+                    } else {
+                        val newProjId = UUID.randomUUID().toString()
+                        val newProj = ProjectEntity(
+                            id = newProjId,
+                            areaId = resolvedAreaId,
+                            title = rawProject,
+                            notes = "",
+                            status = ProjectStatus.ACTIVE,
+                            scheduleState = ScheduleState.ANYTIME,
+                            whenDate = null,
+                            deadline = null,
+                            completedAt = null,
+                            sortOrder = (existingProjects.size + 1) * 1000.0,
+                            tagIdsJson = "[]",
+                            createdAt = now,
+                            updatedAt = now,
+                            isDeleted = false,
+                            isDirty = true
+                        )
+                        database.projectDao().upsert(newProj)
+                        existingProjects.add(newProj)
+                        resolvedProjectId = newProjId
+                    }
                 }
-                if (subEntities.isNotEmpty()) {
-                    database.checklistDao().upsertAll(subEntities)
+
+                // Match or create Tags inside transaction without triggering per-tag network sync
+                val tagIds = mutableListOf<String>()
+                if (rawTags.isNotEmpty()) {
+                    val tagNames = rawTags.split(";", "|").map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+                    for (tName in tagNames) {
+                        val matchTag = existingTags.firstOrNull { it.title.equals(tName, ignoreCase = true) }
+                        if (matchTag != null) {
+                            tagIds.add(matchTag.id)
+                        } else {
+                            val newTagId = UUID.randomUUID().toString()
+                            val createdTag = TagEntity(
+                                id = newTagId,
+                                title = tName,
+                                parentTagId = null,
+                                shortcut = null,
+                                sortOrder = (now % 100_000).toDouble() + existingTags.size,
+                                createdAt = now,
+                                updatedAt = now,
+                                isDeleted = false,
+                                isDirty = true
+                            )
+                            database.tagDao().upsert(createdTag)
+                            existingTags.add(createdTag)
+                            tagIds.add(newTagId)
+                        }
+                    }
                 }
+
+                val taskId = UUID.randomUUID().toString()
+                val resolvedTaskSchedule = if (
+                    scheduleState == ScheduleState.INBOX &&
+                    parsedWhen == null &&
+                    (resolvedProjectId != null || resolvedAreaId != null)
+                ) {
+                    ScheduleState.ANYTIME
+                } else {
+                    scheduleState
+                }
+
+                val taskEntity = TaskEntity(
+                    id = taskId,
+                    title = rawTitle,
+                    notes = rawNotes,
+                    status = status,
+                    scheduleState = resolvedTaskSchedule,
+                    whenDate = parsedWhen,
+                    deadline = parsedDeadline,
+                    reminderTime = null,
+                    completedAt = if (status == TaskStatus.COMPLETED || status == TaskStatus.CANCELED) now else null,
+                    projectId = resolvedProjectId,
+                    headingId = null,
+                    areaId = resolvedAreaId,
+                    recurrenceRuleJson = null,
+                    sortOrder = (now % 100_000) + rowIdx * 50.0,
+                    tagIdsJson = json.encodeToString(tagIds),
+                    createdAt = now,
+                    updatedAt = now,
+                    isDeleted = false,
+                    isDirty = true
+                )
+                database.taskDao().upsertTaskWithTags(taskEntity, tagIds)
+
+                if (rawChecklist.isNotEmpty()) {
+                    val subParts = rawChecklist.split(";").map { it.trim() }.filter { it.isNotEmpty() }
+                    val subEntities = subParts.mapIndexed { sIdx, part ->
+                        val completed = part.startsWith("[x]", ignoreCase = true)
+                        val cleanSubTitle = part
+                            .removePrefix("[x]")
+                            .removePrefix("[X]")
+                            .removePrefix("[ ]")
+                            .removePrefix("[]")
+                            .trim()
+                        ChecklistItemEntity(
+                            id = UUID.randomUUID().toString(),
+                            taskId = taskId,
+                            title = cleanSubTitle.ifEmpty { part },
+                            isCompleted = completed,
+                            sortOrder = (sIdx + 1) * 100.0,
+                            createdAt = now,
+                            updatedAt = now,
+                            isDeleted = false,
+                            isDirty = true
+                        )
+                    }
+                    if (subEntities.isNotEmpty()) {
+                        database.checklistDao().upsertAll(subEntities)
+                    }
+                }
+                importedCount++
             }
-            importedCount++
         }
 
         if (importedCount > 0) {
-            syncRepository.syncBidirectionalDeltas()
+            syncRepository.triggerBackgroundSync()
         }
         return importedCount
-    }
-
-    private fun escapeCsvField(value: String): String {
-        if (value.contains(",") || value.contains("\"") || value.contains("\n") || value.contains("\r")) {
-            return "\"" + value.replace("\"", "\"\"") + "\""
-        }
-        return value
-    }
-
-    private fun parseCsvRows(csv: String, delimiter: Char): List<List<String>> {
-        val result = mutableListOf<List<String>>()
-        var currentRow = mutableListOf<String>()
-        val currentField = StringBuilder()
-        var inQuotes = false
-        var i = 0
-        while (i < csv.length) {
-            val ch = csv[i]
-            if (inQuotes) {
-                if (ch == '"') {
-                    if (i + 1 < csv.length && csv[i + 1] == '"') {
-                        currentField.append('"')
-                        i++
-                    } else {
-                        inQuotes = false
-                    }
-                } else {
-                    currentField.append(ch)
-                }
-            } else {
-                when (ch) {
-                    '"' -> inQuotes = true
-                    delimiter -> {
-                        currentRow.add(currentField.toString())
-                        currentField.clear()
-                    }
-                    '\r' -> {
-                        if (i + 1 < csv.length && csv[i + 1] == '\n') i++
-                        currentRow.add(currentField.toString())
-                        currentField.clear()
-                        if (currentRow.any { it.isNotBlank() }) result.add(currentRow)
-                        currentRow = mutableListOf()
-                    }
-                    '\n' -> {
-                        currentRow.add(currentField.toString())
-                        currentField.clear()
-                        if (currentRow.any { it.isNotBlank() }) result.add(currentRow)
-                        currentRow = mutableListOf()
-                    }
-                    else -> currentField.append(ch)
-                }
-            }
-            i++
-        }
-        if (currentField.isNotEmpty() || currentRow.isNotEmpty()) {
-            currentRow.add(currentField.toString())
-            if (currentRow.any { it.isNotBlank() }) result.add(currentRow)
-        }
-        return result
-    }
-
-    private fun parseFlexibleCsvDate(raw: String, zone: ZoneId): Long? {
-        if (raw.isBlank()) return null
-        val trimmed = raw.trim()
-        // Try ISO YYYY-MM-DD
-        runCatching {
-            return LocalDate.parse(trimmed).atStartOfDay(zone).toInstant().toEpochMilli()
-        }
-        // Try DD.MM.YYYY
-        runCatching {
-            val parts = trimmed.split(".")
-            if (parts.size == 3) {
-                val d = parts[0].trim().toInt()
-                val m = parts[1].trim().toInt()
-                val y = parts[2].trim().toInt()
-                return LocalDate.of(y, m, d).atStartOfDay(zone).toInstant().toEpochMilli()
-            }
-        }
-        return null
     }
 
     private fun decodeStringList(raw: String): List<String> =
@@ -1424,4 +1434,150 @@ class ThingsRepository @Inject constructor(
         updatedAt = project.updatedAt,
         isDeleted = project.isDeleted
     )
+}
+
+internal object CsvParserUtils {
+    fun escapeCsvField(value: String): String {
+        if (
+            value.contains(",") ||
+            value.contains(";") ||
+            value.contains("\"") ||
+            value.contains("\n") ||
+            value.contains("\r")
+        ) {
+            return "\"" + value.replace("\"", "\"\"") + "\""
+        }
+        return value
+    }
+
+    fun parseCsvRows(csv: String, delimiter: Char): List<List<String>> {
+        val cleanCsv = csv.removePrefix("\uFEFF")
+        val result = mutableListOf<List<String>>()
+        var currentRow = mutableListOf<String>()
+        val currentField = StringBuilder()
+        var inQuotes = false
+        var i = 0
+        while (i < cleanCsv.length) {
+            val ch = cleanCsv[i]
+            if (inQuotes) {
+                if (ch == '"') {
+                    if (i + 1 < cleanCsv.length && cleanCsv[i + 1] == '"') {
+                        currentField.append('"')
+                        i++
+                    } else {
+                        inQuotes = false
+                    }
+                } else {
+                    currentField.append(ch)
+                }
+            } else {
+                when (ch) {
+                    '"' -> {
+                        if (currentField.isEmpty()) {
+                            inQuotes = true
+                        } else {
+                            currentField.append(ch)
+                        }
+                    }
+                    delimiter -> {
+                        currentRow.add(currentField.toString())
+                        currentField.clear()
+                    }
+                    '\r' -> {
+                        if (i + 1 < cleanCsv.length && cleanCsv[i + 1] == '\n') i++
+                        currentRow.add(currentField.toString())
+                        currentField.clear()
+                        if (currentRow.any { it.isNotBlank() }) result.add(currentRow)
+                        currentRow = mutableListOf()
+                    }
+                    '\n' -> {
+                        currentRow.add(currentField.toString())
+                        currentField.clear()
+                        if (currentRow.any { it.isNotBlank() }) result.add(currentRow)
+                        currentRow = mutableListOf()
+                    }
+                    else -> currentField.append(ch)
+                }
+            }
+            i++
+        }
+        if (currentField.isNotEmpty() || currentRow.isNotEmpty()) {
+            currentRow.add(currentField.toString())
+            if (currentRow.any { it.isNotBlank() }) result.add(currentRow)
+        }
+        return result
+    }
+
+    private fun normalizeCsvYear(rawYear: Int): Int? {
+        val normalized = if (rawYear in 0..99) 2000 + rawYear else rawYear
+        return normalized.takeIf { it in 1970..2100 }
+    }
+
+    fun parseFlexibleCsvDate(raw: String, zone: ZoneId): Long? {
+        if (raw.isBlank()) return null
+        val trimmed = raw.trim()
+
+        // 1. ISO LocalDate (YYYY-MM-DD)
+        runCatching {
+            val ld = LocalDate.parse(trimmed)
+            if (ld.year in 1970..2100) {
+                return ld.atStartOfDay(zone).toInstant().toEpochMilli()
+            }
+        }
+
+        // 2. DD.MM.YYYY or DD.MM.YY
+        if (trimmed.contains(".")) {
+            runCatching {
+                val parts = trimmed.split(".")
+                if (parts.size == 3) {
+                    val d = parts[0].trim().toInt()
+                    val m = parts[1].trim().toInt()
+                    val y = normalizeCsvYear(parts[2].trim().toInt()) ?: return@runCatching
+                    return LocalDate.of(y, m, d).atStartOfDay(zone).toInstant().toEpochMilli()
+                }
+            }
+        }
+
+        // 3. DD/MM/YYYY or YYYY/MM/DD
+        if (trimmed.contains("/")) {
+            runCatching {
+                val parts = trimmed.split("/")
+                if (parts.size == 3) {
+                    val p0 = parts[0].trim().toInt()
+                    val p1 = parts[1].trim().toInt()
+                    val p2 = parts[2].trim().toInt()
+                    val ld = if (parts[0].trim().length == 4) {
+                        val y = normalizeCsvYear(p0) ?: return@runCatching
+                        LocalDate.of(y, p1, p2)
+                    } else {
+                        val y = normalizeCsvYear(p2) ?: return@runCatching
+                        LocalDate.of(y, p1, p0)
+                    }
+                    return ld.atStartOfDay(zone).toInstant().toEpochMilli()
+                }
+            }
+        }
+
+        // 4. ISO Instant (e.g. 2026-11-08T00:00:00Z)
+        runCatching {
+            val inst = Instant.parse(trimmed)
+            val ld = inst.atZone(zone).toLocalDate()
+            if (ld.year in 1970..2100) {
+                return ld.atStartOfDay(zone).toInstant().toEpochMilli()
+            }
+        }
+
+        // 5. Numeric epoch millis
+        val asLong = trimmed.toLongOrNull()
+        if (asLong != null && asLong > 86_400_000L) {
+            runCatching {
+                val ld = Instant.ofEpochMilli(asLong).atZone(zone).toLocalDate()
+                if (ld.year in 1970..2100) {
+                    return ld.atStartOfDay(zone).toInstant().toEpochMilli()
+                }
+            }
+        }
+
+        return null
+    }
 }

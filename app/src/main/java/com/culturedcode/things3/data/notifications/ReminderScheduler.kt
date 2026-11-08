@@ -1,5 +1,6 @@
 package com.culturedcode.things3.data.notifications
 
+import android.Manifest
 import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,20 +8,25 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.culturedcode.things3.MainActivity
 import com.culturedcode.things3.R
 import com.culturedcode.things3.data.repository.ThingsRepository
-import com.culturedcode.things3.domain.model.ScheduleState
 import com.culturedcode.things3.domain.model.TaskStatus
+import com.culturedcode.things3.domain.util.runCatchingCancellable
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
@@ -37,26 +43,29 @@ data class DailyDigestConfig(
 class ReminderScheduler @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
-    private val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+    private val alarmManager: AlarmManager? =
+        context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     fun getDailyDigestConfig(): DailyDigestConfig {
         return DailyDigestConfig(
             enabled = prefs.getBoolean(KEY_DAILY_ENABLED, true),
-            hour = prefs.getInt(KEY_DAILY_HOUR, 8),
-            minute = prefs.getInt(KEY_DAILY_MINUTE, 30)
+            hour = prefs.getInt(KEY_DAILY_HOUR, 8).coerceIn(0, 23),
+            minute = prefs.getInt(KEY_DAILY_MINUTE, 30).coerceIn(0, 59)
         )
     }
 
     fun updateDailyDigestSchedule(enabled: Boolean, hour: Int, minute: Int) {
+        val safeHour = hour.coerceIn(0, 23)
+        val safeMinute = minute.coerceIn(0, 59)
         prefs.edit()
             .putBoolean(KEY_DAILY_ENABLED, enabled)
-            .putInt(KEY_DAILY_HOUR, hour.coerceIn(0, 23))
-            .putInt(KEY_DAILY_MINUTE, minute.coerceIn(0, 59))
+            .putInt(KEY_DAILY_HOUR, safeHour)
+            .putInt(KEY_DAILY_MINUTE, safeMinute)
             .apply()
 
         if (enabled) {
-            scheduleNextDailyDigestAlarm(hour.coerceIn(0, 23), minute.coerceIn(0, 59))
+            scheduleNextDailyDigestAlarm(safeHour, safeMinute)
         } else {
             cancelDailyDigestAlarm()
         }
@@ -69,10 +78,27 @@ class ReminderScheduler @Inject constructor(
         }
     }
 
+    private fun scheduleAlarmSafely(am: AlarmManager, triggerAtMillis: Long, pendingIntent: PendingIntent) {
+        val canExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || am.canScheduleExactAlarms()
+        if (canExact) {
+            try {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
+            } catch (se: SecurityException) {
+                Log.w("ReminderScheduler", "Exact alarm permission revoked dynamically, falling back to inexact", se)
+                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
+            }
+        } else {
+            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
+        }
+    }
+
     fun scheduleNextDailyDigestAlarm(hour: Int, minute: Int) = runCatching {
+        val am = alarmManager ?: return@runCatching
+        val safeHour = hour.coerceIn(0, 23)
+        val safeMinute = minute.coerceIn(0, 59)
         val zone = ZoneId.systemDefault()
         val now = LocalDateTime.now(zone)
-        var nextRun = LocalDateTime.of(now.toLocalDate(), LocalTime.of(hour, minute))
+        var nextRun = LocalDateTime.of(now.toLocalDate(), LocalTime.of(safeHour, safeMinute))
         if (!nextRun.isAfter(now)) {
             nextRun = nextRun.plusDays(1)
         }
@@ -88,14 +114,13 @@ class ReminderScheduler @Inject constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
-            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
-        } else {
-            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
-        }
+        scheduleAlarmSafely(am, triggerAtMillis, pendingIntent)
+    }.onFailure { err ->
+        Log.w("ReminderScheduler", "Failed to schedule daily digest alarm", err)
     }
 
     fun cancelDailyDigestAlarm() = runCatching {
+        val am = alarmManager ?: return@runCatching
         val intent = Intent(context, ReminderReceiver::class.java).apply {
             action = ReminderReceiver.ACTION_SHOW_DAILY_DIGEST
         }
@@ -106,7 +131,8 @@ class ReminderScheduler @Inject constructor(
             PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
         )
         if (pendingIntent != null) {
-            alarmManager.cancel(pendingIntent)
+            am.cancel(pendingIntent)
+            pendingIntent.cancel()
         }
     }
 
@@ -119,10 +145,12 @@ class ReminderScheduler @Inject constructor(
     }
 
     fun scheduleExactReminder(taskId: String, taskTitle: String, triggerAtMillis: Long) = runCatching {
-        if (triggerAtMillis <= System.currentTimeMillis()) return@runCatching
+        val am = alarmManager ?: return@runCatching
+        if (taskId.isBlank() || triggerAtMillis <= System.currentTimeMillis()) return@runCatching
 
         val intent = Intent(context, ReminderReceiver::class.java).apply {
             action = ReminderReceiver.ACTION_SHOW_REMINDER
+            data = Uri.parse("thingsbook://reminder/$taskId")
             putExtra(ReminderReceiver.EXTRA_TASK_ID, taskId)
             putExtra(ReminderReceiver.EXTRA_TASK_TITLE, taskTitle)
         }
@@ -134,16 +162,17 @@ class ReminderScheduler @Inject constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
-            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
-        } else {
-            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
-        }
+        scheduleAlarmSafely(am, triggerAtMillis, pendingIntent)
+    }.onFailure { err ->
+        Log.w("ReminderScheduler", "Failed to schedule task reminder for $taskId", err)
     }
 
     fun cancelReminder(taskId: String) = runCatching {
+        val am = alarmManager ?: return@runCatching
+        if (taskId.isBlank()) return@runCatching
         val intent = Intent(context, ReminderReceiver::class.java).apply {
             action = ReminderReceiver.ACTION_SHOW_REMINDER
+            data = Uri.parse("thingsbook://reminder/$taskId")
         }
         val pendingIntent = PendingIntent.getBroadcast(
             context,
@@ -152,7 +181,8 @@ class ReminderScheduler @Inject constructor(
             PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
         )
         if (pendingIntent != null) {
-            alarmManager.cancel(pendingIntent)
+            am.cancel(pendingIntent)
+            pendingIntent.cancel()
         }
     }
 
@@ -174,14 +204,43 @@ class ReminderReceiver : BroadcastReceiver() {
     @Inject
     lateinit var reminderScheduler: ReminderScheduler
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val exceptionHandler = CoroutineExceptionHandler { _, err ->
+        Log.w("ReminderReceiver", "Unhandled exception in ReminderReceiver scope", err)
+    }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + exceptionHandler)
+
+    private fun canPostNotifications(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) return false
+        }
+        return NotificationManagerCompat.from(context).areNotificationsEnabled()
+    }
 
     override fun onReceive(context: Context, intent: Intent) {
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationManager =
+            context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
 
         when (intent.action) {
-            Intent.ACTION_BOOT_COMPLETED -> {
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_MY_PACKAGE_REPLACED,
+            Intent.ACTION_TIME_CHANGED,
+            Intent.ACTION_TIMEZONE_CHANGED,
+            AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED -> {
                 reminderScheduler.ensureDailyDigestScheduledIfEnabled()
+                val pendingResult = goAsync()
+                scope.launch {
+                    try {
+                        runCatchingCancellable {
+                            repository.rescheduleAllOpenTaskReminders()
+                        }
+                    } finally {
+                        pendingResult.finish()
+                    }
+                }
             }
 
             ACTION_SHOW_DAILY_DIGEST -> {
@@ -189,11 +248,13 @@ class ReminderReceiver : BroadcastReceiver() {
                 if (!isManualTest) {
                     reminderScheduler.ensureDailyDigestScheduledIfEnabled()
                 }
+                if (!canPostNotifications(context)) return
+
                 val pendingResult = goAsync()
                 scope.launch {
                     try {
                         ensureChannels(context, notificationManager)
-                        val activeTitles = runCatching { repository.getOpenActiveTasksForToday() }
+                        val activeTitles = runCatchingCancellable { repository.getOpenActiveTasksForToday() }
                             .getOrDefault(emptyList())
 
                         val openAppIntent = PendingIntent.getActivity(
@@ -235,7 +296,9 @@ class ReminderReceiver : BroadcastReceiver() {
                             .setContentIntent(openAppIntent)
                             .build()
 
-                        notificationManager.notify(DAILY_NOTIFICATION_ID, notification)
+                        runCatching {
+                            notificationManager.notify(DAILY_NOTIFICATION_ID, notification)
+                        }
                     } finally {
                         pendingResult.finish()
                     }
@@ -243,8 +306,12 @@ class ReminderReceiver : BroadcastReceiver() {
             }
 
             ACTION_SHOW_REMINDER -> {
-                val taskId = intent.getStringExtra(EXTRA_TASK_ID) ?: return
-                val taskTitle = intent.getStringExtra(EXTRA_TASK_TITLE) ?: context.getString(R.string.entity_todo)
+                val taskId = intent.getStringExtra(EXTRA_TASK_ID)?.takeIf { it.isNotBlank() } ?: return
+                if (!canPostNotifications(context)) return
+
+                val taskTitle = intent.getStringExtra(EXTRA_TASK_TITLE)
+                    ?.takeIf { it.isNotBlank() }
+                    ?: context.getString(R.string.entity_todo)
                 ensureChannels(context, notificationManager)
 
                 val openAppIntent = PendingIntent.getActivity(
@@ -259,6 +326,7 @@ class ReminderReceiver : BroadcastReceiver() {
                     (taskId + "_complete").hashCode(),
                     Intent(context, ReminderReceiver::class.java).apply {
                         action = ACTION_COMPLETE_TASK
+                        data = Uri.parse("thingsbook://complete/$taskId")
                         putExtra(EXTRA_TASK_ID, taskId)
                     },
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -269,8 +337,8 @@ class ReminderReceiver : BroadcastReceiver() {
                     (taskId + "_evening").hashCode(),
                     Intent(context, ReminderReceiver::class.java).apply {
                         action = ACTION_DEFER_THIS_EVENING
+                        data = Uri.parse("thingsbook://evening/$taskId")
                         putExtra(EXTRA_TASK_ID, taskId)
-                        putExtra(EXTRA_TASK_TITLE, taskTitle)
                     },
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
@@ -294,16 +362,20 @@ class ReminderReceiver : BroadcastReceiver() {
                     )
                     .build()
 
-                notificationManager.notify(taskId.hashCode(), notification)
+                runCatching {
+                    notificationManager.notify(taskId.hashCode(), notification)
+                }
             }
 
             ACTION_COMPLETE_TASK -> {
-                val taskId = intent.getStringExtra(EXTRA_TASK_ID) ?: return
-                notificationManager.cancel(taskId.hashCode())
+                val taskId = intent.getStringExtra(EXTRA_TASK_ID)?.takeIf { it.isNotBlank() } ?: return
+                runCatching { notificationManager.cancel(taskId.hashCode()) }
                 val pendingResult = goAsync()
                 scope.launch {
                     try {
-                        repository.updateTaskStatus(taskId, TaskStatus.COMPLETED)
+                        runCatchingCancellable {
+                            repository.updateTaskStatus(taskId, TaskStatus.COMPLETED)
+                        }
                     } finally {
                         pendingResult.finish()
                     }
@@ -311,22 +383,14 @@ class ReminderReceiver : BroadcastReceiver() {
             }
 
             ACTION_DEFER_THIS_EVENING -> {
-                val taskId = intent.getStringExtra(EXTRA_TASK_ID) ?: return
-                val taskTitle = intent.getStringExtra(EXTRA_TASK_TITLE) ?: context.getString(R.string.entity_todo)
-                notificationManager.cancel(taskId.hashCode())
+                val taskId = intent.getStringExtra(EXTRA_TASK_ID)?.takeIf { it.isNotBlank() } ?: return
+                runCatching { notificationManager.cancel(taskId.hashCode()) }
                 val pendingResult = goAsync()
                 scope.launch {
                     try {
-                        val todayEpoch = LocalDate.now(ZoneId.systemDefault())
-                            .atStartOfDay(ZoneId.systemDefault())
-                            .toInstant()
-                            .toEpochMilli()
-                        repository.createOrUpdateTask(
-                            id = taskId,
-                            title = taskTitle,
-                            scheduleState = ScheduleState.THIS_EVENING,
-                            whenDate = todayEpoch
-                        )
+                        runCatchingCancellable {
+                            repository.deferTaskToThisEvening(taskId)
+                        }
                     } finally {
                         pendingResult.finish()
                     }

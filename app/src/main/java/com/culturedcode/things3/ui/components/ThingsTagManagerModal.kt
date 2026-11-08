@@ -5,8 +5,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -286,7 +284,13 @@ fun ThingsTagManagerModal(
                                         OutlinedTextField(
                                             value = editingTagShortcutField,
                                             onValueChange = { if (it.text.length <= 2) editingTagShortcutField = it },
-                                            placeholder = { Text("Key", maxLines = 1) },
+                                            placeholder = {
+                                                Text(
+                                                    text = stringResource(R.string.tags_shortcut_placeholder),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            },
                                             singleLine = true,
                                             modifier = Modifier
                                                 .width(68.dp)
@@ -350,7 +354,7 @@ fun ThingsTagManagerModal(
                                                         .padding(horizontal = 6.dp, vertical = 2.dp)
                                                 ) {
                                                     Text(
-                                                        text = "Ctrl+${tag.shortcut.uppercase()}",
+                                                        text = "Ctrl+${tag.shortcut.uppercase(java.util.Locale.ROOT)}",
                                                         style = MaterialTheme.typography.labelSmall,
                                                         color = colors.thingsBlue
                                                     )
@@ -415,7 +419,6 @@ fun ThingsTagManagerModal(
  * Interactive Tag Assignment Dialog (`Tags für diese Aufgabe`) inside any expanded Task Card.
  * Lets the user check/uncheck tags for a task or create a new tag on the fly.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TaskTagPickerDialog(
     allTags: List<Tag>,
@@ -495,6 +498,16 @@ fun TaskTagPickerDialog(
                             )
                         },
                         singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                if (quickNewTagField.text.isNotBlank()) {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onCreateAndAssignTag(quickNewTagField.text.trim())
+                                    quickNewTagField = TextFieldValue(text = "", selection = TextRange(0))
+                                }
+                            }
+                        ),
                         modifier = Modifier
                             .weight(1f)
                             .onFocusChanged { focusState ->
@@ -575,7 +588,7 @@ fun TaskTagPickerDialog(
                             }
 
                             if (!tag.shortcut.isNullOrBlank()) {
-                                ThingsTagPill(title = "Ctrl+${tag.shortcut.uppercase()}")
+                                ThingsTagPill(title = "Ctrl+${tag.shortcut.uppercase(java.util.Locale.ROOT)}")
                             }
                         }
                     }

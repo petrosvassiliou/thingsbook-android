@@ -1,6 +1,7 @@
 package com.culturedcode.things3.data.sync
 
 import android.content.Context
+import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
@@ -15,6 +16,7 @@ import androidx.work.WorkerParameters
 import com.culturedcode.things3.data.repository.SyncRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.CancellationException
 import java.util.concurrent.TimeUnit
 
 @HiltWorker
@@ -25,12 +27,20 @@ class SyncWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, workerParams) {
 
     override suspend fun doWork(): Result {
-        return syncRepository.syncBidirectionalDeltas().fold(
-            onSuccess = { Result.success() },
-            onFailure = {
-                if (runAttemptCount < 3) Result.retry() else Result.failure()
-            }
-        )
+        return try {
+            syncRepository.syncBidirectionalDeltas().fold(
+                onSuccess = { Result.success() },
+                onFailure = { err ->
+                    Log.w("SyncWorker", "Delta sync failed on attempt $runAttemptCount", err)
+                    if (runAttemptCount < 3) Result.retry() else Result.failure()
+                }
+            )
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            Log.w("SyncWorker", "Unexpected SyncWorker failure", t)
+            if (runAttemptCount < 3) Result.retry() else Result.failure()
+        }
     }
 
     companion object {
@@ -38,20 +48,24 @@ class SyncWorker @AssistedInject constructor(
         private const val UNIQUE_PERIODIC_SYNC = "things3_periodic_delta_sync"
 
         fun enqueueImmediateDeltaSync(context: Context) {
-            val constraints = Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.CONNECTED)
-                .build()
+            runCatching {
+                val constraints = Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
 
-            val request = OneTimeWorkRequestBuilder<SyncWorker>()
-                .setConstraints(constraints)
-                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.SECONDS)
-                .build()
+                val request = OneTimeWorkRequestBuilder<SyncWorker>()
+                    .setConstraints(constraints)
+                    .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.SECONDS)
+                    .build()
 
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                UNIQUE_ONE_TIME_SYNC,
-                ExistingWorkPolicy.REPLACE,
-                request
-            )
+                WorkManager.getInstance(context).enqueueUniqueWork(
+                    UNIQUE_ONE_TIME_SYNC,
+                    ExistingWorkPolicy.REPLACE,
+                    request
+                )
+            }.onFailure { err ->
+                Log.w("SyncWorker", "Failed to enqueue immediate delta sync", err)
+            }
         }
 
         fun schedulePeriodicDeltaSync(context: Context) {
@@ -70,6 +84,8 @@ class SyncWorker @AssistedInject constructor(
                     ExistingPeriodicWorkPolicy.KEEP,
                     periodicRequest
                 )
+            }.onFailure { err ->
+                Log.w("SyncWorker", "Failed to schedule periodic delta sync", err)
             }
         }
     }

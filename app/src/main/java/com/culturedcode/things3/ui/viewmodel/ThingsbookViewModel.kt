@@ -1300,6 +1300,48 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
+    fun dismissTopmostOverlay(): Boolean {
+        return when {
+            _selectedTaskIds.value.isNotEmpty() -> {
+                _selectedTaskIds.value = emptySet()
+                true
+            }
+            _isQuickFindOpen.value -> {
+                _isQuickFindOpen.value = false
+                true
+            }
+            _isSettingsModalOpen.value -> {
+                _isSettingsModalOpen.value = false
+                true
+            }
+            _isGeminiModalOpen.value -> {
+                _isGeminiModalOpen.value = false
+                true
+            }
+            _isAuthModalOpen.value -> {
+                _isAuthModalOpen.value = false
+                true
+            }
+            _isTagManagerOpen.value -> {
+                _isTagManagerOpen.value = false
+                true
+            }
+            _isAreaManagerOpen.value -> {
+                _isAreaManagerOpen.value = false
+                true
+            }
+            _isNotificationSettingsOpen.value -> {
+                _isNotificationSettingsOpen.value = false
+                true
+            }
+            _expandedTaskId.value != null -> {
+                _expandedTaskId.value = null
+                true
+            }
+            else -> false
+        }
+    }
+
     init {
         safeVmScope.launch {
             runCatching {

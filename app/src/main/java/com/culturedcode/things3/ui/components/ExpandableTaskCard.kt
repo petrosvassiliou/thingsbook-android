@@ -944,230 +944,316 @@ fun ExpandableTaskCard(
 
         // Right-Click (Mouse) & Long-Press (Phone) Context Menu
         if (showContextMenu) {
-            DropdownMenu(
-                expanded = showContextMenu,
-                onDismissRequest = { showContextMenu = false },
-                modifier = Modifier.background(colors.cardElevatedSurface)
-            ) {
-                if (onToggleSelection != null) {
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                text = if (isSelected) "Auswahl aufheben" else "Aufgabe auswählen (Mehrfachauswahl)",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = colors.thingsBlue
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Outlined.CheckCircleOutline,
-                                contentDescription = null,
-                                tint = colors.thingsBlue,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        },
-                        onClick = {
-                            showContextMenu = false
-                            onToggleSelection()
-                        }
-                    )
-                }
-                val isCompleted = task.status == TaskStatus.COMPLETED
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            text = if (isCompleted) "Als offen markieren" else "Als erledigt markieren",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.primaryText
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Outlined.Check,
-                            contentDescription = null,
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    },
-                    onClick = {
-                        showContextMenu = false
-                        onStatusChange(if (isCompleted) TaskStatus.OPEN else TaskStatus.COMPLETED)
-                    }
-                )
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            text = "Wann? (Datum & Erinnerung)",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.primaryText
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Outlined.CalendarToday,
-                            contentDescription = null,
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    },
-                    onClick = {
-                        showContextMenu = false
-                        showWhenDialog = true
-                    }
-                )
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            text = "Fälligkeit / Deadline anpassen",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.primaryText
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Outlined.Flag,
-                            contentDescription = null,
-                            tint = colors.deadlineUrgentRed,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    },
-                    onClick = {
-                        showContextMenu = false
-                        showDeadlineDialog = true
-                    }
-                )
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            text = "Wiederholung konfigurieren",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.primaryText
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Outlined.Repeat,
-                            contentDescription = null,
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    },
-                    onClick = {
-                        showContextMenu = false
-                        showRepeatDialog = true
-                    }
-                )
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            text = "Verschieben (Bereich / Projekt)",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.primaryText
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Outlined.Folder,
-                            contentDescription = null,
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    },
-                    onClick = {
-                        showContextMenu = false
-                        showMoveDialog = true
-                    }
-                )
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            text = "Tags zuweisen",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.primaryText
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Outlined.LocalOffer,
-                            contentDescription = null,
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    },
-                    onClick = {
-                        showContextMenu = false
-                        showTagPickerDialog = true
-                    }
-                )
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            text = "In Teilaufgaben zerlegen (Gemini ✨)",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.thingsBlue
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Outlined.AutoAwesome,
-                            contentDescription = null,
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    },
-                    onClick = {
-                        showContextMenu = false
-                        onTriggerGeminiMagicBreakdown()
-                    }
-                )
-                HorizontalDivider(color = colors.hairlineDivider)
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            text = "Als abgebrochen markieren",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.secondaryText
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = null,
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    },
-                    onClick = {
-                        showContextMenu = false
-                        onStatusChange(TaskStatus.CANCELED)
-                    }
-                )
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            text = "Aufgabe löschen",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.deadlineUrgentRed
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Outlined.DeleteOutline,
-                            contentDescription = null,
-                            tint = colors.deadlineUrgentRed,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    },
-                    onClick = {
-                        showContextMenu = false
-                        onDeleteTask()
-                    }
-                )
-            }
+            TaskContextDropdownMenu(
+                task = task,
+                isSelected = isSelected,
+                onToggleSelection = onToggleSelection,
+                onStatusChange = onStatusChange,
+                onOpenWhenDialog = { showWhenDialog = true },
+                onOpenDeadlineDialog = { showDeadlineDialog = true },
+                onOpenRepeatDialog = { showRepeatDialog = true },
+                onOpenMoveDialog = { showMoveDialog = true },
+                onOpenTagPickerDialog = { showTagPickerDialog = true },
+                onTriggerGeminiMagicBreakdown = onTriggerGeminiMagicBreakdown,
+                onDeleteTask = onDeleteTask,
+                onDismiss = { showContextMenu = false }
+            )
         }
     }
 
-    // Dialogs available whether card is collapsed (via Context Menu) or expanded
+    TaskCardDialogsHost(
+        task = task,
+        allTags = allTags,
+        allAreas = allAreas,
+        allProjects = allProjects,
+        allHeadings = allHeadings,
+        locale = locale,
+        showWhenDialog = showWhenDialog,
+        onDismissWhenDialog = { showWhenDialog = false },
+        showDeadlineDialog = showDeadlineDialog,
+        onDismissDeadlineDialog = { showDeadlineDialog = false },
+        showRepeatDialog = showRepeatDialog,
+        onDismissRepeatDialog = { showRepeatDialog = false },
+        showMoveDialog = showMoveDialog,
+        onDismissMoveDialog = { showMoveDialog = false },
+        showTagPickerDialog = showTagPickerDialog,
+        onDismissTagPickerDialog = { showTagPickerDialog = false },
+        onScheduleChange = onScheduleChange,
+        onScheduleWithReminderChange = onScheduleWithReminderChange,
+        onDeadlineChange = onDeadlineChange,
+        onRecurrenceChange = onRecurrenceChange,
+        onMoveTaskToContainer = onMoveTaskToContainer,
+        onUpdateTaskTags = onUpdateTaskTags,
+        onCreateAndAssignTag = onCreateAndAssignTag,
+        onOpenFullTagManager = onOpenFullTagManager
+    )
+}
+
+@Composable
+private fun TaskContextDropdownMenu(
+    task: TaskItem,
+    isSelected: Boolean,
+    onToggleSelection: (() -> Unit)?,
+    onStatusChange: (TaskStatus) -> Unit,
+    onOpenWhenDialog: () -> Unit,
+    onOpenDeadlineDialog: () -> Unit,
+    onOpenRepeatDialog: () -> Unit,
+    onOpenMoveDialog: () -> Unit,
+    onOpenTagPickerDialog: () -> Unit,
+    onTriggerGeminiMagicBreakdown: () -> Unit,
+    onDeleteTask: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val colors = ThingsTheme.colors
+    DropdownMenu(
+        expanded = true,
+        onDismissRequest = onDismiss,
+        modifier = Modifier.background(colors.cardElevatedSurface)
+    ) {
+        if (onToggleSelection != null) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = if (isSelected) "Auswahl aufheben" else "Aufgabe auswählen (Mehrfachauswahl)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.thingsBlue
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.CheckCircleOutline,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    onDismiss()
+                    onToggleSelection()
+                }
+            )
+        }
+        val isCompleted = task.status == TaskStatus.COMPLETED
+        DropdownMenuItem(
+            text = {
+                Text(
+                    text = if (isCompleted) "Als offen markieren" else "Als erledigt markieren",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.primaryText
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Outlined.Check,
+                    contentDescription = null,
+                    tint = colors.thingsBlue,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            onClick = {
+                onDismiss()
+                onStatusChange(if (isCompleted) TaskStatus.OPEN else TaskStatus.COMPLETED)
+            }
+        )
+        DropdownMenuItem(
+            text = {
+                Text(
+                    text = "Wann? (Datum & Erinnerung)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.primaryText
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Outlined.CalendarToday,
+                    contentDescription = null,
+                    tint = colors.thingsBlue,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            onClick = {
+                onDismiss()
+                onOpenWhenDialog()
+            }
+        )
+        DropdownMenuItem(
+            text = {
+                Text(
+                    text = "Fälligkeit / Deadline anpassen",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.primaryText
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Outlined.Flag,
+                    contentDescription = null,
+                    tint = colors.deadlineUrgentRed,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            onClick = {
+                onDismiss()
+                onOpenDeadlineDialog()
+            }
+        )
+        DropdownMenuItem(
+            text = {
+                Text(
+                    text = "Wiederholung konfigurieren",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.primaryText
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Outlined.Repeat,
+                    contentDescription = null,
+                    tint = colors.thingsBlue,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            onClick = {
+                onDismiss()
+                onOpenRepeatDialog()
+            }
+        )
+        DropdownMenuItem(
+            text = {
+                Text(
+                    text = "Verschieben (Bereich / Projekt)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.primaryText
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Outlined.Folder,
+                    contentDescription = null,
+                    tint = colors.thingsBlue,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            onClick = {
+                onDismiss()
+                onOpenMoveDialog()
+            }
+        )
+        DropdownMenuItem(
+            text = {
+                Text(
+                    text = "Tags zuweisen",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.primaryText
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Outlined.LocalOffer,
+                    contentDescription = null,
+                    tint = colors.thingsBlue,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            onClick = {
+                onDismiss()
+                onOpenTagPickerDialog()
+            }
+        )
+        DropdownMenuItem(
+            text = {
+                Text(
+                    text = "In Teilaufgaben zerlegen (Gemini ✨)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.thingsBlue
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Outlined.AutoAwesome,
+                    contentDescription = null,
+                    tint = colors.thingsBlue,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            onClick = {
+                onDismiss()
+                onTriggerGeminiMagicBreakdown()
+            }
+        )
+        HorizontalDivider(color = colors.hairlineDivider)
+        DropdownMenuItem(
+            text = {
+                Text(
+                    text = "Als abgebrochen markieren",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.secondaryText
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Outlined.Close,
+                    contentDescription = null,
+                    tint = colors.secondaryText,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            onClick = {
+                onDismiss()
+                onStatusChange(TaskStatus.CANCELED)
+            }
+        )
+        DropdownMenuItem(
+            text = {
+                Text(
+                    text = "Aufgabe löschen",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.deadlineUrgentRed
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Outlined.DeleteOutline,
+                    contentDescription = null,
+                    tint = colors.deadlineUrgentRed,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            onClick = {
+                onDismiss()
+                onDeleteTask()
+            }
+        )
+    }
+}
+
+@Composable
+private fun TaskCardDialogsHost(
+    task: TaskItem,
+    allTags: List<Tag>,
+    allAreas: List<Area>,
+    allProjects: List<Project>,
+    allHeadings: List<Heading>,
+    locale: Locale,
+    showWhenDialog: Boolean,
+    onDismissWhenDialog: () -> Unit,
+    showDeadlineDialog: Boolean,
+    onDismissDeadlineDialog: () -> Unit,
+    showRepeatDialog: Boolean,
+    onDismissRepeatDialog: () -> Unit,
+    showMoveDialog: Boolean,
+    onDismissMoveDialog: () -> Unit,
+    showTagPickerDialog: Boolean,
+    onDismissTagPickerDialog: () -> Unit,
+    onScheduleChange: (ScheduleState, Long?) -> Unit,
+    onScheduleWithReminderChange: ((ScheduleState, Long?, Long?) -> Unit)?,
+    onDeadlineChange: (Long?) -> Unit,
+    onRecurrenceChange: ((RecurrenceRule?) -> Unit)?,
+    onMoveTaskToContainer: ((projectId: String?, headingId: String?, areaId: String?) -> Unit)?,
+    onUpdateTaskTags: ((List<String>) -> Unit)?,
+    onCreateAndAssignTag: ((String) -> Unit)?,
+    onOpenFullTagManager: (() -> Unit)?
+) {
     if (showWhenDialog) {
         WhenNaturalDateDialog(
             currentScheduleState = task.scheduleState,
@@ -1184,7 +1270,7 @@ fun ExpandableTaskCard(
                     onScheduleChange(newState, newWhen)
                 }
             },
-            onDismiss = { showWhenDialog = false }
+            onDismiss = onDismissWhenDialog
         )
     }
 
@@ -1193,7 +1279,7 @@ fun ExpandableTaskCard(
             currentDeadline = task.deadline,
             locale = locale,
             onApplyDeadline = { newDl -> onDeadlineChange(newDl) },
-            onDismiss = { showDeadlineDialog = false }
+            onDismiss = onDismissDeadlineDialog
         )
     }
 
@@ -1204,7 +1290,7 @@ fun ExpandableTaskCard(
             onApplyRecurrence = { newRule ->
                 onRecurrenceChange?.invoke(newRule)
             },
-            onDismiss = { showRepeatDialog = false }
+            onDismiss = onDismissRepeatDialog
         )
     }
 
@@ -1219,7 +1305,7 @@ fun ExpandableTaskCard(
             onMoveTask = { pId, hId, aId ->
                 onMoveTaskToContainer?.invoke(pId, hId, aId)
             },
-            onDismiss = { showMoveDialog = false }
+            onDismiss = onDismissMoveDialog
         )
     }
 
@@ -1236,7 +1322,7 @@ fun ExpandableTaskCard(
             onOpenFullTagManager = {
                 onOpenFullTagManager?.invoke()
             },
-            onDismiss = { showTagPickerDialog = false }
+            onDismiss = onDismissTagPickerDialog
         )
     }
 }

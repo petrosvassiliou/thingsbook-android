@@ -159,7 +159,10 @@ fun ThingsSmartViewScreen(
 
     val navTarget by viewModel.navigationTarget.collectAsState()
     val expandedTaskId by viewModel.expandedTaskId.collectAsState()
-    val collapsedHeadingIds by viewModel.collapsedHeadingIds.collectAsState()
+    val selectedFilterTagId by viewModel.selectedFilterTagId.collectAsState()
+    val isQuickFindOpen by viewModel.isQuickFindOpen.collectAsState()
+    val isSidebarVisible by viewModel.isSidebarVisible.collectAsState()
+    val selectedTaskIds by viewModel.selectedTaskIds.collectAsState()
 
     val inboxTasks by viewModel.inboxTasks.collectAsState()
     val todayTasks by viewModel.todayDaytimeTasks.collectAsState()
@@ -171,51 +174,16 @@ fun ThingsSmartViewScreen(
 
     val areas by viewModel.areas.collectAsState()
     val activeProjects by viewModel.activeProjects.collectAsState()
-    val allHeadings by viewModel.allHeadings.collectAsState()
     val projectHeadings by viewModel.activeProjectHeadings.collectAsState()
     val projectTasks by viewModel.activeProjectTasks.collectAsState()
     val areaTasks by viewModel.activeAreaTasks.collectAsState()
     val allTags by viewModel.allTags.collectAsState()
-    val selectedFilterTagId by viewModel.selectedFilterTagId.collectAsState()
-    val isTagManagerOpen by viewModel.isTagManagerOpen.collectAsState()
-    val isAreaManagerOpen by viewModel.isAreaManagerOpen.collectAsState()
-    val isNotificationSettingsOpen by viewModel.isNotificationSettingsOpen.collectAsState()
-    val dailyDigestConfig by viewModel.dailyDigestConfig.collectAsState()
-
-    val isQuickFindOpen by viewModel.isQuickFindOpen.collectAsState()
-    val quickFindQuery by viewModel.quickFindQuery.collectAsState()
-    val quickFindTasks by viewModel.quickFindTaskResults.collectAsState()
-    val quickFindProjects by viewModel.quickFindProjectResults.collectAsState()
-
-    val isGeminiModalOpen by viewModel.isGeminiModalOpen.collectAsState()
-    val isGeminiBusy by viewModel.isGeminiBusy.collectAsState()
-    val magicBreakdownTaskId by viewModel.magicBreakdownTaskId.collectAsState()
-    val logbookAiReview by viewModel.logbookAiReview.collectAsState()
-    val geminiApiKey by viewModel.geminiApiKey.collectAsState()
-    val syncStatus by viewModel.syncStatus.collectAsState()
-    val isAuthModalOpen by viewModel.isAuthModalOpen.collectAsState()
-    val isSigningIn by viewModel.isSigningIn.collectAsState()
-    val authErrorMessage by viewModel.authErrorMessage.collectAsState()
-    val authInfoMessage by viewModel.authInfoMessage.collectAsState()
-    val currentUserIdentifier by viewModel.currentUserIdentifier.collectAsState()
-
-    // v1.3.0 States: Settings Modal, Collapsible Sidebar, Local DB Mode, Statistics, CSV, Multi-Selection
-    val isSettingsModalOpen by viewModel.isSettingsModalOpen.collectAsState()
-    val isSidebarVisible by viewModel.isSidebarVisible.collectAsState()
-    val isLocalOnlyDbMode by viewModel.isLocalOnlyDbMode.collectAsState()
-    val statistics by viewModel.statistics.collectAsState()
-    val csvStatusMessage by viewModel.csvStatusMessage.collectAsState()
-    val selectedTaskIds by viewModel.selectedTaskIds.collectAsState()
 
     var magicDragState by remember { mutableStateOf(MagicPlusDragState()) }
-    var showLanguageMenu by remember { mutableStateOf(false) }
     var showCreateProjectDialog by remember { mutableStateOf(false) }
     var projectDialogPreselectedAreaId by remember { mutableStateOf<String?>(null) }
     var editingProject by remember { mutableStateOf<Project?>(null) }
     var showBatchMoveDialog by remember { mutableStateOf(false) }
-
-    val defaultNewTodoTitle = ""
-    val defaultNewHeadingTitle = ""
 
     // Determine primary task list for current view, filtered by selected tag if active
     val rawPrimaryTasks: List<TaskItem> = when (val target = navTarget) {
@@ -275,48 +243,6 @@ fun ThingsSmartViewScreen(
         SmartViewType.LOGBOOK to logbookTasks.size
     )
 
-    @Composable
-    fun RenderTaskCard(task: TaskItem) {
-        ExpandableTaskCard(
-            task = task,
-            allTags = allTags,
-            allAreas = areas,
-            allProjects = activeProjects,
-            allHeadings = allHeadings,
-            isExpanded = expandedTaskId == task.id,
-            isSelected = task.id in selectedTaskIds,
-            isSelectionModeActive = selectedTaskIds.isNotEmpty(),
-            onToggleSelection = { viewModel.toggleTaskSelection(task.id) },
-            onRangeSelect = { viewModel.selectTaskRange(allVisibleTaskIds, task.id) },
-            isGeneratingMagicBreakdown = magicBreakdownTaskId == task.id,
-            onExpandToggle = { viewModel.toggleTaskExpansion(task.id) },
-            onStatusChange = { viewModel.updateTaskStatus(task.id, it) },
-            onTitleNotesChange = { t, n -> viewModel.updateTaskTitleAndNotes(task, t, n) },
-            onScheduleChange = { s, w -> viewModel.updateTaskSchedule(task, s, w) },
-            onScheduleWithReminderChange = { s, w, r ->
-                viewModel.updateTaskScheduleWithReminder(task, s, w, r)
-            },
-            onDeadlineChange = { dl -> viewModel.updateTaskDeadline(task, dl) },
-            onRecurrenceChange = { rule -> viewModel.updateTaskRecurrence(task.id, rule) },
-            onMoveTaskToContainer = { pId, hId, aId ->
-                viewModel.moveTaskToContainer(task.id, pId, hId, aId)
-            },
-            onUpdateTaskTags = { tagIds -> viewModel.updateTaskTags(task, tagIds) },
-            onCreateAndAssignTag = { newTag -> viewModel.createAndAssignTagToTask(task, newTag) },
-            onOpenFullTagManager = { viewModel.setTagManagerOpen(true) },
-            onAddChecklistItem = { itemTitle -> viewModel.addChecklistItem(task.id, itemTitle) },
-            onToggleChecklistItem = { itemId, done -> viewModel.toggleChecklistItem(itemId, done) },
-            onRenameChecklistItem = { itemId, newTitle -> viewModel.renameChecklistItem(itemId, newTitle) },
-            onMoveChecklistItem = { itemId, moveUp -> viewModel.moveChecklistItem(task.id, itemId, moveUp) },
-            onDeleteChecklistItem = { itemId -> viewModel.deleteChecklistItem(itemId) },
-            onTriggerGeminiMagicBreakdown = {
-                viewModel.triggerGeminiMagicBreakdown(task, activeLocale)
-            },
-            onDeleteTask = { viewModel.deleteTask(task.id) },
-            locale = activeLocale
-        )
-    }
-
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -334,54 +260,14 @@ fun ThingsSmartViewScreen(
                             true
                         }
                         ctrlOrMeta && event.key == Key.N -> {
-                            viewModel.createTaskAtPosition(primaryTasks, 0, defaultNewTodoTitle)
+                            viewModel.createTaskAtPosition(primaryTasks, 0, "")
                             true
                         }
                         ctrlOrMeta && event.key == Key.G -> {
                             viewModel.setGeminiModalOpen(true)
                             true
                         }
-                        event.key == Key.Escape -> {
-                            when {
-                                selectedTaskIds.isNotEmpty() -> {
-                                    viewModel.clearTaskSelection()
-                                    true
-                                }
-                                isQuickFindOpen -> {
-                                    viewModel.setQuickFindOpen(false)
-                                    true
-                                }
-                                isSettingsModalOpen -> {
-                                    viewModel.setSettingsModalOpen(false)
-                                    true
-                                }
-                                isGeminiModalOpen -> {
-                                    viewModel.setGeminiModalOpen(false)
-                                    true
-                                }
-                                isAuthModalOpen -> {
-                                    viewModel.setAuthModalOpen(false)
-                                    true
-                                }
-                                isTagManagerOpen -> {
-                                    viewModel.setTagManagerOpen(false)
-                                    true
-                                }
-                                isAreaManagerOpen -> {
-                                    viewModel.setAreaManagerOpen(false)
-                                    true
-                                }
-                                isNotificationSettingsOpen -> {
-                                    viewModel.setNotificationSettingsOpen(false)
-                                    true
-                                }
-                                expandedTaskId != null -> {
-                                    viewModel.collapseExpandedTask()
-                                    true
-                                }
-                                else -> false
-                            }
-                        }
+                        event.key == Key.Escape -> viewModel.dismissTopmostOverlay()
                         else -> false
                     }
                 } else {
@@ -460,72 +346,15 @@ fun ThingsSmartViewScreen(
                         .widthIn(max = if (isWideScreen) 1040.dp else 2000.dp)
                         .fillMaxSize()
                 ) {
-                    // Top Utility & Navigation Bar (Sidebar Toggle, Quick Find, Gemini AI ✨, Areas 📦, Tags 🏷️, Notifications 🔔, Language, Cloud Sync, Settings ⚙️)
-                    TopThingsbookBar(
+                    ThingsTopHeaderAndQuickFindSection(
+                        viewModel = viewModel,
                         isWideScreen = isWideScreen,
                         isSidebarVisible = isSidebarVisible,
                         isQuickFindOpen = isQuickFindOpen,
-                        syncStatus = syncStatus,
-                        dailyDigestEnabled = dailyDigestConfig.enabled,
-                        showLanguageMenu = showLanguageMenu,
-                        onToggleSidebar = { viewModel.toggleSidebarVisible() },
-                        onToggleLanguageMenu = { showLanguageMenu = it },
-                        onSelectLanguage = { tag ->
-                            showLanguageMenu = false
-                            viewModel.switchAppLanguage(tag)
-                        },
-                        onOpenQuickFind = { viewModel.setQuickFindOpen(!isQuickFindOpen) },
-                        onOpenGeminiHub = { viewModel.setGeminiModalOpen(true) },
-                        onOpenAreaManager = { viewModel.setAreaManagerOpen(true) },
-                        onOpenTagManager = { viewModel.setTagManagerOpen(true) },
-                        onOpenNotificationSettings = { viewModel.setNotificationSettingsOpen(true) },
-                        onManualSync = { viewModel.setAuthModalOpen(true) },
-                        onOpenSettings = { viewModel.setSettingsModalOpen(true) }
+                        areas = areas,
+                        activeProjects = activeProjects,
+                        activeLocale = activeLocale
                     )
-
-                    // Inline Quick Find Panel (expands directly below Top Bar with rich task details!)
-                    AnimatedVisibility(
-                        visible = isQuickFindOpen,
-                        enter = expandVertically() + fadeIn(),
-                        exit = shrinkVertically() + fadeOut()
-                    ) {
-                        InlineQuickFindSection(
-                            query = quickFindQuery,
-                            taskResults = quickFindTasks,
-                            projectResults = quickFindProjects,
-                            areas = areas,
-                            allProjects = activeProjects,
-                            locale = activeLocale,
-                            onQueryChange = { viewModel.updateQuickFindQuery(it) },
-                            onSelectSmartView = {
-                                viewModel.setQuickFindOpen(false)
-                                viewModel.selectSmartView(it)
-                            },
-                            onSelectArea = {
-                                viewModel.setQuickFindOpen(false)
-                                viewModel.selectArea(it)
-                            },
-                            onSelectProject = {
-                                viewModel.setQuickFindOpen(false)
-                                viewModel.selectProject(it)
-                            },
-                            onSelectTask = { task ->
-                                viewModel.setQuickFindOpen(false)
-                                when {
-                                    task.projectId != null -> viewModel.selectProject(task.projectId)
-                                    task.areaId != null && task.scheduleState == ScheduleState.ANYTIME -> viewModel.selectArea(task.areaId)
-                                    task.scheduleState == ScheduleState.INBOX -> viewModel.selectSmartView(SmartViewType.INBOX)
-                                    task.scheduleState == ScheduleState.TODAY || task.scheduleState == ScheduleState.THIS_EVENING ->
-                                        viewModel.selectSmartView(SmartViewType.TODAY)
-                                    task.scheduleState == ScheduleState.UPCOMING -> viewModel.selectSmartView(SmartViewType.UPCOMING)
-                                    task.scheduleState == ScheduleState.SOMEDAY -> viewModel.selectSmartView(SmartViewType.SOMEDAY)
-                                    else -> viewModel.selectSmartView(SmartViewType.ANYTIME)
-                                }
-                                viewModel.toggleTaskExpansion(task.id)
-                            },
-                            onClose = { viewModel.setQuickFindOpen(false) }
-                        )
-                    }
 
                     // Show Horizontal View Switcher Strip on Phones (< 700dp) OR whenever the Sidebar is hidden!
                     if (!showSidebar) {
@@ -563,10 +392,10 @@ fun ThingsSmartViewScreen(
                         onMoveProject = { pId, up -> viewModel.moveProject(pId, up) },
                         onDeleteProject = { pId -> viewModel.deleteProject(pId) },
                         onAddTaskInCurrentView = {
-                            viewModel.createTaskAtPosition(primaryTasks, 0, defaultNewTodoTitle)
+                            viewModel.createTaskAtPosition(primaryTasks, 0, "")
                         },
                         onAddHeadingInProject = {
-                            viewModel.createHeadingInCurrentProject(projectHeadings.size, defaultNewHeadingTitle)
+                            viewModel.createHeadingInCurrentProject(projectHeadings.size, "")
                         },
                         onRenameArea = { aId, newName -> viewModel.renameArea(aId, newName) },
                         onMoveArea = { aId, up -> viewModel.moveArea(aId, up) },
@@ -587,233 +416,36 @@ fun ThingsSmartViewScreen(
                         onOpenTagManager = { viewModel.setTagManagerOpen(true) }
                     )
 
-                    // Main Task, Area Projects & Heading List with Inline Card Expansion + Magic Plus Insertion Gaps
-                    LazyColumn(
+                    ThingsMainTaskLazyList(
+                        viewModel = viewModel,
+                        navTarget = navTarget,
+                        isProjectView = isProjectView,
+                        isAreaView = isAreaView,
+                        currentArea = currentArea,
+                        primaryTasks = primaryTasks,
+                        filteredEveningTasks = filteredEveningTasks,
+                        allVisibleTaskIds = allVisibleTaskIds,
+                        areas = areas,
+                        activeProjects = activeProjects,
+                        projectHeadings = projectHeadings,
+                        allTags = allTags,
+                        expandedTaskId = expandedTaskId,
+                        selectedTaskIds = selectedTaskIds,
+                        magicDragState = magicDragState,
+                        activeLocale = activeLocale,
+                        onRequestCreateProjectInArea = { areaId ->
+                            projectDialogPreselectedAreaId = areaId
+                            editingProject = null
+                            showCreateProjectDialog = true
+                        },
+                        onRequestEditProject = { proj ->
+                            editingProject = proj
+                            showCreateProjectDialog = true
+                        },
                         modifier = Modifier
                             .fillMaxSize()
-                            .weight(1f),
-                        contentPadding = PaddingValues(bottom = 110.dp)
-                    ) {
-                        // If viewing Logbook, show the Gemini Logbook Reflection Card at the top
-                        if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK)) {
-                            item(key = "gemini_logbook_card") {
-                                GeminiLogbookReflectionCard(
-                                    review = logbookAiReview,
-                                    isGenerating = isGeminiBusy,
-                                    onGenerateReflection = {
-                                        viewModel.generateGeminiLogbookReflection(activeLocale)
-                                    },
-                                    onAdoptSuggestedFocusTask = { title ->
-                                        viewModel.adoptSuggestedFocusTaskForToday(title)
-                                    }
-                                )
-                            }
-                        }
-
-                        // If viewing an Area (e.g. Work or Home), show the Area's Projects section first!
-                        if (isAreaView && currentArea != null) {
-                            val areaProjects = activeProjects.filter { it.areaId == currentArea.id }
-                            item(key = "area_projects_header_${currentArea.id}") {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 20.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = "${stringResource(R.string.entity_projects)} • ${currentArea.title} (${areaProjects.size})",
-                                        style = MaterialTheme.typography.labelLarge.copy(
-                                            color = colors.thingsBlue,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    )
-                                    Row(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(colors.thingsBlueSoft)
-                                            .clickable {
-                                                projectDialogPreselectedAreaId = currentArea.id
-                                                editingProject = null
-                                                showCreateProjectDialog = true
-                                            }
-                                            .padding(horizontal = 10.dp, vertical = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.Add,
-                                            contentDescription = null,
-                                            tint = colors.thingsBlue,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                        Text(
-                                            text = stringResource(R.string.entity_new_project),
-                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                            color = colors.thingsBlue
-                                        )
-                                    }
-                                }
-                            }
-
-                            itemsIndexed(
-                                items = areaProjects,
-                                key = { _, p -> "area_proj_card_${p.id}" }
-                            ) { idx, proj ->
-                                AreaProjectOverviewRow(
-                                    project = proj,
-                                    canMoveUp = idx > 0,
-                                    canMoveDown = idx < areaProjects.lastIndex,
-                                    locale = activeLocale,
-                                    onOpenProject = { viewModel.selectProject(proj.id) },
-                                    onEditProject = {
-                                        editingProject = proj
-                                        showCreateProjectDialog = true
-                                    },
-                                    onUpdateDeadline = { dl -> viewModel.updateProjectDeadline(proj.id, dl) },
-                                    onMoveUp = { viewModel.moveProject(proj.id, true) },
-                                    onMoveDown = { viewModel.moveProject(proj.id, false) }
-                                )
-                            }
-
-                            item(key = "area_tasks_divider_${currentArea.id}") {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 20.dp, vertical = 10.dp)
-                                ) {
-                                    HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        text = "${stringResource(R.string.entity_todo)} • ${currentArea.title} (${primaryTasks.size})",
-                                        style = MaterialTheme.typography.labelLarge.copy(
-                                            color = colors.secondaryText,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                    )
-                                }
-                            }
-                        }
-
-                        // If viewing a Project, render ungrouped tasks first, then collapsible Headings!
-                        if (isProjectView && projectHeadings.isNotEmpty()) {
-                            val ungroupedTasks = primaryTasks.filter { it.headingId == null }
-                            itemsIndexed(
-                                items = ungroupedTasks,
-                                key = { _, task -> "ungrouped_${task.id}" }
-                            ) { index, task ->
-                                MagicPlusInsertionGap(
-                                    visible = magicDragState.isDragging && magicDragState.dropIndex == index,
-                                    dropMode = magicDragState.dropMode
-                                )
-                                RenderTaskCard(task = task)
-                            }
-
-                            projectHeadings.forEachIndexed { hIdx, heading ->
-                                item(key = "heading_${heading.id}") {
-                                    ProjectHeadingSectionHeader(
-                                        heading = heading,
-                                        isCollapsed = heading.id in collapsedHeadingIds,
-                                        onToggleCollapse = { viewModel.toggleHeadingCollapsed(heading.id) },
-                                        onRenameHeading = { newTitle -> viewModel.renameHeading(heading.id, newTitle) },
-                                        onDeleteHeading = { viewModel.deleteHeading(heading.id) }
-                                    )
-                                }
-
-                                if (heading.id !in collapsedHeadingIds) {
-                                    val tasksInHeading = primaryTasks.filter { it.headingId == heading.id }
-                                    itemsIndexed(
-                                        items = tasksInHeading,
-                                        key = { _, task -> task.id }
-                                    ) { index, task ->
-                                        MagicPlusInsertionGap(
-                                            visible = magicDragState.isDragging && magicDragState.dropIndex == index && hIdx == 0 && ungroupedTasks.isEmpty(),
-                                            dropMode = magicDragState.dropMode
-                                        )
-                                        RenderTaskCard(task = task)
-                                    }
-                                }
-                            }
-                        } else if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.UPCOMING)) {
-                            // Upcoming Smart View ("Geplant"): Group tasks chronologically by day ("Gruppierung pro Tag")
-                            val zone = ZoneId.systemDefault()
-                            val todayDate = LocalDate.now(zone)
-                            val groupedUpcoming = primaryTasks
-                                .groupBy { task -> computeUpcomingTargetDate(task, todayDate, zone) }
-                                .toSortedMap()
-
-                            groupedUpcoming.entries.forEachIndexed { groupIdx, (targetDate, dayTasks) ->
-                                item(key = "upcoming_day_header_${targetDate.toEpochDay()}") {
-                                    UpcomingDayGroupHeader(
-                                        date = targetDate,
-                                        todayDate = todayDate,
-                                        locale = activeLocale,
-                                        isFirstGroup = groupIdx == 0
-                                    )
-                                }
-                                itemsIndexed(
-                                    items = dayTasks,
-                                    key = { _, task -> "upcoming_${targetDate.toEpochDay()}_${task.id}" }
-                                ) { index, task ->
-                                    MagicPlusInsertionGap(
-                                        visible = magicDragState.isDragging && magicDragState.dropIndex == index && groupIdx == 0,
-                                        dropMode = magicDragState.dropMode
-                                    )
-                                    RenderTaskCard(task = task)
-                                }
-                            }
-
-                            // Trailing Magic Plus drop slot at the end of the list
-                            item(key = "trailing_magic_plus_gap") {
-                                MagicPlusInsertionGap(
-                                    visible = magicDragState.isDragging && magicDragState.dropIndex >= primaryTasks.size,
-                                    dropMode = magicDragState.dropMode
-                                )
-                            }
-                        } else {
-                            // Standard Smart View / Area Task List with Magic Plus drop gaps between every item
-                            itemsIndexed(
-                                items = primaryTasks,
-                                key = { _, task -> task.id }
-                            ) { index, task ->
-                                MagicPlusInsertionGap(
-                                    visible = magicDragState.isDragging && magicDragState.dropIndex == index,
-                                    dropMode = magicDragState.dropMode
-                                )
-                                RenderTaskCard(task = task)
-                            }
-
-                            // Trailing Magic Plus drop slot at the end of the list
-                            item(key = "trailing_magic_plus_gap") {
-                                MagicPlusInsertionGap(
-                                    visible = magicDragState.isDragging && magicDragState.dropIndex >= primaryTasks.size,
-                                    dropMode = magicDragState.dropMode
-                                )
-                            }
-                        }
-
-                        // Today Smart View: "This Evening / Heute Abend / Stasera / Ce soir / Esta noche" Section
-                        if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) && filteredEveningTasks.isNotEmpty()) {
-                            item(key = "this_evening_header") {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 20.dp, vertical = 12.dp)
-                                ) {
-                                    HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    ThisEveningHeaderBadge()
-                                }
-                            }
-
-                            items(
-                                items = filteredEveningTasks,
-                                key = { "evening_${it.id}" }
-                            ) { eveningTask ->
-                                RenderTaskCard(task = eveningTask)
-                            }
-                        }
-                    }
+                            .weight(1f)
+                    )
                 }
             }
         }
@@ -875,154 +507,654 @@ fun ThingsSmartViewScreen(
             itemCount = primaryTasks.size,
             allowHeadingDrop = isProjectView,
             onQuickTapCreateTodo = {
-                viewModel.createTaskAtPosition(primaryTasks, 0, defaultNewTodoTitle)
+                viewModel.createTaskAtPosition(primaryTasks, 0, "")
             },
             onDragStateChanged = { state -> magicDragState = state },
             onDropCreateTodoAt = { dropIdx ->
-                viewModel.createTaskAtPosition(primaryTasks, dropIdx, defaultNewTodoTitle)
+                viewModel.createTaskAtPosition(primaryTasks, dropIdx, "")
             },
             onDropCreateHeadingAt = { dropIdx ->
-                viewModel.createHeadingInCurrentProject(dropIdx, defaultNewHeadingTitle)
+                viewModel.createHeadingInCurrentProject(dropIdx, "")
             },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 24.dp, bottom = 28.dp)
         )
 
-        // Batch Move Dialog for Multi-Selection
-        if (showBatchMoveDialog) {
-            MoveTaskToProjectOrAreaDialog(
-                currentProjectId = null,
-                currentHeadingId = null,
-                currentAreaId = null,
-                areas = areas,
-                projects = activeProjects,
-                headings = allHeadings,
-                onMoveTask = { pId, hId, aId ->
-                    viewModel.batchMoveSelectedTasks(allVisibleViewTasks, pId, hId, aId)
-                },
-                onDismiss = { showBatchMoveDialog = false }
-            )
-        }
+        ThingsModalsOverlay(
+            viewModel = viewModel,
+            areas = areas,
+            activeProjects = activeProjects,
+            allTags = allTags,
+            allVisibleViewTasks = allVisibleViewTasks,
+            activeLocale = activeLocale,
+            showBatchMoveDialog = showBatchMoveDialog,
+            onDismissBatchMoveDialog = { showBatchMoveDialog = false },
+            showCreateProjectDialog = showCreateProjectDialog,
+            editingProject = editingProject,
+            projectDialogPreselectedAreaId = projectDialogPreselectedAreaId,
+            onDismissCreateProjectDialog = {
+                showCreateProjectDialog = false
+                editingProject = null
+            }
+        )
+    }
+}
 
-        // Comprehensive Settings Modal (⚙️ top-right: Local DB vs Cloud Sync, Account, Language, Statistics, CSV Import/Export)
-        if (isSettingsModalOpen) {
-            ThingsSettingsModal(
-                isLocalOnlyDbMode = isLocalOnlyDbMode,
-                syncStatus = syncStatus,
-                currentUserIdentifier = currentUserIdentifier,
-                statistics = statistics,
-                csvStatusMessage = csvStatusMessage,
-                onSetLocalOnlyDbMode = { viewModel.setLocalOnlyDbMode(it) },
-                onOpenAuthAndSyncModal = {
-                    viewModel.setSettingsModalOpen(false)
-                    viewModel.setAuthModalOpen(true)
-                },
-                onOpenNotificationSettings = {
-                    viewModel.setSettingsModalOpen(false)
-                    viewModel.setNotificationSettingsOpen(true)
-                },
-                onTriggerImmediateSync = { viewModel.triggerManualCloudSync() },
-                onSignOutCloud = { viewModel.signOutCloud() },
-                onSelectLanguage = { viewModel.switchAppLanguage(it) },
-                onExportCsv = { onReady -> viewModel.exportTasksCsv(onReady) },
-                onImportCsv = { content -> viewModel.importTasksCsv(content) },
-                onClearCsvMessage = { viewModel.clearCsvStatusMessage() },
-                onDismiss = { viewModel.setSettingsModalOpen(false) }
-            )
-        }
+@Composable
+private fun ThingsTopHeaderAndQuickFindSection(
+    viewModel: ThingsbookViewModel,
+    isWideScreen: Boolean,
+    isSidebarVisible: Boolean,
+    isQuickFindOpen: Boolean,
+    areas: List<Area>,
+    activeProjects: List<Project>,
+    activeLocale: Locale
+) {
+    val syncStatus by viewModel.syncStatus.collectAsState()
+    val dailyDigestConfig by viewModel.dailyDigestConfig.collectAsState()
+    val quickFindQuery by viewModel.quickFindQuery.collectAsState()
+    val quickFindTasks by viewModel.quickFindTaskResults.collectAsState()
+    val quickFindProjects by viewModel.quickFindProjectResults.collectAsState()
+    var showLanguageMenu by remember { mutableStateOf(false) }
 
-        // Gemini AI Hub Modal (Brain Dump + Project Architect in EN, DE, IT, FR, ES)
-        if (isGeminiModalOpen) {
-            GeminiAssistantModal(
-                isProcessing = isGeminiBusy,
-                currentApiKey = geminiApiKey,
-                onUpdateApiKey = { viewModel.updateGeminiApiKey(it) },
-                onSubmitBrainDump = { raw -> viewModel.submitGeminiBrainDump(raw, activeLocale) },
-                onSubmitProjectArchitect = { goal -> viewModel.submitGeminiProjectArchitect(goal, activeLocale) },
-                onDismiss = { viewModel.setGeminiModalOpen(false) }
-            )
-        }
+    // Top Utility & Navigation Bar (Sidebar Toggle, Quick Find, Gemini AI ✨, Areas 📦, Tags 🏷️, Notifications 🔔, Language, Cloud Sync, Settings ⚙️)
+    TopThingsbookBar(
+        isWideScreen = isWideScreen,
+        isSidebarVisible = isSidebarVisible,
+        isQuickFindOpen = isQuickFindOpen,
+        syncStatus = syncStatus,
+        dailyDigestEnabled = dailyDigestConfig.enabled,
+        showLanguageMenu = showLanguageMenu,
+        onToggleSidebar = { viewModel.toggleSidebarVisible() },
+        onToggleLanguageMenu = { showLanguageMenu = it },
+        onSelectLanguage = { tag ->
+            showLanguageMenu = false
+            viewModel.switchAppLanguage(tag)
+        },
+        onOpenQuickFind = { viewModel.setQuickFindOpen(!isQuickFindOpen) },
+        onOpenGeminiHub = { viewModel.setGeminiModalOpen(true) },
+        onOpenAreaManager = { viewModel.setAreaManagerOpen(true) },
+        onOpenTagManager = { viewModel.setTagManagerOpen(true) },
+        onOpenNotificationSettings = { viewModel.setNotificationSettingsOpen(true) },
+        onManualSync = { viewModel.setAuthModalOpen(true) },
+        onOpenSettings = { viewModel.setSettingsModalOpen(true) }
+    )
 
-        // Built-In Thingsbook Cloud Sync & Multi-Device Auth Modal
-        if (isAuthModalOpen) {
-            ThingsAuthAndSyncModal(
-                syncStatus = syncStatus,
-                currentUserIdentifier = currentUserIdentifier,
-                authErrorMessage = authErrorMessage,
-                authInfoMessage = authInfoMessage,
-                isSigningIn = isSigningIn,
-                onRegisterEmailPassword = { email, pw -> viewModel.registerWithEmailPassword(email, pw) },
-                onSignInEmailPassword = { email, pw -> viewModel.signInWithEmailPassword(email, pw) },
-                onResetPassword = { email -> viewModel.sendPasswordReset(email) },
-                onSignInWithGoogle = { enteredEmail -> viewModel.signInWithGoogleAccount(enteredEmail) },
-                onSignInAnonymously = { viewModel.signInAnonymouslyAndSync() },
-                onSignOut = { viewModel.signOutCloud() },
-                onTriggerDeltaSyncNow = { viewModel.triggerManualCloudSync() },
-                onDismiss = { viewModel.setAuthModalOpen(false) }
-            )
-        }
-
-        // Full Tag Management Modal
-        if (isTagManagerOpen) {
-            ThingsTagManagerModal(
-                allTags = allTags,
-                onCreateTag = { title, shortcut -> viewModel.createTag(title, shortcut) },
-                onRenameTag = { id, title, shortcut -> viewModel.renameTag(id, title, shortcut) },
-                onDeleteTag = { id -> viewModel.deleteTag(id) },
-                onDismiss = { viewModel.setTagManagerOpen(false) }
-            )
-        }
-
-        // Areas of Responsibility Manager Modal (Work, Home, up to 8 Areas)
-        if (isAreaManagerOpen) {
-            ThingsAreaManagerModal(
-                areas = areas,
-                projects = activeProjects,
-                onCreateArea = { title -> viewModel.createArea(title) },
-                onRenameArea = { id, newTitle -> viewModel.renameArea(id, newTitle) },
-                onMoveArea = { id, moveUp -> viewModel.moveArea(id, moveUp) },
-                onDeleteArea = { id -> viewModel.deleteArea(id) },
-                onOpenArea = { id -> viewModel.selectArea(id) },
-                onDismiss = { viewModel.setAreaManagerOpen(false) }
-            )
-        }
-
-        // Create or Edit Project Dialog (with Target Date / Deadline & Area Assignment)
-        if (showCreateProjectDialog) {
-            CreateOrEditProjectDialog(
-                existingProject = editingProject,
-                areas = areas,
-                preselectedAreaId = projectDialogPreselectedAreaId,
-                locale = activeLocale,
-                onSaveProject = { title, notes, areaId, deadline ->
-                    viewModel.saveProject(
-                        id = editingProject?.id,
-                        title = title,
-                        notes = notes,
-                        areaId = areaId,
-                        deadlineEpochMillis = deadline,
-                        navigateToProject = editingProject == null
-                    )
-                },
-                onDismiss = {
-                    showCreateProjectDialog = false
-                    editingProject = null
+    // Inline Quick Find Panel (expands directly below Top Bar with rich task details!)
+    AnimatedVisibility(
+        visible = isQuickFindOpen,
+        enter = expandVertically() + fadeIn(),
+        exit = shrinkVertically() + fadeOut()
+    ) {
+        InlineQuickFindSection(
+            query = quickFindQuery,
+            taskResults = quickFindTasks,
+            projectResults = quickFindProjects,
+            areas = areas,
+            allProjects = activeProjects,
+            locale = activeLocale,
+            onQueryChange = { viewModel.updateQuickFindQuery(it) },
+            onSelectSmartView = {
+                viewModel.setQuickFindOpen(false)
+                viewModel.selectSmartView(it)
+            },
+            onSelectArea = {
+                viewModel.setQuickFindOpen(false)
+                viewModel.selectArea(it)
+            },
+            onSelectProject = {
+                viewModel.setQuickFindOpen(false)
+                viewModel.selectProject(it)
+            },
+            onSelectTask = { task ->
+                viewModel.setQuickFindOpen(false)
+                when {
+                    task.projectId != null -> viewModel.selectProject(task.projectId)
+                    task.areaId != null && task.scheduleState == ScheduleState.ANYTIME -> viewModel.selectArea(task.areaId)
+                    task.scheduleState == ScheduleState.INBOX -> viewModel.selectSmartView(SmartViewType.INBOX)
+                    task.scheduleState == ScheduleState.TODAY || task.scheduleState == ScheduleState.THIS_EVENING ->
+                        viewModel.selectSmartView(SmartViewType.TODAY)
+                    task.scheduleState == ScheduleState.UPCOMING -> viewModel.selectSmartView(SmartViewType.UPCOMING)
+                    task.scheduleState == ScheduleState.SOMEDAY -> viewModel.selectSmartView(SmartViewType.SOMEDAY)
+                    else -> viewModel.selectSmartView(SmartViewType.ANYTIME)
                 }
-            )
+                viewModel.toggleTaskExpansion(task.id)
+            },
+            onClose = { viewModel.setQuickFindOpen(false) }
+        )
+    }
+}
+
+@Composable
+private fun ThingsTaskRowItem(
+    task: TaskItem,
+    viewModel: ThingsbookViewModel,
+    allTags: List<Tag>,
+    areas: List<Area>,
+    activeProjects: List<Project>,
+    allHeadings: List<Heading>,
+    expandedTaskId: String?,
+    selectedTaskIds: Set<String>,
+    allVisibleTaskIds: List<String>,
+    magicBreakdownTaskId: String?,
+    activeLocale: Locale
+) {
+    ExpandableTaskCard(
+        task = task,
+        allTags = allTags,
+        allAreas = areas,
+        allProjects = activeProjects,
+        allHeadings = allHeadings,
+        isExpanded = expandedTaskId == task.id,
+        isSelected = task.id in selectedTaskIds,
+        isSelectionModeActive = selectedTaskIds.isNotEmpty(),
+        onToggleSelection = { viewModel.toggleTaskSelection(task.id) },
+        onRangeSelect = { viewModel.selectTaskRange(allVisibleTaskIds, task.id) },
+        isGeneratingMagicBreakdown = magicBreakdownTaskId == task.id,
+        onExpandToggle = { viewModel.toggleTaskExpansion(task.id) },
+        onStatusChange = { viewModel.updateTaskStatus(task.id, it) },
+        onTitleNotesChange = { t, n -> viewModel.updateTaskTitleAndNotes(task, t, n) },
+        onScheduleChange = { s, w -> viewModel.updateTaskSchedule(task, s, w) },
+        onScheduleWithReminderChange = { s, w, r ->
+            viewModel.updateTaskScheduleWithReminder(task, s, w, r)
+        },
+        onDeadlineChange = { dl -> viewModel.updateTaskDeadline(task, dl) },
+        onRecurrenceChange = { rule -> viewModel.updateTaskRecurrence(task.id, rule) },
+        onMoveTaskToContainer = { pId, hId, aId ->
+            viewModel.moveTaskToContainer(task.id, pId, hId, aId)
+        },
+        onUpdateTaskTags = { tagIds -> viewModel.updateTaskTags(task, tagIds) },
+        onCreateAndAssignTag = { newTag -> viewModel.createAndAssignTagToTask(task, newTag) },
+        onOpenFullTagManager = { viewModel.setTagManagerOpen(true) },
+        onAddChecklistItem = { itemTitle -> viewModel.addChecklistItem(task.id, itemTitle) },
+        onToggleChecklistItem = { itemId, done -> viewModel.toggleChecklistItem(itemId, done) },
+        onRenameChecklistItem = { itemId, newTitle -> viewModel.renameChecklistItem(itemId, newTitle) },
+        onMoveChecklistItem = { itemId, moveUp -> viewModel.moveChecklistItem(task.id, itemId, moveUp) },
+        onDeleteChecklistItem = { itemId -> viewModel.deleteChecklistItem(itemId) },
+        onTriggerGeminiMagicBreakdown = {
+            viewModel.triggerGeminiMagicBreakdown(task, activeLocale)
+        },
+        onDeleteTask = { viewModel.deleteTask(task.id) },
+        locale = activeLocale
+    )
+}
+
+@Composable
+private fun ThingsMainTaskLazyList(
+    viewModel: ThingsbookViewModel,
+    navTarget: ActiveNavigationTarget,
+    isProjectView: Boolean,
+    isAreaView: Boolean,
+    currentArea: Area?,
+    primaryTasks: List<TaskItem>,
+    filteredEveningTasks: List<TaskItem>,
+    allVisibleTaskIds: List<String>,
+    areas: List<Area>,
+    activeProjects: List<Project>,
+    projectHeadings: List<Heading>,
+    allTags: List<Tag>,
+    expandedTaskId: String?,
+    selectedTaskIds: Set<String>,
+    magicDragState: MagicPlusDragState,
+    activeLocale: Locale,
+    onRequestCreateProjectInArea: (String) -> Unit,
+    onRequestEditProject: (Project) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = ThingsTheme.colors
+    val collapsedHeadingIds by viewModel.collapsedHeadingIds.collectAsState()
+    val allHeadings by viewModel.allHeadings.collectAsState()
+    val magicBreakdownTaskId by viewModel.magicBreakdownTaskId.collectAsState()
+    val logbookAiReview by viewModel.logbookAiReview.collectAsState()
+    val isGeminiBusy by viewModel.isGeminiBusy.collectAsState()
+
+    LazyColumn(
+        modifier = modifier,
+        contentPadding = PaddingValues(bottom = 110.dp)
+    ) {
+        // If viewing Logbook, show the Gemini Logbook Reflection Card at the top
+        if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK)) {
+            item(key = "gemini_logbook_card") {
+                GeminiLogbookReflectionCard(
+                    review = logbookAiReview,
+                    isGenerating = isGeminiBusy,
+                    onGenerateReflection = {
+                        viewModel.generateGeminiLogbookReflection(activeLocale)
+                    },
+                    onAdoptSuggestedFocusTask = { title ->
+                        viewModel.adoptSuggestedFocusTaskForToday(title)
+                    }
+                )
+            }
         }
 
-        // Daily Active Tasks Notification & Reminder Settings Modal
-        if (isNotificationSettingsOpen) {
-            ThingsNotificationSettingsModal(
-                config = dailyDigestConfig,
-                onSaveDailyDigestConfig = { enabled, hr, min ->
-                    viewModel.updateDailyDigestConfig(enabled, hr, min)
-                },
-                onSendTestNotificationNow = { viewModel.sendTestDailyDigestNotificationNow() },
-                onDismiss = { viewModel.setNotificationSettingsOpen(false) }
-            )
+        // If viewing an Area (e.g. Work or Home), show the Area's Projects section first!
+        if (isAreaView && currentArea != null) {
+            val areaProjects = activeProjects.filter { it.areaId == currentArea.id }
+            item(key = "area_projects_header_${currentArea.id}") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "${stringResource(R.string.entity_projects)} • ${currentArea.title} (${areaProjects.size})",
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            color = colors.thingsBlue,
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(colors.thingsBlueSoft)
+                            .clickable { onRequestCreateProjectInArea(currentArea.id) }
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Add,
+                            contentDescription = null,
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.entity_new_project),
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.thingsBlue
+                        )
+                    }
+                }
+            }
+
+            itemsIndexed(
+                items = areaProjects,
+                key = { _, p -> "area_proj_card_${p.id}" }
+            ) { idx, proj ->
+                AreaProjectOverviewRow(
+                    project = proj,
+                    canMoveUp = idx > 0,
+                    canMoveDown = idx < areaProjects.lastIndex,
+                    locale = activeLocale,
+                    onOpenProject = { viewModel.selectProject(proj.id) },
+                    onEditProject = { onRequestEditProject(proj) },
+                    onUpdateDeadline = { dl -> viewModel.updateProjectDeadline(proj.id, dl) },
+                    onMoveUp = { viewModel.moveProject(proj.id, true) },
+                    onMoveDown = { viewModel.moveProject(proj.id, false) }
+                )
+            }
+
+            item(key = "area_tasks_divider_${currentArea.id}") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 10.dp)
+                ) {
+                    HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "${stringResource(R.string.entity_todo)} • ${currentArea.title} (${primaryTasks.size})",
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            color = colors.secondaryText,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    )
+                }
+            }
         }
+
+        // If viewing a Project, render ungrouped tasks first, then collapsible Headings!
+        if (isProjectView && projectHeadings.isNotEmpty()) {
+            val ungroupedTasks = primaryTasks.filter { it.headingId == null }
+            itemsIndexed(
+                items = ungroupedTasks,
+                key = { _, task -> "ungrouped_${task.id}" }
+            ) { index, task ->
+                MagicPlusInsertionGap(
+                    visible = magicDragState.isDragging && magicDragState.dropIndex == index,
+                    dropMode = magicDragState.dropMode
+                )
+                ThingsTaskRowItem(
+                    task = task,
+                    viewModel = viewModel,
+                    allTags = allTags,
+                    areas = areas,
+                    activeProjects = activeProjects,
+                    allHeadings = allHeadings,
+                    expandedTaskId = expandedTaskId,
+                    selectedTaskIds = selectedTaskIds,
+                    allVisibleTaskIds = allVisibleTaskIds,
+                    magicBreakdownTaskId = magicBreakdownTaskId,
+                    activeLocale = activeLocale
+                )
+            }
+
+            projectHeadings.forEachIndexed { hIdx, heading ->
+                item(key = "heading_${heading.id}") {
+                    ProjectHeadingSectionHeader(
+                        heading = heading,
+                        isCollapsed = heading.id in collapsedHeadingIds,
+                        onToggleCollapse = { viewModel.toggleHeadingCollapsed(heading.id) },
+                        onRenameHeading = { newTitle -> viewModel.renameHeading(heading.id, newTitle) },
+                        onDeleteHeading = { viewModel.deleteHeading(heading.id) }
+                    )
+                }
+
+                if (heading.id !in collapsedHeadingIds) {
+                    val tasksInHeading = primaryTasks.filter { it.headingId == heading.id }
+                    itemsIndexed(
+                        items = tasksInHeading,
+                        key = { _, task -> task.id }
+                    ) { index, task ->
+                        MagicPlusInsertionGap(
+                            visible = magicDragState.isDragging && magicDragState.dropIndex == index && hIdx == 0 && ungroupedTasks.isEmpty(),
+                            dropMode = magicDragState.dropMode
+                        )
+                        ThingsTaskRowItem(
+                            task = task,
+                            viewModel = viewModel,
+                            allTags = allTags,
+                            areas = areas,
+                            activeProjects = activeProjects,
+                            allHeadings = allHeadings,
+                            expandedTaskId = expandedTaskId,
+                            selectedTaskIds = selectedTaskIds,
+                            allVisibleTaskIds = allVisibleTaskIds,
+                            magicBreakdownTaskId = magicBreakdownTaskId,
+                            activeLocale = activeLocale
+                        )
+                    }
+                }
+            }
+        } else if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.UPCOMING)) {
+            // Upcoming Smart View ("Geplant"): Group tasks chronologically by day ("Gruppierung pro Tag")
+            val zone = ZoneId.systemDefault()
+            val todayDate = LocalDate.now(zone)
+            val groupedUpcoming = primaryTasks
+                .groupBy { task -> computeUpcomingTargetDate(task, todayDate, zone) }
+                .toSortedMap()
+
+            groupedUpcoming.entries.forEachIndexed { groupIdx, (targetDate, dayTasks) ->
+                item(key = "upcoming_day_header_${targetDate.toEpochDay()}") {
+                    UpcomingDayGroupHeader(
+                        date = targetDate,
+                        todayDate = todayDate,
+                        locale = activeLocale,
+                        isFirstGroup = groupIdx == 0
+                    )
+                }
+                itemsIndexed(
+                    items = dayTasks,
+                    key = { _, task -> "upcoming_${targetDate.toEpochDay()}_${task.id}" }
+                ) { index, task ->
+                    MagicPlusInsertionGap(
+                        visible = magicDragState.isDragging && magicDragState.dropIndex == index && groupIdx == 0,
+                        dropMode = magicDragState.dropMode
+                    )
+                    ThingsTaskRowItem(
+                        task = task,
+                        viewModel = viewModel,
+                        allTags = allTags,
+                        areas = areas,
+                        activeProjects = activeProjects,
+                        allHeadings = allHeadings,
+                        expandedTaskId = expandedTaskId,
+                        selectedTaskIds = selectedTaskIds,
+                        allVisibleTaskIds = allVisibleTaskIds,
+                        magicBreakdownTaskId = magicBreakdownTaskId,
+                        activeLocale = activeLocale
+                    )
+                }
+            }
+
+            // Trailing Magic Plus drop slot at the end of the list
+            item(key = "trailing_magic_plus_gap") {
+                MagicPlusInsertionGap(
+                    visible = magicDragState.isDragging && magicDragState.dropIndex >= primaryTasks.size,
+                    dropMode = magicDragState.dropMode
+                )
+            }
+        } else {
+            // Standard Smart View / Area Task List with Magic Plus drop gaps between every item
+            itemsIndexed(
+                items = primaryTasks,
+                key = { _, task -> task.id }
+            ) { index, task ->
+                MagicPlusInsertionGap(
+                    visible = magicDragState.isDragging && magicDragState.dropIndex == index,
+                    dropMode = magicDragState.dropMode
+                )
+                ThingsTaskRowItem(
+                    task = task,
+                    viewModel = viewModel,
+                    allTags = allTags,
+                    areas = areas,
+                    activeProjects = activeProjects,
+                    allHeadings = allHeadings,
+                    expandedTaskId = expandedTaskId,
+                    selectedTaskIds = selectedTaskIds,
+                    allVisibleTaskIds = allVisibleTaskIds,
+                    magicBreakdownTaskId = magicBreakdownTaskId,
+                    activeLocale = activeLocale
+                )
+            }
+
+            // Trailing Magic Plus drop slot at the end of the list
+            item(key = "trailing_magic_plus_gap") {
+                MagicPlusInsertionGap(
+                    visible = magicDragState.isDragging && magicDragState.dropIndex >= primaryTasks.size,
+                    dropMode = magicDragState.dropMode
+                )
+            }
+        }
+
+        // Today Smart View: "This Evening / Heute Abend / Stasera / Ce soir / Esta noche" Section
+        if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) && filteredEveningTasks.isNotEmpty()) {
+            item(key = "this_evening_header") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                ) {
+                    HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    ThisEveningHeaderBadge()
+                }
+            }
+
+            items(
+                items = filteredEveningTasks,
+                key = { "evening_${it.id}" }
+            ) { eveningTask ->
+                ThingsTaskRowItem(
+                    task = eveningTask,
+                    viewModel = viewModel,
+                    allTags = allTags,
+                    areas = areas,
+                    activeProjects = activeProjects,
+                    allHeadings = allHeadings,
+                    expandedTaskId = expandedTaskId,
+                    selectedTaskIds = selectedTaskIds,
+                    allVisibleTaskIds = allVisibleTaskIds,
+                    magicBreakdownTaskId = magicBreakdownTaskId,
+                    activeLocale = activeLocale
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThingsModalsOverlay(
+    viewModel: ThingsbookViewModel,
+    areas: List<Area>,
+    activeProjects: List<Project>,
+    allTags: List<Tag>,
+    allVisibleViewTasks: List<TaskItem>,
+    activeLocale: Locale,
+    showBatchMoveDialog: Boolean,
+    onDismissBatchMoveDialog: () -> Unit,
+    showCreateProjectDialog: Boolean,
+    editingProject: Project?,
+    projectDialogPreselectedAreaId: String?,
+    onDismissCreateProjectDialog: () -> Unit
+) {
+    val allHeadings by viewModel.allHeadings.collectAsState()
+    val isSettingsModalOpen by viewModel.isSettingsModalOpen.collectAsState()
+    val isLocalOnlyDbMode by viewModel.isLocalOnlyDbMode.collectAsState()
+    val syncStatus by viewModel.syncStatus.collectAsState()
+    val currentUserIdentifier by viewModel.currentUserIdentifier.collectAsState()
+    val statistics by viewModel.statistics.collectAsState()
+    val csvStatusMessage by viewModel.csvStatusMessage.collectAsState()
+
+    val isGeminiModalOpen by viewModel.isGeminiModalOpen.collectAsState()
+    val isGeminiBusy by viewModel.isGeminiBusy.collectAsState()
+    val geminiApiKey by viewModel.geminiApiKey.collectAsState()
+
+    val isAuthModalOpen by viewModel.isAuthModalOpen.collectAsState()
+    val isSigningIn by viewModel.isSigningIn.collectAsState()
+    val authErrorMessage by viewModel.authErrorMessage.collectAsState()
+    val authInfoMessage by viewModel.authInfoMessage.collectAsState()
+
+    val isTagManagerOpen by viewModel.isTagManagerOpen.collectAsState()
+    val isAreaManagerOpen by viewModel.isAreaManagerOpen.collectAsState()
+    val isNotificationSettingsOpen by viewModel.isNotificationSettingsOpen.collectAsState()
+    val dailyDigestConfig by viewModel.dailyDigestConfig.collectAsState()
+
+    // Batch Move Dialog for Multi-Selection
+    if (showBatchMoveDialog) {
+        MoveTaskToProjectOrAreaDialog(
+            currentProjectId = null,
+            currentHeadingId = null,
+            currentAreaId = null,
+            areas = areas,
+            projects = activeProjects,
+            headings = allHeadings,
+            onMoveTask = { pId, hId, aId ->
+                viewModel.batchMoveSelectedTasks(allVisibleViewTasks, pId, hId, aId)
+            },
+            onDismiss = onDismissBatchMoveDialog
+        )
+    }
+
+    // Comprehensive Settings Modal (⚙️ top-right: Local DB vs Cloud Sync, Account, Language, Statistics, CSV Import/Export)
+    if (isSettingsModalOpen) {
+        ThingsSettingsModal(
+            isLocalOnlyDbMode = isLocalOnlyDbMode,
+            syncStatus = syncStatus,
+            currentUserIdentifier = currentUserIdentifier,
+            statistics = statistics,
+            csvStatusMessage = csvStatusMessage,
+            onSetLocalOnlyDbMode = { viewModel.setLocalOnlyDbMode(it) },
+            onOpenAuthAndSyncModal = {
+                viewModel.setSettingsModalOpen(false)
+                viewModel.setAuthModalOpen(true)
+            },
+            onOpenNotificationSettings = {
+                viewModel.setSettingsModalOpen(false)
+                viewModel.setNotificationSettingsOpen(true)
+            },
+            onTriggerImmediateSync = { viewModel.triggerManualCloudSync() },
+            onSignOutCloud = { viewModel.signOutCloud() },
+            onSelectLanguage = { viewModel.switchAppLanguage(it) },
+            onExportCsv = { onReady -> viewModel.exportTasksCsv(onReady) },
+            onImportCsv = { content -> viewModel.importTasksCsv(content) },
+            onClearCsvMessage = { viewModel.clearCsvStatusMessage() },
+            onDismiss = { viewModel.setSettingsModalOpen(false) }
+        )
+    }
+
+    // Gemini AI Hub Modal (Brain Dump + Project Architect in EN, DE, IT, FR, ES)
+    if (isGeminiModalOpen) {
+        GeminiAssistantModal(
+            isProcessing = isGeminiBusy,
+            currentApiKey = geminiApiKey,
+            onUpdateApiKey = { viewModel.updateGeminiApiKey(it) },
+            onSubmitBrainDump = { raw -> viewModel.submitGeminiBrainDump(raw, activeLocale) },
+            onSubmitProjectArchitect = { goal -> viewModel.submitGeminiProjectArchitect(goal, activeLocale) },
+            onDismiss = { viewModel.setGeminiModalOpen(false) }
+        )
+    }
+
+    // Built-In Thingsbook Cloud Sync & Multi-Device Auth Modal
+    if (isAuthModalOpen) {
+        ThingsAuthAndSyncModal(
+            syncStatus = syncStatus,
+            currentUserIdentifier = currentUserIdentifier,
+            authErrorMessage = authErrorMessage,
+            authInfoMessage = authInfoMessage,
+            isSigningIn = isSigningIn,
+            onRegisterEmailPassword = { email, pw -> viewModel.registerWithEmailPassword(email, pw) },
+            onSignInEmailPassword = { email, pw -> viewModel.signInWithEmailPassword(email, pw) },
+            onResetPassword = { email -> viewModel.sendPasswordReset(email) },
+            onSignInWithGoogle = { enteredEmail -> viewModel.signInWithGoogleAccount(enteredEmail) },
+            onSignInAnonymously = { viewModel.signInAnonymouslyAndSync() },
+            onSignOut = { viewModel.signOutCloud() },
+            onTriggerDeltaSyncNow = { viewModel.triggerManualCloudSync() },
+            onDismiss = { viewModel.setAuthModalOpen(false) }
+        )
+    }
+
+    // Full Tag Management Modal
+    if (isTagManagerOpen) {
+        ThingsTagManagerModal(
+            allTags = allTags,
+            onCreateTag = { title, shortcut -> viewModel.createTag(title, shortcut) },
+            onRenameTag = { id, title, shortcut -> viewModel.renameTag(id, title, shortcut) },
+            onDeleteTag = { id -> viewModel.deleteTag(id) },
+            onDismiss = { viewModel.setTagManagerOpen(false) }
+        )
+    }
+
+    // Areas of Responsibility Manager Modal (Work, Home, up to 8 Areas)
+    if (isAreaManagerOpen) {
+        ThingsAreaManagerModal(
+            areas = areas,
+            projects = activeProjects,
+            onCreateArea = { title -> viewModel.createArea(title) },
+            onRenameArea = { id, newTitle -> viewModel.renameArea(id, newTitle) },
+            onMoveArea = { id, moveUp -> viewModel.moveArea(id, moveUp) },
+            onDeleteArea = { id -> viewModel.deleteArea(id) },
+            onOpenArea = { id -> viewModel.selectArea(id) },
+            onDismiss = { viewModel.setAreaManagerOpen(false) }
+        )
+    }
+
+    // Create or Edit Project Dialog (with Target Date / Deadline & Area Assignment)
+    if (showCreateProjectDialog) {
+        CreateOrEditProjectDialog(
+            existingProject = editingProject,
+            areas = areas,
+            preselectedAreaId = projectDialogPreselectedAreaId,
+            locale = activeLocale,
+            onSaveProject = { title, notes, areaId, deadline ->
+                viewModel.saveProject(
+                    id = editingProject?.id,
+                    title = title,
+                    notes = notes,
+                    areaId = areaId,
+                    deadlineEpochMillis = deadline,
+                    navigateToProject = editingProject == null
+                )
+            },
+            onDismiss = onDismissCreateProjectDialog
+        )
+    }
+
+    // Daily Active Tasks Notification & Reminder Settings Modal
+    if (isNotificationSettingsOpen) {
+        ThingsNotificationSettingsModal(
+            config = dailyDigestConfig,
+            onSaveDailyDigestConfig = { enabled, hr, min ->
+                viewModel.updateDailyDigestConfig(enabled, hr, min)
+            },
+            onSendTestNotificationNow = { viewModel.sendTestDailyDigestNotificationNow() },
+            onDismiss = { viewModel.setNotificationSettingsOpen(false) }
+        )
     }
 }
 

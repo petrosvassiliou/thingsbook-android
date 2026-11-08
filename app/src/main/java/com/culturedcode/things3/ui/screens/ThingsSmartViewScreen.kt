@@ -3418,7 +3418,11 @@ private fun computeUpcomingTargetDate(
         runCatching { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() }.getOrNull()
     }
 
-    if (whenLocal != null && whenLocal.isAfter(todayDate)) {
+    if (task.scheduleState == ScheduleState.TODAY || task.scheduleState == ScheduleState.THIS_EVENING) {
+        return@runCatching if (whenLocal != null && whenLocal.isAfter(todayDate)) whenLocal else todayDate
+    }
+
+    if (whenLocal != null && !whenLocal.isBefore(todayDate)) {
         return@runCatching whenLocal
     }
 
@@ -3520,8 +3524,8 @@ private fun UpcomingDayGroupHeader(
             Text(
                 text = subtitleText,
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.Medium,
-                    color = if (date == todayDate.plusDays(1)) colors.thingsBlue else colors.secondaryText
+                    fontWeight = FontWeight.Normal,
+                    color = colors.secondaryText
                 ),
                 modifier = Modifier.padding(bottom = 1.dp)
             )

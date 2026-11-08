@@ -161,4 +161,5 @@
     <string name="move_dialog_title">Mover (Proyecto / Área)</string>
     <string name="move_none_option">Sin proyecto / Sin área</string>
     <string name="auth_forgot_password">¿Olvidaste tu contraseña? Restablecer</string>
+    <string name="widget_description">Widget interactivo de Thingsbook con cambio rápido de vista (Hoy, Entrada, Programado, Cualquier momento, Algún día).</string>
 </resources>

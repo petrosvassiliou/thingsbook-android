@@ -161,4 +161,5 @@
     <string name="move_dialog_title">Move (Project / Area)</string>
     <string name="move_none_option">No Project / No Area</string>
     <string name="auth_forgot_password">Forgot password? Reset</string>
+    <string name="widget_description">Interactive Thingsbook To-Do list widget with instant view switching (Today, Inbox, Upcoming, Anytime, Someday).</string>
 </resources>

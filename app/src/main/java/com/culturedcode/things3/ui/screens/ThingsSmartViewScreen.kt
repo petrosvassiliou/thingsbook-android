@@ -386,11 +386,15 @@ fun ThingsSmartViewScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
-                contentAlignment = Alignment.TopCenter
+                contentAlignment = Alignment.TopStart
             ) {
                 Column(
                     modifier = Modifier
-                        .widthIn(max = if (isWideScreen) 840.dp else 2000.dp)
+                        .padding(
+                            start = if (isWideScreen) 12.dp else 0.dp,
+                            end = if (isWideScreen) 20.dp else 0.dp
+                        )
+                        .widthIn(max = if (isWideScreen) 1040.dp else 2000.dp)
                         .fillMaxSize()
                 ) {
                     // Top Utility & Navigation Bar (Quick Find, Gemini AI ✨, Areas 📦, Tags 🏷️, Notifications 🔔, Language, Cloud Sync)

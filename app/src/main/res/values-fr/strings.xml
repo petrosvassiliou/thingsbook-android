@@ -161,4 +161,5 @@
     <string name="move_dialog_title">Déplacer (Projet / Domaine)</string>
     <string name="move_none_option">Aucun projet / Aucun domaine</string>
     <string name="auth_forgot_password">Mot de passe oublié ? Réinitialiser</string>
+    <string name="widget_description">Widget interactif Thingsbook avec changement de vue instantané (Aujourd’hui, Boîte de réception, Planifié, À tout moment, Un jour).</string>
 </resources>

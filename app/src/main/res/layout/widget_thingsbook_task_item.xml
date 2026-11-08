@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_item_row_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingLeft="4dp"
+    android:paddingTop="6dp"
+    android:paddingRight="4dp"
+    android:paddingBottom="6dp">
+
+    <!-- Interactive Checkbox (Tapping completes the task directly from the Home Screen!) -->
+    <FrameLayout
+        android:id="@+id/widget_item_checkbox_hit"
+        android:layout_width="28dp"
+        android:layout_height="28dp"
+        android:padding="5dp">
+
+        <FrameLayout
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:background="@drawable/bg_things_widget_checkbox" />
+    </FrameLayout>
+
+    <!-- Task Title -->
+    <TextView
+        android:id="@+id/widget_item_title"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="6dp"
+        android:layout_marginEnd="6dp"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="#1B1E23"
+        android:textSize="14sp" />
+
+    <!-- Right Metadata Badge (Recurrence / Reminder / Date / Tag) -->
+    <TextView
+        android:id="@+id/widget_item_badge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_things_widget_badge"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:paddingLeft="7dp"
+        android:paddingTop="2dp"
+        android:paddingRight="7dp"
+        android:paddingBottom="2dp"
+        android:textColor="#2B7BF6"
+        android:textSize="10.5sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+</LinearLayout>

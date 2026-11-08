@@ -24,6 +24,7 @@ import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -78,6 +79,16 @@ class ThingsRepository @Inject constructor(
 
     fun observeAllTags(): Flow<List<Tag>> =
         database.tagDao().observeAllTags().map { list -> list.map { it.toDomain() } }
+
+    suspend fun getTasksForWidgetView(viewName: String): List<TaskItem> {
+        return when (viewName.uppercase()) {
+            "INBOX" -> observeInboxTasks().first()
+            "UPCOMING" -> observeUpcomingTasks().first()
+            "ANYTIME" -> observeAnytimeTasks().first()
+            "SOMEDAY" -> observeSomedayTasks().first()
+            else -> observeTodayDaytimeTasks().first() + observeThisEveningTasks().first()
+        }
+    }
 
     companion object {
         const val MAX_AREAS = 6

@@ -32,6 +32,25 @@ class MainActivity : AppCompatActivity() {
         setContent {
             Things3Theme {
                 val viewModel: ThingsbookViewModel = hiltViewModel()
+                androidx.compose.runtime.LaunchedEffect(intent) {
+                    val widgetView = intent?.getStringExtra(
+                        com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.EXTRA_WIDGET_SMART_VIEW
+                    )
+                    val widgetTaskId = intent?.getStringExtra(
+                        com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.EXTRA_TASK_ID
+                    )
+                    val widgetQuickAdd = intent?.getBooleanExtra(
+                        com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.EXTRA_WIDGET_QUICK_ADD,
+                        false
+                    ) ?: false
+
+                    if (widgetView != null || widgetTaskId != null || widgetQuickAdd) {
+                        viewModel.handleWidgetLaunchIntent(widgetView, widgetTaskId, widgetQuickAdd)
+                        intent?.removeExtra(com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.EXTRA_WIDGET_SMART_VIEW)
+                        intent?.removeExtra(com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.EXTRA_TASK_ID)
+                        intent?.removeExtra(com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.EXTRA_WIDGET_QUICK_ADD)
+                    }
+                }
                 ThingsSmartViewScreen(
                     viewModel = viewModel,
                     modifier = Modifier.fillMaxSize()

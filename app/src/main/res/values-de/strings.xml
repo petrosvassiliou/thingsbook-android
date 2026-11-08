@@ -161,4 +161,5 @@
     <string name="move_dialog_title">Verschieben (Projekt / Bereich)</string>
     <string name="move_none_option">Kein Projekt / Kein Bereich</string>
     <string name="auth_forgot_password">Passwort vergessen? Zurücksetzen</string>
+    <string name="widget_description">Interaktives Thingsbook-Aufgaben-Widget im Things-Design mit direktem Ansichtswechsel (Heute, Eingang, Geplant, Jederzeit, Irgendwann).</string>
 </resources>

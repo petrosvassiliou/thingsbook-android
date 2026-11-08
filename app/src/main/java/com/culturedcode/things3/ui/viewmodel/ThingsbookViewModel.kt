@@ -163,6 +163,21 @@ class ThingsbookViewModel @Inject constructor(
     val logbookTasks: StateFlow<List<TaskItem>> = repository.observeLogbookTasks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    init {
+        viewModelScope.launch {
+            combine(
+                inboxTasks,
+                todayDaytimeTasks,
+                thisEveningTasks,
+                upcomingTasks,
+                anytimeTasks
+            ) { a, b, c, d, e -> a.size + b.size + c.size + d.size + e.size }
+                .collect {
+                    com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.refreshAllWidgets(appContext)
+                }
+        }
+    }
+
     val activeProjects: StateFlow<List<Project>> = repository.observeActiveProjectsWithProgress()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -260,6 +275,22 @@ class ThingsbookViewModel @Inject constructor(
     fun selectSmartView(viewType: SmartViewType) {
         _expandedTaskId.value = null
         _navigationTarget.value = ActiveNavigationTarget.SmartView(viewType)
+    }
+
+    fun handleWidgetLaunchIntent(viewName: String?, taskId: String?, quickAdd: Boolean) {
+        val targetView = when (viewName?.uppercase(Locale.ROOT)) {
+            "INBOX" -> SmartViewType.INBOX
+            "UPCOMING" -> SmartViewType.UPCOMING
+            "ANYTIME" -> SmartViewType.ANYTIME
+            "SOMEDAY" -> SmartViewType.SOMEDAY
+            else -> SmartViewType.TODAY
+        }
+        _navigationTarget.value = ActiveNavigationTarget.SmartView(targetView)
+        if (!taskId.isNullOrBlank()) {
+            _expandedTaskId.value = taskId
+        } else if (quickAdd) {
+            createTaskAtPosition(emptyList(), 0, "")
+        }
     }
 
     fun selectProject(projectId: String) {

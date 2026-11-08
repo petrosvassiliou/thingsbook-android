@@ -24,6 +24,7 @@ import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.encodeToString
@@ -51,95 +52,128 @@ class ThingsRepository @Inject constructor(
     }
 
     fun observeInboxTasks(): Flow<List<TaskItem>> =
-        database.taskDao().observeInboxTasks().map { list -> list.map { it.toDomain() } }
+        database.taskDao().observeInboxTasks()
+            .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
+            .catch { emit(emptyList()) }
 
     fun observeTodayDaytimeTasks(): Flow<List<TaskItem>> =
-        database.taskDao().observeTodayTasks(endOfTodayEpochMillis()).map { list -> list.map { it.toDomain() } }
+        database.taskDao().observeTodayTasks(endOfTodayEpochMillis())
+            .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
+            .catch { emit(emptyList()) }
 
     fun observeThisEveningTasks(): Flow<List<TaskItem>> =
-        database.taskDao().observeThisEveningTasks().map { list -> list.map { it.toDomain() } }
+        database.taskDao().observeThisEveningTasks()
+            .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
+            .catch { emit(emptyList()) }
 
     fun observeUpcomingTasks(): Flow<List<TaskItem>> =
-        database.taskDao().observeUpcomingTasks(endOfTodayEpochMillis()).map { list -> list.map { it.toDomain() } }
+        database.taskDao().observeUpcomingTasks(endOfTodayEpochMillis())
+            .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
+            .catch { emit(emptyList()) }
 
     fun observeAnytimeTasks(): Flow<List<TaskItem>> =
-        database.taskDao().observeAnytimeTasks().map { list -> list.map { it.toDomain() } }
+        database.taskDao().observeAnytimeTasks()
+            .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
+            .catch { emit(emptyList()) }
 
     fun observeSomedayTasks(): Flow<List<TaskItem>> =
-        database.taskDao().observeSomedayTasks().map { list -> list.map { it.toDomain() } }
+        database.taskDao().observeSomedayTasks()
+            .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
+            .catch { emit(emptyList()) }
 
     fun observeLogbookTasks(): Flow<List<TaskItem>> =
-        database.taskDao().observeLogbookTasks().map { list -> list.map { it.toDomain() } }
+        database.taskDao().observeLogbookTasks()
+            .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
+            .catch { emit(emptyList()) }
 
     fun observeActiveProjectsWithProgress(): Flow<List<Project>> =
-        database.projectDao().observeActiveProjectsWithProgress().map { list -> list.map { it.toDomain() } }
+        database.projectDao().observeActiveProjectsWithProgress()
+            .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
+            .catch { emit(emptyList()) }
 
     fun observeAreas(): Flow<List<Area>> =
-        database.areaDao().observeAreas().map { list -> list.map { it.toDomain() } }
+        database.areaDao().observeAreas()
+            .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
+            .catch { emit(emptyList()) }
 
     fun observeAllTags(): Flow<List<Tag>> =
-        database.tagDao().observeAllTags().map { list -> list.map { it.toDomain() } }
+        database.tagDao().observeAllTags()
+            .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
+            .catch { emit(emptyList()) }
 
     fun observeAllTasksRaw(): Flow<List<TaskEntity>> =
         database.taskDao().observeAllTasksRaw()
+            .catch { emit(emptyList()) }
 
     suspend fun getTasksForWidgetView(viewName: String): List<TaskItem> {
-        return when (viewName.uppercase()) {
-            "INBOX" -> observeInboxTasks().first()
-            "UPCOMING" -> observeUpcomingTasks().first()
-            "ANYTIME" -> observeAnytimeTasks().first()
-            "SOMEDAY" -> observeSomedayTasks().first()
-            else -> observeTodayDaytimeTasks().first() + observeThisEveningTasks().first()
-        }
+        return runCatching {
+            when (viewName.uppercase()) {
+                "INBOX" -> observeInboxTasks().first()
+                "UPCOMING" -> observeUpcomingTasks().first()
+                "ANYTIME" -> observeAnytimeTasks().first()
+                "SOMEDAY" -> observeSomedayTasks().first()
+                else -> (observeTodayDaytimeTasks().first() + observeThisEveningTasks().first()).distinctBy { it.id }
+            }
+        }.getOrDefault(emptyList())
     }
 
     companion object {
-        const val MAX_AREAS = 6
+        const val MAX_AREAS = 8
     }
 
     fun observeAllActiveHeadings(): Flow<List<Heading>> =
-        database.headingDao().observeAllActiveHeadings().map { list ->
-            list.map {
-                Heading(
-                    id = it.id,
-                    projectId = it.projectId,
-                    title = it.title,
-                    sortOrder = it.sortOrder,
-                    isArchived = it.isArchived,
-                    createdAt = it.createdAt,
-                    updatedAt = it.updatedAt,
-                    isDeleted = it.isDeleted
-                )
+        database.headingDao().observeAllActiveHeadings()
+            .map { list ->
+                list.mapNotNull {
+                    runCatching {
+                        Heading(
+                            id = it.id,
+                            projectId = it.projectId,
+                            title = it.title,
+                            sortOrder = it.sortOrder,
+                            isArchived = it.isArchived,
+                            createdAt = it.createdAt,
+                            updatedAt = it.updatedAt,
+                            isDeleted = it.isDeleted
+                        )
+                    }.getOrNull()
+                }.distinctBy { it.id }
             }
-        }
+            .catch { emit(emptyList()) }
 
     fun searchTasksFts5(rawQuery: String): Flow<List<TaskItem>> {
         val sql = ThingsDatabase.buildTasksFts5SqlQuery(rawQuery)
-        return database.taskDao().searchTasksFts5(sql).map { list -> list.map { it.toDomain() } }
+        return database.taskDao().searchTasksFts5(sql)
+            .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
+            .catch { emit(emptyList()) }
     }
 
     fun searchProjectsFts5(rawQuery: String): Flow<List<Project>> {
         val sql = ThingsDatabase.buildProjectsFts5SqlQuery(rawQuery)
-        return database.taskDao().searchProjectsFts5(sql).map { list ->
-            list.map { entity ->
-                Project(
-                    id = entity.id,
-                    areaId = entity.areaId,
-                    title = entity.title,
-                    notes = entity.notes,
-                    status = entity.status,
-                    scheduleState = entity.scheduleState,
-                    whenDate = entity.whenDate,
-                    deadline = entity.deadline,
-                    completedAt = entity.completedAt,
-                    sortOrder = entity.sortOrder,
-                    tagIds = decodeStringList(entity.tagIdsJson),
-                    createdAt = entity.createdAt,
-                    updatedAt = entity.updatedAt,
-                    isDeleted = entity.isDeleted
-                )
+        return database.taskDao().searchProjectsFts5(sql)
+            .map { list ->
+                list.mapNotNull { entity ->
+                    runCatching {
+                        Project(
+                            id = entity.id,
+                            areaId = entity.areaId,
+                            title = entity.title,
+                            notes = entity.notes,
+                            status = entity.status,
+                            scheduleState = entity.scheduleState,
+                            whenDate = entity.whenDate,
+                            deadline = entity.deadline,
+                            completedAt = entity.completedAt,
+                            sortOrder = entity.sortOrder,
+                            tagIds = decodeStringList(entity.tagIdsJson),
+                            createdAt = entity.createdAt,
+                            updatedAt = entity.updatedAt,
+                            isDeleted = entity.isDeleted
+                        )
+                    }.getOrNull()
+                }.distinctBy { it.id }
             }
-        }
+            .catch { emit(emptyList()) }
     }
 
     /**

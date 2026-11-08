@@ -79,7 +79,7 @@ class SyncRepository @Inject constructor(
 ) {
     private val exceptionHandler = CoroutineExceptionHandler { _, _ -> }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + exceptionHandler)
-    private val activeListeners = mutableListOf<ListenerRegistration>()
+    private val activeListeners = java.util.Collections.synchronizedList(mutableListOf<ListenerRegistration>())
     private var realtimeCloudPollJob: Job? = null
     private var lanUdpListenerJob: Job? = null
 
@@ -104,11 +104,20 @@ class SyncRepository @Inject constructor(
 
     init {
         scope.launch {
+            delay(800L)
             runCatching {
                 restoreBuiltInCloudSession()
             }
         }
     }
+
+    private fun isLocalOnlyDbModeEnabled(): Boolean = runCatching {
+        val uiPrefs = context.getSharedPreferences("thingsbook_ui_prefs", Context.MODE_PRIVATE)
+            .getBoolean("local_only_db_mode", false)
+        val settingsPrefs = context.getSharedPreferences("thingsbook_settings_prefs", Context.MODE_PRIVATE)
+            .getBoolean("local_only_db_mode", false)
+        uiPrefs || settingsPrefs
+    }.getOrDefault(false)
 
     private suspend fun getOrCreateDeviceId(): String {
         val prefs = context.syncDataStore.data.first()
@@ -120,6 +129,10 @@ class SyncRepository @Inject constructor(
     }
 
     private suspend fun restoreBuiltInCloudSession() {
+        if (isLocalOnlyDbModeEnabled()) {
+            _syncStatus.value = CloudSyncStatus.OFFLINE
+            return
+        }
         val prefs = context.syncDataStore.data.first()
         val userId = prefs[KEY_ACTIVE_USER_ID]
         val email = prefs[KEY_ACTIVE_USER_EMAIL]
@@ -137,7 +150,7 @@ class SyncRepository @Inject constructor(
             syncBidirectionalDeltas()
             startRealtimeMultiDeviceSync(userId, channelTopic)
         } else {
-            val fbUser = firebaseAuth.currentUser
+            val fbUser = runCatching { firebaseAuth.currentUser }.getOrNull()
             if (fbUser != null) {
                 val fbEmail = fbUser.email
                 if (fbEmail != null && fbEmail.endsWith("@thingsbook.app")) {
@@ -742,6 +755,7 @@ class SyncRepository @Inject constructor(
      * (plus Firestore SnapshotListeners if configured).
      */
     private fun startRealtimeMultiDeviceSync(userId: String, channelTopic: String) {
+        if (isLocalOnlyDbModeEnabled()) return
         realtimeCloudPollJob?.cancel()
         lanUdpListenerJob?.cancel()
 
@@ -749,6 +763,7 @@ class SyncRepository @Inject constructor(
         realtimeCloudPollJob = scope.launch {
             while (isActive) {
                 delay(6000L)
+                if (isLocalOnlyDbModeEnabled()) break
                 runCatching {
                     pushDirtyRecordsToBuiltInCloud(userId, channelTopic)
                     val lastSync = getLastSyncTimestamp(userId)
@@ -764,21 +779,21 @@ class SyncRepository @Inject constructor(
         lanUdpListenerJob = scope.launch {
             runCatching {
                 val localDeviceId = getOrCreateDeviceId()
-                val socket = DatagramSocket(null).apply {
-                    reuseAddress = true
-                    bind(InetSocketAddress(45833))
-                }
-                val buffer = ByteArray(65507)
-                while (isActive) {
-                    val packet = DatagramPacket(buffer, buffer.size)
-                    socket.receive(packet)
-                    val text = String(packet.data, 0, packet.length, StandardCharsets.UTF_8)
-                    val batch = runCatching { json.decodeFromString<CloudDeltaBatchPayload>(text) }.getOrNull()
-                    if (batch != null && batch.userId == userId && batch.deviceId != localDeviceId) {
-                        val lastSync = getLastSyncTimestamp(userId)
-                        val newMax = applyDeltaBatchToRoom(batch, lastSync)
-                        if (newMax > lastSync) {
-                            saveLastSyncTimestamp(userId, newMax)
+                DatagramSocket(null).use { socket ->
+                    socket.reuseAddress = true
+                    socket.bind(InetSocketAddress(45833))
+                    val buffer = ByteArray(65507)
+                    while (isActive && !isLocalOnlyDbModeEnabled()) {
+                        val packet = DatagramPacket(buffer, buffer.size)
+                        socket.receive(packet)
+                        val text = String(packet.data, 0, packet.length, StandardCharsets.UTF_8)
+                        val batch = runCatching { json.decodeFromString<CloudDeltaBatchPayload>(text) }.getOrNull()
+                        if (batch != null && batch.userId == userId && batch.deviceId != localDeviceId) {
+                            val lastSync = getLastSyncTimestamp(userId)
+                            val newMax = applyDeltaBatchToRoom(batch, lastSync)
+                            if (newMax > lastSync) {
+                                saveLastSyncTimestamp(userId, newMax)
+                            }
                         }
                     }
                 }
@@ -934,8 +949,10 @@ class SyncRepository @Inject constructor(
 
     suspend fun attachRealtimeDeltaListeners(userId: String) {
         runCatching {
-            activeListeners.forEach { it.remove() }
-            activeListeners.clear()
+            synchronized(activeListeners) {
+                activeListeners.forEach { runCatching { it.remove() } }
+                activeListeners.clear()
+            }
 
             val sinceTimestamp = getLastSyncTimestamp(userId)
             val userDoc = firestore.collection("users").document(userId)
@@ -943,125 +960,139 @@ class SyncRepository @Inject constructor(
             activeListeners += userDoc.collection("tasks")
                 .whereGreaterThan("updatedAt", sinceTimestamp)
                 .addSnapshotListener { snapshot, error ->
-                    if (error != null || snapshot == null) return@addSnapshotListener
-                    scope.launch {
-                        for (change in snapshot.documentChanges) {
-                            runCatching {
-                                val dto = TaskFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatching
-                                if (dto.id.isNotBlank()) {
-                                    val local = database.taskDao().getById(dto.id)
-                                    if (local == null || dto.updatedAt >= local.updatedAt) {
-                                        database.taskDao().upsertTaskWithTags(dto.toEntity(), dto.tagIds)
-                                        saveLastSyncTimestamp(userId, maxOf(getLastSyncTimestamp(userId), dto.updatedAt))
+                    try {
+                        if (error != null || snapshot == null) return@addSnapshotListener
+                        scope.launch {
+                            for (change in snapshot.documentChanges) {
+                                runCatching {
+                                    val dto = TaskFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatching
+                                    if (dto.id.isNotBlank()) {
+                                        val local = database.taskDao().getById(dto.id)
+                                        if (local == null || dto.updatedAt >= local.updatedAt) {
+                                            database.taskDao().upsertTaskWithTags(dto.toEntity(), dto.tagIds)
+                                            saveLastSyncTimestamp(userId, maxOf(getLastSyncTimestamp(userId), dto.updatedAt))
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
+                    } catch (_: Throwable) {}
                 }
 
             activeListeners += userDoc.collection("projects")
                 .whereGreaterThan("updatedAt", sinceTimestamp)
                 .addSnapshotListener { snapshot, error ->
-                    if (error != null || snapshot == null) return@addSnapshotListener
-                    scope.launch {
-                        for (change in snapshot.documentChanges) {
-                            runCatching {
-                                val dto = ProjectFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatching
-                                if (dto.id.isNotBlank()) {
-                                    val local = database.projectDao().getById(dto.id)
-                                    if (local == null || dto.updatedAt >= local.updatedAt) {
-                                        database.projectDao().upsertProjectWithTags(dto.toEntity(), dto.tagIds)
-                                        saveLastSyncTimestamp(userId, maxOf(getLastSyncTimestamp(userId), dto.updatedAt))
+                    try {
+                        if (error != null || snapshot == null) return@addSnapshotListener
+                        scope.launch {
+                            for (change in snapshot.documentChanges) {
+                                runCatching {
+                                    val dto = ProjectFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatching
+                                    if (dto.id.isNotBlank()) {
+                                        val local = database.projectDao().getById(dto.id)
+                                        if (local == null || dto.updatedAt >= local.updatedAt) {
+                                            database.projectDao().upsertProjectWithTags(dto.toEntity(), dto.tagIds)
+                                            saveLastSyncTimestamp(userId, maxOf(getLastSyncTimestamp(userId), dto.updatedAt))
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
+                    } catch (_: Throwable) {}
                 }
 
             activeListeners += userDoc.collection("areas")
                 .whereGreaterThan("updatedAt", sinceTimestamp)
                 .addSnapshotListener { snapshot, error ->
-                    if (error != null || snapshot == null) return@addSnapshotListener
-                    scope.launch {
-                        for (change in snapshot.documentChanges) {
-                            runCatching {
-                                val dto = AreaFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatching
-                                if (dto.id.isNotBlank()) {
-                                    val local = database.areaDao().getById(dto.id)
-                                    if (local == null || dto.updatedAt >= local.updatedAt) {
-                                        database.areaDao().upsert(dto.toEntity())
+                    try {
+                        if (error != null || snapshot == null) return@addSnapshotListener
+                        scope.launch {
+                            for (change in snapshot.documentChanges) {
+                                runCatching {
+                                    val dto = AreaFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatching
+                                    if (dto.id.isNotBlank()) {
+                                        val local = database.areaDao().getById(dto.id)
+                                        if (local == null || dto.updatedAt >= local.updatedAt) {
+                                            database.areaDao().upsert(dto.toEntity())
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
+                    } catch (_: Throwable) {}
                 }
 
             activeListeners += userDoc.collection("headings")
                 .whereGreaterThan("updatedAt", sinceTimestamp)
                 .addSnapshotListener { snapshot, error ->
-                    if (error != null || snapshot == null) return@addSnapshotListener
-                    scope.launch {
-                        for (change in snapshot.documentChanges) {
-                            runCatching {
-                                val dto = HeadingFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatching
-                                if (dto.id.isNotBlank()) {
-                                    val local = database.headingDao().getById(dto.id)
-                                    if (local == null || dto.updatedAt >= local.updatedAt) {
-                                        database.headingDao().upsert(dto.toEntity())
+                    try {
+                        if (error != null || snapshot == null) return@addSnapshotListener
+                        scope.launch {
+                            for (change in snapshot.documentChanges) {
+                                runCatching {
+                                    val dto = HeadingFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatching
+                                    if (dto.id.isNotBlank()) {
+                                        val local = database.headingDao().getById(dto.id)
+                                        if (local == null || dto.updatedAt >= local.updatedAt) {
+                                            database.headingDao().upsert(dto.toEntity())
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
+                    } catch (_: Throwable) {}
                 }
 
             activeListeners += userDoc.collection("checklist_items")
                 .whereGreaterThan("updatedAt", sinceTimestamp)
                 .addSnapshotListener { snapshot, error ->
-                    if (error != null || snapshot == null) return@addSnapshotListener
-                    scope.launch {
-                        for (change in snapshot.documentChanges) {
-                            runCatching {
-                                val dto = ChecklistItemFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatching
-                                if (dto.id.isNotBlank()) {
-                                    val local = database.checklistDao().getById(dto.id)
-                                    if (local == null || dto.updatedAt >= local.updatedAt) {
-                                        database.checklistDao().upsert(dto.toEntity())
+                    try {
+                        if (error != null || snapshot == null) return@addSnapshotListener
+                        scope.launch {
+                            for (change in snapshot.documentChanges) {
+                                runCatching {
+                                    val dto = ChecklistItemFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatching
+                                    if (dto.id.isNotBlank()) {
+                                        val local = database.checklistDao().getById(dto.id)
+                                        if (local == null || dto.updatedAt >= local.updatedAt) {
+                                            database.checklistDao().upsert(dto.toEntity())
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
+                    } catch (_: Throwable) {}
                 }
 
             activeListeners += userDoc.collection("tags")
                 .whereGreaterThan("updatedAt", sinceTimestamp)
                 .addSnapshotListener { snapshot, error ->
-                    if (error != null || snapshot == null) return@addSnapshotListener
-                    scope.launch {
-                        for (change in snapshot.documentChanges) {
-                            runCatching {
-                                val dto = TagFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatching
-                                if (dto.id.isNotBlank()) {
-                                    val local = database.tagDao().getById(dto.id)
-                                    if (local == null || dto.updatedAt >= local.updatedAt) {
-                                        database.tagDao().upsert(dto.toEntity())
+                    try {
+                        if (error != null || snapshot == null) return@addSnapshotListener
+                        scope.launch {
+                            for (change in snapshot.documentChanges) {
+                                runCatching {
+                                    val dto = TagFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatching
+                                    if (dto.id.isNotBlank()) {
+                                        val local = database.tagDao().getById(dto.id)
+                                        if (local == null || dto.updatedAt >= local.updatedAt) {
+                                            database.tagDao().upsert(dto.toEntity())
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
+                    } catch (_: Throwable) {}
                 }
         }
     }
 
     fun detachRealtimeDeltaListeners() {
-        realtimeCloudPollJob?.cancel()
-        lanUdpListenerJob?.cancel()
-        activeListeners.forEach { it.remove() }
-        activeListeners.clear()
+        runCatching { realtimeCloudPollJob?.cancel() }
+        runCatching { lanUdpListenerJob?.cancel() }
+        synchronized(activeListeners) {
+            activeListeners.forEach { runCatching { it.remove() } }
+            activeListeners.clear()
+        }
     }
 }

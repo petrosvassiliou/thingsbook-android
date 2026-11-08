@@ -29,12 +29,16 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -65,6 +69,10 @@ class ThingsbookViewModel @Inject constructor(
     private val reminderScheduler: ReminderScheduler
 ) : ViewModel() {
 
+    private val safeVmScope = CoroutineScope(
+        viewModelScope.coroutineContext + SupervisorJob() + CoroutineExceptionHandler { _, _ -> }
+    )
+
     @Volatile
     private var activeAuth: FirebaseAuth = firebaseAuth
 
@@ -94,7 +102,10 @@ class ThingsbookViewModel @Inject constructor(
     private val _isNotificationSettingsOpen = MutableStateFlow(false)
     val isNotificationSettingsOpen: StateFlow<Boolean> = _isNotificationSettingsOpen.asStateFlow()
 
-    private val _dailyDigestConfig = MutableStateFlow(reminderScheduler.getDailyDigestConfig())
+    private val _dailyDigestConfig = MutableStateFlow(
+        runCatching { reminderScheduler.getDailyDigestConfig() }
+            .getOrDefault(DailyDigestConfig(enabled = false, hour = 8, minute = 30))
+    )
     val dailyDigestConfig: StateFlow<DailyDigestConfig> = _dailyDigestConfig.asStateFlow()
 
     // Quick Find (SQLite FTS5)
@@ -137,37 +148,48 @@ class ThingsbookViewModel @Inject constructor(
 
     // Core Data Streams from Room Single Source of Truth
     val inboxTasks: StateFlow<List<TaskItem>> = repository.observeInboxTasks()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val todayDaytimeTasks: StateFlow<List<TaskItem>> = repository.observeTodayDaytimeTasks()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val thisEveningTasks: StateFlow<List<TaskItem>> = repository.observeThisEveningTasks()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val upcomingTasks: StateFlow<List<TaskItem>> = repository.observeUpcomingTasks()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val anytimeTasks: StateFlow<List<TaskItem>> = repository.observeAnytimeTasks()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val somedayTasks: StateFlow<List<TaskItem>> = repository.observeSomedayTasks()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val logbookTasks: StateFlow<List<TaskItem>> = repository.observeLogbookTasks()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val activeProjects: StateFlow<List<Project>> = repository.observeActiveProjectsWithProgress()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val areas: StateFlow<List<Area>> = repository.observeAreas()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val allHeadings: StateFlow<List<Heading>> = repository.observeAllActiveHeadings()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val allTags: StateFlow<List<Tag>> = repository.observeAllTags()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val syncStatus: StateFlow<CloudSyncStatus> = syncRepository.syncStatus
 
@@ -175,25 +197,30 @@ class ThingsbookViewModel @Inject constructor(
     val activeProjectHeadings: StateFlow<List<Heading>> = _navigationTarget
         .flatMapLatest { target ->
             if (target is ActiveNavigationTarget.ProjectDetail) {
-                database.headingDao().observeHeadingsForProject(target.projectId).map { list ->
-                    list.map {
-                        Heading(
-                            id = it.id,
-                            projectId = it.projectId,
-                            title = it.title,
-                            sortOrder = it.sortOrder,
-                            isArchived = it.isArchived,
-                            createdAt = it.createdAt,
-                            updatedAt = it.updatedAt,
-                            isDeleted = it.isDeleted
-                        )
+                database.headingDao().observeHeadingsForProject(target.projectId)
+                    .map { list ->
+                        list.mapNotNull {
+                            runCatching {
+                                Heading(
+                                    id = it.id,
+                                    projectId = it.projectId,
+                                    title = it.title,
+                                    sortOrder = it.sortOrder,
+                                    isArchived = it.isArchived,
+                                    createdAt = it.createdAt,
+                                    updatedAt = it.updatedAt,
+                                    isDeleted = it.isDeleted
+                                )
+                            }.getOrNull()
+                        }.distinctBy { it.id }
                     }
-                }
+                    .catch { emit(emptyList()) }
             } else {
                 flowOf(emptyList())
             }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val activeProjectTasks: StateFlow<List<TaskItem>> = _navigationTarget
         .flatMapLatest { target ->
@@ -214,7 +241,8 @@ class ThingsbookViewModel @Inject constructor(
                 flowOf(emptyList())
             }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Direct tasks belonging to an Area when viewing AreaDetail
     val activeAreaTasks: StateFlow<List<TaskItem>> = _navigationTarget
@@ -236,20 +264,23 @@ class ThingsbookViewModel @Inject constructor(
                 flowOf(emptyList())
             }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Real-time FTS5 Quick Find Results
     val quickFindTaskResults: StateFlow<List<TaskItem>> = _quickFindQuery
         .flatMapLatest { q ->
             if (q.isBlank()) flowOf(emptyList()) else repository.searchTasksFts5(q)
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val quickFindProjectResults: StateFlow<List<Project>> = _quickFindQuery
         .flatMapLatest { q ->
             if (q.isBlank()) flowOf(emptyList()) else repository.searchProjectsFts5(q)
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun selectSmartView(viewType: SmartViewType) {
         _expandedTaskId.value = null
@@ -326,7 +357,7 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun updateTaskStatus(taskId: String, status: TaskStatus) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.updateTaskStatus(taskId, status)
             if (status != TaskStatus.OPEN && _expandedTaskId.value == taskId) {
                 _expandedTaskId.value = null
@@ -335,7 +366,7 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun updateTaskTitleAndNotes(task: TaskItem, newTitle: String, newNotes: String) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.createOrUpdateTask(
                 id = task.id,
                 title = newTitle,
@@ -356,7 +387,7 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun updateTaskSchedule(task: TaskItem, newState: ScheduleState, newWhenDate: Long?) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.createOrUpdateTask(
                 id = task.id,
                 title = task.title,
@@ -377,7 +408,7 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun updateTaskDeadline(task: TaskItem, newDeadline: Long?) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.createOrUpdateTask(
                 id = task.id,
                 title = task.title,
@@ -398,37 +429,37 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun addChecklistItem(taskId: String, title: String) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.addChecklistItem(taskId, title)
         }
     }
 
     fun toggleChecklistItem(itemId: String, isCompleted: Boolean) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.toggleChecklistItem(itemId, isCompleted)
         }
     }
 
     fun renameChecklistItem(itemId: String, newTitle: String) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.updateChecklistItemTitle(itemId, newTitle)
         }
     }
 
     fun moveChecklistItem(taskId: String, itemId: String, moveUp: Boolean) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.moveChecklistItem(taskId, itemId, moveUp)
         }
     }
 
     fun deleteChecklistItem(itemId: String) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.softDeleteChecklistItem(itemId)
         }
     }
 
     fun updateTaskRecurrence(taskId: String, recurrenceRule: RecurrenceRule?) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.updateTaskRecurrence(taskId, recurrenceRule)
         }
     }
@@ -439,13 +470,13 @@ class ThingsbookViewModel @Inject constructor(
         headingId: String?,
         areaId: String?
     ) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.moveTaskToContainer(taskId, projectId, headingId, areaId)
         }
     }
 
     fun deleteTask(taskId: String) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             if (_expandedTaskId.value == taskId) {
                 _expandedTaskId.value = null
             }
@@ -462,7 +493,7 @@ class ThingsbookViewModel @Inject constructor(
         dropIndex: Int,
         defaultTitle: String
     ) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             val prevOrder = currentList.getOrNull(dropIndex - 1)?.sortOrder
             val nextOrder = currentList.getOrNull(dropIndex)?.sortOrder
             val midpointOrder = repository.computeMidpointSortOrder(prevOrder, nextOrder)
@@ -516,7 +547,7 @@ class ThingsbookViewModel @Inject constructor(
 
     fun createHeadingInCurrentProject(dropIndex: Int, defaultHeadingTitle: String) {
         val target = _navigationTarget.value as? ActiveNavigationTarget.ProjectDetail ?: return
-        viewModelScope.launch {
+        safeVmScope.launch {
             val headings = activeProjectHeadings.value
             val prevOrder = headings.getOrNull(dropIndex - 1)?.sortOrder
             val nextOrder = headings.getOrNull(dropIndex)?.sortOrder
@@ -530,13 +561,13 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun renameHeading(headingId: String, newTitle: String) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.renameHeading(headingId, newTitle)
         }
     }
 
     fun deleteHeading(headingId: String) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.softDeleteHeading(headingId)
         }
     }
@@ -550,25 +581,25 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun createArea(title: String) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.createArea(title)
         }
     }
 
     fun renameArea(areaId: String, newTitle: String) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.renameArea(areaId, newTitle)
         }
     }
 
     fun moveArea(areaId: String, moveUp: Boolean) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.moveArea(areaId, moveUp)
         }
     }
 
     fun deleteArea(areaId: String) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             val currentTarget = _navigationTarget.value
             if (currentTarget is ActiveNavigationTarget.AreaDetail && currentTarget.areaId == areaId) {
                 _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
@@ -589,7 +620,7 @@ class ThingsbookViewModel @Inject constructor(
         deadlineEpochMillis: Long?,
         navigateToProject: Boolean = true
     ) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             val savedId = if (id != null) {
                 repository.createOrUpdateProject(
                     id = id,
@@ -613,19 +644,19 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun updateProjectDeadline(projectId: String, deadlineEpochMillis: Long?) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.updateProjectDeadline(projectId, deadlineEpochMillis)
         }
     }
 
     fun updateProjectArea(projectId: String, areaId: String?) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.updateProjectArea(projectId, areaId)
         }
     }
 
     fun completeProject(projectId: String) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.updateProjectStatus(projectId, ProjectStatus.COMPLETED)
             val currentTarget = _navigationTarget.value
             if (currentTarget is ActiveNavigationTarget.ProjectDetail && currentTarget.projectId == projectId) {
@@ -635,13 +666,13 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun moveProject(projectId: String, moveUp: Boolean) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.moveProject(projectId, moveUp)
         }
     }
 
     fun deleteProject(projectId: String) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             val currentTarget = _navigationTarget.value
             if (currentTarget is ActiveNavigationTarget.ProjectDetail && currentTarget.projectId == projectId) {
                 _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
@@ -658,7 +689,7 @@ class ThingsbookViewModel @Inject constructor(
      * Feature 1: Gemini Magic Breakdown inside an expanded To-Do card.
      */
     fun triggerGeminiMagicBreakdown(task: TaskItem, locale: Locale = Locale.getDefault()) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             _magicBreakdownTaskId.value = task.id
             val steps = geminiService.generateMagicChecklist(
                 taskTitle = task.title,
@@ -674,7 +705,7 @@ class ThingsbookViewModel @Inject constructor(
      * Feature 2: Gemini Brain Dump -> Structured GTD Tasks with automatic ScheduleState, whenDate, deadline & checklist.
      */
     fun submitGeminiBrainDump(rawText: String, locale: Locale = Locale.getDefault()) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             _isGeminiBusy.value = true
             val parsedTasks = geminiService.parseBrainDumpToTasks(rawText, locale)
             val zone = ZoneId.systemDefault()
@@ -716,7 +747,7 @@ class ThingsbookViewModel @Inject constructor(
      * Feature 3: Gemini AI Project Architect -> Generates Project + Headings + To-Dos and navigates to it.
      */
     fun submitGeminiProjectArchitect(goalPrompt: String, locale: Locale = Locale.getDefault()) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             _isGeminiBusy.value = true
             val blueprint = geminiService.generateProjectBlueprint(goalPrompt, locale)
             val projectId = repository.createProjectFromBlueprint(
@@ -734,7 +765,7 @@ class ThingsbookViewModel @Inject constructor(
      * Feature 4: Gemini Logbook Reflection -> Summarizes completed tasks & offers 1-tap focus tasks for Today.
      */
     fun generateGeminiLogbookReflection(locale: Locale = Locale.getDefault()) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             _isGeminiBusy.value = true
             val completedTitles = logbookTasks.value.map { it.title }
             _logbookAiReview.value = geminiService.generateLogbookReflection(completedTitles, locale)
@@ -743,7 +774,7 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun adoptSuggestedFocusTaskForToday(title: String) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             val zone = ZoneId.systemDefault()
             val todayEpoch = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
             repository.createOrUpdateTask(
@@ -756,7 +787,7 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun triggerManualCloudSync() {
-        viewModelScope.launch {
+        safeVmScope.launch {
             syncRepository.syncBidirectionalDeltas()
         }
     }
@@ -772,7 +803,7 @@ class ThingsbookViewModel @Inject constructor(
      * Registers the user on the built-in Thingsbook Cloud Backend and immediately pushes all local records.
      */
     fun registerWithEmailPassword(email: String, password: String) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             _isSigningIn.value = true
             _authErrorMessage.value = null
             _authInfoMessage.value = null
@@ -793,7 +824,7 @@ class ThingsbookViewModel @Inject constructor(
      * (`updatedAt > lastSyncTimestamp`), and attaches real-time multi-device listeners.
      */
     fun signInWithEmailPassword(email: String, password: String) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             _isSigningIn.value = true
             _authErrorMessage.value = null
             _authInfoMessage.value = null
@@ -812,7 +843,7 @@ class ThingsbookViewModel @Inject constructor(
      * Sends a password reset email via Firebase Auth (`sendPasswordResetEmail`).
      */
     fun sendPasswordReset(email: String) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             _isSigningIn.value = true
             _authErrorMessage.value = null
             _authInfoMessage.value = null
@@ -832,7 +863,7 @@ class ThingsbookViewModel @Inject constructor(
      * Uses the entered Google email if provided, or creates a Google Cloud device profile via the enabled provider.
      */
     fun signInWithGoogleAccount(optionalEmail: String? = null) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             _isSigningIn.value = true
             _authErrorMessage.value = null
             _authInfoMessage.value = null
@@ -848,7 +879,7 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun signInAnonymouslyAndSync() {
-        viewModelScope.launch {
+        safeVmScope.launch {
             _isSigningIn.value = true
             _authErrorMessage.value = null
             _authInfoMessage.value = null
@@ -864,13 +895,13 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun signOutCloud() {
-        viewModelScope.launch {
+        safeVmScope.launch {
             syncRepository.signOutAccount()
         }
     }
 
     fun scheduleTaskReminder(task: TaskItem, triggerAtMillis: Long) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.createOrUpdateTask(
                 id = task.id,
                 title = task.title,
@@ -897,7 +928,7 @@ class ThingsbookViewModel @Inject constructor(
         newWhenDate: Long?,
         newReminderTime: Long?
     ) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.createOrUpdateTask(
                 id = task.id,
                 title = task.title,
@@ -935,19 +966,19 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun createTag(title: String, shortcut: String?) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.createOrUpdateTag(title = title, shortcut = shortcut)
         }
     }
 
     fun renameTag(tagId: String, newTitle: String, shortcut: String?) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.createOrUpdateTag(id = tagId, title = newTitle, shortcut = shortcut)
         }
     }
 
     fun deleteTag(tagId: String) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             if (_selectedFilterTagId.value == tagId) {
                 _selectedFilterTagId.value = null
             }
@@ -956,7 +987,7 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun updateTaskTags(task: TaskItem, newTagIds: List<String>) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             repository.createOrUpdateTask(
                 id = task.id,
                 title = task.title,
@@ -977,7 +1008,7 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun createAndAssignTagToTask(task: TaskItem, newTagTitle: String) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             val newId = repository.createOrUpdateTag(title = newTagTitle)
             val updatedTagIds = (task.tags.map { it.id } + newId).distinct()
             repository.createOrUpdateTask(
@@ -1044,57 +1075,61 @@ class ThingsbookViewModel @Inject constructor(
         areas,
         allTags
     ) { allRawTasks, projectsList, areasList, tagsList ->
-        val nonDeleted = allRawTasks.filter { !it.isDeleted }
-        val deletedCount = allRawTasks.count { it.isDeleted }
-        val openTasks = nonDeleted.filter { it.status == TaskStatus.OPEN }
-        val completedCount = nonDeleted.count { it.status == TaskStatus.COMPLETED }
-        val canceledCount = nonDeleted.count { it.status == TaskStatus.CANCELED }
+        runCatching {
+            val nonDeleted = allRawTasks.filter { !it.isDeleted }
+            val deletedCount = allRawTasks.count { it.isDeleted }
+            val openTasks = nonDeleted.filter { it.status == TaskStatus.OPEN }
+            val completedCount = nonDeleted.count { it.status == TaskStatus.COMPLETED }
+            val canceledCount = nonDeleted.count { it.status == TaskStatus.CANCELED }
 
-        val todayEndMillis = LocalDate.now()
-            .plusDays(1)
-            .atStartOfDay(ZoneId.systemDefault())
-            .toInstant()
-            .toEpochMilli() - 1L
+            val todayEndMillis = LocalDate.now()
+                .plusDays(1)
+                .atStartOfDay(ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli() - 1L
 
-        val todayCount = openTasks.count { t ->
-            t.scheduleState == ScheduleState.TODAY ||
-                t.scheduleState == ScheduleState.THIS_EVENING ||
-                (t.whenDate != null && t.whenDate <= todayEndMillis)
-        }
-        val upcomingCount = openTasks.count { t ->
-            t.scheduleState == ScheduleState.UPCOMING ||
-                (t.whenDate != null && t.whenDate > todayEndMillis)
-        }
-        val inboxCount = openTasks.count { t ->
-            t.scheduleState == ScheduleState.INBOX && t.projectId == null && t.areaId == null && t.whenDate == null
-        }
-        val anytimeCount = openTasks.count { t ->
-            t.scheduleState == ScheduleState.ANYTIME && t.whenDate == null && t.recurrenceRuleJson.isNullOrBlank()
-        }
-        val somedayCount = openTasks.count { t ->
-            t.scheduleState == ScheduleState.SOMEDAY
-        }
-        val recurringCount = openTasks.count { t ->
-            !t.recurrenceRuleJson.isNullOrBlank()
-        }
+            val todayCount = openTasks.count { t ->
+                t.scheduleState == ScheduleState.TODAY ||
+                    t.scheduleState == ScheduleState.THIS_EVENING ||
+                    (t.whenDate != null && t.whenDate <= todayEndMillis)
+            }
+            val upcomingCount = openTasks.count { t ->
+                t.scheduleState == ScheduleState.UPCOMING ||
+                    (t.whenDate != null && t.whenDate > todayEndMillis)
+            }
+            val inboxCount = openTasks.count { t ->
+                t.scheduleState == ScheduleState.INBOX && t.projectId == null && t.areaId == null && t.whenDate == null
+            }
+            val anytimeCount = openTasks.count { t ->
+                t.scheduleState == ScheduleState.ANYTIME && t.whenDate == null && t.recurrenceRuleJson.isNullOrBlank()
+            }
+            val somedayCount = openTasks.count { t ->
+                t.scheduleState == ScheduleState.SOMEDAY
+            }
+            val recurringCount = openTasks.count { t ->
+                !t.recurrenceRuleJson.isNullOrBlank()
+            }
 
-        ThingsbookStatistics(
-            totalRecordsCount = allRawTasks.size,
-            openTasksCount = openTasks.size,
-            todayTasksCount = todayCount,
-            upcomingTasksCount = upcomingCount,
-            anytimeTasksCount = anytimeCount,
-            inboxTasksCount = inboxCount,
-            somedayTasksCount = somedayCount,
-            recurringTasksCount = recurringCount,
-            completedTasksCount = completedCount,
-            canceledTasksCount = canceledCount,
-            deletedTasksCount = deletedCount,
-            activeProjectsCount = projectsList.size,
-            areasCount = areasList.size,
-            tagsCount = tagsList.size
-        )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ThingsbookStatistics())
+            ThingsbookStatistics(
+                totalRecordsCount = allRawTasks.size,
+                openTasksCount = openTasks.size,
+                todayTasksCount = todayCount,
+                upcomingTasksCount = upcomingCount,
+                anytimeTasksCount = anytimeCount,
+                inboxTasksCount = inboxCount,
+                somedayTasksCount = somedayCount,
+                recurringTasksCount = recurringCount,
+                completedTasksCount = completedCount,
+                canceledTasksCount = canceledCount,
+                deletedTasksCount = deletedCount,
+                activeProjectsCount = projectsList.size,
+                areasCount = areasList.size,
+                tagsCount = tagsList.size
+            )
+        }.getOrDefault(ThingsbookStatistics())
+    }
+        .catch { emit(ThingsbookStatistics()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), ThingsbookStatistics())
 
     fun setSettingsModalOpen(open: Boolean) {
         _isSettingsModalOpen.value = open
@@ -1114,9 +1149,13 @@ class ThingsbookViewModel @Inject constructor(
     fun setLocalOnlyDbMode(localOnly: Boolean) {
         _isLocalOnlyDbMode.value = localOnly
         settingsPrefs.edit().putBoolean("local_only_db_mode", localOnly).apply()
+        appContext.getSharedPreferences("thingsbook_settings_prefs", Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("local_only_db_mode", localOnly)
+            .apply()
         if (localOnly) {
-            viewModelScope.launch {
-                syncRepository.signOutAccount()
+            safeVmScope.launch {
+                runCatching { syncRepository.signOutAccount() }
             }
         }
     }
@@ -1126,7 +1165,7 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun exportTasksCsv(onCsvReady: (String) -> Unit) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             runCatching {
                 repository.exportTasksToCsv()
             }.onSuccess { csv ->
@@ -1139,7 +1178,7 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun importTasksCsv(csvContent: String) {
-        viewModelScope.launch {
+        safeVmScope.launch {
             runCatching {
                 repository.importTasksFromCsv(csvContent)
             }.onSuccess { count ->
@@ -1194,7 +1233,7 @@ class ThingsbookViewModel @Inject constructor(
     fun batchCompleteSelectedTasks() {
         val ids = _selectedTaskIds.value.toList()
         if (ids.isEmpty()) return
-        viewModelScope.launch {
+        safeVmScope.launch {
             ids.forEach { id ->
                 repository.updateTaskStatus(id, TaskStatus.COMPLETED)
             }
@@ -1205,7 +1244,7 @@ class ThingsbookViewModel @Inject constructor(
     fun batchDeleteSelectedTasks() {
         val ids = _selectedTaskIds.value.toList()
         if (ids.isEmpty()) return
-        viewModelScope.launch {
+        safeVmScope.launch {
             ids.forEach { id ->
                 repository.softDeleteTask(id)
             }
@@ -1221,7 +1260,7 @@ class ThingsbookViewModel @Inject constructor(
         val ids = _selectedTaskIds.value
         if (ids.isEmpty()) return
         val targets = allTasksInView.filter { it.id in ids }
-        viewModelScope.launch {
+        safeVmScope.launch {
             targets.forEach { task ->
                 repository.createOrUpdateTask(
                     id = task.id,
@@ -1253,7 +1292,7 @@ class ThingsbookViewModel @Inject constructor(
         val ids = _selectedTaskIds.value
         if (ids.isEmpty()) return
         val targets = allTasksInView.filter { it.id in ids }
-        viewModelScope.launch {
+        safeVmScope.launch {
             targets.forEach { task ->
                 repository.moveTaskToContainer(task.id, projectId, headingId, areaId)
             }
@@ -1262,12 +1301,12 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     init {
-        viewModelScope.launch {
+        safeVmScope.launch {
             runCatching {
                 repository.ensureDefaultWorkAndHomeAreas()
             }
         }
-        viewModelScope.launch {
+        safeVmScope.launch {
             runCatching {
                 combine(
                     inboxTasks,
@@ -1276,6 +1315,7 @@ class ThingsbookViewModel @Inject constructor(
                     upcomingTasks,
                     anytimeTasks
                 ) { a, b, c, d, e -> a.size + b.size + c.size + d.size + e.size }
+                    .catch { emit(0) }
                     .collect {
                         runCatching {
                             com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.refreshAllWidgets(appContext)

@@ -321,14 +321,20 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
             // 6. PendingIntent Template for Task Row Click & Direct Checkbox Completion
             val itemTemplateIntent = Intent(context, ThingsbookWidgetProvider::class.java).apply {
                 action = ACTION_ITEM_INTERACTION
+                setPackage(context.packageName)
                 putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
                 data = Uri.parse("thingsbook://widget/item/$appWidgetId")
+            }
+            val mutableFlag = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                PendingIntent.FLAG_MUTABLE
+            } else {
+                0
             }
             val itemTemplatePending = PendingIntent.getBroadcast(
                 context,
                 appWidgetId * 100 + 3,
                 itemTemplateIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+                PendingIntent.FLAG_UPDATE_CURRENT or mutableFlag
             )
             views.setPendingIntentTemplate(R.id.widget_task_list, itemTemplatePending)
 

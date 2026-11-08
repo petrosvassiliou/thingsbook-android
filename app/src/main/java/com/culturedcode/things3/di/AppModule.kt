@@ -10,6 +10,7 @@ import com.culturedcode.things3.data.local.dao.HeadingDao
 import com.culturedcode.things3.data.local.dao.ProjectDao
 import com.culturedcode.things3.data.local.dao.TagDao
 import com.culturedcode.things3.data.local.dao.TaskDao
+import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreSettings
@@ -39,6 +40,7 @@ object AppModule {
         )
             .addCallback(DatabaseSeeder(databaseProvider))
             .fallbackToDestructiveMigration()
+            .fallbackToDestructiveMigrationOnDowngrade()
             .build()
     }
 
@@ -62,11 +64,15 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideFirebaseAuth(): FirebaseAuth = FirebaseAuth.getInstance()
+    fun provideFirebaseAuth(@ApplicationContext context: Context): FirebaseAuth {
+        runCatching { FirebaseApp.initializeApp(context) }
+        return FirebaseAuth.getInstance()
+    }
 
     @Provides
     @Singleton
-    fun provideFirebaseFirestore(): FirebaseFirestore {
+    fun provideFirebaseFirestore(@ApplicationContext context: Context): FirebaseFirestore {
+        runCatching { FirebaseApp.initializeApp(context) }
         return FirebaseFirestore.getInstance().apply {
             runCatching {
                 firestoreSettings = FirebaseFirestoreSettings.Builder()
@@ -76,3 +82,4 @@ object AppModule {
         }
     }
 }
+

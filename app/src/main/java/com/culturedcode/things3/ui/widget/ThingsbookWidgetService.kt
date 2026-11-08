@@ -34,7 +34,8 @@ private class ThingsbookRemoteViewsFactory(
     private var selectedView: String = ThingsbookWidgetProvider.VIEW_TODAY
 
     override fun onCreate() {
-        loadTasksBlocking()
+        // Do NOT call runBlocking on the Main UI Thread in onCreate()!
+        // Android always invokes onDataSetChanged() on a background binder thread immediately after.
     }
 
     override fun onDataSetChanged() {
@@ -42,7 +43,9 @@ private class ThingsbookRemoteViewsFactory(
     }
 
     private fun loadTasksBlocking() {
-        selectedView = ThingsbookWidgetProvider.getSelectedViewForWidget(context, appWidgetId)
+        selectedView = runCatching {
+            ThingsbookWidgetProvider.getSelectedViewForWidget(context, appWidgetId)
+        }.getOrDefault(ThingsbookWidgetProvider.VIEW_TODAY)
         tasks = runCatching {
             val entryPoint = EntryPointAccessors.fromApplication(
                 context.applicationContext,
@@ -60,8 +63,8 @@ private class ThingsbookRemoteViewsFactory(
 
     override fun getCount(): Int = tasks.size
 
-    override fun getViewAt(position: Int): RemoteViews? {
-        val task = tasks.getOrNull(position) ?: return null
+    override fun getViewAt(position: Int): RemoteViews? = runCatching {
+        val task = tasks.getOrNull(position) ?: return@runCatching null
         val rv = RemoteViews(context.packageName, R.layout.widget_thingsbook_task_item)
 
         val displayTitle = task.title.ifBlank { context.getString(R.string.entity_new_todo) }
@@ -98,8 +101,8 @@ private class ThingsbookRemoteViewsFactory(
         }
         rv.setOnClickFillInIntent(R.id.widget_item_row_root, openFillIn)
 
-        return rv
-    }
+        rv
+    }.getOrNull()
 
     private fun buildTaskMetadataBadge(task: TaskItem): String? {
         val zone = ZoneId.systemDefault()

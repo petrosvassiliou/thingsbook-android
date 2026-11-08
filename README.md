@@ -12,9 +12,9 @@ Eine eigenständige, native Android-Produktivitäts-App (für **Android-Smartpho
 
 ---
 
-## Direkt-Download (Installierbares Android-APK — Version 1.3.1)
+## Direkt-Download (Installierbares Android-APK — Version 1.3.2)
 
-- **[Thingsbook-v1.3.1-full.apk herunterladen (v1.3.1 — Startup-Crash-Fix für ChromeOS/Tablets/Smartphones, Inline-Schnellsuche, Einstellungen-Modal mit Live-Statistiken & CSV-Import/Export, ausblendbare Seitenleiste, bis zu 8 Bereiche, Rechtsklick/Long-Press-Kontextmenü, Things-for-iPhone-Wischgesten, Mehrfachauswahl per Maus & intelligente Textbox-Cursorsteuerung)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.3.1-full.apk)**
+- **[Thingsbook-v1.3.2-full.apk herunterladen (v1.3.2 — Globaler CrashGuardian Main/Background-Thread-Schutz, Fix für Widget Main-Thread-Deadlock & Coroutine/Room-Flows, Inline-Schnellsuche, Einstellungen-Modal mit Live-Statistiken & CSV-Import/Export, ausblendbare Seitenleiste, bis zu 8 Bereiche, Rechtsklick/Long-Press-Kontextmenü, Things-for-iPhone-Wischgesten, Mehrfachauswahl per Maus & intelligente Textbox-Cursorsteuerung)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.3.2-full.apk)**
 
 ---
 

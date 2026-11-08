@@ -68,12 +68,6 @@ class ThingsbookViewModel @Inject constructor(
     @Volatile
     private var activeAuth: FirebaseAuth = firebaseAuth
 
-    init {
-        viewModelScope.launch {
-            repository.ensureDefaultWorkAndHomeAreas()
-        }
-    }
-
     private val _navigationTarget = MutableStateFlow<ActiveNavigationTarget>(
         ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
     )
@@ -162,21 +156,6 @@ class ThingsbookViewModel @Inject constructor(
 
     val logbookTasks: StateFlow<List<TaskItem>> = repository.observeLogbookTasks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    init {
-        viewModelScope.launch {
-            combine(
-                inboxTasks,
-                todayDaytimeTasks,
-                thisEveningTasks,
-                upcomingTasks,
-                anytimeTasks
-            ) { a, b, c, d, e -> a.size + b.size + c.size + d.size + e.size }
-                .collect {
-                    com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.refreshAllWidgets(appContext)
-                }
-        }
-    }
 
     val activeProjects: StateFlow<List<Project>> = repository.observeActiveProjectsWithProgress()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -1279,6 +1258,30 @@ class ThingsbookViewModel @Inject constructor(
                 repository.moveTaskToContainer(task.id, projectId, headingId, areaId)
             }
             _selectedTaskIds.value = emptySet()
+        }
+    }
+
+    init {
+        viewModelScope.launch {
+            runCatching {
+                repository.ensureDefaultWorkAndHomeAreas()
+            }
+        }
+        viewModelScope.launch {
+            runCatching {
+                combine(
+                    inboxTasks,
+                    todayDaytimeTasks,
+                    thisEveningTasks,
+                    upcomingTasks,
+                    anytimeTasks
+                ) { a, b, c, d, e -> a.size + b.size + c.size + d.size + e.size }
+                    .collect {
+                        runCatching {
+                            com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.refreshAllWidgets(appContext)
+                        }
+                    }
+            }
         }
     }
 }

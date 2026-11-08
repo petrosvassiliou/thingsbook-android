@@ -17,6 +17,9 @@
     <uses-feature
         android:name="android.hardware.type.pc"
         android:required="false" />
+    <uses-feature
+        android:name="android.software.app_widgets"
+        android:required="false" />
 
     <application
         android:name=".Things3Application"

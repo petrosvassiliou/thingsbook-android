@@ -943,23 +943,47 @@ fun ExpandableTaskCard(
         }
 
         // Right-Click (Mouse) & Long-Press (Phone) Context Menu
-        DropdownMenu(
-            expanded = showContextMenu,
-            onDismissRequest = { showContextMenu = false },
-            modifier = Modifier.background(colors.cardElevatedSurface)
-        ) {
-            if (onToggleSelection != null) {
+        if (showContextMenu) {
+            DropdownMenu(
+                expanded = showContextMenu,
+                onDismissRequest = { showContextMenu = false },
+                modifier = Modifier.background(colors.cardElevatedSurface)
+            ) {
+                if (onToggleSelection != null) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = if (isSelected) "Auswahl aufheben" else "Aufgabe auswählen (Mehrfachauswahl)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.thingsBlue
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Outlined.CheckCircleOutline,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        onClick = {
+                            showContextMenu = false
+                            onToggleSelection()
+                        }
+                    )
+                }
+                val isCompleted = task.status == TaskStatus.COMPLETED
                 DropdownMenuItem(
                     text = {
                         Text(
-                            text = if (isSelected) "Auswahl aufheben" else "Aufgabe auswählen (Mehrfachauswahl)",
+                            text = if (isCompleted) "Als offen markieren" else "Als erledigt markieren",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = colors.thingsBlue
+                            color = colors.primaryText
                         )
                     },
                     leadingIcon = {
                         Icon(
-                            imageVector = Icons.Outlined.CheckCircleOutline,
+                            imageVector = Icons.Outlined.Check,
                             contentDescription = null,
                             tint = colors.thingsBlue,
                             modifier = Modifier.size(18.dp)
@@ -967,201 +991,179 @@ fun ExpandableTaskCard(
                     },
                     onClick = {
                         showContextMenu = false
-                        onToggleSelection()
+                        onStatusChange(if (isCompleted) TaskStatus.OPEN else TaskStatus.COMPLETED)
+                    }
+                )
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = "Wann? (Datum & Erinnerung)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.primaryText
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.CalendarToday,
+                            contentDescription = null,
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    onClick = {
+                        showContextMenu = false
+                        showWhenDialog = true
+                    }
+                )
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = "Fälligkeit / Deadline anpassen",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.primaryText
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.Flag,
+                            contentDescription = null,
+                            tint = colors.deadlineUrgentRed,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    onClick = {
+                        showContextMenu = false
+                        showDeadlineDialog = true
+                    }
+                )
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = "Wiederholung konfigurieren",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.primaryText
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.Repeat,
+                            contentDescription = null,
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    onClick = {
+                        showContextMenu = false
+                        showRepeatDialog = true
+                    }
+                )
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = "Verschieben (Bereich / Projekt)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.primaryText
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.Folder,
+                            contentDescription = null,
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    onClick = {
+                        showContextMenu = false
+                        showMoveDialog = true
+                    }
+                )
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = "Tags zuweisen",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.primaryText
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.LocalOffer,
+                            contentDescription = null,
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    onClick = {
+                        showContextMenu = false
+                        showTagPickerDialog = true
+                    }
+                )
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = "In Teilaufgaben zerlegen (Gemini ✨)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.thingsBlue
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.AutoAwesome,
+                            contentDescription = null,
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    onClick = {
+                        showContextMenu = false
+                        onTriggerGeminiMagicBreakdown()
+                    }
+                )
+                HorizontalDivider(color = colors.hairlineDivider)
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = "Als abgebrochen markieren",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.secondaryText
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.Close,
+                            contentDescription = null,
+                            tint = colors.secondaryText,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    onClick = {
+                        showContextMenu = false
+                        onStatusChange(TaskStatus.CANCELED)
+                    }
+                )
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = "Aufgabe löschen",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.deadlineUrgentRed
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.DeleteOutline,
+                            contentDescription = null,
+                            tint = colors.deadlineUrgentRed,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    onClick = {
+                        showContextMenu = false
+                        onDeleteTask()
                     }
                 )
             }
-            val isCompleted = task.status == TaskStatus.COMPLETED
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        text = if (isCompleted) "Als offen markieren" else "Als erledigt markieren",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.primaryText
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Outlined.Check,
-                        contentDescription = null,
-                        tint = colors.thingsBlue,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                onClick = {
-                    showContextMenu = false
-                    onStatusChange(if (isCompleted) TaskStatus.OPEN else TaskStatus.COMPLETED)
-                }
-            )
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        text = "Wann? (Datum & Erinnerung)",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.primaryText
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Outlined.CalendarToday,
-                        contentDescription = null,
-                        tint = colors.thingsBlue,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                onClick = {
-                    showContextMenu = false
-                    showWhenDialog = true
-                }
-            )
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        text = "Fälligkeit / Deadline anpassen",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.primaryText
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Outlined.Flag,
-                        contentDescription = null,
-                        tint = colors.deadlineUrgentRed,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                onClick = {
-                    showContextMenu = false
-                    showDeadlineDialog = true
-                }
-            )
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        text = "Wiederholung konfigurieren",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.primaryText
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Outlined.Repeat,
-                        contentDescription = null,
-                        tint = colors.thingsBlue,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                onClick = {
-                    showContextMenu = false
-                    showRepeatDialog = true
-                }
-            )
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        text = "Verschieben (Bereich / Projekt)",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.primaryText
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Outlined.Folder,
-                        contentDescription = null,
-                        tint = colors.thingsBlue,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                onClick = {
-                    showContextMenu = false
-                    showMoveDialog = true
-                }
-            )
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        text = "Tags zuweisen",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.primaryText
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Outlined.LocalOffer,
-                        contentDescription = null,
-                        tint = colors.thingsBlue,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                onClick = {
-                    showContextMenu = false
-                    showTagPickerDialog = true
-                }
-            )
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        text = "In Teilaufgaben zerlegen (Gemini ✨)",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.thingsBlue
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Outlined.AutoAwesome,
-                        contentDescription = null,
-                        tint = colors.thingsBlue,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                onClick = {
-                    showContextMenu = false
-                    onTriggerGeminiMagicBreakdown()
-                }
-            )
-            HorizontalDivider(color = colors.hairlineDivider)
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        text = "Als abgebrochen markieren",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.secondaryText
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Outlined.Close,
-                        contentDescription = null,
-                        tint = colors.secondaryText,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                onClick = {
-                    showContextMenu = false
-                    onStatusChange(TaskStatus.CANCELED)
-                }
-            )
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        text = "Aufgabe löschen",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.deadlineUrgentRed
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Outlined.DeleteOutline,
-                        contentDescription = null,
-                        tint = colors.deadlineUrgentRed,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                onClick = {
-                    showContextMenu = false
-                    onDeleteTask()
-                }
-            )
         }
     }
 

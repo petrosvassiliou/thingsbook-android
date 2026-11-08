@@ -16,6 +16,7 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -29,25 +30,39 @@ interface ThingsWidgetEntryPoint {
 
 class ThingsbookWidgetProvider : AppWidgetProvider() {
 
+    private val widgetScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, _ -> }
+    )
+
     override fun onUpdate(
         context: Context,
-        appWidgetManager: AppWidgetManager,
-        appWidgetIds: IntArray
+        appWidgetManager: AppWidgetManager?,
+        appWidgetIds: IntArray?
     ) {
-        val pendingResult = goAsync()
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+        val mgr = appWidgetManager ?: runCatching { AppWidgetManager.getInstance(context) }.getOrNull() ?: return
+        val ids = appWidgetIds ?: return
+        if (ids.isEmpty()) return
+
+        val pendingResult = runCatching { goAsync() }.getOrNull()
+        widgetScope.launch {
             try {
-                for (widgetId in appWidgetIds) {
-                    updateSingleWidget(context, appWidgetManager, widgetId)
+                for (widgetId in ids) {
+                    runCatching {
+                        updateSingleWidget(context, mgr, widgetId)
+                    }
                 }
+            } catch (_: Throwable) {
             } finally {
-                pendingResult.finish()
+                runCatching { pendingResult?.finish() }
             }
         }
     }
 
-    override fun onReceive(context: Context, intent: Intent) {
-        super.onReceive(context, intent)
+    override fun onReceive(context: Context, intent: Intent?) {
+        if (intent == null) return
+        runCatching {
+            super.onReceive(context, intent)
+        }
         when (intent.action) {
             ACTION_SWITCH_VIEW -> {
                 val widgetId = intent.getIntExtra(
@@ -57,14 +72,17 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
                 val targetView = intent.getStringExtra(EXTRA_TARGET_VIEW) ?: VIEW_TODAY
                 if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
                     setSelectedViewForWidget(context, widgetId, targetView)
-                    val pendingResult = goAsync()
-                    CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                    val pendingResult = runCatching { goAsync() }.getOrNull()
+                    widgetScope.launch {
                         try {
-                            val mgr = AppWidgetManager.getInstance(context)
-                            mgr.notifyAppWidgetViewDataChanged(widgetId, R.id.widget_task_list)
-                            updateSingleWidget(context, mgr, widgetId)
+                            val mgr: AppWidgetManager? = runCatching { AppWidgetManager.getInstance(context) }.getOrNull()
+                            if (mgr != null) {
+                                mgr.notifyAppWidgetViewDataChanged(widgetId, R.id.widget_task_list)
+                                updateSingleWidget(context, mgr, widgetId)
+                            }
+                        } catch (_: Throwable) {
                         } finally {
-                            pendingResult.finish()
+                            runCatching { pendingResult?.finish() }
                         }
                     }
                 }
@@ -76,8 +94,8 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
                 val viewName = intent.getStringExtra(EXTRA_TARGET_VIEW) ?: VIEW_TODAY
 
                 if (interactionType == INTERACTION_COMPLETE_TASK && !taskId.isNullOrBlank()) {
-                    val pendingResult = goAsync()
-                    CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                    val pendingResult = runCatching { goAsync() }.getOrNull()
+                    widgetScope.launch {
                         try {
                             val entryPoint = EntryPointAccessors.fromApplication(
                                 context.applicationContext,
@@ -88,42 +106,49 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
                                 com.culturedcode.things3.domain.model.TaskStatus.COMPLETED
                             )
                             refreshAllWidgetsSync(context)
+                        } catch (_: Throwable) {
                         } finally {
-                            pendingResult.finish()
+                            runCatching { pendingResult?.finish() }
                         }
                     }
                 } else {
-                    val openIntent = Intent(context, MainActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                        putExtra(EXTRA_WIDGET_SMART_VIEW, viewName)
-                        if (!taskId.isNullOrBlank()) {
-                            putExtra(EXTRA_TASK_ID, taskId)
+                    runCatching {
+                        val openIntent = Intent(context, MainActivity::class.java).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            putExtra(EXTRA_WIDGET_SMART_VIEW, viewName)
+                            if (!taskId.isNullOrBlank()) {
+                                putExtra(EXTRA_TASK_ID, taskId)
+                            }
                         }
+                        context.startActivity(openIntent)
                     }
-                    context.startActivity(openIntent)
                 }
             }
 
             ACTION_REFRESH_ALL -> {
-                val pendingResult = goAsync()
-                CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                val pendingResult = runCatching { goAsync() }.getOrNull()
+                widgetScope.launch {
                     try {
                         refreshAllWidgetsSync(context)
+                    } catch (_: Throwable) {
                     } finally {
-                        pendingResult.finish()
+                        runCatching { pendingResult?.finish() }
                     }
                 }
             }
         }
     }
 
-    override fun onDeleted(context: Context, appWidgetIds: IntArray) {
-        super.onDeleted(context, appWidgetIds)
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
-        for (id in appWidgetIds) {
-            prefs.remove(prefKeyForWidget(id))
+    override fun onDeleted(context: Context, appWidgetIds: IntArray?) {
+        runCatching {
+            super.onDeleted(context, appWidgetIds)
+            if (appWidgetIds == null) return
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            for (id in appWidgetIds) {
+                prefs.remove(prefKeyForWidget(id))
+            }
+            prefs.apply()
         }
-        prefs.apply()
     }
 
     companion object {
@@ -162,27 +187,40 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
         }
 
         fun refreshAllWidgets(context: Context) {
-            val intent = Intent(context, ThingsbookWidgetProvider::class.java).apply {
-                action = ACTION_REFRESH_ALL
+            runCatching {
+                val mgr: AppWidgetManager? = AppWidgetManager.getInstance(context)
+                if (mgr == null) return
+                val ids: IntArray? = mgr.getAppWidgetIds(ComponentName(context, ThingsbookWidgetProvider::class.java))
+                if (ids == null || ids.isEmpty()) return
+
+                val intent = Intent(context, ThingsbookWidgetProvider::class.java).apply {
+                    action = ACTION_REFRESH_ALL
+                }
+                context.sendBroadcast(intent)
             }
-            context.sendBroadcast(intent)
         }
 
         suspend fun refreshAllWidgetsSync(context: Context) {
-            val mgr = AppWidgetManager.getInstance(context)
-            val ids = mgr.getAppWidgetIds(ComponentName(context, ThingsbookWidgetProvider::class.java))
-            if (ids.isEmpty()) return
-            mgr.notifyAppWidgetViewDataChanged(ids, R.id.widget_task_list)
-            for (id in ids) {
-                updateSingleWidget(context, mgr, id)
+            runCatching {
+                val mgr: AppWidgetManager? = AppWidgetManager.getInstance(context)
+                if (mgr == null) return
+                val ids: IntArray? = mgr.getAppWidgetIds(ComponentName(context, ThingsbookWidgetProvider::class.java))
+                if (ids == null || ids.isEmpty()) return
+                mgr.notifyAppWidgetViewDataChanged(ids, R.id.widget_task_list)
+                for (id in ids) {
+                    runCatching {
+                        updateSingleWidget(context, mgr, id)
+                    }
+                }
             }
         }
 
         suspend fun updateSingleWidget(
             context: Context,
-            appWidgetManager: AppWidgetManager,
+            appWidgetManager: AppWidgetManager?,
             appWidgetId: Int
         ) {
+            val mgr = appWidgetManager ?: return
             val selectedView = getSelectedViewForWidget(context, appWidgetId)
             val entryPoint = EntryPointAccessors.fromApplication(
                 context.applicationContext,
@@ -294,7 +332,7 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
             )
             views.setPendingIntentTemplate(R.id.widget_task_list, itemTemplatePending)
 
-            appWidgetManager.updateAppWidget(appWidgetId, views)
+            mgr.updateAppWidget(appWidgetId, views)
         }
     }
 }

@@ -121,16 +121,22 @@ import com.culturedcode.things3.ui.components.DeadlineDatePickerDialog
 import com.culturedcode.things3.ui.components.ExpandableTaskCard
 import com.culturedcode.things3.ui.components.GeminiAssistantModal
 import com.culturedcode.things3.ui.components.GeminiLogbookReflectionCard
+import com.culturedcode.things3.ui.components.MagicPlusBackdropScrim
+import com.culturedcode.things3.ui.components.MagicPlusContextMode
 import com.culturedcode.things3.ui.components.MagicPlusDragState
 import com.culturedcode.things3.ui.components.MagicPlusFab
 import com.culturedcode.things3.ui.components.MagicPlusInsertionGap
 import com.culturedcode.things3.ui.components.MoveTaskToProjectOrAreaDialog
 import com.culturedcode.things3.ui.components.ProjectProgressRing
+import com.culturedcode.things3.ui.components.QuickCreateAreaDialog
+import com.culturedcode.things3.ui.components.SampleTasksAccountMergeDialog
 import com.culturedcode.things3.ui.components.SmartViewIcon
 import com.culturedcode.things3.ui.components.SmartViewType
 import com.culturedcode.things3.ui.components.ThingsAreaManagerModal
 import com.culturedcode.things3.ui.components.ThingsAuthAndSyncModal
 import com.culturedcode.things3.ui.components.ThingsDeadlineBadge
+import com.culturedcode.things3.ui.components.ThingsHoverTooltip
+import com.culturedcode.things3.ui.components.ThingsInitialSetupBanner
 import com.culturedcode.things3.ui.components.ThingsNotificationSettingsModal
 import com.culturedcode.things3.ui.components.ThingsReminderBadge
 import com.culturedcode.things3.ui.components.ThingsRepeatBadge
@@ -138,6 +144,7 @@ import com.culturedcode.things3.ui.components.ThingsSettingsModal
 import com.culturedcode.things3.ui.components.ThingsTagManagerModal
 import com.culturedcode.things3.ui.components.ThingsTagPill
 import com.culturedcode.things3.ui.components.ThingsWhenBadge
+import com.culturedcode.things3.ui.components.ThingsbookBrandSymbol
 import com.culturedcode.things3.ui.components.ThisEveningHeaderBadge
 import com.culturedcode.things3.ui.theme.ThingsTheme
 import com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget
@@ -311,6 +318,7 @@ fun ThingsSmartViewScreen(
         ) {
             if (showSidebar) {
                 ThingsChromebookSidebar(
+                    viewModel = viewModel,
                     navTarget = navTarget,
                     smartViewCounts = smartViewCounts,
                     areas = areas,
@@ -323,8 +331,7 @@ fun ThingsSmartViewScreen(
                         projectDialogPreselectedAreaId = areaId
                         editingProject = null
                         showCreateProjectDialog = true
-                    },
-                    onToggleSidebar = { viewModel.toggleSidebarVisible() }
+                    }
                 )
                 VerticalDivider(
                     color = colors.hairlineDivider,
@@ -353,6 +360,7 @@ fun ThingsSmartViewScreen(
                         isWideScreen = isWideScreen,
                         isSidebarVisible = isSidebarVisible,
                         isQuickFindOpen = isQuickFindOpen,
+                        todayCount = todayTasks.size + eveningTasks.size,
                         areas = areas,
                         activeProjects = activeProjects,
                         activeLocale = activeLocale
@@ -423,6 +431,7 @@ fun ThingsSmartViewScreen(
                         navTarget = navTarget,
                         isProjectView = isProjectView,
                         isAreaView = isAreaView,
+                        isQuickFindOpen = isQuickFindOpen,
                         currentArea = currentArea,
                         primaryTasks = primaryTasks,
                         filteredEveningTasks = filteredEveningTasks,
@@ -504,23 +513,20 @@ fun ThingsSmartViewScreen(
             )
         }
 
-        // Draggable "Magic Plus" Floating Action Button (bottom-right)
-        MagicPlusFab(
-            itemCount = primaryTasks.size,
-            allowHeadingDrop = isProjectView,
-            onQuickTapCreateTodo = {
-                viewModel.createTaskAtPosition(primaryTasks, 0, "")
-            },
+        // Expandable Context-Sensitive "Magic Plus" Menu + Drag & Drop FAB (bottom-right)
+        MagicPlusOverlaySection(
+            viewModel = viewModel,
+            navTarget = navTarget,
+            currentArea = currentArea,
+            primaryTasks = primaryTasks,
+            projectHeadings = projectHeadings,
+            areasCount = areas.size,
             onDragStateChanged = { state -> magicDragState = state },
-            onDropCreateTodoAt = { dropIdx ->
-                viewModel.createTaskAtPosition(primaryTasks, dropIdx, "")
-            },
-            onDropCreateHeadingAt = { dropIdx ->
-                viewModel.createHeadingInCurrentProject(dropIdx.coerceIn(0, projectHeadings.size), "")
-            },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 24.dp, bottom = 28.dp)
+            onRequestCreateProject = { areaId ->
+                projectDialogPreselectedAreaId = areaId
+                editingProject = null
+                showCreateProjectDialog = true
+            }
         )
 
         ThingsModalsOverlay(
@@ -539,6 +545,69 @@ fun ThingsSmartViewScreen(
                 showCreateProjectDialog = false
                 editingProject = null
             }
+        )
+    }
+}
+
+@Composable
+private fun MagicPlusOverlaySection(
+    viewModel: ThingsbookViewModel,
+    navTarget: ActiveNavigationTarget,
+    currentArea: Area?,
+    primaryTasks: List<TaskItem>,
+    projectHeadings: List<Heading>,
+    areasCount: Int,
+    onDragStateChanged: (MagicPlusDragState) -> Unit,
+    onRequestCreateProject: (String?) -> Unit
+) {
+    val isMagicPlusMenuOpen by viewModel.isMagicPlusMenuOpen.collectAsState()
+    val contextMode = when (navTarget) {
+        is ActiveNavigationTarget.ProjectDetail -> MagicPlusContextMode.PROJECT_DETAIL
+        is ActiveNavigationTarget.AreaDetail -> MagicPlusContextMode.AREA_DETAIL
+        is ActiveNavigationTarget.SmartView -> {
+            if (navTarget.type == SmartViewType.LOGBOOK) {
+                MagicPlusContextMode.LOGBOOK
+            } else {
+                MagicPlusContextMode.SMART_VIEW
+            }
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        MagicPlusBackdropScrim(
+            visible = isMagicPlusMenuOpen,
+            onDismiss = { viewModel.setMagicPlusMenuOpen(false) },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        MagicPlusFab(
+            itemCount = primaryTasks.size,
+            contextMode = contextMode,
+            canCreateArea = areasCount < ThingsRepository.MAX_AREAS,
+            isMenuExpanded = isMagicPlusMenuOpen,
+            onMenuExpandedChange = { viewModel.setMagicPlusMenuOpen(it) },
+            onCreateTodo = {
+                viewModel.createTaskAtPosition(primaryTasks, 0, "")
+            },
+            onCreateProject = {
+                onRequestCreateProject(currentArea?.id)
+            },
+            onCreateHeading = {
+                viewModel.createHeadingInCurrentProject(projectHeadings.size, "")
+            },
+            onCreateArea = {
+                viewModel.setQuickCreateAreaDialogOpen(true)
+            },
+            onDragStateChanged = onDragStateChanged,
+            onDropCreateTodoAt = { dropIdx ->
+                viewModel.createTaskAtPosition(primaryTasks, dropIdx, "")
+            },
+            onDropCreateHeadingAt = { dropIdx ->
+                viewModel.createHeadingInCurrentProject(dropIdx.coerceIn(0, projectHeadings.size), "")
+            },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 24.dp, bottom = 28.dp)
         )
     }
 }
@@ -599,6 +668,7 @@ private fun ThingsTopHeaderAndQuickFindSection(
     isWideScreen: Boolean,
     isSidebarVisible: Boolean,
     isQuickFindOpen: Boolean,
+    todayCount: Int,
     areas: List<Area>,
     activeProjects: List<Project>,
     activeLocale: Locale
@@ -609,17 +679,27 @@ private fun ThingsTopHeaderAndQuickFindSection(
     val quickFindTasks by viewModel.quickFindTaskResults.collectAsState()
     val quickFindProjects by viewModel.quickFindProjectResults.collectAsState()
     val uiErrorMessage by viewModel.uiErrorMessage.collectAsState()
+    val showTodayAppBadge by viewModel.showTodayAppBadge.collectAsState()
+    val hasSampleTasks by viewModel.hasSampleTasks.collectAsState()
+    val isInitialSetupBannerDismissed by viewModel.isInitialSetupBannerDismissed.collectAsState()
+    val currentUserIdentifier by viewModel.currentUserIdentifier.collectAsState()
     var showLanguageMenu by remember { mutableStateOf(false) }
 
-    // Top Utility & Navigation Bar (Sidebar Toggle, Quick Find, Gemini AI ✨, Areas 📦, Tags 🏷️, Notifications 🔔, Language, Cloud Sync, Settings ⚙️)
+    val showSidebar = isWideScreen && isSidebarVisible
+
+    // Top Utility & Navigation Bar (Sidebar Toggle, Thingsbook Symbol when sidebar hidden, Quick Find, Gemini AI ✨, Areas 📦, Tags 🏷️, Notifications 🔔, Language, Cloud Sync, Settings ⚙️)
     TopThingsbookBar(
         isWideScreen = isWideScreen,
         isSidebarVisible = isSidebarVisible,
+        showBrandSymbol = !showSidebar,
+        todayCount = todayCount,
+        showTodayAppBadge = showTodayAppBadge,
         isQuickFindOpen = isQuickFindOpen,
         syncStatus = syncStatus,
         dailyDigestEnabled = dailyDigestConfig.enabled,
         showLanguageMenu = showLanguageMenu,
         onToggleSidebar = { viewModel.toggleSidebarVisible() },
+        onSelectTodayView = { viewModel.selectSmartView(SmartViewType.TODAY) },
         onToggleLanguageMenu = { showLanguageMenu = it },
         onSelectLanguage = { tag ->
             showLanguageMenu = false
@@ -642,6 +722,19 @@ private fun ThingsTopHeaderAndQuickFindSection(
         ThingsErrorBanner(
             message = uiErrorMessage.orEmpty(),
             onDismiss = { viewModel.clearUiErrorMessage() }
+        )
+    }
+
+    // Initial Setup Banner (shown only while seeded sample tasks still exist and user has not signed in or dismissed)
+    AnimatedVisibility(
+        visible = hasSampleTasks && !isInitialSetupBannerDismissed && currentUserIdentifier.isNullOrBlank(),
+        enter = expandVertically() + fadeIn(),
+        exit = shrinkVertically() + fadeOut()
+    ) {
+        ThingsInitialSetupBanner(
+            onConnectAccount = { viewModel.setAuthModalOpen(true) },
+            onDeleteSampleTasksNow = { viewModel.deleteSampleTasksForLocalSetup() },
+            onDismissBanner = { viewModel.dismissInitialSetupBanner() }
         )
     }
 
@@ -699,6 +792,7 @@ private fun ThingsTaskRowItem(
     activeProjects: List<Project>,
     allHeadings: List<Heading>,
     expandedTaskId: String?,
+    isQuickFindOpen: Boolean,
     selectedTaskIds: Set<String>,
     allVisibleTaskIds: List<String>,
     magicBreakdownTaskId: String?,
@@ -713,6 +807,7 @@ private fun ThingsTaskRowItem(
         isExpanded = expandedTaskId == task.id,
         isSelected = task.id in selectedTaskIds,
         isSelectionModeActive = selectedTaskIds.isNotEmpty(),
+        suppressContextMenuExternal = expandedTaskId != null || isQuickFindOpen,
         onToggleSelection = { viewModel.toggleTaskSelection(task.id) },
         onRangeSelect = { viewModel.selectTaskRange(allVisibleTaskIds, task.id) },
         isGeneratingMagicBreakdown = magicBreakdownTaskId == task.id,
@@ -750,6 +845,7 @@ private fun ThingsMainTaskLazyList(
     navTarget: ActiveNavigationTarget,
     isProjectView: Boolean,
     isAreaView: Boolean,
+    isQuickFindOpen: Boolean,
     currentArea: Area?,
     primaryTasks: List<TaskItem>,
     filteredEveningTasks: List<TaskItem>,
@@ -890,6 +986,7 @@ private fun ThingsMainTaskLazyList(
                     activeProjects = activeProjects,
                     allHeadings = allHeadings,
                     expandedTaskId = expandedTaskId,
+                    isQuickFindOpen = isQuickFindOpen,
                     selectedTaskIds = selectedTaskIds,
                     allVisibleTaskIds = allVisibleTaskIds,
                     magicBreakdownTaskId = magicBreakdownTaskId,
@@ -926,6 +1023,7 @@ private fun ThingsMainTaskLazyList(
                             activeProjects = activeProjects,
                             allHeadings = allHeadings,
                             expandedTaskId = expandedTaskId,
+                            isQuickFindOpen = isQuickFindOpen,
                             selectedTaskIds = selectedTaskIds,
                             allVisibleTaskIds = allVisibleTaskIds,
                             magicBreakdownTaskId = magicBreakdownTaskId,
@@ -967,6 +1065,7 @@ private fun ThingsMainTaskLazyList(
                         activeProjects = activeProjects,
                         allHeadings = allHeadings,
                         expandedTaskId = expandedTaskId,
+                        isQuickFindOpen = isQuickFindOpen,
                         selectedTaskIds = selectedTaskIds,
                         allVisibleTaskIds = allVisibleTaskIds,
                         magicBreakdownTaskId = magicBreakdownTaskId,
@@ -1000,6 +1099,7 @@ private fun ThingsMainTaskLazyList(
                     activeProjects = activeProjects,
                     allHeadings = allHeadings,
                     expandedTaskId = expandedTaskId,
+                    isQuickFindOpen = isQuickFindOpen,
                     selectedTaskIds = selectedTaskIds,
                     allVisibleTaskIds = allVisibleTaskIds,
                     magicBreakdownTaskId = magicBreakdownTaskId,
@@ -1042,6 +1142,7 @@ private fun ThingsMainTaskLazyList(
                     activeProjects = activeProjects,
                     allHeadings = allHeadings,
                     expandedTaskId = expandedTaskId,
+                    isQuickFindOpen = isQuickFindOpen,
                     selectedTaskIds = selectedTaskIds,
                     allVisibleTaskIds = allVisibleTaskIds,
                     magicBreakdownTaskId = magicBreakdownTaskId,
@@ -1074,6 +1175,11 @@ private fun ThingsModalsOverlay(
     val currentUserIdentifier by viewModel.currentUserIdentifier.collectAsState()
     val statistics by viewModel.statistics.collectAsState()
     val csvStatusMessage by viewModel.csvStatusMessage.collectAsState()
+    val showTodayAppBadge by viewModel.showTodayAppBadge.collectAsState()
+    val hasSampleTasks by viewModel.hasSampleTasks.collectAsState()
+    val pendingMergeAuthRequest by viewModel.pendingMergeAuthRequest.collectAsState()
+    val pendingMergeNonSampleCount by viewModel.pendingMergeNonSampleCount.collectAsState()
+    val isQuickCreateAreaDialogOpen by viewModel.isQuickCreateAreaDialogOpen.collectAsState()
 
     val isGeminiModalOpen by viewModel.isGeminiModalOpen.collectAsState()
     val isGeminiBusy by viewModel.isGeminiBusy.collectAsState()
@@ -1106,7 +1212,7 @@ private fun ThingsModalsOverlay(
         )
     }
 
-    // Comprehensive Settings Modal (⚙️ top-right: Local DB vs Cloud Sync, Account, Language, Statistics, CSV Import/Export)
+    // Comprehensive Settings Modal (⚙️ top-right: Local DB vs Cloud Sync, Account, Language, Today Badge, Statistics, CSV Import/Export)
     if (isSettingsModalOpen) {
         ThingsSettingsModal(
             isLocalOnlyDbMode = isLocalOnlyDbMode,
@@ -1114,6 +1220,11 @@ private fun ThingsModalsOverlay(
             currentUserIdentifier = currentUserIdentifier,
             statistics = statistics,
             csvStatusMessage = csvStatusMessage,
+            showTodayAppBadge = showTodayAppBadge,
+            todayCount = statistics.todayTasksCount,
+            hasSampleTasks = hasSampleTasks,
+            onSetShowTodayAppBadge = { viewModel.setShowTodayAppBadge(it) },
+            onDeleteSampleTasksNow = { viewModel.deleteSampleTasksForLocalSetup() },
             onSetLocalOnlyDbMode = { viewModel.setLocalOnlyDbMode(it) },
             onOpenAuthAndSyncModal = {
                 viewModel.setSettingsModalOpen(false)
@@ -1131,6 +1242,36 @@ private fun ThingsModalsOverlay(
             onImportCsvFromUri = { uri -> viewModel.importTasksCsvFromUri(uri) },
             onClearCsvMessage = { viewModel.clearCsvStatusMessage() },
             onDismiss = { viewModel.setSettingsModalOpen(false) }
+        )
+    }
+
+    // Initial Setup Account Merge Prompt (shown BEFORE syncing whenever sample tasks still exist!)
+    pendingMergeAuthRequest?.let { pendingReq ->
+        SampleTasksAccountMergeDialog(
+            accountLabel = pendingReq.displayAccountLabel,
+            nonSampleTaskCount = pendingMergeNonSampleCount,
+            onConfirmMergeWithAccount = {
+                viewModel.confirmAccountSetupMerge(mergeCurrentTasks = true)
+            },
+            onConfirmReplaceWithAccountOnly = {
+                viewModel.confirmAccountSetupMerge(mergeCurrentTasks = false)
+            },
+            onCancel = {
+                viewModel.cancelPendingAccountSetupMerge()
+            }
+        )
+    }
+
+    // Quick Create Area Dialog (triggered from the animated Magic Plus '+' context menu)
+    if (isQuickCreateAreaDialogOpen) {
+        QuickCreateAreaDialog(
+            currentAreaCount = areas.size,
+            maxAreas = ThingsRepository.MAX_AREAS,
+            onCreateArea = { newTitle ->
+                viewModel.setQuickCreateAreaDialogOpen(false)
+                viewModel.createAreaAndNavigate(newTitle)
+            },
+            onDismiss = { viewModel.setQuickCreateAreaDialogOpen(false) }
         )
     }
 
@@ -1269,19 +1410,21 @@ private fun ThingsMultiSelectionBar(
             }
 
             if (selectedCount < totalVisibleCount) {
-                IconButton(
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onSelectAll()
-                    },
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.SelectAll,
-                        contentDescription = "Alle auswählen",
-                        tint = colors.thingsBlue,
-                        modifier = Modifier.size(18.dp)
-                    )
+                ThingsHoverTooltip(text = "Alle Aufgaben in dieser Ansicht auswählen (Strg+A)") {
+                    IconButton(
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onSelectAll()
+                        },
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.SelectAll,
+                            contentDescription = "Alle auswählen",
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
 
@@ -1317,34 +1460,38 @@ private fun ThingsMultiSelectionBar(
                 }
             )
 
-            IconButton(
-                onClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onBatchDelete()
-                },
-                modifier = Modifier.size(30.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.DeleteOutline,
-                    contentDescription = "Ausgewählte löschen",
-                    tint = colors.deadlineUrgentRed,
-                    modifier = Modifier.size(18.dp)
-                )
+            ThingsHoverTooltip(text = "Ausgewählte Aufgaben löschen") {
+                IconButton(
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onBatchDelete()
+                    },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.DeleteOutline,
+                        contentDescription = "Ausgewählte löschen",
+                        tint = colors.deadlineUrgentRed,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
 
-            IconButton(
-                onClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onClearSelection()
-                },
-                modifier = Modifier.size(30.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Close,
-                    contentDescription = "Auswahl aufheben",
-                    tint = colors.secondaryText,
-                    modifier = Modifier.size(18.dp)
-                )
+            ThingsHoverTooltip(text = "Auswahl aufheben (Esc)") {
+                IconButton(
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onClearSelection()
+                    },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Close,
+                        contentDescription = "Auswahl aufheben",
+                        tint = colors.secondaryText,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
     }
@@ -1420,32 +1567,38 @@ private fun AreaProjectOverviewRow(
                 }
 
                 if (canMoveUp) {
-                    IconButton(onClick = onMoveUp, modifier = Modifier.size(26.dp)) {
-                        Icon(
-                            imageVector = Icons.Outlined.ArrowUpward,
-                            contentDescription = stringResource(R.string.action_move),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(14.dp)
-                        )
+                    ThingsHoverTooltip(text = "Projekt nach oben verschieben") {
+                        IconButton(onClick = onMoveUp, modifier = Modifier.size(26.dp)) {
+                            Icon(
+                                imageVector = Icons.Outlined.ArrowUpward,
+                                contentDescription = stringResource(R.string.action_move),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
                     }
                 }
                 if (canMoveDown) {
-                    IconButton(onClick = onMoveDown, modifier = Modifier.size(26.dp)) {
-                        Icon(
-                            imageVector = Icons.Outlined.ArrowDownward,
-                            contentDescription = stringResource(R.string.action_move),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(14.dp)
-                        )
+                    ThingsHoverTooltip(text = "Projekt nach unten verschieben") {
+                        IconButton(onClick = onMoveDown, modifier = Modifier.size(26.dp)) {
+                            Icon(
+                                imageVector = Icons.Outlined.ArrowDownward,
+                                contentDescription = stringResource(R.string.action_move),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
                     }
                 }
-                IconButton(onClick = onEditProject, modifier = Modifier.size(26.dp)) {
-                    Icon(
-                        imageVector = Icons.Outlined.Edit,
-                        contentDescription = stringResource(R.string.project_edit_title),
-                        tint = colors.thingsBlue,
-                        modifier = Modifier.size(15.dp)
-                    )
+                ThingsHoverTooltip(text = stringResource(R.string.project_edit_title)) {
+                    IconButton(onClick = onEditProject, modifier = Modifier.size(26.dp)) {
+                        Icon(
+                            imageVector = Icons.Outlined.Edit,
+                            contentDescription = stringResource(R.string.project_edit_title),
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
                 }
             }
         }
@@ -1465,11 +1618,15 @@ private fun AreaProjectOverviewRow(
 private fun TopThingsbookBar(
     isWideScreen: Boolean,
     isSidebarVisible: Boolean,
+    showBrandSymbol: Boolean,
+    todayCount: Int,
+    showTodayAppBadge: Boolean,
     isQuickFindOpen: Boolean,
     syncStatus: CloudSyncStatus,
     dailyDigestEnabled: Boolean,
     showLanguageMenu: Boolean,
     onToggleSidebar: () -> Unit,
+    onSelectTodayView: () -> Unit,
     onToggleLanguageMenu: (Boolean) -> Unit,
     onSelectLanguage: (String) -> Unit,
     onOpenQuickFind: () -> Unit,
@@ -1493,42 +1650,59 @@ private fun TopThingsbookBar(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (isWideScreen) {
-                IconButton(
-                    onClick = onToggleSidebar,
-                    modifier = Modifier.size(34.dp)
+                ThingsHoverTooltip(
+                    text = if (isSidebarVisible) "Seitenleiste ausblenden" else "Seitenleiste einblenden"
                 ) {
-                    Icon(
-                        imageVector = if (isSidebarVisible) Icons.AutoMirrored.Outlined.MenuOpen else Icons.Outlined.Menu,
-                        contentDescription = if (isSidebarVisible) "Seitenleiste ausblenden" else "Seitenleiste einblenden",
-                        tint = colors.thingsBlue,
-                        modifier = Modifier.size(20.dp)
+                    IconButton(
+                        onClick = onToggleSidebar,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isSidebarVisible) Icons.AutoMirrored.Outlined.MenuOpen else Icons.Outlined.Menu,
+                            contentDescription = if (isSidebarVisible) "Seitenleiste ausblenden" else "Seitenleiste einblenden",
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+
+            if (showBrandSymbol) {
+                ThingsHoverTooltip(text = "Thingsbook • Heute ($todayCount offen)") {
+                    ThingsbookBrandSymbol(
+                        todayCount = todayCount,
+                        showBadge = showTodayAppBadge,
+                        size = 28.dp,
+                        onClick = onSelectTodayView
                     )
                 }
             }
 
             // Quick Find Trigger Pill (opens inline!)
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (isQuickFindOpen) colors.thingsBlueSoft else colors.tagPillBg)
-                    .clickable(onClick = onOpenQuickFind)
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Search,
-                    contentDescription = stringResource(R.string.quick_find_title),
-                    tint = if (isQuickFindOpen) colors.thingsBlue else colors.secondaryText,
-                    modifier = Modifier.size(16.dp)
-                )
-                Text(
-                    text = stringResource(R.string.quick_find_title),
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontWeight = if (isQuickFindOpen) FontWeight.Bold else FontWeight.Medium
-                    ),
-                    color = if (isQuickFindOpen) colors.thingsBlue else colors.secondaryText
-                )
+            ThingsHoverTooltip(text = "Schnellsuche öffnen (Strg+F)") {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (isQuickFindOpen) colors.thingsBlueSoft else colors.tagPillBg)
+                        .clickable(onClick = onOpenQuickFind)
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Search,
+                        contentDescription = stringResource(R.string.quick_find_title),
+                        tint = if (isQuickFindOpen) colors.thingsBlue else colors.secondaryText,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.quick_find_title),
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = if (isQuickFindOpen) FontWeight.Bold else FontWeight.Medium
+                        ),
+                        color = if (isQuickFindOpen) colors.thingsBlue else colors.secondaryText
+                    )
+                }
             }
         }
 
@@ -1537,79 +1711,89 @@ private fun TopThingsbookBar(
             horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             // Gemini AI Button ✨
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(colors.thingsBlueSoft)
-                    .clickable(onClick = onOpenGeminiHub)
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.AutoAwesome,
-                    contentDescription = stringResource(R.string.gemini_hub_title),
-                    tint = colors.thingsBlue,
-                    modifier = Modifier.size(16.dp)
-                )
-                Text(
-                    text = "Gemini",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                    color = colors.thingsBlue
-                )
+            ThingsHoverTooltip(text = "Gemini KI-Assistent öffnen (Strg+G)") {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(colors.thingsBlueSoft)
+                        .clickable(onClick = onOpenGeminiHub)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.AutoAwesome,
+                        contentDescription = stringResource(R.string.gemini_hub_title),
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "Gemini",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.thingsBlue
+                    )
+                }
             }
 
             // Areas Manager Button 📦 (Work, Home, max 8)
-            IconButton(
-                onClick = onOpenAreaManager,
-                modifier = Modifier.size(34.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Inventory2,
-                    contentDescription = stringResource(R.string.areas_manage_title),
-                    tint = colors.anytimeTeal,
-                    modifier = Modifier.size(19.dp)
-                )
+            ThingsHoverTooltip(text = stringResource(R.string.areas_manage_title)) {
+                IconButton(
+                    onClick = onOpenAreaManager,
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Inventory2,
+                        contentDescription = stringResource(R.string.areas_manage_title),
+                        tint = colors.anytimeTeal,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
             }
 
             // Tag Management Button 🏷️
-            IconButton(
-                onClick = onOpenTagManager,
-                modifier = Modifier.size(34.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.LocalOffer,
-                    contentDescription = stringResource(R.string.tags_manage_title),
-                    tint = colors.secondaryText,
-                    modifier = Modifier.size(19.dp)
-                )
+            ThingsHoverTooltip(text = stringResource(R.string.tags_manage_title)) {
+                IconButton(
+                    onClick = onOpenTagManager,
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.LocalOffer,
+                        contentDescription = stringResource(R.string.tags_manage_title),
+                        tint = colors.secondaryText,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
             }
 
             // Daily & Task Notifications Button 🔔
-            IconButton(
-                onClick = onOpenNotificationSettings,
-                modifier = Modifier.size(34.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.NotificationsActive,
-                    contentDescription = stringResource(R.string.notifications_title),
-                    tint = if (dailyDigestEnabled) colors.thingsBlue else colors.secondaryText,
-                    modifier = Modifier.size(19.dp)
-                )
+            ThingsHoverTooltip(text = stringResource(R.string.notifications_title)) {
+                IconButton(
+                    onClick = onOpenNotificationSettings,
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.NotificationsActive,
+                        contentDescription = stringResource(R.string.notifications_title),
+                        tint = if (dailyDigestEnabled) colors.thingsBlue else colors.secondaryText,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
             }
 
             // In-App Language Switcher (EN, DE, IT, FR, ES)
             Box {
-                IconButton(
-                    onClick = { onToggleLanguageMenu(true) },
-                    modifier = Modifier.size(34.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Language,
-                        contentDescription = stringResource(R.string.settings_language),
-                        tint = colors.secondaryText,
-                        modifier = Modifier.size(19.dp)
-                    )
+                ThingsHoverTooltip(text = stringResource(R.string.settings_language)) {
+                    IconButton(
+                        onClick = { onToggleLanguageMenu(true) },
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Language,
+                            contentDescription = stringResource(R.string.settings_language),
+                            tint = colors.secondaryText,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
                 }
 
                 DropdownMenu(
@@ -1644,34 +1828,38 @@ private fun TopThingsbookBar(
             }
 
             // Cloud Delta-Sync Status Indicator ☁️
-            IconButton(
-                onClick = onManualSync,
-                modifier = Modifier.size(34.dp)
-            ) {
-                val (syncIcon, syncTint) = when (syncStatus) {
-                    CloudSyncStatus.SYNCED -> Icons.Outlined.CloudDone to colors.logbookGreen
-                    CloudSyncStatus.SYNCING -> Icons.Outlined.CloudSync to colors.thingsBlue
-                    CloudSyncStatus.OFFLINE -> Icons.Outlined.CloudOff to colors.secondaryText
+            ThingsHoverTooltip(text = stringResource(R.string.sync_title)) {
+                IconButton(
+                    onClick = onManualSync,
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    val (syncIcon, syncTint) = when (syncStatus) {
+                        CloudSyncStatus.SYNCED -> Icons.Outlined.CloudDone to colors.logbookGreen
+                        CloudSyncStatus.SYNCING -> Icons.Outlined.CloudSync to colors.thingsBlue
+                        CloudSyncStatus.OFFLINE -> Icons.Outlined.CloudOff to colors.secondaryText
+                    }
+                    Icon(
+                        imageVector = syncIcon,
+                        contentDescription = stringResource(R.string.sync_title),
+                        tint = syncTint,
+                        modifier = Modifier.size(19.dp)
+                    )
                 }
-                Icon(
-                    imageVector = syncIcon,
-                    contentDescription = stringResource(R.string.sync_title),
-                    tint = syncTint,
-                    modifier = Modifier.size(19.dp)
-                )
             }
 
             // Additional Settings Button ⚙️ at the far top-right!
-            IconButton(
-                onClick = onOpenSettings,
-                modifier = Modifier.size(34.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Settings,
-                    contentDescription = "Einstellungen",
-                    tint = colors.primaryText,
-                    modifier = Modifier.size(19.dp)
-                )
+            ThingsHoverTooltip(text = "Einstellungen öffnen") {
+                IconButton(
+                    onClick = onOpenSettings,
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Settings,
+                        contentDescription = "Einstellungen",
+                        tint = colors.primaryText,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
             }
         }
     }
@@ -2080,63 +2268,73 @@ private fun ViewTitleHeader(
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     if (projIdx > 0) {
-                        IconButton(
-                            onClick = { onMoveProject(currentProject.id, true) },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.ArrowUpward,
-                                contentDescription = stringResource(R.string.action_move),
-                                tint = colors.secondaryText,
-                                modifier = Modifier.size(16.dp)
-                            )
+                        ThingsHoverTooltip(text = "Projekt nach oben verschieben") {
+                            IconButton(
+                                onClick = { onMoveProject(currentProject.id, true) },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.ArrowUpward,
+                                    contentDescription = stringResource(R.string.action_move),
+                                    tint = colors.secondaryText,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                     }
                     if (projIdx != -1 && projIdx < projects.lastIndex) {
+                        ThingsHoverTooltip(text = "Projekt nach unten verschieben") {
+                            IconButton(
+                                onClick = { onMoveProject(currentProject.id, false) },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.ArrowDownward,
+                                    contentDescription = stringResource(R.string.action_move),
+                                    tint = colors.secondaryText,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                    ThingsHoverTooltip(text = stringResource(R.string.project_edit_title)) {
                         IconButton(
-                            onClick = { onMoveProject(currentProject.id, false) },
+                            onClick = { onEditProject(currentProject) },
                             modifier = Modifier.size(30.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.ArrowDownward,
-                                contentDescription = stringResource(R.string.action_move),
-                                tint = colors.secondaryText,
-                                modifier = Modifier.size(16.dp)
+                                imageVector = Icons.Outlined.Edit,
+                                contentDescription = stringResource(R.string.project_edit_title),
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(17.dp)
                             )
                         }
                     }
-                    IconButton(
-                        onClick = { onEditProject(currentProject) },
-                        modifier = Modifier.size(30.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Edit,
-                            contentDescription = stringResource(R.string.project_edit_title),
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(17.dp)
-                        )
+                    ThingsHoverTooltip(text = "Projekt abschließen") {
+                        IconButton(
+                            onClick = { onCompleteProject(currentProject.id) },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.CheckCircleOutline,
+                                contentDescription = stringResource(R.string.action_complete),
+                                tint = colors.logbookGreen,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
-                    IconButton(
-                        onClick = { onCompleteProject(currentProject.id) },
-                        modifier = Modifier.size(30.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.CheckCircleOutline,
-                            contentDescription = stringResource(R.string.action_complete),
-                            tint = colors.logbookGreen,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    IconButton(
-                        onClick = { onDeleteProject(currentProject.id) },
-                        modifier = Modifier.size(30.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.DeleteOutline,
-                            contentDescription = stringResource(R.string.action_delete),
-                            tint = colors.deadlineUrgentRed,
-                            modifier = Modifier.size(18.dp)
-                        )
+                    ThingsHoverTooltip(text = "Projekt löschen") {
+                        IconButton(
+                            onClick = { onDeleteProject(currentProject.id) },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.DeleteOutline,
+                                contentDescription = stringResource(R.string.action_delete),
+                                tint = colors.deadlineUrgentRed,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             } else if (currentArea != null && !isRenamingAreaInline) {
@@ -2146,58 +2344,66 @@ private fun ViewTitleHeader(
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     if (areaIdx > 0) {
-                        IconButton(
-                            onClick = { onMoveArea(currentArea.id, true) },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.ArrowUpward,
-                                contentDescription = stringResource(R.string.action_move),
-                                tint = colors.secondaryText,
-                                modifier = Modifier.size(16.dp)
-                            )
+                        ThingsHoverTooltip(text = "Bereich nach oben verschieben") {
+                            IconButton(
+                                onClick = { onMoveArea(currentArea.id, true) },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.ArrowUpward,
+                                    contentDescription = stringResource(R.string.action_move),
+                                    tint = colors.secondaryText,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                     }
                     if (areaIdx != -1 && areaIdx < areas.lastIndex) {
+                        ThingsHoverTooltip(text = "Bereich nach unten verschieben") {
+                            IconButton(
+                                onClick = { onMoveArea(currentArea.id, false) },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.ArrowDownward,
+                                    contentDescription = stringResource(R.string.action_move),
+                                    tint = colors.secondaryText,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                    ThingsHoverTooltip(text = stringResource(R.string.areas_rename_label)) {
                         IconButton(
-                            onClick = { onMoveArea(currentArea.id, false) },
+                            onClick = {
+                                inlineAreaField = TextFieldValue(
+                                    text = currentArea.title,
+                                    selection = TextRange(0, currentArea.title.length)
+                                )
+                                isRenamingAreaInline = true
+                            },
                             modifier = Modifier.size(30.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.ArrowDownward,
-                                contentDescription = stringResource(R.string.action_move),
-                                tint = colors.secondaryText,
-                                modifier = Modifier.size(16.dp)
+                                imageVector = Icons.Outlined.Edit,
+                                contentDescription = stringResource(R.string.areas_rename_label),
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(17.dp)
                             )
                         }
                     }
-                    IconButton(
-                        onClick = {
-                            inlineAreaField = TextFieldValue(
-                                text = currentArea.title,
-                                selection = TextRange(0, currentArea.title.length)
+                    ThingsHoverTooltip(text = "Bereich löschen") {
+                        IconButton(
+                            onClick = { onDeleteArea(currentArea.id) },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.DeleteOutline,
+                                contentDescription = stringResource(R.string.action_delete),
+                                tint = colors.deadlineUrgentRed,
+                                modifier = Modifier.size(18.dp)
                             )
-                            isRenamingAreaInline = true
-                        },
-                        modifier = Modifier.size(30.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Edit,
-                            contentDescription = stringResource(R.string.areas_rename_label),
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(17.dp)
-                        )
-                    }
-                    IconButton(
-                        onClick = { onDeleteArea(currentArea.id) },
-                        modifier = Modifier.size(30.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.DeleteOutline,
-                            contentDescription = stringResource(R.string.action_delete),
-                            tint = colors.deadlineUrgentRed,
-                            modifier = Modifier.size(18.dp)
-                        )
+                        }
                     }
                 }
             }
@@ -2858,6 +3064,7 @@ private fun InlineQuickFindSection(
 
 @Composable
 private fun ThingsChromebookSidebar(
+    viewModel: ThingsbookViewModel,
     navTarget: ActiveNavigationTarget,
     smartViewCounts: Map<SmartViewType, Int>,
     areas: List<Area>,
@@ -2866,12 +3073,13 @@ private fun ThingsChromebookSidebar(
     onSelectArea: (String) -> Unit,
     onSelectProject: (String) -> Unit,
     onOpenAreaManager: () -> Unit,
-    onCreateNewProject: (String?) -> Unit,
-    onToggleSidebar: () -> Unit
+    onCreateNewProject: (String?) -> Unit
 ) {
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
     val areasLabel = stringResource(R.string.entity_areas)
+    val showTodayAppBadge by viewModel.showTodayAppBadge.collectAsState()
+    val todayCount = smartViewCounts[SmartViewType.TODAY] ?: 0
 
     Column(
         modifier = Modifier
@@ -2881,29 +3089,29 @@ private fun ThingsChromebookSidebar(
             .padding(horizontal = 14.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        // Clean Sidebar Brand Header (without duplicate gray collapse icon — the blue arrow in TopThingsbookBar handles toggling)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 6.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            ThingsHoverTooltip(
+                text = if (todayCount > 0) "Thingsbook • Heute ($todayCount offen)" else "Thingsbook • Heute"
+            ) {
+                ThingsbookBrandSymbol(
+                    todayCount = todayCount,
+                    showBadge = showTodayAppBadge,
+                    size = 28.dp,
+                    onClick = { onSelectSmartView(SmartViewType.TODAY) }
+                )
+            }
             Text(
                 text = stringResource(R.string.app_name),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                 color = colors.primaryText
             )
-            IconButton(
-                onClick = onToggleSidebar,
-                modifier = Modifier.size(28.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Outlined.MenuOpen,
-                    contentDescription = "Seitenleiste ausblenden",
-                    tint = colors.secondaryText,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
         }
 
         Spacer(modifier = Modifier.height(2.dp))
@@ -2992,16 +3200,18 @@ private fun ThingsChromebookSidebar(
                                 )
                             )
                         }
-                        IconButton(
-                            onClick = { onCreateNewProject(area.id) },
-                            modifier = Modifier.size(22.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Add,
-                                contentDescription = stringResource(R.string.entity_new_project),
-                                tint = colors.secondaryText,
-                                modifier = Modifier.size(14.dp)
-                            )
+                        ThingsHoverTooltip(text = "${stringResource(R.string.entity_new_project)} in ${area.title}") {
+                            IconButton(
+                                onClick = { onCreateNewProject(area.id) },
+                                modifier = Modifier.size(22.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Add,
+                                    contentDescription = stringResource(R.string.entity_new_project),
+                                    tint = colors.secondaryText,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
                         }
                     }
 
@@ -3088,46 +3298,50 @@ private fun ThingsChromebookSidebar(
                 .padding(top = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { onCreateNewProject(null) }
-                    .padding(horizontal = 8.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Add,
-                    contentDescription = null,
-                    tint = colors.thingsBlue,
-                    modifier = Modifier.size(15.dp)
-                )
-                Text(
-                    text = stringResource(R.string.entity_new_project),
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = colors.thingsBlue
-                )
+            ThingsHoverTooltip(text = "Neues Projekt anlegen") {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onCreateNewProject(null) }
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Add,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.entity_new_project),
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.thingsBlue
+                    )
+                }
             }
 
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(onClick = onOpenAreaManager)
-                    .padding(horizontal = 8.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Inventory2,
-                    contentDescription = null,
-                    tint = colors.anytimeTeal,
-                    modifier = Modifier.size(14.dp)
-                )
-                Text(
-                    text = "$areasLabel (${areas.size}/${ThingsRepository.MAX_AREAS})",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.secondaryText
-                )
+            ThingsHoverTooltip(text = "Bereiche verwalten (${areas.size}/${ThingsRepository.MAX_AREAS})") {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onOpenAreaManager)
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Inventory2,
+                        contentDescription = null,
+                        tint = colors.anytimeTeal,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = "$areasLabel (${areas.size}/${ThingsRepository.MAX_AREAS})",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.secondaryText
+                    )
+                }
             }
         }
 

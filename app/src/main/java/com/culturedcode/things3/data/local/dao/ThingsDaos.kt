@@ -57,6 +57,21 @@ interface AreaDao {
             if (chunk.isNotEmpty()) markSynced(chunk)
         }
     }
+
+    @Query("SELECT COUNT(*) FROM tasks WHERE areaId = :areaId AND isDeleted = 0")
+    suspend fun countActiveTasksInArea(areaId: String): Int
+
+    @Query("SELECT COUNT(*) FROM projects WHERE areaId = :areaId AND isDeleted = 0")
+    suspend fun countActiveProjectsInArea(areaId: String): Int
+
+    @Query("DELETE FROM areas WHERE id IN (:ids)")
+    suspend fun hardDeleteByIds(ids: List<String>)
+
+    @Query("DELETE FROM areas")
+    suspend fun hardDeleteAll()
+
+    @Query("UPDATE areas SET isDirty = 1 WHERE isDeleted = 0")
+    suspend fun markAllActiveDirty()
 }
 
 @Dao
@@ -121,6 +136,24 @@ interface ProjectDao {
             if (chunk.isNotEmpty()) markSynced(chunk)
         }
     }
+
+    @Query("SELECT COUNT(*) FROM tasks WHERE projectId = :projectId AND isDeleted = 0")
+    suspend fun countActiveTasksInProject(projectId: String): Int
+
+    @Query("DELETE FROM project_tags WHERE projectId IN (:projectIds)")
+    suspend fun hardDeleteProjectTagsByIds(projectIds: List<String>)
+
+    @Query("DELETE FROM project_tags")
+    suspend fun hardDeleteAllProjectTags()
+
+    @Query("DELETE FROM projects WHERE id IN (:ids)")
+    suspend fun hardDeleteByIds(ids: List<String>)
+
+    @Query("DELETE FROM projects")
+    suspend fun hardDeleteAll()
+
+    @Query("UPDATE projects SET isDirty = 1 WHERE isDeleted = 0")
+    suspend fun markAllActiveDirty()
 }
 
 @Dao
@@ -154,6 +187,18 @@ interface HeadingDao {
             if (chunk.isNotEmpty()) markSynced(chunk)
         }
     }
+
+    @Query("SELECT COUNT(*) FROM tasks WHERE headingId = :headingId AND isDeleted = 0")
+    suspend fun countActiveTasksInHeading(headingId: String): Int
+
+    @Query("DELETE FROM headings WHERE id IN (:ids)")
+    suspend fun hardDeleteByIds(ids: List<String>)
+
+    @Query("DELETE FROM headings")
+    suspend fun hardDeleteAll()
+
+    @Query("UPDATE headings SET isDirty = 1 WHERE isDeleted = 0")
+    suspend fun markAllActiveDirty()
 }
 
 @Dao
@@ -392,6 +437,30 @@ interface TaskDao {
     @Transaction
     @Query("SELECT * FROM tasks WHERE isDeleted = 0 ORDER BY sortOrder ASC")
     suspend fun getAllActiveTasksWithDetails(): List<TaskWithDetails>
+
+    @Query("SELECT COUNT(*) FROM tasks WHERE id IN (:sampleIds) AND isDeleted = 0")
+    fun observeActiveSampleTaskCount(sampleIds: List<String>): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM tasks WHERE id IN (:sampleIds) AND isDeleted = 0")
+    suspend fun countActiveSampleTasks(sampleIds: List<String>): Int
+
+    @Query("SELECT COUNT(*) FROM tasks WHERE id NOT IN (:sampleIds) AND isDeleted = 0")
+    suspend fun countActiveNonSampleTasks(sampleIds: List<String>): Int
+
+    @Query("DELETE FROM task_tags WHERE taskId IN (:taskIds)")
+    suspend fun hardDeleteTaskTagsByTaskIds(taskIds: List<String>)
+
+    @Query("DELETE FROM task_tags")
+    suspend fun hardDeleteAllTaskTags()
+
+    @Query("DELETE FROM tasks WHERE id IN (:ids)")
+    suspend fun hardDeleteByIds(ids: List<String>)
+
+    @Query("DELETE FROM tasks")
+    suspend fun hardDeleteAll()
+
+    @Query("UPDATE tasks SET isDirty = 1 WHERE isDeleted = 0")
+    suspend fun markAllActiveDirty()
 }
 
 @Dao
@@ -422,6 +491,15 @@ interface ChecklistDao {
             if (chunk.isNotEmpty()) markSynced(chunk)
         }
     }
+
+    @Query("DELETE FROM checklist_items WHERE taskId IN (:taskIds) OR id IN (:itemIds)")
+    suspend fun hardDeleteForSampleTasks(taskIds: List<String>, itemIds: List<String>)
+
+    @Query("DELETE FROM checklist_items")
+    suspend fun hardDeleteAll()
+
+    @Query("UPDATE checklist_items SET isDirty = 1 WHERE isDeleted = 0")
+    suspend fun markAllActiveDirty()
 }
 
 @Dao
@@ -455,4 +533,19 @@ interface TagDao {
             if (chunk.isNotEmpty()) markSynced(chunk)
         }
     }
+
+    @Query("SELECT COUNT(*) FROM task_tags WHERE tagId = :tagId")
+    suspend fun countTasksUsingTag(tagId: String): Int
+
+    @Query("SELECT COUNT(*) FROM project_tags WHERE tagId = :tagId")
+    suspend fun countProjectsUsingTag(tagId: String): Int
+
+    @Query("DELETE FROM tags WHERE id IN (:ids)")
+    suspend fun hardDeleteByIds(ids: List<String>)
+
+    @Query("DELETE FROM tags")
+    suspend fun hardDeleteAll()
+
+    @Query("UPDATE tags SET isDirty = 1 WHERE isDeleted = 0")
+    suspend fun markAllActiveDirty()
 }

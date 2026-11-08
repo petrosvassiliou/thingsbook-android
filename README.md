@@ -12,9 +12,9 @@ Eine eigenständige, native Android-Produktivitäts-App (für **Android-Smartpho
 
 ---
 
-## Direkt-Download (Installierbares Android-APK — Version 1.4.0)
+## Direkt-Download (Installierbares Android-APK — Version 1.5.0)
 
-- **[Thingsbook-v1.4.0-full.apk herunterladen (v1.4.0 — Umfassende Code-Qualitätssicherung (QS) & End-to-End Error Handling, Coroutine-Cancellation-Sicherheit (`runCatchingCancellable`), transaktionale Room/FTS5/CSV-Härtung, Hintergrund-Sync-Mutex, Gemini-REST-DTO-Serialisierung, sichtbare Fehler-Banner im UI, Home-Screen-Widget-Timeout-Schutz, Inline-Schnellsuche, Einstellungen-Modal mit Live-Statistiken & CSV-Import/Export, bis zu 8 Bereiche, Wischgesten & Mehrfachauswahl)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.4.0-full.apk)**
+- **[Thingsbook-v1.5.0-full.apk herunterladen (v1.5.0 — Maus-Hover-Tooltips auf allen Symbolen, animiertes kontextabhängiges Plus-Menü (`Aufgabe`, `Projekt`, `Überschrift`, `Bereich`) + Drag & Drop, 3-stufige Erledigt-Animation mit Halo-Ring & Streichlinie, konfigurierbare „Heute“-Anzahl am Thingsbook-Symbol & App-Icon, Ersteinrichtung mit Beispielaufgaben-Bereinigung & Konto-Zusammenführungs-Abfrage, bereinigter Seitenleisten-Header sowie intelligentes Ausblenden des Rechtsklick-Kontextmenüs bei fokussierten Textfeldern)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.5.0-full.apk)**
 
 ---
 

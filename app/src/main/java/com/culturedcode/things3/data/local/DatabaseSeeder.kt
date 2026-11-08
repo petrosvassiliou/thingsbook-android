@@ -332,7 +332,7 @@ class DatabaseSeeder(
                 sortOrder = 100.0,
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             ),
             TagEntity(
                 id = tagHomeId,
@@ -342,7 +342,7 @@ class DatabaseSeeder(
                 sortOrder = 200.0,
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             ),
             TagEntity(
                 id = tagOfficeId,
@@ -352,7 +352,7 @@ class DatabaseSeeder(
                 sortOrder = 300.0,
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             ),
             TagEntity(
                 id = tagErrandsId,
@@ -362,7 +362,7 @@ class DatabaseSeeder(
                 sortOrder = 400.0,
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             ),
             TagEntity(
                 id = tagQuickId,
@@ -372,7 +372,7 @@ class DatabaseSeeder(
                 sortOrder = 500.0,
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             )
         )
 
@@ -385,7 +385,7 @@ class DatabaseSeeder(
                 tagIdsJson = json.encodeToString(listOf(tagOfficeId)),
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             ),
             AreaEntity(
                 id = areaHomeId,
@@ -394,7 +394,7 @@ class DatabaseSeeder(
                 tagIdsJson = json.encodeToString(listOf(tagHomeId)),
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             )
         )
 
@@ -416,7 +416,7 @@ class DatabaseSeeder(
                 tagIdsJson = json.encodeToString(projWorkTags),
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             ) to projWorkTags,
             ProjectEntity(
                 id = projVacationId,
@@ -432,7 +432,7 @@ class DatabaseSeeder(
                 tagIdsJson = json.encodeToString(projVacationTags),
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             ) to projVacationTags
         )
 
@@ -445,7 +445,7 @@ class DatabaseSeeder(
                 isArchived = false,
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             ),
             HeadingEntity(
                 id = headBookingId,
@@ -455,7 +455,7 @@ class DatabaseSeeder(
                 isArchived = false,
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             ),
             HeadingEntity(
                 id = headPackingId,
@@ -465,7 +465,7 @@ class DatabaseSeeder(
                 isArchived = false,
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             )
         )
 
@@ -507,7 +507,7 @@ class DatabaseSeeder(
                 tagIdsJson = json.encodeToString(listOf(tagQuickId)),
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             ) to listOf(tagQuickId),
 
             TaskEntity(
@@ -528,7 +528,7 @@ class DatabaseSeeder(
                 tagIdsJson = json.encodeToString(listOf(tagImportantId, tagHomeId)),
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             ) to listOf(tagImportantId, tagHomeId),
 
             TaskEntity(
@@ -549,7 +549,7 @@ class DatabaseSeeder(
                 tagIdsJson = json.encodeToString(listOf(tagOfficeId)),
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             ) to listOf(tagOfficeId),
 
             TaskEntity(
@@ -570,7 +570,7 @@ class DatabaseSeeder(
                 tagIdsJson = json.encodeToString(listOf(tagHomeId)),
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             ) to listOf(tagHomeId),
 
             TaskEntity(
@@ -591,7 +591,7 @@ class DatabaseSeeder(
                 tagIdsJson = json.encodeToString(listOf(tagImportantId)),
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             ) to listOf(tagImportantId),
 
             TaskEntity(
@@ -612,7 +612,7 @@ class DatabaseSeeder(
                 tagIdsJson = json.encodeToString(listOf(tagHomeId)),
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             ) to listOf(tagHomeId),
 
             TaskEntity(
@@ -633,7 +633,7 @@ class DatabaseSeeder(
                 tagIdsJson = json.encodeToString(listOf(tagQuickId)),
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             ) to listOf(tagQuickId),
 
             TaskEntity(
@@ -654,7 +654,7 @@ class DatabaseSeeder(
                 tagIdsJson = json.encodeToString(listOf(tagOfficeId)),
                 createdAt = now - 7200_000L,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             ) to listOf(tagOfficeId)
         )
 
@@ -667,7 +667,7 @@ class DatabaseSeeder(
                 sortOrder = 100.0,
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             ),
             ChecklistItemEntity(
                 id = "chk-002",
@@ -677,7 +677,7 @@ class DatabaseSeeder(
                 sortOrder = 200.0,
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             ),
             ChecklistItemEntity(
                 id = "chk-003",
@@ -687,7 +687,7 @@ class DatabaseSeeder(
                 sortOrder = 300.0,
                 createdAt = now,
                 updatedAt = now,
-                isDirty = true
+                isDirty = false
             )
         )
 
@@ -735,4 +735,47 @@ class DatabaseSeeder(
         val check2: String,
         val check3: String
     )
+
+    companion object {
+        val SAMPLE_TASK_IDS: Set<String> = setOf(
+            "task-inbox-001",
+            "task-today-002",
+            "task-today-003",
+            "task-evening-004",
+            "task-upcoming-005",
+            "task-anytime-006",
+            "task-someday-007",
+            "task-completed-008"
+        )
+
+        val SAMPLE_PROJECT_IDS: Set<String> = setOf(
+            "proj-vacation-001",
+            "proj-home-002"
+        )
+
+        val SAMPLE_HEADING_IDS: Set<String> = setOf(
+            "head-booking-001",
+            "head-packing-002",
+            "head-everyday-003"
+        )
+
+        val SAMPLE_CHECKLIST_IDS: Set<String> = setOf(
+            "chk-001",
+            "chk-002",
+            "chk-003"
+        )
+
+        val SAMPLE_AREA_IDS: Set<String> = setOf(
+            "area-work-001",
+            "area-home-002"
+        )
+
+        val SAMPLE_TAG_IDS: Set<String> = setOf(
+            "tag-important-001",
+            "tag-home-002",
+            "tag-office-003",
+            "tag-errands-004",
+            "tag-quick-005"
+        )
+    }
 }

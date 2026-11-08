@@ -32,6 +32,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.CloudSync
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.Language
@@ -71,12 +72,12 @@ import java.time.LocalDate
 
 /**
  * Comprehensive Thingsbook Settings Modal (`Einstellungen` ⚙️):
- * 1. Database Mode: Local Room DB (Offline-Only) vs. Cloud Sync (Firebase Firestore)
+ * 1. Database Mode: Local Room DB (Offline-Only) vs. Cloud Sync (Firebase Firestore) + Sample Tasks Cleanup
  * 2. Account Management: Full email address display, Sync Now, Login/Switch Account, Sign Out
- * 3. App Language Selection: System Default, Deutsch, English, Italiano, Français, Español
+ * 3. App Language Selection & Configurable "Heute" Badge on the Thingsbook Symbol
  * 4. Live Task & Productivity Statistics: Open, Today, Upcoming, Anytime, Inbox, Someday, Recurring, Completed, Canceled, Deleted, Projects, Areas (X/8), Tags
  * 5. CSV Import & Export: Export all tasks to `.csv` file or share via Intent; Import tasks from `.csv` file
- * 6. App Version Info (`Thingsbook v1.4.0`)
+ * 6. App Version Info (`Thingsbook v1.5.0`)
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -86,6 +87,11 @@ fun ThingsSettingsModal(
     currentUserIdentifier: String?,
     statistics: ThingsbookStatistics,
     csvStatusMessage: String?,
+    showTodayAppBadge: Boolean = true,
+    todayCount: Int = statistics.todayTasksCount,
+    hasSampleTasks: Boolean = false,
+    onSetShowTodayAppBadge: (Boolean) -> Unit = {},
+    onDeleteSampleTasksNow: () -> Unit = {},
     onSetLocalOnlyDbMode: (Boolean) -> Unit,
     onOpenAuthAndSyncModal: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
@@ -179,13 +185,15 @@ fun ThingsSettingsModal(
                         }
                     }
 
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(30.dp)) {
-                        Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = stringResource(R.string.action_cancel),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(18.dp)
-                        )
+                    ThingsHoverTooltip(text = "Einstellungen schließen") {
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(30.dp)) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.action_cancel),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
 
@@ -500,6 +508,136 @@ fun ThingsSettingsModal(
                         style = MaterialTheme.typography.labelMedium,
                         color = colors.thingsBlue
                     )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Configurable "Heute"-Anzahl am Thingsbook-Symbol (in-app & Launcher/Shelf Badge)
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = colors.tagPillBg.copy(alpha = 0.6f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        ThingsbookBrandSymbol(
+                            todayCount = todayCount,
+                            showBadge = showTodayAppBadge,
+                            size = 30.dp
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "„Heute“-Anzahl am Thingsbook-Symbol",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.primaryText
+                            )
+                            Text(
+                                text = "Zeigt die Anzahl offener „Heute“-Aufgaben am App-Symbol & in der Kopfleiste",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
+                                color = colors.secondaryText
+                            )
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (showTodayAppBadge) colors.thingsBlue else colors.cardSurface)
+                                    .clickable {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onSetShowTodayAppBadge(true)
+                                    }
+                                    .padding(horizontal = 9.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = "Ein",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = if (showTodayAppBadge) Color.White else colors.secondaryText
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (!showTodayAppBadge) colors.thingsBlue else colors.cardSurface)
+                                    .clickable {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onSetShowTodayAppBadge(false)
+                                    }
+                                    .padding(horizontal = 9.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = "Aus",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = if (!showTodayAppBadge) Color.White else colors.secondaryText
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Optional 1-click sample tasks removal when demo data is still present
+                if (hasSampleTasks) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = colors.deadlineUrgentRed.copy(alpha = 0.08f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(
+                                width = 1.dp,
+                                color = colors.deadlineUrgentRed.copy(alpha = 0.28f),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Beispielaufgaben noch vorhanden",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = colors.primaryText
+                                )
+                                Text(
+                                    text = "Löscht ausschließlich die vorinstallierten Demo-Aufgaben",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
+                                    color = colors.secondaryText
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onDeleteSampleTasksNow()
+                                },
+                                shape = RoundedCornerShape(9.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.DeleteOutline,
+                                    contentDescription = null,
+                                    tint = colors.deadlineUrgentRed,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Löschen",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = colors.deadlineUrgentRed
+                                )
+                            }
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))

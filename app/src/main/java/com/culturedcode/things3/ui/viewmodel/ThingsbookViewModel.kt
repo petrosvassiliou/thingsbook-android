@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.culturedcode.things3.data.ai.GeminiLogbookReviewResponse
 import com.culturedcode.things3.data.ai.ThingsbookGeminiService
 import com.culturedcode.things3.data.local.ThingsDatabase
+import com.culturedcode.things3.data.notifications.AppIconBadgeUpdater
 import com.culturedcode.things3.data.notifications.DailyDigestConfig
 import com.culturedcode.things3.data.notifications.ReminderScheduler
 import com.culturedcode.things3.data.repository.CloudSyncStatus
@@ -59,6 +60,27 @@ sealed interface ActiveNavigationTarget {
     data class SmartView(val type: SmartViewType) : ActiveNavigationTarget
     data class ProjectDetail(val projectId: String) : ActiveNavigationTarget
     data class AreaDetail(val areaId: String) : ActiveNavigationTarget
+}
+
+sealed interface PendingCloudAuthRequest {
+    val displayAccountLabel: String
+
+    data class RegisterEmail(val email: String, val password: String) : PendingCloudAuthRequest {
+        override val displayAccountLabel: String get() = email
+    }
+
+    data class SignInEmail(val email: String, val password: String) : PendingCloudAuthRequest {
+        override val displayAccountLabel: String get() = email
+    }
+
+    data class SignInGoogle(val optionalEmail: String?) : PendingCloudAuthRequest {
+        override val displayAccountLabel: String
+            get() = optionalEmail?.takeIf { it.isNotBlank() } ?: "Google Cloud-Konto"
+    }
+
+    data object SignInAnonymous : PendingCloudAuthRequest {
+        override val displayAccountLabel: String get() = "Thingsbook Cloud-Konto"
+    }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -628,6 +650,21 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
+    fun createAreaAndNavigate(title: String) {
+        val trimmed = title.trim()
+        if (trimmed.isEmpty()) return
+        safeVmScope.launch {
+            repository.createArea(trimmed)
+                .onSuccess { createdAreaId ->
+                    _expandedTaskId.value = null
+                    _navigationTarget.value = ActiveNavigationTarget.AreaDetail(createdAreaId)
+                }
+                .onFailure { err ->
+                    _uiErrorMessage.value = err.localizedMessage ?: err.message ?: "Bereich konnte nicht erstellt werden."
+                }
+        }
+    }
+
     fun renameArea(areaId: String, newTitle: String) {
         val trimmed = newTitle.trim()
         if (trimmed.isEmpty()) return
@@ -914,50 +951,35 @@ class ThingsbookViewModel @Inject constructor(
 
     /**
      * Multi-Device User Registration (Email & Password):
-     * Registers the user on the built-in Thingsbook Cloud Backend and immediately pushes all local records.
+     * If initial sample tasks are still present, asks the user first whether to merge current tasks
+     * (after deleting sample tasks) or load only account tasks.
      */
     fun registerWithEmailPassword(email: String, password: String) {
         safeVmScope.launch {
-            _isSigningIn.value = true
-            _authErrorMessage.value = null
-            _authInfoMessage.value = null
-            try {
-                if (_isLocalOnlyDbMode.value) setLocalOnlyDbMode(false)
-                syncRepository.registerAccount(email, password)
-                    .onSuccess {
-                        _isAuthModalOpen.value = false
-                    }
-                    .onFailure { err ->
-                        _authErrorMessage.value = err.localizedMessage ?: err.message
-                    }
-            } finally {
-                _isSigningIn.value = false
+            if (email.isNotBlank() && password.isNotBlank() && repository.hasSampleTasks()) {
+                _pendingMergeNonSampleCount.value = repository.countNonSampleTasks()
+                _pendingMergeAuthRequest.value = PendingCloudAuthRequest.RegisterEmail(email.trim(), password)
+                _isAuthModalOpen.value = false
+                return@launch
             }
+            executeCloudAuthRequestDirect(PendingCloudAuthRequest.RegisterEmail(email, password))
         }
     }
 
     /**
      * Multi-Device User Sign-In (Email & Password):
-     * Signs in an existing user on a second/third device, pulls all cloud deltas
-     * (`updatedAt > lastSyncTimestamp`), and attaches real-time multi-device listeners.
+     * If initial sample tasks are still present, asks the user first whether to merge current tasks
+     * (after deleting sample tasks) or load only account tasks.
      */
     fun signInWithEmailPassword(email: String, password: String) {
         safeVmScope.launch {
-            _isSigningIn.value = true
-            _authErrorMessage.value = null
-            _authInfoMessage.value = null
-            try {
-                if (_isLocalOnlyDbMode.value) setLocalOnlyDbMode(false)
-                syncRepository.signInAccount(email, password)
-                    .onSuccess {
-                        _isAuthModalOpen.value = false
-                    }
-                    .onFailure { err ->
-                        _authErrorMessage.value = err.localizedMessage ?: err.message
-                    }
-            } finally {
-                _isSigningIn.value = false
+            if (email.isNotBlank() && password.isNotBlank() && repository.hasSampleTasks()) {
+                _pendingMergeNonSampleCount.value = repository.countNonSampleTasks()
+                _pendingMergeAuthRequest.value = PendingCloudAuthRequest.SignInEmail(email.trim(), password)
+                _isAuthModalOpen.value = false
+                return@launch
             }
+            executeCloudAuthRequestDirect(PendingCloudAuthRequest.SignInEmail(email, password))
         }
     }
 
@@ -985,45 +1007,65 @@ class ThingsbookViewModel @Inject constructor(
 
     /**
      * One-Tap Google Cloud Sign-In ("Weiter mit Google").
-     * Uses the entered Google email if provided, or creates a Google Cloud device profile via the enabled provider.
+     * If initial sample tasks are still present, asks the user first whether to merge current tasks
+     * (after deleting sample tasks) or load only account tasks.
      */
     fun signInWithGoogleAccount(optionalEmail: String? = null) {
         safeVmScope.launch {
-            _isSigningIn.value = true
-            _authErrorMessage.value = null
-            _authInfoMessage.value = null
-            try {
-                if (_isLocalOnlyDbMode.value) setLocalOnlyDbMode(false)
-                syncRepository.signInInstantCloudAccount(optionalEmail)
-                    .onSuccess {
-                        _isAuthModalOpen.value = false
-                    }
-                    .onFailure { err ->
-                        _authErrorMessage.value = err.localizedMessage ?: err.message
-                    }
-            } finally {
-                _isSigningIn.value = false
+            if (repository.hasSampleTasks()) {
+                _pendingMergeNonSampleCount.value = repository.countNonSampleTasks()
+                _pendingMergeAuthRequest.value = PendingCloudAuthRequest.SignInGoogle(optionalEmail)
+                _isAuthModalOpen.value = false
+                return@launch
             }
+            executeCloudAuthRequestDirect(PendingCloudAuthRequest.SignInGoogle(optionalEmail))
         }
     }
 
     fun signInAnonymouslyAndSync() {
         safeVmScope.launch {
-            _isSigningIn.value = true
-            _authErrorMessage.value = null
-            _authInfoMessage.value = null
-            try {
-                if (_isLocalOnlyDbMode.value) setLocalOnlyDbMode(false)
-                syncRepository.signInInstantCloudAccount(null)
-                    .onSuccess {
-                        _isAuthModalOpen.value = false
-                    }
-                    .onFailure { err ->
-                        _authErrorMessage.value = err.localizedMessage ?: err.message
-                    }
-            } finally {
-                _isSigningIn.value = false
+            if (repository.hasSampleTasks()) {
+                _pendingMergeNonSampleCount.value = repository.countNonSampleTasks()
+                _pendingMergeAuthRequest.value = PendingCloudAuthRequest.SignInAnonymous
+                _isAuthModalOpen.value = false
+                return@launch
             }
+            executeCloudAuthRequestDirect(PendingCloudAuthRequest.SignInAnonymous)
+        }
+    }
+
+    private suspend fun executeCloudAuthRequestDirect(
+        request: PendingCloudAuthRequest,
+        reopenAuthModalOnError: Boolean = false
+    ) {
+        _isSigningIn.value = true
+        _authErrorMessage.value = null
+        _authInfoMessage.value = null
+        try {
+            if (_isLocalOnlyDbMode.value) setLocalOnlyDbMode(false)
+            val result = when (request) {
+                is PendingCloudAuthRequest.RegisterEmail ->
+                    syncRepository.registerAccount(request.email, request.password)
+                is PendingCloudAuthRequest.SignInEmail ->
+                    syncRepository.signInAccount(request.email, request.password)
+                is PendingCloudAuthRequest.SignInGoogle ->
+                    syncRepository.signInInstantCloudAccount(request.optionalEmail)
+                PendingCloudAuthRequest.SignInAnonymous ->
+                    syncRepository.signInInstantCloudAccount(null)
+            }
+            result
+                .onSuccess {
+                    _isAuthModalOpen.value = false
+                    dismissInitialSetupBanner()
+                }
+                .onFailure { err ->
+                    _authErrorMessage.value = err.localizedMessage ?: err.message
+                    if (reopenAuthModalOnError) {
+                        _isAuthModalOpen.value = true
+                    }
+                }
+        } finally {
+            _isSigningIn.value = false
         }
     }
 
@@ -1217,6 +1259,36 @@ class ThingsbookViewModel @Inject constructor(
     )
     val isLocalOnlyDbMode: StateFlow<Boolean> = _isLocalOnlyDbMode.asStateFlow()
 
+    // v1.5.0: Configurable "Heute" count badge on Thingsbook symbol (in-app & launcher/shelf badge)
+    private val _showTodayAppBadge = MutableStateFlow(settingsPrefs.getBoolean("show_today_app_badge", true))
+    val showTodayAppBadge: StateFlow<Boolean> = _showTodayAppBadge.asStateFlow()
+
+    // v1.5.0: Initial setup sample task detection & Cloud Account Merge prompt
+    val hasSampleTasks: StateFlow<Boolean> = repository.observeHasSampleTasks()
+        .catch { emit(false) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), false)
+
+    private val _isInitialSetupBannerDismissed = MutableStateFlow(
+        settingsPrefs.getBoolean("initial_setup_banner_dismissed", false)
+    )
+    val isInitialSetupBannerDismissed: StateFlow<Boolean> = _isInitialSetupBannerDismissed.asStateFlow()
+
+    private val _pendingMergeAuthRequest = MutableStateFlow<PendingCloudAuthRequest?>(null)
+    val pendingMergeAuthRequest: StateFlow<PendingCloudAuthRequest?> = _pendingMergeAuthRequest.asStateFlow()
+
+    private val _pendingMergeNonSampleCount = MutableStateFlow(0)
+    val pendingMergeNonSampleCount: StateFlow<Int> = _pendingMergeNonSampleCount.asStateFlow()
+
+    // v1.5.0: Expandable Magic Plus (+) context menu & quick-create dialogs
+    private val _isMagicPlusMenuOpen = MutableStateFlow(false)
+    val isMagicPlusMenuOpen: StateFlow<Boolean> = _isMagicPlusMenuOpen.asStateFlow()
+
+    private val _isQuickCreateAreaDialogOpen = MutableStateFlow(false)
+    val isQuickCreateAreaDialogOpen: StateFlow<Boolean> = _isQuickCreateAreaDialogOpen.asStateFlow()
+
+    private val _isMagicPlusCreateProjectOpen = MutableStateFlow(false)
+    val isMagicPlusCreateProjectOpen: StateFlow<Boolean> = _isMagicPlusCreateProjectOpen.asStateFlow()
+
     private val _csvStatusMessage = MutableStateFlow<String?>(null)
     val csvStatusMessage: StateFlow<String?> = _csvStatusMessage.asStateFlow()
 
@@ -1284,6 +1356,68 @@ class ThingsbookViewModel @Inject constructor(
 
     fun setSettingsModalOpen(open: Boolean) {
         _isSettingsModalOpen.value = open
+    }
+
+    fun setShowTodayAppBadge(enabled: Boolean) {
+        _showTodayAppBadge.value = enabled
+        runCatching { settingsPrefs.edit().putBoolean("show_today_app_badge", enabled).apply() }
+        val currentTodayCount = todayDaytimeTasks.value.size + thisEveningTasks.value.size
+        AppIconBadgeUpdater.updateTodayAppBadge(appContext, currentTodayCount, enabled)
+    }
+
+    fun setMagicPlusMenuOpen(open: Boolean) {
+        _isMagicPlusMenuOpen.value = open
+    }
+
+    fun setQuickCreateAreaDialogOpen(open: Boolean) {
+        _isQuickCreateAreaDialogOpen.value = open
+    }
+
+    fun setMagicPlusCreateProjectOpen(open: Boolean) {
+        _isMagicPlusCreateProjectOpen.value = open
+    }
+
+    fun dismissInitialSetupBanner() {
+        _isInitialSetupBannerDismissed.value = true
+        runCatching { settingsPrefs.edit().putBoolean("initial_setup_banner_dismissed", true).apply() }
+    }
+
+    fun deleteSampleTasksForLocalSetup() {
+        safeVmScope.launch {
+            runCatchingCancellable {
+                repository.purgeSampleDataLocally(markRemainingDirtyForMerge = false)
+            }.onSuccess {
+                dismissInitialSetupBanner()
+                runCatching {
+                    com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.refreshAllWidgets(appContext)
+                }
+            }.onFailure { err ->
+                Log.w(TAG, "Failed purging sample tasks", err)
+                _uiErrorMessage.value = err.localizedMessage ?: "Beispielaufgaben konnten nicht gelöscht werden."
+            }
+        }
+    }
+
+    fun confirmAccountSetupMerge(mergeCurrentTasks: Boolean) {
+        val pendingReq = _pendingMergeAuthRequest.value ?: return
+        _pendingMergeAuthRequest.value = null
+        safeVmScope.launch {
+            runCatchingCancellable {
+                if (mergeCurrentTasks) {
+                    repository.purgeSampleDataLocally(markRemainingDirtyForMerge = true)
+                } else {
+                    repository.purgeAllLocalDataBeforeAccountPull()
+                }
+            }.onFailure { err ->
+                Log.w(TAG, "Failed preparing local tasks before account merge", err)
+            }
+            executeCloudAuthRequestDirect(pendingReq, reopenAuthModalOnError = true)
+        }
+    }
+
+    fun cancelPendingAccountSetupMerge() {
+        _pendingMergeAuthRequest.value = null
+        _isAuthModalOpen.value = true
     }
 
     fun toggleSidebarVisible() {
@@ -1545,6 +1679,22 @@ class ThingsbookViewModel @Inject constructor(
                 _uiErrorMessage.value = null
                 true
             }
+            _pendingMergeAuthRequest.value != null -> {
+                cancelPendingAccountSetupMerge()
+                true
+            }
+            _isMagicPlusMenuOpen.value -> {
+                _isMagicPlusMenuOpen.value = false
+                true
+            }
+            _isQuickCreateAreaDialogOpen.value -> {
+                _isQuickCreateAreaDialogOpen.value = false
+                true
+            }
+            _isMagicPlusCreateProjectOpen.value -> {
+                _isMagicPlusCreateProjectOpen.value = false
+                true
+            }
             _selectedTaskIds.value.isNotEmpty() -> {
                 _selectedTaskIds.value = emptySet()
                 true
@@ -1619,6 +1769,25 @@ class ThingsbookViewModel @Inject constructor(
                         runCatching {
                             com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.refreshAllWidgets(appContext)
                         }
+                    }
+            }
+        }
+        safeVmScope.launch {
+            runCatchingCancellable {
+                combine(
+                    todayDaytimeTasks,
+                    thisEveningTasks,
+                    _showTodayAppBadge
+                ) { daytime, evening, enabled ->
+                    Pair(daytime.size + evening.size, enabled)
+                }
+                    .catch { emit(Pair(0, false)) }
+                    .collect { (todayCount, enabled) ->
+                        AppIconBadgeUpdater.updateTodayAppBadge(
+                            context = appContext,
+                            todayCount = todayCount,
+                            enabled = enabled
+                        )
                     }
             }
         }

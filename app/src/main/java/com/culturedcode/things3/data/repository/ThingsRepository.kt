@@ -1,6 +1,7 @@
 package com.culturedcode.things3.data.repository
 
 import androidx.room.withTransaction
+import com.culturedcode.things3.data.local.DatabaseSeeder
 import com.culturedcode.things3.data.local.ThingsDatabase
 import com.culturedcode.things3.data.local.entity.AreaEntity
 import com.culturedcode.things3.data.local.entity.ChecklistItemEntity
@@ -1349,6 +1350,100 @@ class ThingsRepository @Inject constructor(
             syncRepository.triggerBackgroundSync()
         }
         return importedCount
+    }
+
+    // =========================================================================
+    // Initial App Setup: Sample Data Detection & Local Cleanup / Cloud Merge
+    // =========================================================================
+
+    fun observeHasSampleTasks(): Flow<Boolean> =
+        database.taskDao()
+            .observeActiveSampleTaskCount(DatabaseSeeder.SAMPLE_TASK_IDS.toList())
+            .map { count -> count > 0 }
+            .catch { emit(false) }
+
+    suspend fun hasSampleTasks(): Boolean = runCatchingCancellable {
+        database.taskDao().countActiveSampleTasks(DatabaseSeeder.SAMPLE_TASK_IDS.toList()) > 0
+    }.getOrDefault(false)
+
+    suspend fun countNonSampleTasks(): Int = runCatchingCancellable {
+        database.taskDao().countActiveNonSampleTasks(DatabaseSeeder.SAMPLE_TASK_IDS.toList())
+    }.getOrDefault(0)
+
+    /**
+     * Hard-deletes all seeded initial sample tasks (and any sample checklists, headings, projects, or tags
+     * that do not contain user-created tasks) locally in Room without creating `isDeleted` cloud tombstones.
+     * When [markRemainingDirtyForMerge] is true, marks remaining user-created items `isDirty = true` so they
+     * merge cleanly with the user's cloud account.
+     */
+    suspend fun purgeSampleDataLocally(markRemainingDirtyForMerge: Boolean = false) {
+        val sampleTaskIds = DatabaseSeeder.SAMPLE_TASK_IDS.toList()
+        sampleTaskIds.forEach { id -> reminderScheduler.cancelReminder(id) }
+
+        database.withTransaction {
+            database.checklistDao().hardDeleteForSampleTasks(
+                taskIds = sampleTaskIds,
+                itemIds = DatabaseSeeder.SAMPLE_CHECKLIST_IDS.toList()
+            )
+            database.taskDao().hardDeleteTaskTagsByTaskIds(sampleTaskIds)
+            database.taskDao().hardDeleteByIds(sampleTaskIds)
+
+            val emptySampleHeadings = DatabaseSeeder.SAMPLE_HEADING_IDS.filter { hId ->
+                database.headingDao().countActiveTasksInHeading(hId) == 0
+            }
+            if (emptySampleHeadings.isNotEmpty()) {
+                database.headingDao().hardDeleteByIds(emptySampleHeadings)
+            }
+
+            val emptySampleProjects = DatabaseSeeder.SAMPLE_PROJECT_IDS.filter { pId ->
+                database.projectDao().countActiveTasksInProject(pId) == 0
+            }
+            if (emptySampleProjects.isNotEmpty()) {
+                database.projectDao().hardDeleteProjectTagsByIds(emptySampleProjects)
+                database.projectDao().hardDeleteByIds(emptySampleProjects)
+            }
+
+            val unusedSampleTags = DatabaseSeeder.SAMPLE_TAG_IDS.filter { tId ->
+                database.tagDao().countTasksUsingTag(tId) == 0 &&
+                    database.tagDao().countProjectsUsingTag(tId) == 0
+            }
+            if (unusedSampleTags.isNotEmpty()) {
+                database.tagDao().hardDeleteByIds(unusedSampleTags)
+            }
+
+            if (markRemainingDirtyForMerge) {
+                database.areaDao().markAllActiveDirty()
+                database.projectDao().markAllActiveDirty()
+                database.headingDao().markAllActiveDirty()
+                database.taskDao().markAllActiveDirty()
+                database.checklistDao().markAllActiveDirty()
+                database.tagDao().markAllActiveDirty()
+            }
+        }
+    }
+
+    /**
+     * Hard-clears all local tasks, checklists, headings, projects, areas, and tags locally in Room
+     * without generating tombstones so that subsequent account sign-in loads exclusively the user's
+     * cloud account tasks.
+     */
+    suspend fun purgeAllLocalDataBeforeAccountPull() {
+        runCatchingCancellable {
+            val futureReminders = database.taskDao().getOpenTasksWithFutureReminders(0L)
+            futureReminders.forEach { task -> reminderScheduler.cancelReminder(task.id) }
+        }
+        DatabaseSeeder.SAMPLE_TASK_IDS.forEach { id -> reminderScheduler.cancelReminder(id) }
+
+        database.withTransaction {
+            database.checklistDao().hardDeleteAll()
+            database.taskDao().hardDeleteAllTaskTags()
+            database.taskDao().hardDeleteAll()
+            database.headingDao().hardDeleteAll()
+            database.projectDao().hardDeleteAllProjectTags()
+            database.projectDao().hardDeleteAll()
+            database.areaDao().hardDeleteAll()
+            database.tagDao().hardDeleteAll()
+        }
     }
 
     private fun decodeStringList(raw: String): List<String> =

@@ -12,9 +12,9 @@ Eine eigenständige, native Android-Produktivitäts-App (für **Android-Smartpho
 
 ---
 
-## Direkt-Download (Installierbares Android-APK — Version 1.5.0)
+## Direkt-Download (Installierbares Android-APK — Version 1.6.0)
 
-- **[Thingsbook-v1.5.0-full.apk herunterladen (v1.5.0 — Maus-Hover-Tooltips auf allen Symbolen, animiertes kontextabhängiges Plus-Menü (`Aufgabe`, `Projekt`, `Überschrift`, `Bereich`) + Drag & Drop, 3-stufige Erledigt-Animation mit Halo-Ring & Streichlinie, konfigurierbare „Heute“-Anzahl am Thingsbook-Symbol & App-Icon, Ersteinrichtung mit Beispielaufgaben-Bereinigung & Konto-Zusammenführungs-Abfrage, bereinigter Seitenleisten-Header sowie intelligentes Ausblenden des Rechtsklick-Kontextmenüs bei fokussierten Textfeldern)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.5.0-full.apk)**
+- **[Thingsbook-v1.6.0-full.apk herunterladen (v1.6.0 — Vollständiges Backup & Restore aller Aufgaben, Bereiche, Projekte, Überschriften, Tags & Unteraufgaben mit optionalem AES-256-GCM/PBKDF2-Passwortschutz sowie komplett flackerfreie 120-Hz-GPU-Animationen für das `+`-Menü, Maus-Tooltips & das Erledigen von Aufgaben)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.0-full.apk)**
 
 ---
 
@@ -23,8 +23,9 @@ Eine eigenständige, native Android-Produktivitäts-App (für **Android-Smartpho
 - **Adaptives UI für Android-Smartphones, Tablets & Foldables:**
   - **Android-Smartphones (`< 700dp`):** Einhand-optimiertes Layout mit horizontaler Smart-View-Leiste, Wischgeste nach unten für *Quick Find*, flüssiger 120-Hz-Inline-Karten-Expansion (`spring(dampingRatio = 0.8f, stiffness = 400f)`) und ziehbarem **„Magic Plus“ (`+`)** Floating Action Button für direktes Drag & Drop in die Liste.
   - **Große Displays / Android-Tablets & Foldables (`>= 700dp`):** 2-Spalten-Ansicht mit permanenter Seitenleiste (inkl. Live-Zählern & Projekt-Fortschrittsringen), zentrierter Arbeitsfläche (`max 840dp`) und Unterstützung für externe Tastaturen (`Strg+F` Quick Find, `Strg+N` Neue Aufgabe, `Strg+G` Gemini AI Hub, `Esc` Schließen).
-- **Offline-First Room Database + SQLite FTS5 (`unicode61 remove_diacritics 2`):**
+- **Offline-First Room Database + SQLite FTS5 (`unicode61 remove_diacritics 2`) + Komplettes Backup & Restore:**
   - Komplette GTD-Hierarchie: `Areas` (Lebensbereiche), `Projects` (mit Live-Pie-Chart-Fortschrittsring), `Headings` (Überschriften innerhalb von Projekten), `Tasks` (mit `whenDate`, `deadline`, `recurrenceRule`, `reminderTime`, LexoRank `sortOrder` und Long-Press auf die Checkbox für *Abgebrochen* mit `X`-Icon), `ChecklistItems` und hierarchische `Tags`.
+  - **Backup & Restore (`.tbbackup`):** Vollständige Sicherung sämtlicher Entitäten & Einstellungen in einer einzelnen Datei — wahlweise unverschlüsselt oder mit **AES-256-GCM & PBKDF2-HMAC-SHA256 (120.000 Iterationen)** passwortgeschützt, inklusive atomarem Komplett-Restore nach Passworteingabe.
 - **Eigenständiger Bidirektionaler Cloud-Sync (`Firebase Firestore` + `Firebase Auth`):**
   - Multi-Device-Registrierung & Login direkt in der App (`users/{userId}/areas`, `projects`, `headings`, `tasks`, `checklist_items`, `tags`).
   - Kosteneffizienter Delta-Sync (`whereGreaterThan("updatedAt", lastSyncTimestamp)`), `WriteBatch`-Uploads (`isDirty = true`), *Last-Write-Wins*-Konfliktlösung und Soft-Deletes (`isDeleted = true`).

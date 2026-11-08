@@ -134,6 +134,8 @@ import com.culturedcode.things3.ui.components.SmartViewIcon
 import com.culturedcode.things3.ui.components.SmartViewType
 import com.culturedcode.things3.ui.components.ThingsAreaManagerModal
 import com.culturedcode.things3.ui.components.ThingsAuthAndSyncModal
+import com.culturedcode.things3.ui.components.ThingsBackupCreateDialog
+import com.culturedcode.things3.ui.components.ThingsBackupRestoreDialog
 import com.culturedcode.things3.ui.components.ThingsDeadlineBadge
 import com.culturedcode.things3.ui.components.ThingsHoverTooltip
 import com.culturedcode.things3.ui.components.ThingsInitialSetupBanner
@@ -148,7 +150,10 @@ import com.culturedcode.things3.ui.components.ThingsbookBrandSymbol
 import com.culturedcode.things3.ui.components.ThisEveningHeaderBadge
 import com.culturedcode.things3.ui.theme.ThingsTheme
 import com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget
+import com.culturedcode.things3.ui.viewmodel.ThingsbookStatistics
 import com.culturedcode.things3.ui.viewmodel.ThingsbookViewModel
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.LocalDate
@@ -1212,14 +1217,18 @@ private fun ThingsModalsOverlay(
         )
     }
 
-    // Comprehensive Settings Modal (⚙️ top-right: Local DB vs Cloud Sync, Account, Language, Today Badge, Statistics, CSV Import/Export)
+    // Comprehensive Settings Modal (⚙️ top-right: Local DB vs Cloud Sync, Account, Language, Today Badge, Statistics, Backup & Restore, CSV)
     if (isSettingsModalOpen) {
+        val isBackupBusy by viewModel.isBackupBusy.collectAsState()
+        val backupStatusMessage by viewModel.backupStatusMessage.collectAsState()
         ThingsSettingsModal(
             isLocalOnlyDbMode = isLocalOnlyDbMode,
             syncStatus = syncStatus,
             currentUserIdentifier = currentUserIdentifier,
             statistics = statistics,
             csvStatusMessage = csvStatusMessage,
+            isBackupBusy = isBackupBusy,
+            backupStatusMessage = backupStatusMessage,
             showTodayAppBadge = showTodayAppBadge,
             todayCount = statistics.todayTasksCount,
             hasSampleTasks = hasSampleTasks,
@@ -1237,6 +1246,9 @@ private fun ThingsModalsOverlay(
             onTriggerImmediateSync = { viewModel.triggerManualCloudSync() },
             onSignOutCloud = { viewModel.signOutCloud() },
             onSelectLanguage = { viewModel.switchAppLanguage(it) },
+            onOpenCreateBackupDialog = { viewModel.setBackupCreateDialogOpen(true) },
+            onInspectBackupFromUri = { uri -> viewModel.inspectBackupUriForRestore(uri) },
+            onClearBackupStatusMessage = { viewModel.clearBackupStatusMessage() },
             onExportCsvToUri = { uri -> viewModel.exportTasksCsvToUri(uri) },
             onShareCsv = { viewModel.shareTasksCsv() },
             onImportCsvFromUri = { uri -> viewModel.importTasksCsvFromUri(uri) },
@@ -1244,6 +1256,11 @@ private fun ThingsModalsOverlay(
             onDismiss = { viewModel.setSettingsModalOpen(false) }
         )
     }
+
+    ThingsBackupDialogsHost(
+        viewModel = viewModel,
+        statistics = statistics
+    )
 
     // Initial Setup Account Merge Prompt (shown BEFORE syncing whenever sample tasks still exist!)
     pendingMergeAuthRequest?.let { pendingReq ->
@@ -1362,6 +1379,59 @@ private fun ThingsModalsOverlay(
             },
             onSendTestNotificationNow = { viewModel.sendTestDailyDigestNotificationNow() },
             onDismiss = { viewModel.setNotificationSettingsOpen(false) }
+        )
+    }
+}
+
+@Composable
+private fun ThingsBackupDialogsHost(
+    viewModel: ThingsbookViewModel,
+    statistics: ThingsbookStatistics
+) {
+    val isBackupCreateDialogOpen by viewModel.isBackupCreateDialogOpen.collectAsState()
+    val pendingRestoreSession by viewModel.pendingRestoreSession.collectAsState()
+    val isBackupBusy by viewModel.isBackupBusy.collectAsState()
+    val restoreDialogError by viewModel.restoreDialogError.collectAsState()
+
+    val createBackupDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        if (uri != null) {
+            viewModel.exportFullBackupToUri(uri)
+        } else {
+            viewModel.clearStagedBackupPassword()
+        }
+    }
+
+    if (isBackupCreateDialogOpen) {
+        ThingsBackupCreateDialog(
+            statistics = statistics,
+            isBusy = isBackupBusy,
+            onSaveToFile = { pwd ->
+                viewModel.stagePasswordForBackupFileSave(pwd)
+                val suffix = if (!pwd.isNullOrEmpty()) "-encrypted" else ""
+                val fileName = "thingsbook-backup-${LocalDate.now()}$suffix.tbbackup"
+                runCatching { createBackupDocumentLauncher.launch(fileName) }
+            },
+            onShareBackupFile = { pwd ->
+                viewModel.shareFullBackup(pwd)
+            },
+            onDismiss = { viewModel.setBackupCreateDialogOpen(false) }
+        )
+    }
+
+    pendingRestoreSession?.let { session ->
+        ThingsBackupRestoreDialog(
+            inspection = session.inspection,
+            fileNameHint = session.fileNameHint,
+            isBusy = isBackupBusy,
+            errorMessage = restoreDialogError,
+            onConfirmRestore = { pwd ->
+                viewModel.confirmRestoreFromPendingBackup(pwd)
+            },
+            onCancel = {
+                viewModel.cancelPendingRestore()
+            }
         )
     }
 }

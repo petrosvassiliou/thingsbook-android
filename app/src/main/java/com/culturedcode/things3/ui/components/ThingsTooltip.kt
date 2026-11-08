@@ -1,33 +1,33 @@
 package com.culturedcode.things3.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,142 +44,256 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.roundToIntRect
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupPositionProvider
-import androidx.compose.ui.window.PopupProperties
 import com.culturedcode.things3.ui.theme.ThingsTheme
 import kotlinx.coroutines.delay
 
 /**
+ * Pure in-tree GPU Tooltip Coordinator:
+ * Avoids Android `WindowManager` `Popup` windows completely, eliminating:
+ * 1. The ChromeOS / Android hover-stealing strobe loop (`Enter -> Popup -> Exit -> Destroy -> Enter`)
+ * 2. Wayland / SurfaceFlinger child-window creation flashes.
+ * Because the rendered tooltip layer has zero pointer modifiers, hit-testing passes 100% through it.
+ */
+@Stable
+class ThingsTooltipHostState {
+    var activeOwnerId by mutableStateOf<Any?>(null)
+        private set
+    var activeText by mutableStateOf("")
+        private set
+    var activeAnchorBounds by mutableStateOf(IntRect.Zero)
+        private set
+
+    fun show(ownerId: Any, text: String, anchorBounds: IntRect) {
+        if (text.isBlank() || anchorBounds.width <= 0 || anchorBounds.height <= 0) return
+        activeOwnerId = ownerId
+        activeText = text
+        activeAnchorBounds = anchorBounds
+    }
+
+    fun hide(ownerId: Any) {
+        if (activeOwnerId === ownerId) {
+            activeOwnerId = null
+        }
+    }
+}
+
+val LocalThingsTooltipHostState = staticCompositionLocalOf<ThingsTooltipHostState?> { null }
+
+private class BoundsRef(var rect: IntRect = IntRect.Zero)
+
+/**
+ * Root container that hosts the hit-test-transparent GPU tooltip layer above its content.
+ */
+@Composable
+fun ThingsTooltipHostBox(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    val hostState = remember { ThingsTooltipHostState() }
+    var hostSize by remember { mutableStateOf(IntSize.Zero) }
+    var rootOffsetInWindow by remember { mutableStateOf(IntRect.Zero) }
+
+    CompositionLocalProvider(LocalThingsTooltipHostState provides hostState) {
+        Box(
+            modifier = modifier
+                .onSizeChanged { hostSize = it }
+                .onGloballyPositioned { coords ->
+                    rootOffsetInWindow = coords.boundsInRoot().roundToIntRect()
+                }
+        ) {
+            content()
+            ThingsTooltipOverlayLayer(
+                hostState = hostState,
+                hostSize = hostSize,
+                hostBoundsInRoot = rootOffsetInWindow
+            )
+        }
+    }
+}
+
+@Composable
+private fun ThingsTooltipOverlayLayer(
+    hostState: ThingsTooltipHostState,
+    hostSize: IntSize,
+    hostBoundsInRoot: IntRect
+) {
+    val density = LocalDensity.current
+    val isShowing = hostState.activeOwnerId != null && hostState.activeText.isNotBlank()
+
+    var displayedText by remember { mutableStateOf("") }
+    var displayedBounds by remember { mutableStateOf(IntRect.Zero) }
+
+    if (isShowing) {
+        displayedText = hostState.activeText
+        displayedBounds = hostState.activeAnchorBounds
+    }
+
+    val alpha by animateFloatAsState(
+        targetValue = if (isShowing) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = if (isShowing) 150 else 110,
+            easing = FastOutSlowInEasing
+        ),
+        label = "thingsTooltipAlpha"
+    )
+
+    if (alpha <= 0.005f || displayedText.isBlank() || hostSize.width <= 0 || hostSize.height <= 0) {
+        return
+    }
+
+    val verticalGapPx = with(density) { 8.dp.roundToPx() }
+    val screenMarginPx = with(density) { 8.dp.roundToPx() }
+    val slideOffsetPx = with(density) { 3.dp.toPx() }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .layout { measurable, constraints ->
+                    val maxTooltipW = (hostSize.width - screenMarginPx * 2).coerceAtLeast(60)
+                    val placeable = measurable.measure(
+                        constraints.copy(
+                            minWidth = 0,
+                            maxWidth = maxTooltipW.coerceAtMost(constraints.maxWidth),
+                            minHeight = 0
+                        )
+                    )
+                    val localLeft = displayedBounds.left - hostBoundsInRoot.left
+                    val localTop = displayedBounds.top - hostBoundsInRoot.top
+                    val localBottom = displayedBounds.bottom - hostBoundsInRoot.top
+
+                    val centeredX = localLeft + (displayedBounds.width - placeable.width) / 2
+                    val maxX = (hostSize.width - placeable.width - screenMarginPx).coerceAtLeast(screenMarginPx)
+                    val finalX = centeredX.coerceIn(screenMarginPx, maxX)
+
+                    val aboveY = localTop - placeable.height - verticalGapPx
+                    val belowY = localBottom + verticalGapPx
+                    val maxY = (hostSize.height - placeable.height - screenMarginPx).coerceAtLeast(0)
+                    val finalY = if (aboveY >= screenMarginPx) {
+                        aboveY
+                    } else {
+                        belowY.coerceIn(0, maxY)
+                    }
+
+                    layout(placeable.width, placeable.height) {
+                        placeable.place(finalX, finalY)
+                    }
+                }
+                .graphicsLayer {
+                    val safeAlpha = if (alpha.isFinite()) alpha.coerceIn(0f, 1f) else 0f
+                    this.alpha = safeAlpha
+                    this.translationY = (1f - safeAlpha) * slideOffsetPx
+                }
+                .clip(RoundedCornerShape(7.dp))
+                .background(Color(0xEB1D2128))
+                .border(
+                    width = 0.75.dp,
+                    color = Color.White.copy(alpha = 0.14f),
+                    shape = RoundedCornerShape(7.dp)
+                )
+                .padding(horizontal = 9.dp, vertical = 5.dp)
+        ) {
+            Text(
+                text = displayedText,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Medium
+                ),
+                color = Color.White,
+                maxLines = 2
+            )
+        }
+    }
+}
+
+/**
  * Non-intrusive Things-for-Mac style mouse/stylus hover tooltip.
  *
- * - Observes `PointerEventType.Enter`, `Exit`, and `Press` on `PointerEventPass.Initial` WITHOUT
- *   consuming pointer events, so clicks, long-presses, and Drag & Drop gestures (such as MagicPlusFab)
- *   work completely undisturbed.
- * - Positions smartly above the hovered symbol (or flips below if near the top edge of the window).
+ * - Uses pure in-tree GPU rendering via [LocalThingsTooltipHostState] — never spawns Android `PopupWindow`s,
+ *   completely preventing hover-exit oscillation/flashing on Chromebooks, tablets, and desktop mice.
+ * - Ignores touch finger taps (`PointerType.Touch`), activating strictly on mouse/stylus hover.
  */
 @Composable
 fun ThingsHoverTooltip(
     text: String,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    delayMillis: Long = 240L,
+    delayMillis: Long = 420L,
     content: @Composable () -> Unit
 ) {
-    var isHovered by remember { mutableStateOf(false) }
-    var isVisible by remember { mutableStateOf(false) }
-    val density = LocalDensity.current
+    val hostState = LocalThingsTooltipHostState.current
+    val ownerId = remember { Any() }
+    val boundsRef = remember { BoundsRef() }
+    var isMouseHovered by remember { mutableStateOf(false) }
 
-    LaunchedEffect(isHovered, enabled, text) {
-        if (isHovered && enabled && text.isNotBlank()) {
-            delay(delayMillis)
-            isVisible = true
-        } else {
-            isVisible = false
+    DisposableEffect(ownerId, hostState) {
+        onDispose {
+            hostState?.hide(ownerId)
         }
     }
 
-    val verticalGapPx = with(density) { 8.dp.toPx().toInt() }
-    val screenMarginPx = with(density) { 8.dp.toPx().toInt() }
-
-    val positionProvider = remember(verticalGapPx, screenMarginPx) {
-        object : PopupPositionProvider {
-            override fun calculatePosition(
-                anchorBounds: IntRect,
-                windowSize: IntSize,
-                layoutDirection: LayoutDirection,
-                popupContentSize: IntSize
-            ): IntOffset {
-                val centeredX = anchorBounds.left + (anchorBounds.width - popupContentSize.width) / 2
-                val maxX = (windowSize.width - popupContentSize.width - screenMarginPx).coerceAtLeast(screenMarginPx)
-                val clampedX = centeredX.coerceIn(screenMarginPx, maxX)
-
-                val aboveY = anchorBounds.top - popupContentSize.height - verticalGapPx
-                val belowY = anchorBounds.bottom + verticalGapPx
-                val finalY = if (aboveY >= screenMarginPx) {
-                    aboveY
-                } else {
-                    belowY.coerceAtMost((windowSize.height - popupContentSize.height - screenMarginPx).coerceAtLeast(0))
-                }
-                return IntOffset(clampedX, finalY)
-            }
+    LaunchedEffect(isMouseHovered, enabled, text, hostState) {
+        if (hostState == null || !enabled || !isMouseHovered || text.isBlank()) {
+            hostState?.hide(ownerId)
+        } else {
+            delay(delayMillis)
+            hostState.show(ownerId, text, boundsRef.rect)
+            // Calm auto-hide after 3.5s so a parked mouse cursor never blocks the view indefinitely
+            delay(3500L)
+            hostState.hide(ownerId)
         }
     }
 
     Box(
-        modifier = modifier.pointerInput(enabled) {
-            if (!enabled) return@pointerInput
-            awaitPointerEventScope {
-                while (true) {
-                    val event = awaitPointerEvent(PointerEventPass.Initial)
-                    when (event.type) {
-                        PointerEventType.Enter -> isHovered = true
-                        PointerEventType.Exit -> {
-                            isHovered = false
-                            isVisible = false
+        modifier = modifier
+            .onGloballyPositioned { coords ->
+                boundsRef.rect = coords.boundsInRoot().roundToIntRect()
+            }
+            .pointerInput(enabled, hostState != null) {
+                if (!enabled || hostState == null) return@pointerInput
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val pointerType = event.changes.firstOrNull()?.type
+                        val isHoverPointer = pointerType == PointerType.Mouse || pointerType == PointerType.Stylus
+                        when (event.type) {
+                            PointerEventType.Enter -> {
+                                if (isHoverPointer && event.changes.none { it.pressed }) {
+                                    isMouseHovered = true
+                                }
+                            }
+                            PointerEventType.Exit, PointerEventType.Press -> {
+                                if (isMouseHovered) {
+                                    isMouseHovered = false
+                                }
+                                hostState.hide(ownerId)
+                            }
+                            else -> Unit
                         }
-                        PointerEventType.Press -> {
-                            isHovered = false
-                            isVisible = false
-                        }
-                        else -> Unit
                     }
                 }
             }
-        }
     ) {
         content()
-
-        if (isVisible && enabled && text.isNotBlank()) {
-            Popup(
-                popupPositionProvider = positionProvider,
-                properties = PopupProperties(
-                    focusable = false,
-                    dismissOnBackPress = false,
-                    dismissOnClickOutside = false,
-                    clippingEnabled = true
-                )
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(7.dp),
-                    color = Color(0xF01C2026),
-                    shadowElevation = 6.dp,
-                    modifier = Modifier
-                        .border(
-                            width = 0.75.dp,
-                            color = Color.White.copy(alpha = 0.14f),
-                            shape = RoundedCornerShape(7.dp)
-                        )
-                ) {
-                    Text(
-                        text = text,
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Medium
-                        ),
-                        color = Color.White,
-                        maxLines = 2,
-                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
-                    )
-                }
-            }
-        }
     }
 }
 
 /**
  * The Thingsbook App Symbol (rounded macOS-style cobalt squircle with white checkmark)
- * with an optional animated Things-Red numeric badge showing the open "Today" (`Heute`) task count.
+ * with an optional calm, smooth Things-Red numeric badge showing the open "Today" (`Heute`) task count.
  */
 @Composable
 fun ThingsbookBrandSymbol(
@@ -191,13 +305,10 @@ fun ThingsbookBrandSymbol(
 ) {
     val colors = ThingsTheme.colors
     val shouldShowCount = showBadge && todayCount > 0
-    val badgeScale by animateFloatAsState(
+    val badgeProgress by animateFloatAsState(
         targetValue = if (shouldShowCount) 1f else 0f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
-        label = "thingsbookSymbolBadgeScale"
+        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+        label = "thingsbookSymbolBadgeProgress"
     )
 
     Box(
@@ -206,7 +317,11 @@ fun ThingsbookBrandSymbol(
                 if (onClick != null) {
                     Modifier
                         .clip(RoundedCornerShape(9.dp))
-                        .clickable(onClick = onClick)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onClick
+                        )
                         .padding(2.dp)
                 } else {
                     Modifier.padding(2.dp)
@@ -220,8 +335,8 @@ fun ThingsbookBrandSymbol(
                 .shadow(
                     elevation = 2.dp,
                     shape = RoundedCornerShape(size * 0.27f),
-                    ambientColor = colors.thingsBlue.copy(alpha = 0.3f),
-                    spotColor = colors.thingsBlue.copy(alpha = 0.4f)
+                    ambientColor = colors.thingsBlue.copy(alpha = 0.28f),
+                    spotColor = colors.thingsBlue.copy(alpha = 0.36f)
                 )
         ) {
             val w = this.size.width
@@ -229,7 +344,6 @@ fun ThingsbookBrandSymbol(
             if (w <= 0f || h <= 0f) return@Canvas
             val corner = w * 0.27f
 
-            // Outer white/card rim + Things cobalt gradient inner squircle
             drawRoundRect(
                 brush = Brush.verticalGradient(
                     colors = listOf(Color(0xFF428BFF), Color(0xFF1E6BF1))
@@ -239,7 +353,6 @@ fun ThingsbookBrandSymbol(
                 cornerRadius = CornerRadius(corner, corner)
             )
 
-            // Crisp white checkmark
             val checkPath = Path().apply {
                 moveTo(w * 0.27f, h * 0.53f)
                 lineTo(w * 0.44f, h * 0.70f)
@@ -256,21 +369,18 @@ fun ThingsbookBrandSymbol(
             )
         }
 
-        AnimatedVisibility(
-            visible = shouldShowCount,
-            enter = scaleIn(spring(dampingRatio = 0.65f, stiffness = 450f)) + fadeIn(),
-            exit = scaleOut() + fadeOut(),
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .offset(x = 6.dp, y = (-5).dp)
-        ) {
+        if (badgeProgress > 0.01f && todayCount > 0) {
             val badgeText = if (todayCount > 99) "99+" else todayCount.toString()
             Box(
                 modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 6.dp, y = (-5).dp)
                     .graphicsLayer {
-                        val s = if (badgeScale.isFinite()) badgeScale.coerceAtLeast(0f) else 1f
+                        val p = if (badgeProgress.isFinite()) badgeProgress.coerceIn(0f, 1f) else 1f
+                        val s = 0.75f + 0.25f * p
                         scaleX = s
                         scaleY = s
+                        alpha = p
                     }
                     .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp)
                     .clip(CircleShape)

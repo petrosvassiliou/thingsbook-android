@@ -1,15 +1,30 @@
 package com.culturedcode.things3.data.repository
 
 import androidx.room.withTransaction
+import com.culturedcode.things3.data.backup.BackupAreaDto
+import com.culturedcode.things3.data.backup.BackupChecklistItemDto
+import com.culturedcode.things3.data.backup.BackupHeadingDto
+import com.culturedcode.things3.data.backup.BackupInspectionResult
+import com.culturedcode.things3.data.backup.BackupPreferencesDto
+import com.culturedcode.things3.data.backup.BackupProjectDto
+import com.culturedcode.things3.data.backup.BackupProjectTagRefDto
+import com.culturedcode.things3.data.backup.BackupSummary
+import com.culturedcode.things3.data.backup.BackupTagDto
+import com.culturedcode.things3.data.backup.BackupTaskDto
+import com.culturedcode.things3.data.backup.BackupTaskTagRefDto
+import com.culturedcode.things3.data.backup.ThingsBackupCodec
+import com.culturedcode.things3.data.backup.ThingsbookBackupPayload
 import com.culturedcode.things3.data.local.DatabaseSeeder
 import com.culturedcode.things3.data.local.ThingsDatabase
 import com.culturedcode.things3.data.local.entity.AreaEntity
 import com.culturedcode.things3.data.local.entity.ChecklistItemEntity
 import com.culturedcode.things3.data.local.entity.HeadingEntity
 import com.culturedcode.things3.data.local.entity.ProjectEntity
+import com.culturedcode.things3.data.local.entity.ProjectTagCrossRef
 import com.culturedcode.things3.data.local.entity.ProjectWithProgressTuple
 import com.culturedcode.things3.data.local.entity.TagEntity
 import com.culturedcode.things3.data.local.entity.TaskEntity
+import com.culturedcode.things3.data.local.entity.TaskTagCrossRef
 import com.culturedcode.things3.data.local.entity.TaskWithDetails
 import com.culturedcode.things3.data.notifications.ReminderScheduler
 import com.culturedcode.things3.domain.model.Area
@@ -1444,6 +1459,366 @@ class ThingsRepository @Inject constructor(
             database.areaDao().hardDeleteAll()
             database.tagDao().hardDeleteAll()
         }
+    }
+
+    // =========================================================================
+    // Full Backup & Restore (.tbbackup — Optional AES-256-GCM Password Protection)
+    // =========================================================================
+
+    suspend fun createFullBackupBytes(
+        password: CharArray?,
+        appVersionName: String,
+        appVersionCode: Int,
+        preferences: BackupPreferencesDto
+    ): Pair<ByteArray, BackupSummary> {
+        val now = System.currentTimeMillis()
+        val payload = database.withTransaction {
+            val areas = database.areaDao().getActiveAreasList()
+            val projects = database.projectDao().getAllNonDeletedProjectsList()
+            val headings = database.headingDao().getAllNonDeletedHeadingsList()
+            val tasks = database.taskDao().getAllNonDeletedTasksList()
+            val checklistItems = database.checklistDao().getAllNonDeletedChecklistItemsList()
+            val tags = database.tagDao().getAllNonDeletedTagsList()
+
+            val activeTaskIds = tasks.mapTo(HashSet()) { it.id }
+            val activeProjectIds = projects.mapTo(HashSet()) { it.id }
+            val activeTagIds = tags.mapTo(HashSet()) { it.id }
+
+            val taskTagRefs = database.taskDao().getAllTaskTagCrossRefs()
+                .filter { it.taskId in activeTaskIds && it.tagId in activeTagIds }
+            val projectTagRefs = database.projectDao().getAllProjectTagCrossRefs()
+                .filter { it.projectId in activeProjectIds && it.tagId in activeTagIds }
+
+            ThingsbookBackupPayload(
+                schemaVersion = ThingsBackupCodec.FORMAT_VERSION,
+                createdAt = now,
+                appVersionName = appVersionName,
+                areas = areas.map { a ->
+                    BackupAreaDto(
+                        id = a.id,
+                        title = a.title,
+                        sortOrder = if (a.sortOrder.isFinite()) a.sortOrder else 0.0,
+                        tagIdsJson = a.tagIdsJson,
+                        createdAt = a.createdAt,
+                        updatedAt = a.updatedAt
+                    )
+                },
+                projects = projects.map { p ->
+                    BackupProjectDto(
+                        id = p.id,
+                        areaId = p.areaId,
+                        title = p.title,
+                        notes = p.notes,
+                        status = p.status.name,
+                        scheduleState = p.scheduleState.name,
+                        whenDate = p.whenDate,
+                        deadline = p.deadline,
+                        completedAt = p.completedAt,
+                        sortOrder = if (p.sortOrder.isFinite()) p.sortOrder else 0.0,
+                        tagIdsJson = p.tagIdsJson,
+                        createdAt = p.createdAt,
+                        updatedAt = p.updatedAt
+                    )
+                },
+                headings = headings.map { h ->
+                    BackupHeadingDto(
+                        id = h.id,
+                        projectId = h.projectId,
+                        title = h.title,
+                        sortOrder = if (h.sortOrder.isFinite()) h.sortOrder else 0.0,
+                        isArchived = h.isArchived,
+                        createdAt = h.createdAt,
+                        updatedAt = h.updatedAt
+                    )
+                },
+                tasks = tasks.map { t ->
+                    BackupTaskDto(
+                        id = t.id,
+                        title = t.title,
+                        notes = t.notes,
+                        status = t.status.name,
+                        scheduleState = t.scheduleState.name,
+                        whenDate = t.whenDate,
+                        deadline = t.deadline,
+                        reminderTime = t.reminderTime,
+                        completedAt = t.completedAt,
+                        projectId = t.projectId,
+                        headingId = t.headingId,
+                        areaId = t.areaId,
+                        recurrenceRuleJson = t.recurrenceRuleJson,
+                        sortOrder = if (t.sortOrder.isFinite()) t.sortOrder else 0.0,
+                        tagIdsJson = t.tagIdsJson,
+                        createdAt = t.createdAt,
+                        updatedAt = t.updatedAt
+                    )
+                },
+                checklistItems = checklistItems.map { c ->
+                    BackupChecklistItemDto(
+                        id = c.id,
+                        taskId = c.taskId,
+                        title = c.title,
+                        isCompleted = c.isCompleted,
+                        sortOrder = if (c.sortOrder.isFinite()) c.sortOrder else 0.0,
+                        createdAt = c.createdAt,
+                        updatedAt = c.updatedAt
+                    )
+                },
+                tags = tags.map { tg ->
+                    BackupTagDto(
+                        id = tg.id,
+                        title = tg.title,
+                        parentTagId = tg.parentTagId,
+                        shortcut = tg.shortcut,
+                        sortOrder = if (tg.sortOrder.isFinite()) tg.sortOrder else 0.0,
+                        createdAt = tg.createdAt,
+                        updatedAt = tg.updatedAt
+                    )
+                },
+                taskTagRefs = taskTagRefs.map { BackupTaskTagRefDto(it.taskId, it.tagId) },
+                projectTagRefs = projectTagRefs.map { BackupProjectTagRefDto(it.projectId, it.tagId) },
+                preferences = preferences
+            )
+        }
+
+        val encrypted = password != null && password.isNotEmpty()
+        val encodedBytes = ThingsBackupCodec.encodeBackup(
+            payload = payload,
+            password = password,
+            appVersionName = appVersionName,
+            appVersionCode = appVersionCode
+        )
+        val summary = ThingsBackupCodec.summarizePayload(payload, encrypted = encrypted)
+        return encodedBytes to summary
+    }
+
+    fun inspectBackupBytes(rawBytes: ByteArray): BackupInspectionResult =
+        ThingsBackupCodec.inspectBackup(rawBytes)
+
+    /**
+     * Decrypts (if password-protected), validates, and atomically replaces all local entities
+     * (`areas`, `tags`, `projects`, `project_tags`, `headings`, `tasks`, `task_tags`, `checklist_items`).
+     * If password verification or format parsing fails, throws BEFORE touching the database.
+     */
+    suspend fun restoreFullBackupFromBytes(
+        rawBytes: ByteArray,
+        password: CharArray?,
+        syncAfterRestore: Boolean
+    ): Pair<BackupSummary, BackupPreferencesDto> {
+        // 1. Authenticate, decrypt, decompress, and parse BEFORE any DB write!
+        val payload = ThingsBackupCodec.decodeBackup(rawBytes, password)
+        val now = System.currentTimeMillis()
+
+        // 2. Normalize and enforce referential integrity across all 8 tables
+        val restoredTagsRaw = payload.tags
+            .filter { it.id.isNotBlank() && it.title.isNotBlank() }
+            .distinctBy { it.id }
+        val validTagIds = restoredTagsRaw.mapTo(HashSet()) { it.id }
+
+        val restoredTags = restoredTagsRaw.map { tg ->
+            TagEntity(
+                id = tg.id,
+                title = tg.title.trim(),
+                parentTagId = tg.parentTagId?.takeIf { it in validTagIds && it != tg.id },
+                shortcut = tg.shortcut?.trim()?.takeIf { it.isNotEmpty() },
+                sortOrder = if (tg.sortOrder.isFinite()) tg.sortOrder else 0.0,
+                createdAt = tg.createdAt.takeIf { it > 0L } ?: now,
+                updatedAt = tg.updatedAt.takeIf { it > 0L } ?: now,
+                isDeleted = false,
+                isDirty = syncAfterRestore
+            )
+        }
+
+        val restoredAreas = payload.areas
+            .filter { it.id.isNotBlank() && it.title.isNotBlank() }
+            .distinctBy { it.id }
+            .take(MAX_AREAS)
+            .map { a ->
+                val cleanAreaTags = decodeStringList(a.tagIdsJson).filter { it in validTagIds }.distinct()
+                AreaEntity(
+                    id = a.id,
+                    title = a.title.trim(),
+                    sortOrder = if (a.sortOrder.isFinite()) a.sortOrder else 0.0,
+                    tagIdsJson = json.encodeToString(cleanAreaTags),
+                    createdAt = a.createdAt.takeIf { it > 0L } ?: now,
+                    updatedAt = a.updatedAt.takeIf { it > 0L } ?: now,
+                    isDeleted = false,
+                    isDirty = syncAfterRestore
+                )
+            }
+        val validAreaIds = restoredAreas.mapTo(HashSet()) { it.id }
+
+        val explicitProjTagsByProject = payload.projectTagRefs
+            .filter { it.tagId in validTagIds }
+            .groupBy({ it.projectId }, { it.tagId })
+
+        val restoredProjects = payload.projects
+            .filter { it.id.isNotBlank() }
+            .distinctBy { it.id }
+            .map { p ->
+                val projStatus = runCatching { ProjectStatus.valueOf(p.status) }.getOrDefault(ProjectStatus.ACTIVE)
+                val projSchedule = runCatching { ScheduleState.valueOf(p.scheduleState) }.getOrDefault(ScheduleState.ANYTIME)
+                val combinedTagIds = (decodeStringList(p.tagIdsJson) + explicitProjTagsByProject[p.id].orEmpty())
+                    .filter { it in validTagIds }
+                    .distinct()
+                ProjectEntity(
+                    id = p.id,
+                    areaId = p.areaId?.takeIf { it in validAreaIds },
+                    title = p.title,
+                    notes = p.notes,
+                    status = projStatus,
+                    scheduleState = projSchedule,
+                    whenDate = p.whenDate,
+                    deadline = p.deadline,
+                    completedAt = p.completedAt,
+                    sortOrder = if (p.sortOrder.isFinite()) p.sortOrder else 0.0,
+                    tagIdsJson = json.encodeToString(combinedTagIds),
+                    createdAt = p.createdAt.takeIf { it > 0L } ?: now,
+                    updatedAt = p.updatedAt.takeIf { it > 0L } ?: now,
+                    isDeleted = false,
+                    isDirty = syncAfterRestore
+                )
+            }
+        val validProjectIds = restoredProjects.mapTo(HashSet()) { it.id }
+
+        val restoredProjectTagRefs = restoredProjects.flatMap { proj ->
+            decodeStringList(proj.tagIdsJson).map { tagId ->
+                ProjectTagCrossRef(projectId = proj.id, tagId = tagId)
+            }
+        }
+
+        val restoredHeadings = payload.headings
+            .filter { it.id.isNotBlank() && it.projectId in validProjectIds }
+            .distinctBy { it.id }
+            .map { h ->
+                HeadingEntity(
+                    id = h.id,
+                    projectId = h.projectId,
+                    title = h.title,
+                    sortOrder = if (h.sortOrder.isFinite()) h.sortOrder else 0.0,
+                    isArchived = h.isArchived,
+                    createdAt = h.createdAt.takeIf { it > 0L } ?: now,
+                    updatedAt = h.updatedAt.takeIf { it > 0L } ?: now,
+                    isDeleted = false,
+                    isDirty = syncAfterRestore
+                )
+            }
+        val headingProjectMap = restoredHeadings.associate { it.id to it.projectId }
+
+        val explicitTaskTagsByTask = payload.taskTagRefs
+            .filter { it.tagId in validTagIds }
+            .groupBy({ it.taskId }, { it.tagId })
+
+        val restoredTasks = payload.tasks
+            .filter { it.id.isNotBlank() }
+            .distinctBy { it.id }
+            .map { t ->
+                val taskStatus = runCatching { TaskStatus.valueOf(t.status) }.getOrDefault(TaskStatus.OPEN)
+                val taskSchedule = runCatching { ScheduleState.valueOf(t.scheduleState) }.getOrDefault(ScheduleState.INBOX)
+                val cleanProjectId = t.projectId?.takeIf { it in validProjectIds }
+                val cleanHeadingId = t.headingId?.takeIf { hId ->
+                    cleanProjectId != null && headingProjectMap[hId] == cleanProjectId
+                }
+                val cleanAreaId = if (cleanProjectId != null) null else t.areaId?.takeIf { it in validAreaIds }
+                val combinedTagIds = (decodeStringList(t.tagIdsJson) + explicitTaskTagsByTask[t.id].orEmpty())
+                    .filter { it in validTagIds }
+                    .distinct()
+                val validRecurrenceJson = t.recurrenceRuleJson?.takeIf { raw ->
+                    raw.isNotBlank() && runCatching { json.decodeFromString<RecurrenceRule>(raw) }.isSuccess
+                }
+
+                TaskEntity(
+                    id = t.id,
+                    title = t.title,
+                    notes = t.notes,
+                    status = taskStatus,
+                    scheduleState = taskSchedule,
+                    whenDate = t.whenDate,
+                    deadline = t.deadline,
+                    reminderTime = t.reminderTime,
+                    completedAt = t.completedAt,
+                    projectId = cleanProjectId,
+                    headingId = cleanHeadingId,
+                    areaId = cleanAreaId,
+                    recurrenceRuleJson = validRecurrenceJson,
+                    sortOrder = if (t.sortOrder.isFinite()) t.sortOrder else 0.0,
+                    tagIdsJson = json.encodeToString(combinedTagIds),
+                    createdAt = t.createdAt.takeIf { it > 0L } ?: now,
+                    updatedAt = t.updatedAt.takeIf { it > 0L } ?: now,
+                    isDeleted = false,
+                    isDirty = syncAfterRestore
+                )
+            }
+        val validTaskIds = restoredTasks.mapTo(HashSet()) { it.id }
+
+        val restoredTaskTagRefs = restoredTasks.flatMap { task ->
+            decodeStringList(task.tagIdsJson).map { tagId ->
+                TaskTagCrossRef(taskId = task.id, tagId = tagId)
+            }
+        }
+
+        val restoredChecklistItems = payload.checklistItems
+            .filter { it.id.isNotBlank() && it.taskId in validTaskIds }
+            .distinctBy { it.id }
+            .map { c ->
+                ChecklistItemEntity(
+                    id = c.id,
+                    taskId = c.taskId,
+                    title = c.title,
+                    isCompleted = c.isCompleted,
+                    sortOrder = if (c.sortOrder.isFinite()) c.sortOrder else 0.0,
+                    createdAt = c.createdAt.takeIf { it > 0L } ?: now,
+                    updatedAt = c.updatedAt.takeIf { it > 0L } ?: now,
+                    isDeleted = false,
+                    isDirty = syncAfterRestore
+                )
+            }
+
+        // 3. Cancel previous task reminders before replacing the database
+        runCatchingCancellable {
+            val previousReminders = database.taskDao().getOpenTasksWithFutureReminders(0L)
+            previousReminders.forEach { reminderScheduler.cancelReminder(it.id) }
+        }
+        DatabaseSeeder.SAMPLE_TASK_IDS.forEach { id -> reminderScheduler.cancelReminder(id) }
+
+        // 4. Atomic full swap inside a single Room SQLite transaction
+        database.withTransaction {
+            database.checklistDao().hardDeleteAll()
+            database.taskDao().hardDeleteAllTaskTags()
+            database.taskDao().hardDeleteAll()
+            database.headingDao().hardDeleteAll()
+            database.projectDao().hardDeleteAllProjectTags()
+            database.projectDao().hardDeleteAll()
+            database.areaDao().hardDeleteAll()
+            database.tagDao().hardDeleteAll()
+
+            if (restoredAreas.isNotEmpty()) database.areaDao().upsertAll(restoredAreas)
+            if (restoredTags.isNotEmpty()) database.tagDao().upsertAll(restoredTags)
+            if (restoredProjects.isNotEmpty()) database.projectDao().upsertAll(restoredProjects)
+            if (restoredProjectTagRefs.isNotEmpty()) database.projectDao().insertProjectTagCrossRefs(restoredProjectTagRefs)
+            if (restoredHeadings.isNotEmpty()) database.headingDao().upsertAll(restoredHeadings)
+            if (restoredTasks.isNotEmpty()) database.taskDao().upsertAll(restoredTasks)
+            if (restoredTaskTagRefs.isNotEmpty()) database.taskDao().insertTaskTagCrossRefs(restoredTaskTagRefs)
+            if (restoredChecklistItems.isNotEmpty()) database.checklistDao().upsertAll(restoredChecklistItems)
+        }
+
+        // 5. Reschedule future reminders for restored open tasks & trigger cloud sync if active
+        runCatchingCancellable { rescheduleAllOpenTaskReminders() }
+        if (syncAfterRestore) {
+            syncRepository.triggerBackgroundSync()
+        }
+
+        val summary = BackupSummary(
+            createdAt = payload.createdAt,
+            appVersionName = payload.appVersionName,
+            encrypted = password != null && password.isNotEmpty(),
+            areasCount = restoredAreas.size,
+            projectsCount = restoredProjects.size,
+            headingsCount = restoredHeadings.size,
+            tasksCount = restoredTasks.size,
+            checklistItemsCount = restoredChecklistItems.size,
+            tagsCount = restoredTags.size
+        )
+        return summary to payload.preferences
     }
 
     private fun decodeStringList(raw: String): List<String> =

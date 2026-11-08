@@ -83,6 +83,17 @@
             android:exported="false"
             android:permission="android.permission.BIND_REMOTEVIEWS" />
 
+        <!-- FileProvider for securely sharing .tbbackup files -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/backup_file_paths" />
+        </provider>
+
         <!-- Disable default WorkManager initializer for HiltWorkerFactory -->
         <provider
             android:name="androidx.startup.InitializationProvider"

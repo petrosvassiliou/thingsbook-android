@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.culturedcode.things3.ui.components.ThingsTooltipHostBox
 import com.culturedcode.things3.ui.screens.ThingsSmartViewScreen
 import com.culturedcode.things3.ui.theme.Things3Theme
 import com.culturedcode.things3.ui.viewmodel.ThingsbookViewModel
@@ -108,10 +109,12 @@ class MainActivity : AppCompatActivity() {
                             launchIntentState = null
                         }
                     }
-                    ThingsSmartViewScreen(
-                        viewModel = viewModel,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    ThingsTooltipHostBox(modifier = Modifier.fillMaxSize()) {
+                        ThingsSmartViewScreen(
+                            viewModel = viewModel,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                 }
             }
         } catch (t: Throwable) {

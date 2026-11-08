@@ -152,6 +152,9 @@ interface ProjectDao {
     @Query("DELETE FROM projects")
     suspend fun hardDeleteAll()
 
+    @Query("SELECT * FROM project_tags")
+    suspend fun getAllProjectTagCrossRefs(): List<ProjectTagCrossRef>
+
     @Query("UPDATE projects SET isDirty = 1 WHERE isDeleted = 0")
     suspend fun markAllActiveDirty()
 }
@@ -166,6 +169,9 @@ interface HeadingDao {
 
     @Query("SELECT * FROM headings WHERE projectId = :projectId AND isDeleted = 0 AND isArchived = 0 ORDER BY sortOrder ASC")
     suspend fun getHeadingsForProjectList(projectId: String): List<HeadingEntity>
+
+    @Query("SELECT * FROM headings WHERE isDeleted = 0 ORDER BY sortOrder ASC")
+    suspend fun getAllNonDeletedHeadingsList(): List<HeadingEntity>
 
     @Query("SELECT * FROM headings WHERE isDirty = 1")
     suspend fun getDirtyHeadings(): List<HeadingEntity>
@@ -459,6 +465,12 @@ interface TaskDao {
     @Query("DELETE FROM tasks")
     suspend fun hardDeleteAll()
 
+    @Query("SELECT * FROM tasks WHERE isDeleted = 0 ORDER BY sortOrder ASC")
+    suspend fun getAllNonDeletedTasksList(): List<TaskEntity>
+
+    @Query("SELECT * FROM task_tags")
+    suspend fun getAllTaskTagCrossRefs(): List<TaskTagCrossRef>
+
     @Query("UPDATE tasks SET isDirty = 1 WHERE isDeleted = 0")
     suspend fun markAllActiveDirty()
 }
@@ -470,6 +482,9 @@ interface ChecklistDao {
 
     @Query("SELECT * FROM checklist_items WHERE taskId = :taskId AND isDeleted = 0 ORDER BY sortOrder ASC")
     suspend fun getForTaskSync(taskId: String): List<ChecklistItemEntity>
+
+    @Query("SELECT * FROM checklist_items WHERE isDeleted = 0 ORDER BY sortOrder ASC")
+    suspend fun getAllNonDeletedChecklistItemsList(): List<ChecklistItemEntity>
 
     @Query("SELECT * FROM checklist_items WHERE isDirty = 1")
     suspend fun getDirtyChecklistItems(): List<ChecklistItemEntity>
@@ -506,6 +521,9 @@ interface ChecklistDao {
 interface TagDao {
     @Query("SELECT * FROM tags WHERE isDeleted = 0 ORDER BY sortOrder ASC")
     fun observeAllTags(): Flow<List<TagEntity>>
+
+    @Query("SELECT * FROM tags WHERE isDeleted = 0 ORDER BY sortOrder ASC")
+    suspend fun getAllNonDeletedTagsList(): List<TagEntity>
 
     @Query("SELECT * FROM tags WHERE isDirty = 1")
     suspend fun getDirtyTags(): List<TagEntity>

@@ -76,8 +76,9 @@ import java.time.LocalDate
  * 2. Account Management: Full email address display, Sync Now, Login/Switch Account, Sign Out
  * 3. App Language Selection & Configurable "Heute" Badge on the Thingsbook Symbol
  * 4. Live Task & Productivity Statistics: Open, Today, Upcoming, Anytime, Inbox, Someday, Recurring, Completed, Canceled, Deleted, Projects, Areas (X/8), Tags
- * 5. CSV Import & Export: Export all tasks to `.csv` file or share via Intent; Import tasks from `.csv` file
- * 6. App Version Info (`Thingsbook v1.5.0`)
+ * 5. Full Backup & Restore (`.tbbackup` with optional AES-256-GCM password protection)
+ * 6. CSV Import & Export: Export all tasks to `.csv` file or share via Intent; Import tasks from `.csv` file
+ * 7. App Version Info (`Thingsbook v1.6.0`)
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -87,6 +88,8 @@ fun ThingsSettingsModal(
     currentUserIdentifier: String?,
     statistics: ThingsbookStatistics,
     csvStatusMessage: String?,
+    isBackupBusy: Boolean = false,
+    backupStatusMessage: String? = null,
     showTodayAppBadge: Boolean = true,
     todayCount: Int = statistics.todayTasksCount,
     hasSampleTasks: Boolean = false,
@@ -98,6 +101,9 @@ fun ThingsSettingsModal(
     onTriggerImmediateSync: () -> Unit,
     onSignOutCloud: () -> Unit,
     onSelectLanguage: (String) -> Unit,
+    onOpenCreateBackupDialog: () -> Unit = {},
+    onInspectBackupFromUri: (Uri) -> Unit = {},
+    onClearBackupStatusMessage: () -> Unit = {},
     onExportCsvToUri: (Uri) -> Unit,
     onShareCsv: () -> Unit,
     onImportCsvFromUri: (Uri) -> Unit,
@@ -178,7 +184,7 @@ fun ThingsSettingsModal(
                                 color = colors.primaryText
                             )
                             Text(
-                                text = "Datenbank, Cloud-Konto, Sprache, Statistik & CSV",
+                                text = "Datenbank, Cloud-Konto, Sprache, Statistik, Backup & CSV",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = colors.secondaryText
                             )
@@ -720,7 +726,22 @@ fun ThingsSettingsModal(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // =============================================================
-                // 4. CSV Import & Export Funktion
+                // 4. Vollständiges Backup & Restore (.tbbackup + Passwortschutz)
+                // =============================================================
+                BackupAndRestoreSettingsSection(
+                    isBackupBusy = isBackupBusy,
+                    backupStatusMessage = backupStatusMessage,
+                    onOpenCreateBackupDialog = onOpenCreateBackupDialog,
+                    onInspectBackupFromUri = onInspectBackupFromUri,
+                    onClearBackupStatusMessage = onClearBackupStatusMessage
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(color = colors.hairlineDivider)
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // =============================================================
+                // 5. CSV Import & Export Funktion
                 // =============================================================
                 SettingsSectionHeader(
                     icon = Icons.Outlined.FileDownload,

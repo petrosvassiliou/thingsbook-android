@@ -3,9 +3,7 @@ package com.culturedcode.things3.ui.components
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -43,7 +41,6 @@ import androidx.compose.ui.unit.dp
 import com.culturedcode.things3.R
 import com.culturedcode.things3.domain.model.TaskStatus
 import com.culturedcode.things3.ui.theme.ThingsTheme
-import kotlinx.coroutines.launch
 
 enum class ThingsCheckboxShape {
     ROUNDED_SQUARE,
@@ -78,58 +75,35 @@ fun ThingsCheckbox(
 
     var prevStatus by remember { mutableStateOf(status) }
     val popScaleAnim = remember { Animatable(1f) }
-    val haloProgressAnim = remember { Animatable(0f) }
 
     LaunchedEffect(status) {
         if (prevStatus == TaskStatus.OPEN && status == TaskStatus.COMPLETED) {
-            launch {
-                popScaleAnim.snapTo(0.86f)
-                popScaleAnim.animateTo(
-                    targetValue = 1.18f,
-                    animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing)
-                )
-                popScaleAnim.animateTo(
-                    targetValue = 1.0f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                        stiffness = Spring.StiffnessMedium
-                    )
-                )
-            }
-            launch {
-                haloProgressAnim.snapTo(0f)
-                haloProgressAnim.animateTo(
-                    targetValue = 1f,
-                    animationSpec = tween(durationMillis = 460, easing = FastOutSlowInEasing)
-                )
-            }
+            popScaleAnim.snapTo(0.94f)
+            popScaleAnim.animateTo(
+                targetValue = 1.07f,
+                animationSpec = tween(durationMillis = 110, easing = FastOutSlowInEasing)
+            )
+            popScaleAnim.animateTo(
+                targetValue = 1.0f,
+                animationSpec = tween(durationMillis = 130, easing = FastOutSlowInEasing)
+            )
         } else {
             popScaleAnim.snapTo(1f)
-            haloProgressAnim.snapTo(0f)
         }
         prevStatus = status
     }
 
-    val baseScale by animateFloatAsState(
-        targetValue = if (isActive) 1.0f else 0.96f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "checkboxScale"
-    )
-
     val fillFraction by animateFloatAsState(
         targetValue = if (isActive) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.78f, stiffness = 460f),
+        animationSpec = tween(durationMillis = 165, easing = FastOutSlowInEasing),
         label = "checkboxFillFraction"
     )
 
     val checkDrawProgress by animateFloatAsState(
         targetValue = if (status == TaskStatus.COMPLETED) 1f else 0f,
         animationSpec = tween(
-            durationMillis = if (status == TaskStatus.COMPLETED) 250 else 120,
-            delayMillis = if (status == TaskStatus.COMPLETED) 35 else 0,
+            durationMillis = if (status == TaskStatus.COMPLETED) 190 else 110,
+            delayMillis = if (status == TaskStatus.COMPLETED) 25 else 0,
             easing = FastOutSlowInEasing
         ),
         label = "checkDrawProgress"
@@ -137,13 +111,13 @@ fun ThingsCheckbox(
 
     val fillColor by animateColorAsState(
         targetValue = if (isActive) colors.checkboxCheckedFill else Color.Transparent,
-        animationSpec = spring(stiffness = 500f),
+        animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing),
         label = "checkboxFillColor"
     )
 
     val borderColor by animateColorAsState(
         targetValue = if (isActive) colors.checkboxCheckedFill else colors.checkboxBorder,
-        animationSpec = spring(stiffness = 500f),
+        animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing),
         label = "checkboxBorderColor"
     )
 
@@ -158,9 +132,9 @@ fun ThingsCheckbox(
             modifier = modifier
                 .size(size + 10.dp)
                 .graphicsLayer {
-                    val combinedScale = (baseScale * popScaleAnim.value).coerceIn(0.6f, 1.4f)
-                    scaleX = combinedScale
-                    scaleY = combinedScale
+                    val s = popScaleAnim.value.coerceIn(0.85f, 1.15f)
+                    scaleX = s
+                    scaleY = s
                 }
                 .combinedClickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -198,22 +172,6 @@ fun ThingsCheckbox(
                     boxSizePx / 2f
                 } else {
                     5.5.dp.toPx()
-                }
-
-                // Expanding luminous completion halo ring
-                val haloP = haloProgressAnim.value.coerceIn(0f, 1f)
-                if (haloP > 0.01f && haloP < 0.99f) {
-                    val haloExpand = haloP * 5.dp.toPx()
-                    val haloAlpha = ((1f - haloP) * 0.46f).coerceIn(0f, 1f)
-                    val haloSize = boxSizePx + haloExpand * 2f
-                    val haloCorner = cornerPx + haloExpand
-                    drawRoundRect(
-                        color = colors.checkboxCheckedFill.copy(alpha = haloAlpha),
-                        topLeft = Offset(insetX - haloExpand, insetY - haloExpand),
-                        size = Size(haloSize, haloSize),
-                        cornerRadius = CornerRadius(haloCorner, haloCorner),
-                        style = Stroke(width = (1.8.dp.toPx() * (1f - haloP * 0.45f)).coerceAtLeast(0.6f))
-                    )
                 }
 
                 val borderStroke = if (isDashedSomeday && status == TaskStatus.OPEN) {

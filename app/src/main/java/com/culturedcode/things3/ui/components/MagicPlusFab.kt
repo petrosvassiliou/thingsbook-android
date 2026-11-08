@@ -2,21 +2,25 @@ package com.culturedcode.things3.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,8 +61,6 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -70,6 +72,9 @@ import androidx.compose.ui.unit.sp
 import com.culturedcode.things3.R
 import com.culturedcode.things3.ui.theme.ThingsTheme
 import kotlin.math.roundToInt
+
+private val SmoothPopoverOutEasing = CubicBezierEasing(0.22f, 1.0f, 0.36f, 1.0f)
+private val SmoothPopoverInEasing = CubicBezierEasing(0.4f, 0.0f, 1.0f, 1.0f)
 
 enum class MagicPlusDropMode {
     NONE,
@@ -103,8 +108,10 @@ fun MagicPlusInsertionGap(
     val colors = ThingsTheme.colors
     AnimatedVisibility(
         visible = visible,
-        enter = expandVertically(animationSpec = spring(dampingRatio = 0.78f, stiffness = 380f)) + fadeIn(),
-        exit = shrinkVertically(animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f)) + fadeOut(),
+        enter = expandVertically(animationSpec = tween(durationMillis = 170, easing = SmoothPopoverOutEasing)) +
+            fadeIn(animationSpec = tween(durationMillis = 140)),
+        exit = shrinkVertically(animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing)) +
+            fadeOut(animationSpec = tween(durationMillis = 110)),
         modifier = modifier
     ) {
         val isHeading = dropMode == MagicPlusDropMode.INSERT_HEADING
@@ -149,8 +156,8 @@ fun MagicPlusInsertionGap(
 }
 
 /**
- * Subtle backdrop scrim rendered behind the expanded Magic Plus speed-dial menu so clicking
- * outside smoothly collapses the menu.
+ * Transparent click-outside catcher behind the expanded Magic Plus popover menu.
+ * Intentionally uses zero dark tint so opening or closing the '+' menu NEVER flashes the workspace grey.
  */
 @Composable
 fun MagicPlusBackdropScrim(
@@ -158,16 +165,10 @@ fun MagicPlusBackdropScrim(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
-        exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMedium)),
-        modifier = modifier
-    ) {
+    if (visible) {
         Box(
-            modifier = Modifier
+            modifier = modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.14f))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -178,9 +179,9 @@ fun MagicPlusBackdropScrim(
 }
 
 /**
- * The iconic Things 3 "Magic Plus" Draggable Floating Action Button + Context-Aware Expandable Menu:
- * - Clicking smoothly expands/collapses a spring-animated context menu offering:
- *   `Aufgabe`, `Projekt`, `Überschrift` (in Projects), and `Bereich` (when < max areas) depending on context!
+ * The iconic Things 3 "Magic Plus" Draggable Floating Action Button + Context-Aware Popover Menu:
+ * - Clicking smoothly opens/closes a pure-GPU (`graphicsLayer`) popover menu without layout reflows,
+ *   shadow-clipping pops, ripple flashes, or dark screen flashes.
  * - Dragging it across the list preserves 100% of the Things Magic Plus Drag & Drop behavior
  *   (`INSERT_TODO` row gap & `INSERT_HEADING` when dragged to the left inside a Project).
  */
@@ -211,89 +212,105 @@ fun MagicPlusFab(
     var lastHapticSlot by remember { mutableIntStateOf(-1) }
     var lastDropMode by remember { mutableStateOf(MagicPlusDropMode.NONE) }
 
-    val scale by animateFloatAsState(
+    val fabInteractionSource = remember { MutableInteractionSource() }
+    val isFabPressed by fabInteractionSource.collectIsPressedAsState()
+
+    val showMenu = isMenuExpanded && !isDragging
+    val menuTransition = updateTransition(targetState = showMenu, label = "magicPlusMenuTransition")
+
+    val menuAlpha by menuTransition.animateFloat(
+        transitionSpec = {
+            if (targetState) {
+                tween(durationMillis = 165, easing = FastOutSlowInEasing)
+            } else {
+                tween(durationMillis = 120, easing = SmoothPopoverInEasing)
+            }
+        },
+        label = "magicPlusMenuAlpha"
+    ) { expanded -> if (expanded) 1f else 0f }
+
+    val menuMorph by menuTransition.animateFloat(
+        transitionSpec = {
+            if (targetState) {
+                tween(durationMillis = 210, easing = SmoothPopoverOutEasing)
+            } else {
+                tween(durationMillis = 140, easing = SmoothPopoverInEasing)
+            }
+        },
+        label = "magicPlusMenuMorph"
+    ) { expanded -> if (expanded) 1f else 0f }
+
+    val fabScale by animateFloatAsState(
         targetValue = when {
-            isDragging -> 1.18f
-            isMenuExpanded -> 1.05f
+            isDragging -> 1.14f
+            isFabPressed -> 0.94f
             else -> 1.0f
         },
-        animationSpec = spring(dampingRatio = 0.70f, stiffness = 420f),
+        animationSpec = tween(durationMillis = 150, easing = SmoothPopoverOutEasing),
         label = "magicPlusScale"
     )
 
     val iconRotation by animateFloatAsState(
-        targetValue = if (isMenuExpanded && !isDragging) 135f else 0f,
-        animationSpec = spring(dampingRatio = 0.66f, stiffness = 420f),
+        targetValue = if (showMenu) 45f else 0f,
+        animationSpec = tween(durationMillis = 200, easing = SmoothPopoverOutEasing),
         label = "magicPlusIconRotation"
-    )
-
-    val fabColor by animateColorAsState(
-        targetValue = if (isMenuExpanded && !isDragging) Color(0xFF1E5FD9) else colors.thingsBlue,
-        animationSpec = spring(stiffness = 450f),
-        label = "magicPlusFabColor"
-    )
-
-    val elevation by animateDpAsState(
-        targetValue = if (isDragging) 18.dp else if (isMenuExpanded) 12.dp else 8.dp,
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f),
-        label = "magicPlusElevation"
     )
 
     val rowHeightPx = with(density) { 58.dp.toPx() }.coerceAtLeast(1f)
     val leftEdgeThresholdPx = with(density) { (-210).dp.toPx() }
+    val menuFloatOffsetPx = with(density) { 10.dp.toPx() }
 
-    Column(
+    Box(
         modifier = modifier,
-        horizontalAlignment = Alignment.End,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentAlignment = Alignment.BottomEnd
     ) {
-        // Animated Context-Aware Speed-Dial Menu (fans open from bottom-right above the + button)
-        AnimatedVisibility(
-            visible = isMenuExpanded && !isDragging,
-            enter = expandVertically(
-                expandFrom = Alignment.Bottom,
-                animationSpec = spring(dampingRatio = 0.72f, stiffness = 430f)
-            ) + scaleIn(
-                initialScale = 0.76f,
-                transformOrigin = TransformOrigin(0.92f, 1.0f),
-                animationSpec = spring(dampingRatio = 0.72f, stiffness = 430f)
-            ) + fadeIn(animationSpec = spring(stiffness = 500f)),
-            exit = shrinkVertically(
-                shrinkTowards = Alignment.Bottom,
-                animationSpec = spring(dampingRatio = 0.86f, stiffness = 500f)
-            ) + scaleOut(
-                targetScale = 0.80f,
-                transformOrigin = TransformOrigin(0.92f, 1.0f),
-                animationSpec = spring(dampingRatio = 0.86f, stiffness = 500f)
-            ) + fadeOut(animationSpec = spring(stiffness = 600f))
-        ) {
-            MagicPlusContextMenuCard(
-                contextMode = contextMode,
-                canCreateArea = canCreateArea,
-                onSelectTodo = {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onMenuExpandedChange(false)
-                    onCreateTodo()
-                },
-                onSelectHeading = {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onMenuExpandedChange(false)
-                    onCreateHeading()
-                },
-                onSelectProject = {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onMenuExpandedChange(false)
-                    onCreateProject()
-                },
-                onSelectArea = {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onMenuExpandedChange(false)
-                    onCreateArea()
-                }
-            )
+        // Pure GPU-Animated Context Menu positioned cleanly above the '+' button with unclipped shadow margin
+        if (menuTransition.currentState || menuTransition.targetState) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = 56.dp)
+                    .graphicsLayer {
+                        val a = if (menuAlpha.isFinite()) menuAlpha.coerceIn(0f, 1f) else 0f
+                        val m = if (menuMorph.isFinite()) menuMorph.coerceIn(0f, 1f) else 0f
+                        alpha = a
+                        val s = 0.90f + 0.10f * m
+                        scaleX = s
+                        scaleY = s
+                        translationY = (1f - m) * menuFloatOffsetPx
+                        transformOrigin = TransformOrigin(0.92f, 1.0f)
+                    }
+                    // Breathing room around Surface so soft shadow never clips during transition
+                    .padding(start = 16.dp, top = 16.dp, end = 2.dp, bottom = 14.dp)
+            ) {
+                MagicPlusContextMenuCard(
+                    contextMode = contextMode,
+                    canCreateArea = canCreateArea,
+                    onSelectTodo = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onMenuExpandedChange(false)
+                        onCreateTodo()
+                    },
+                    onSelectHeading = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onMenuExpandedChange(false)
+                        onCreateHeading()
+                    },
+                    onSelectProject = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onMenuExpandedChange(false)
+                        onCreateProject()
+                    },
+                    onSelectArea = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onMenuExpandedChange(false)
+                        onCreateArea()
+                    }
+                )
+            }
         }
 
-        // Draggable + Clickable Magic Plus Circle Button with Mouse Hover Tooltip
+        // Draggable + Clickable Magic Plus Circle Button with zero ripple flash
         ThingsHoverTooltip(
             text = "Neu erstellen (Klicken für Menü • Ziehen zum Platzieren)",
             enabled = !isDragging && !isMenuExpanded
@@ -307,20 +324,24 @@ fun MagicPlusFab(
                         )
                     }
                     .graphicsLayer {
-                        val safeScale = if (scale.isFinite()) scale else 1f
+                        val safeScale = if (fabScale.isFinite()) fabScale else 1f
                         scaleX = safeScale
                         scaleY = safeScale
                     }
                     .shadow(
-                        elevation = elevation,
+                        elevation = if (isDragging) 14.dp else 8.dp,
                         shape = CircleShape,
-                        ambientColor = colors.thingsBlue.copy(alpha = 0.45f),
-                        spotColor = colors.thingsBlue.copy(alpha = 0.55f)
+                        ambientColor = colors.thingsBlue.copy(alpha = 0.38f),
+                        spotColor = colors.thingsBlue.copy(alpha = 0.48f)
                     )
                     .size(58.dp)
                     .clip(CircleShape)
-                    .background(fabColor)
-                    .clickable(enabled = !isDragging) {
+                    .background(colors.thingsBlue)
+                    .clickable(
+                        interactionSource = fabInteractionSource,
+                        indication = null,
+                        enabled = !isDragging
+                    ) {
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onMenuExpandedChange(!isMenuExpanded)
                     }
@@ -434,13 +455,14 @@ private fun MagicPlusContextMenuCard(
         else -> "Mit Schritten & Zieldatum"
     }
 
+    // Pure crisp white/dark elevated card (`tonalElevation = 0.dp`) so icon badges never wash out
     Surface(
         shape = RoundedCornerShape(18.dp),
         color = colors.cardElevatedSurface,
-        shadowElevation = 14.dp,
-        tonalElevation = 6.dp,
+        shadowElevation = 10.dp,
+        tonalElevation = 0.dp,
         modifier = Modifier
-            .widthIn(min = 236.dp, max = 280.dp)
+            .widthIn(min = 240.dp, max = 282.dp)
             .border(
                 width = 0.75.dp,
                 color = colors.hairlineDivider,
@@ -449,7 +471,7 @@ private fun MagicPlusContextMenuCard(
     ) {
         Column(
             modifier = Modifier.padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             // 1. Aufgabe (Always available)
             MagicPlusOptionRow(
@@ -483,7 +505,7 @@ private fun MagicPlusContextMenuCard(
                 onClick = onSelectProject
             )
 
-            // 4. Bereich (Context-specific: available outside Project detail or whenever < 8 Areas)
+            // 4. Bereich (Context-specific: available outside Project detail when < 8 Areas)
             if (contextMode != MagicPlusContextMode.PROJECT_DETAIL && canCreateArea) {
                 MagicPlusOptionRow(
                     icon = Icons.Outlined.Inventory2,
@@ -508,11 +530,17 @@ private fun MagicPlusOptionRow(
     onClick: () -> Unit
 ) {
     val colors = ThingsTheme.colors
-    var isHovered by remember { mutableStateOf(false) }
+    val interactionSource = remember { MutableInteractionSource() }
+    val isHovered by interactionSource.collectIsHoveredAsState()
+    val isPressed by interactionSource.collectIsPressedAsState()
 
     val rowBg by animateColorAsState(
-        targetValue = if (isHovered) colors.thingsBlueSoft.copy(alpha = 0.65f) else Color.Transparent,
-        animationSpec = spring(stiffness = 600f),
+        targetValue = when {
+            isPressed -> colors.thingsBlue.copy(alpha = 0.13f)
+            isHovered -> colors.thingsBlue.copy(alpha = 0.07f)
+            else -> Color.Transparent
+        },
+        animationSpec = tween(durationMillis = 110, easing = FastOutSlowInEasing),
         label = "magicPlusOptionHoverBg"
     )
 
@@ -521,19 +549,12 @@ private fun MagicPlusOptionRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(rowBg)
-            .pointerInput(Unit) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val ev = awaitPointerEvent(PointerEventPass.Initial)
-                        when (ev.type) {
-                            PointerEventType.Enter -> isHovered = true
-                            PointerEventType.Exit -> isHovered = false
-                            else -> Unit
-                        }
-                    }
-                }
-            }
-            .clickable(onClick = onClick)
+            .hoverable(interactionSource = interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
             .padding(horizontal = 10.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(11.dp)
@@ -556,7 +577,7 @@ private fun MagicPlusOptionRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = colors.primaryText
             )
             Text(

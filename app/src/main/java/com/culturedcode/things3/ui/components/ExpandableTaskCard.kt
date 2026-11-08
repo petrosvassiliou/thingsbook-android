@@ -233,15 +233,24 @@ fun ExpandableTaskCard(
     }
 
     // =========================================================================
-    // Elegant 3-Stage Task Completion Choreography
+    // Calm, Zero-Flash Task Completion Choreography (Authentic Things 3 Style)
     // =========================================================================
     var isCompletingAnim by remember(task.id) { mutableStateOf(false) }
+    var isCompletedPendingCommit by remember(task.id) { mutableStateOf(false) }
     val completionStrikeProgress = remember(task.id) { Animatable(0f) }
     val completionExitProgress = remember(task.id) { Animatable(0f) }
 
+    LaunchedEffect(task.status, task.whenDate) {
+        if (isCompletedPendingCommit && task.status != TaskStatus.OPEN) {
+            isCompletedPendingCommit = false
+            completionStrikeProgress.snapTo(0f)
+            completionExitProgress.snapTo(0f)
+        }
+    }
+
     DisposableEffect(task.id) {
         onDispose {
-            // If user navigates to another view while completion animation is in flight, commit immediately
+            // If user navigates away while completion animation is in flight, commit immediately
             if (isCompletingAnim) {
                 isCompletingAnim = false
                 currentOnStatusChange(TaskStatus.COMPLETED)
@@ -251,30 +260,45 @@ fun ExpandableTaskCard(
 
     LaunchedEffect(isCompletingAnim) {
         if (isCompletingAnim) {
+            isCompletedPendingCommit = false
             completionStrikeProgress.snapTo(0f)
             completionExitProgress.snapTo(0f)
             launch {
-                delay(45)
+                delay(25)
                 completionStrikeProgress.animateTo(
                     targetValue = 1f,
-                    animationSpec = tween(durationMillis = 275, easing = FastOutSlowInEasing)
+                    animationSpec = tween(durationMillis = 210, easing = FastOutSlowInEasing)
                 )
             }
-            delay(385)
+            delay(310)
             completionExitProgress.animateTo(
                 targetValue = 1f,
-                animationSpec = tween(durationMillis = 195, easing = FastOutSlowInEasing)
+                animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
             )
+            // Keep row invisible while Room DB transaction commits so it never flashes back at alpha=1!
+            isCompletedPendingCommit = true
             isCompletingAnim = false
             currentOnStatusChange(TaskStatus.COMPLETED)
-        } else {
+        } else if (!isCompletedPendingCommit) {
             completionStrikeProgress.snapTo(0f)
             completionExitProgress.snapTo(0f)
         }
     }
 
+    LaunchedEffect(isCompletedPendingCommit) {
+        if (isCompletedPendingCommit) {
+            // Safety fallback for recurring tasks that stay in the current Project view with a new date
+            delay(350)
+            if (isCompletedPendingCommit) {
+                isCompletedPendingCommit = false
+                completionStrikeProgress.snapTo(0f)
+                completionExitProgress.snapTo(0f)
+            }
+        }
+    }
+
     val handleStatusRequest: (TaskStatus) -> Unit = { requestedStatus ->
-        if (task.status == TaskStatus.OPEN && requestedStatus == TaskStatus.COMPLETED && !isCompletingAnim) {
+        if (task.status == TaskStatus.OPEN && requestedStatus == TaskStatus.COMPLETED && !isCompletingAnim && !isCompletedPendingCommit) {
             if (isExpanded) {
                 onExpandToggle()
             }
@@ -282,18 +306,23 @@ fun ExpandableTaskCard(
         } else if (isCompletingAnim && requestedStatus == TaskStatus.OPEN) {
             // Allow instant undo if user clicks checkbox again before glide-out finishes
             isCompletingAnim = false
+            isCompletedPendingCommit = false
         } else {
             onStatusChange(requestedStatus)
         }
     }
 
-    val effectiveVisualStatus = if (isCompletingAnim) TaskStatus.COMPLETED else task.status
+    val effectiveVisualStatus = if (isCompletingAnim || isCompletedPendingCommit) {
+        TaskStatus.COMPLETED
+    } else {
+        task.status
+    }
 
     // Things-for-iPhone Horizontal Swipe Gesture state (when collapsed)
     var rawSwipeOffsetPx by remember(task.id, isExpanded) { mutableFloatStateOf(0f) }
     val animatedSwipeOffsetPx by animateFloatAsState(
         targetValue = rawSwipeOffsetPx,
-        animationSpec = spring(dampingRatio = 0.78f, stiffness = 450f),
+        animationSpec = spring(dampingRatio = 0.82f, stiffness = 450f),
         label = "swipeOffsetPx"
     )
     val whenSwipeThresholdPx = with(density) { 68.dp.toPx() }
@@ -328,41 +357,39 @@ fun ExpandableTaskCard(
 
     val horizontalPadding by animateDpAsState(
         targetValue = if (isExpanded) 12.dp else 16.dp,
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f),
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
         label = "cardHorizontalMargin"
     )
     val verticalPadding by animateDpAsState(
         targetValue = if (isExpanded) 8.dp else 1.dp,
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f),
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
         label = "cardVerticalMargin"
     )
     val cornerRadius by animateDpAsState(
         targetValue = if (isExpanded) 14.dp else 8.dp,
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f),
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
         label = "cardCornerRadius"
     )
     val shadowElevation by animateDpAsState(
         targetValue = if (isExpanded) 10.dp else 0.dp,
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f),
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
         label = "cardShadowElevation"
     )
 
-    val strikeFrac = completionStrikeProgress.value.coerceIn(0f, 1f)
-    val exitFrac = completionExitProgress.value.coerceIn(0f, 1f)
-    val completionGlowAlpha = if (isCompletingAnim) {
-        (strikeFrac * (1f - exitFrac * 0.5f) * 0.11f).coerceIn(0f, 0.14f)
+    val strikeFrac = if (isCompletedPendingCommit) 1f else completionStrikeProgress.value.coerceIn(0f, 1f)
+    val exitFrac = if (isCompletedPendingCommit && task.status == TaskStatus.OPEN) {
+        1f
     } else {
-        0f
+        completionExitProgress.value.coerceIn(0f, 1f)
     }
 
     val surfaceColor by animateColorAsState(
         targetValue = when {
             isExpanded -> colors.cardElevatedSurface
-            isCompletingAnim -> colors.thingsBlue.copy(alpha = 0.09f)
             isSelected -> colors.thingsBlue.copy(alpha = 0.14f)
             else -> Color.Transparent
         },
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f),
+        animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
         label = "cardSurfaceColor"
     )
 
@@ -370,16 +397,13 @@ fun ExpandableTaskCard(
         modifier = modifier
             .fillMaxWidth()
             .graphicsLayer {
-                if (isCompletingAnim && exitFrac > 0f) {
-                    translationX = exitFrac * 20.dp.toPx()
+                if ((isCompletingAnim || isCompletedPendingCommit) && exitFrac > 0f) {
+                    translationX = exitFrac * 10.dp.toPx()
                     alpha = (1f - exitFrac).coerceIn(0f, 1f)
-                    val s = 1f - (exitFrac * 0.018f)
-                    scaleX = s
-                    scaleY = s
                 }
             }
     ) {
-        if (!isExpanded && !isCompletingAnim && kotlin.math.abs(animatedSwipeOffsetPx) > 6f) {
+        if (!isExpanded && !isCompletingAnim && !isCompletedPendingCommit && kotlin.math.abs(animatedSwipeOffsetPx) > 6f) {
             SwipeActionBackgroundLayer(
                 animatedSwipeOffsetPx = animatedSwipeOffsetPx,
                 deleteSwipeThresholdPx = deleteSwipeThresholdPx,
@@ -406,12 +430,10 @@ fun ExpandableTaskCard(
                 )
                 .clip(RoundedCornerShape(cornerRadius))
                 .then(
-                    if ((isSelected && !isExpanded) || completionGlowAlpha > 0.01f) {
+                    if (isSelected && !isExpanded) {
                         Modifier.border(
                             width = 1.dp,
-                            color = colors.thingsBlue.copy(
-                                alpha = if (isCompletingAnim) (completionGlowAlpha * 2.8f).coerceAtMost(0.38f) else 0.42f
-                            ),
+                            color = colors.thingsBlue.copy(alpha = 0.42f),
                             shape = RoundedCornerShape(cornerRadius)
                         )
                     } else {

@@ -3,13 +3,20 @@ package com.culturedcode.things3.ui.viewmodel
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Log
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.content.FileProvider
 import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.culturedcode.things3.BuildConfig
 import com.culturedcode.things3.data.ai.GeminiLogbookReviewResponse
 import com.culturedcode.things3.data.ai.ThingsbookGeminiService
+import com.culturedcode.things3.data.backup.BackupInspectionResult
+import com.culturedcode.things3.data.backup.BackupPasswordRequiredException
+import com.culturedcode.things3.data.backup.BackupPreferencesDto
+import com.culturedcode.things3.data.backup.InvalidBackupPasswordException
 import com.culturedcode.things3.data.local.ThingsDatabase
 import com.culturedcode.things3.data.notifications.AppIconBadgeUpdater
 import com.culturedcode.things3.data.notifications.DailyDigestConfig
@@ -50,6 +57,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
+import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.InputStreamReader
 import java.time.LocalDate
 import java.time.ZoneId
@@ -61,6 +70,12 @@ sealed interface ActiveNavigationTarget {
     data class ProjectDetail(val projectId: String) : ActiveNavigationTarget
     data class AreaDetail(val areaId: String) : ActiveNavigationTarget
 }
+
+class PendingRestoreSession(
+    val rawBytes: ByteArray,
+    val fileNameHint: String?,
+    val inspection: BackupInspectionResult
+)
 
 sealed interface PendingCloudAuthRequest {
     val displayAccountLabel: String
@@ -1563,6 +1578,277 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     // =========================================================================
+    // v1.6.0: Full Backup & Restore (.tbbackup with optional AES-256-GCM Password)
+    // =========================================================================
+
+    private val _isBackupCreateDialogOpen = MutableStateFlow(false)
+    val isBackupCreateDialogOpen: StateFlow<Boolean> = _isBackupCreateDialogOpen.asStateFlow()
+
+    private val _pendingRestoreSession = MutableStateFlow<PendingRestoreSession?>(null)
+    val pendingRestoreSession: StateFlow<PendingRestoreSession?> = _pendingRestoreSession.asStateFlow()
+
+    private val _isBackupBusy = MutableStateFlow(false)
+    val isBackupBusy: StateFlow<Boolean> = _isBackupBusy.asStateFlow()
+
+    private val _restoreDialogError = MutableStateFlow<String?>(null)
+    val restoreDialogError: StateFlow<String?> = _restoreDialogError.asStateFlow()
+
+    private val _backupStatusMessage = MutableStateFlow<String?>(null)
+    val backupStatusMessage: StateFlow<String?> = _backupStatusMessage.asStateFlow()
+
+    private var stagedBackupExportPassword: CharArray? = null
+
+    fun setBackupCreateDialogOpen(open: Boolean) {
+        if (!open) {
+            clearStagedBackupPassword()
+        }
+        _isBackupCreateDialogOpen.value = open
+    }
+
+    fun clearBackupStatusMessage() {
+        _backupStatusMessage.value = null
+    }
+
+    fun stagePasswordForBackupFileSave(password: String?) {
+        clearStagedBackupPassword()
+        stagedBackupExportPassword = password?.takeIf { it.isNotEmpty() }?.toCharArray()
+    }
+
+    fun clearStagedBackupPassword() {
+        stagedBackupExportPassword?.fill('\u0000')
+        stagedBackupExportPassword = null
+    }
+
+    private fun currentBackupPreferencesSnapshot(): BackupPreferencesDto {
+        val digest = runCatching { reminderScheduler.getDailyDigestConfig() }.getOrNull()
+        val langTag = runCatching { AppCompatDelegate.getApplicationLocales().toLanguageTags() }.getOrDefault("")
+        return BackupPreferencesDto(
+            sidebarVisible = _isSidebarVisible.value,
+            showTodayAppBadge = _showTodayAppBadge.value,
+            dailyDigestEnabled = digest?.enabled,
+            dailyDigestHour = digest?.hour,
+            dailyDigestMinute = digest?.minute,
+            languageTag = langTag
+        )
+    }
+
+    fun exportFullBackupToUri(uri: Uri) {
+        val pwdChars = stagedBackupExportPassword
+        stagedBackupExportPassword = null
+        safeVmScope.launch {
+            _isBackupBusy.value = true
+            try {
+                runCatchingCancellable {
+                    val prefsSnapshot = currentBackupPreferencesSnapshot()
+                    withContext(Dispatchers.IO) {
+                        val (backupBytes, summary) = repository.createFullBackupBytes(
+                            password = pwdChars,
+                            appVersionName = BuildConfig.VERSION_NAME,
+                            appVersionCode = BuildConfig.VERSION_CODE,
+                            preferences = prefsSnapshot
+                        )
+                        val outputStream = runCatching {
+                            appContext.contentResolver.openOutputStream(uri, "wt")
+                        }.getOrNull() ?: appContext.contentResolver.openOutputStream(uri)
+                            ?: throw IllegalStateException("Zieldatei für das Backup konnte nicht geöffnet werden.")
+                        outputStream.use { out ->
+                            out.write(backupBytes)
+                            out.flush()
+                        }
+                        summary
+                    }
+                }.onSuccess { summary ->
+                    _isBackupCreateDialogOpen.value = false
+                    val lockBadge = if (summary.encrypted) "🔒 Passwortgeschützt" else "Unverschlüsselt"
+                    _backupStatusMessage.value = "✅ Backup gespeichert ($lockBadge): ${summary.tasksCount} Aufgaben, ${summary.projectsCount} Projekte, ${summary.areasCount} Bereiche & ${summary.tagsCount} Tags."
+                }.onFailure { err ->
+                    Log.w(TAG, "Full backup export failed", err)
+                    val msg = "❌ Backup fehlgeschlagen: ${err.localizedMessage ?: err.message}"
+                    _backupStatusMessage.value = msg
+                    _uiErrorMessage.value = msg
+                }
+            } finally {
+                pwdChars?.fill('\u0000')
+                _isBackupBusy.value = false
+            }
+        }
+    }
+
+    fun shareFullBackup(password: String?) {
+        val pwdChars = password?.takeIf { it.isNotEmpty() }?.toCharArray()
+        safeVmScope.launch {
+            _isBackupBusy.value = true
+            try {
+                runCatchingCancellable {
+                    val prefsSnapshot = currentBackupPreferencesSnapshot()
+                    val (shareUri, summary) = withContext(Dispatchers.IO) {
+                        val (backupBytes, sum) = repository.createFullBackupBytes(
+                            password = pwdChars,
+                            appVersionName = BuildConfig.VERSION_NAME,
+                            appVersionCode = BuildConfig.VERSION_CODE,
+                            preferences = prefsSnapshot
+                        )
+                        val backupDir = File(appContext.cacheDir, "backups").apply { mkdirs() }
+                        backupDir.listFiles()?.forEach { old -> runCatching { old.delete() } }
+                        val suffix = if (sum.encrypted) "-encrypted" else ""
+                        val outFile = File(backupDir, "thingsbook-backup-${LocalDate.now()}$suffix.tbbackup")
+                        outFile.writeBytes(backupBytes)
+                        val contentUri = FileProvider.getUriForFile(
+                            appContext,
+                            "${appContext.packageName}.fileprovider",
+                            outFile
+                        )
+                        contentUri to sum
+                    }
+                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "application/octet-stream"
+                        putExtra(Intent.EXTRA_SUBJECT, "Thingsbook Backup (${LocalDate.now()})")
+                        putExtra(Intent.EXTRA_STREAM, shareUri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    val chooser = Intent.createChooser(sendIntent, "Thingsbook Backup teilen").apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    appContext.startActivity(chooser)
+                    summary
+                }.onSuccess { summary ->
+                    _isBackupCreateDialogOpen.value = false
+                    val lockBadge = if (summary.encrypted) "🔒 passwortgeschützt" else "unverschlüsselt"
+                    _backupStatusMessage.value = "✅ Backup ($lockBadge) zum Teilen geöffnet."
+                }.onFailure { err ->
+                    Log.w(TAG, "Sharing full backup failed", err)
+                    val msg = "❌ Backup-Teilen fehlgeschlagen: ${err.localizedMessage ?: err.message}"
+                    _backupStatusMessage.value = msg
+                    _uiErrorMessage.value = msg
+                }
+            } finally {
+                pwdChars?.fill('\u0000')
+                _isBackupBusy.value = false
+            }
+        }
+    }
+
+    fun inspectBackupUriForRestore(uri: Uri) {
+        safeVmScope.launch {
+            _isBackupBusy.value = true
+            _restoreDialogError.value = null
+            try {
+                runCatchingCancellable {
+                    withContext(Dispatchers.IO) {
+                        val fileNameHint = runCatching {
+                            appContext.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                                ?.use { cursor ->
+                                    if (cursor.moveToFirst()) cursor.getString(0) else null
+                                }
+                        }.getOrNull()
+
+                        val inputStream = appContext.contentResolver.openInputStream(uri)
+                            ?: throw IllegalStateException("Ausgewählte Backup-Datei konnte nicht geöffnet werden.")
+                        val rawBytes = inputStream.use { stream ->
+                            val out = ByteArrayOutputStream()
+                            val buf = ByteArray(8192)
+                            var total = 0
+                            while (true) {
+                                val read = stream.read(buf)
+                                if (read == -1) break
+                                total += read
+                                if (total > MAX_BACKUP_FILE_BYTES) {
+                                    throw IllegalArgumentException("Die Backup-Datei ist zu groß (maximal 30 MB).")
+                                }
+                                out.write(buf, 0, read)
+                            }
+                            out.toByteArray()
+                        }
+                        val inspection = repository.inspectBackupBytes(rawBytes)
+                        PendingRestoreSession(
+                            rawBytes = rawBytes,
+                            fileNameHint = fileNameHint,
+                            inspection = inspection
+                        )
+                    }
+                }.onSuccess { session ->
+                    _pendingRestoreSession.value = session
+                }.onFailure { err ->
+                    Log.w(TAG, "Backup inspection failed", err)
+                    val msg = "❌ Backup-Datei konnte nicht geladen werden: ${err.localizedMessage ?: err.message}"
+                    _backupStatusMessage.value = msg
+                    _uiErrorMessage.value = msg
+                }
+            } finally {
+                _isBackupBusy.value = false
+            }
+        }
+    }
+
+    fun cancelPendingRestore() {
+        if (_isBackupBusy.value) return
+        _pendingRestoreSession.value = null
+        _restoreDialogError.value = null
+    }
+
+    fun confirmRestoreFromPendingBackup(password: String?) {
+        val session = _pendingRestoreSession.value ?: return
+        val pwdChars = password?.takeIf { it.isNotEmpty() }?.toCharArray()
+        safeVmScope.launch {
+            _isBackupBusy.value = true
+            _restoreDialogError.value = null
+            try {
+                runCatchingCancellable {
+                    withContext(Dispatchers.IO) {
+                        repository.restoreFullBackupFromBytes(
+                            rawBytes = session.rawBytes,
+                            password = pwdChars,
+                            syncAfterRestore = !_isLocalOnlyDbMode.value
+                        )
+                    }
+                }.onSuccess { (summary, restoredPrefs) ->
+                    _pendingRestoreSession.value = null
+                    _restoreDialogError.value = null
+                    _expandedTaskId.value = null
+                    _selectedTaskIds.value = emptySet()
+                    _selectedFilterTagId.value = null
+                    _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
+
+                    restoredPrefs.sidebarVisible?.let { setSidebarVisible(it) }
+                    restoredPrefs.showTodayAppBadge?.let { setShowTodayAppBadge(it) }
+                    if (
+                        restoredPrefs.dailyDigestEnabled != null &&
+                        restoredPrefs.dailyDigestHour != null &&
+                        restoredPrefs.dailyDigestMinute != null
+                    ) {
+                        updateDailyDigestConfig(
+                            restoredPrefs.dailyDigestEnabled,
+                            restoredPrefs.dailyDigestHour.coerceIn(0, 23),
+                            restoredPrefs.dailyDigestMinute.coerceIn(0, 59)
+                        )
+                    }
+                    if (!repository.hasSampleTasks()) {
+                        dismissInitialSetupBanner()
+                    }
+                    runCatching {
+                        com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.refreshAllWidgets(appContext)
+                    }
+
+                    _backupStatusMessage.value =
+                        "✅ Komplettes Restore erfolgreich: ${summary.tasksCount} Aufgaben, ${summary.projectsCount} Projekte, ${summary.areasCount} Bereiche & ${summary.tagsCount} Tags wiederhergestellt!"
+                }.onFailure { err ->
+                    Log.w(TAG, "Full restore failed", err)
+                    if (err is InvalidBackupPasswordException || err is BackupPasswordRequiredException) {
+                        _restoreDialogError.value = err.localizedMessage ?: "Falsches Passwort."
+                    } else {
+                        val msg = err.localizedMessage ?: err.message ?: "Restore fehlgeschlagen."
+                        _restoreDialogError.value = msg
+                        _backupStatusMessage.value = "❌ Restore fehlgeschlagen: $msg"
+                    }
+                }
+            } finally {
+                pwdChars?.fill('\u0000')
+                _isBackupBusy.value = false
+            }
+        }
+    }
+
+    // =========================================================================
     // Multi-Task Selection (Mouse Ctrl/Shift-Click & Things-for-iPhone Swipe)
     // =========================================================================
 
@@ -1677,6 +1963,14 @@ class ThingsbookViewModel @Inject constructor(
         return when {
             _uiErrorMessage.value != null -> {
                 _uiErrorMessage.value = null
+                true
+            }
+            _pendingRestoreSession.value != null && !_isBackupBusy.value -> {
+                cancelPendingRestore()
+                true
+            }
+            _isBackupCreateDialogOpen.value && !_isBackupBusy.value -> {
+                setBackupCreateDialogOpen(false)
                 true
             }
             _pendingMergeAuthRequest.value != null -> {
@@ -1796,6 +2090,7 @@ class ThingsbookViewModel @Inject constructor(
     companion object {
         private const val TAG = "ThingsbookVM"
         private const val MAX_CSV_IMPORT_CHARS = 10 * 1024 * 1024
+        private const val MAX_BACKUP_FILE_BYTES = 30 * 1024 * 1024
     }
 }
 

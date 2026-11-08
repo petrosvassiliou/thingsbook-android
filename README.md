@@ -12,9 +12,9 @@ Eine eigenständige, native Android-Produktivitäts-App (für **Android-Smartpho
 
 ---
 
-## Direkt-Download (Installierbares Android-APK — Version 1.6.0)
+## Direkt-Download (Installierbares Android-APK — Version 1.6.1)
 
-- **[Thingsbook-v1.6.0-full.apk herunterladen (v1.6.0 — Vollständiges Backup & Restore aller Aufgaben, Bereiche, Projekte, Überschriften, Tags & Unteraufgaben mit optionalem AES-256-GCM/PBKDF2-Passwortschutz sowie komplett flackerfreie 120-Hz-GPU-Animationen für das `+`-Menü, Maus-Tooltips & das Erledigen von Aufgaben)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.0-full.apk)**
+- **[Thingsbook-v1.6.1-full.apk herunterladen (v1.6.1 — Kontextbezogene Tag-Filterleiste zeigt pro Ansicht nur die von den dortigen Aufgaben verwendeten Tags, vollständiges Backup & Restore mit optionalem AES-256-GCM-Passwortschutz sowie komplett flackerfreie 120-Hz-GPU-Animationen)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.1-full.apk)**
 
 ---
 

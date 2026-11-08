@@ -423,12 +423,14 @@ fun ThingsSmartViewScreen(
                         onOpenAreaManager = { viewModel.setAreaManagerOpen(true) }
                     )
 
-                    // Interactive Tag Filter Strip + Tag Management Trigger
+                    // Interactive Tag Filter Strip (displays ONLY tags used by tasks in the current view)
                     TagFilterAndManageStrip(
                         allTags = allTags,
+                        rawPrimaryTasks = rawPrimaryTasks,
+                        eveningTasks = eveningTasks,
+                        navTarget = navTarget,
                         selectedTagId = selectedFilterTagId,
-                        onSelectTag = { viewModel.selectFilterTag(it) },
-                        onOpenTagManager = { viewModel.setTagManagerOpen(true) }
+                        onSelectTag = { viewModel.selectFilterTag(it) }
                     )
 
                     ThingsMainTaskLazyList(
@@ -1938,12 +1940,36 @@ private fun TopThingsbookBar(
 @Composable
 private fun TagFilterAndManageStrip(
     allTags: List<Tag>,
+    rawPrimaryTasks: List<TaskItem>,
+    eveningTasks: List<TaskItem>,
+    navTarget: ActiveNavigationTarget,
     selectedTagId: String?,
-    onSelectTag: (String?) -> Unit,
-    onOpenTagManager: () -> Unit
+    onSelectTag: (String?) -> Unit
 ) {
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
+    val isTodaySmartView = navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
+
+    val usedTags = remember(allTags, rawPrimaryTasks, eveningTasks, isTodaySmartView) {
+        com.culturedcode.things3.domain.model.ViewTagFilterUtils.resolveUsedTagsForView(
+            allTags = allTags,
+            rawPrimaryTasks = rawPrimaryTasks,
+            eveningTasks = eveningTasks,
+            isTodaySmartView = isTodaySmartView
+        )
+    }
+
+    // Automatically reset filter if the previously selected tag is not used by any task in this view
+    LaunchedEffect(selectedTagId, usedTags) {
+        if (selectedTagId != null && usedTags.none { it.id == selectedTagId }) {
+            onSelectTag(null)
+        }
+    }
+
+    // Authentic Things 3 behavior: only show the tag filter bar when tasks in the view actually use tags
+    if (usedTags.isEmpty()) {
+        return
+    }
 
     LazyRow(
         modifier = Modifier
@@ -1975,7 +2001,7 @@ private fun TagFilterAndManageStrip(
             }
         }
 
-        items(allTags, key = { "tag_chip_${it.id}" }) { tag ->
+        items(usedTags, key = { "tag_chip_${it.id}" }) { tag ->
             val isSelected = selectedTagId == tag.id
             Box(
                 modifier = Modifier
@@ -1983,7 +2009,7 @@ private fun TagFilterAndManageStrip(
                     .background(if (isSelected) colors.thingsBlue else colors.tagPillBg)
                     .clickable {
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onSelectTag(tag.id)
+                        onSelectTag(if (isSelected) null else tag.id)
                     }
                     .padding(horizontal = 10.dp, vertical = 5.dp)
             ) {
@@ -1993,34 +2019,6 @@ private fun TagFilterAndManageStrip(
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                     ),
                     color = if (isSelected) Color.White else colors.tagPillText
-                )
-            }
-        }
-
-        // Manage Tags Action Chip
-        item(key = "tag_manage_trigger") {
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(colors.thingsBlueSoft)
-                    .clickable {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onOpenTagManager()
-                    }
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.LocalOffer,
-                    contentDescription = null,
-                    tint = colors.thingsBlue,
-                    modifier = Modifier.size(13.dp)
-                )
-                Text(
-                    text = stringResource(R.string.tags_manage_title),
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = colors.thingsBlue
                 )
             }
         }

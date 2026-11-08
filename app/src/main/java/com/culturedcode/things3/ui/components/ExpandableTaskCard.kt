@@ -72,6 +72,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import android.view.MotionEvent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -86,6 +87,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEvent
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isMetaPressed
@@ -103,6 +106,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -121,6 +125,25 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.roundToInt
+
+private fun PointerEvent.isRightClickTrigger(previousButtonsSecondary: Boolean): Boolean {
+    val me = runCatching {
+        val prop = this::class.java.methods.firstOrNull {
+            it.name == "getMotionEvent\$ui_release" || it.name == "getMotionEvent"
+        }
+        prop?.invoke(this) as? MotionEvent
+    }.getOrNull()
+
+    return com.culturedcode.things3.domain.model.RightClickGestureUtils.isRightClickEvent(
+        isPressEvent = type == PointerEventType.Press,
+        isReleaseEvent = type == PointerEventType.Release,
+        isSecondaryButtonFlag = buttons.isSecondaryPressed,
+        previousButtonsSecondary = previousButtonsSecondary,
+        motionEventActionMasked = me?.actionMasked ?: -1,
+        motionEventButtonState = me?.buttonState ?: 0,
+        motionEventActionButton = me?.actionButton ?: 0
+    )
+}
 
 /**
  * The centerpiece of Things 3 UI/UX:
@@ -225,6 +248,7 @@ fun ExpandableTaskCard(
     var showMoveDialog by remember(task.id) { mutableStateOf(false) }
     var showTagPickerDialog by remember(task.id) { mutableStateOf(false) }
     var showContextMenu by remember(task.id) { mutableStateOf(false) }
+    var contextMenuOffsetDp by remember(task.id) { mutableStateOf(DpOffset(24.dp, 0.dp)) }
 
     LaunchedEffect(suppressCustomContextMenu) {
         if (suppressCustomContextMenu && showContextMenu) {
@@ -478,28 +502,35 @@ fun ExpandableTaskCard(
                 }
                 .pointerInput(task.id, suppressCustomContextMenu) {
                     awaitPointerEventScope {
+                        var wasSecondaryPressed = false
                         while (true) {
-                            val event = awaitPointerEvent()
-                            if (event.type == PointerEventType.Press) {
-                                if (event.buttons.isSecondaryPressed) {
-                                    // Do NOT intercept right-click when inside an expanded task or when any textbox is focused!
-                                    if (!suppressCustomContextMenu) {
-                                        event.changes.forEach { it.consume() }
-                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        showContextMenu = true
-                                    }
-                                } else if (!suppressCustomContextMenu && (
-                                        event.buttons.isTertiaryPressed ||
-                                            (event.buttons.isPrimaryPressed && (event.keyboardModifiers.isCtrlPressed || event.keyboardModifiers.isMetaPressed))
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            if (!suppressCustomContextMenu && event.isRightClickTrigger(wasSecondaryPressed)) {
+                                wasSecondaryPressed = false
+                                val pos = event.changes.firstOrNull()?.position
+                                if (pos != null && pos.x.isFinite() && pos.y.isFinite()) {
+                                    contextMenuOffsetDp = with(density) {
+                                        DpOffset(
+                                            x = pos.x.toDp().coerceAtLeast(12.dp),
+                                            y = 0.dp
                                         )
+                                    }
+                                }
+                                event.changes.forEach { it.consume() }
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                showContextMenu = true
+                                continue
+                            }
+
+                            wasSecondaryPressed = event.buttons.isSecondaryPressed
+                            if (event.type == PointerEventType.Press && !suppressCustomContextMenu) {
+                                if (event.buttons.isTertiaryPressed ||
+                                    (event.buttons.isPrimaryPressed && (event.keyboardModifiers.isCtrlPressed || event.keyboardModifiers.isMetaPressed))
                                 ) {
                                     event.changes.forEach { it.consume() }
                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     onToggleSelection?.invoke()
-                                } else if (!suppressCustomContextMenu &&
-                                    event.buttons.isPrimaryPressed &&
-                                    event.keyboardModifiers.isShiftPressed
-                                ) {
+                                } else if (event.buttons.isPrimaryPressed && event.keyboardModifiers.isShiftPressed) {
                                     event.changes.forEach { it.consume() }
                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     if (onRangeSelect != null) onRangeSelect() else onToggleSelection?.invoke()
@@ -525,6 +556,7 @@ fun ExpandableTaskCard(
                         null
                     } else {
                         {
+                            contextMenuOffsetDp = DpOffset(24.dp, 0.dp)
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             showContextMenu = true
                         }
@@ -653,6 +685,7 @@ fun ExpandableTaskCard(
             TaskContextDropdownMenu(
                 task = task,
                 isSelected = isSelected,
+                offset = contextMenuOffsetDp,
                 onToggleSelection = onToggleSelection,
                 onStatusChange = handleStatusRequest,
                 onOpenWhenDialog = { showWhenDialog = true },
@@ -1328,6 +1361,7 @@ private fun ExpandedTaskCardBody(
 private fun TaskContextDropdownMenu(
     task: TaskItem,
     isSelected: Boolean,
+    offset: DpOffset,
     onToggleSelection: (() -> Unit)?,
     onStatusChange: (TaskStatus) -> Unit,
     onOpenWhenDialog: () -> Unit,
@@ -1343,6 +1377,7 @@ private fun TaskContextDropdownMenu(
     DropdownMenu(
         expanded = true,
         onDismissRequest = onDismiss,
+        offset = offset,
         modifier = Modifier.background(colors.cardElevatedSurface)
     ) {
         if (onToggleSelection != null) {

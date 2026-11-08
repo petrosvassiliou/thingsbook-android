@@ -414,13 +414,7 @@ fun ThingsSmartViewScreen(
                         },
                         onRenameArea = { aId, newName -> viewModel.renameArea(aId, newName) },
                         onMoveArea = { aId, up -> viewModel.moveArea(aId, up) },
-                        onDeleteArea = { aId -> viewModel.deleteArea(aId) },
-                        onCreateProjectInArea = { areaId ->
-                            projectDialogPreselectedAreaId = areaId
-                            editingProject = null
-                            showCreateProjectDialog = true
-                        },
-                        onOpenAreaManager = { viewModel.setAreaManagerOpen(true) }
+                        onDeleteArea = { aId -> viewModel.deleteArea(aId) }
                     )
 
                     // Interactive Tag Filter Strip (displays ONLY tags used by tasks in the current view)
@@ -1749,10 +1743,10 @@ private fun TopThingsbookBar(
             }
 
             if (showBrandSymbol) {
-                ThingsHoverTooltip(text = "Thingsbook • Heute ($todayCount offen)") {
+                ThingsHoverTooltip(text = "Thingsbook • Heute") {
                     ThingsbookBrandSymbol(
-                        todayCount = todayCount,
-                        showBadge = showTodayAppBadge,
+                        todayCount = 0,
+                        showBadge = false,
                         size = 28.dp,
                         onClick = onSelectTodayView
                     )
@@ -2225,9 +2219,7 @@ private fun ViewTitleHeader(
     onAddHeadingInProject: () -> Unit,
     onRenameArea: (String, String) -> Unit,
     onMoveArea: (String, Boolean) -> Unit,
-    onDeleteArea: (String) -> Unit,
-    onCreateProjectInArea: (String) -> Unit,
-    onOpenAreaManager: () -> Unit
+    onDeleteArea: (String) -> Unit
 ) {
     val colors = ThingsTheme.colors
     val zone = ZoneId.systemDefault()
@@ -2245,7 +2237,6 @@ private fun ViewTitleHeader(
     }
 
     val areaWord = stringResource(R.string.entity_area)
-    val areasWord = stringResource(R.string.entity_areas)
 
     Column(
         modifier = Modifier
@@ -2587,28 +2578,6 @@ private fun ViewTitleHeader(
                         onUpdateProjectDeadline(currentProject.id, newDl)
                     },
                     onDismiss = { showProjectDeadlineDialog = false }
-                )
-            }
-        }
-
-        // Area Quick Action Bar when viewing an Area (e.g. Work or Home)
-        if (currentArea != null) {
-            Spacer(modifier = Modifier.height(6.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                ThingsTagPill(
-                    title = "+ ${stringResource(R.string.entity_new_project)} (${currentArea.title})",
-                    onClick = { onCreateProjectInArea(currentArea.id) }
-                )
-                ThingsTagPill(
-                    title = "+ ${stringResource(R.string.entity_new_todo)} (${currentArea.title})",
-                    onClick = onAddTaskInCurrentView
-                )
-                ThingsTagPill(
-                    title = "⚙️ $areasWord (${areas.size}/${ThingsRepository.MAX_AREAS})",
-                    onClick = onOpenAreaManager
                 )
             }
         }
@@ -3155,8 +3124,6 @@ private fun ThingsChromebookSidebar(
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
     val areasLabel = stringResource(R.string.entity_areas)
-    val showTodayAppBadge by viewModel.showTodayAppBadge.collectAsState()
-    val todayCount = smartViewCounts[SmartViewType.TODAY] ?: 0
 
     Column(
         modifier = Modifier
@@ -3166,7 +3133,7 @@ private fun ThingsChromebookSidebar(
             .padding(horizontal = 14.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        // Clean Sidebar Brand Header (without duplicate gray collapse icon — the blue arrow in TopThingsbookBar handles toggling)
+        // Clean Sidebar Brand Header (no Today badge here — Heute count is shown in the Heute row below)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -3174,12 +3141,10 @@ private fun ThingsChromebookSidebar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            ThingsHoverTooltip(
-                text = if (todayCount > 0) "Thingsbook • Heute ($todayCount offen)" else "Thingsbook • Heute"
-            ) {
+            ThingsHoverTooltip(text = "Thingsbook") {
                 ThingsbookBrandSymbol(
-                    todayCount = todayCount,
-                    showBadge = showTodayAppBadge,
+                    todayCount = 0,
+                    showBadge = false,
                     size = 28.dp,
                     onClick = { onSelectSmartView(SmartViewType.TODAY) }
                 )

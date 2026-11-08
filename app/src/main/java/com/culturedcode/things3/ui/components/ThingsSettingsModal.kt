@@ -543,7 +543,7 @@ fun ThingsSettingsModal(
                                 color = colors.primaryText
                             )
                             Text(
-                                text = "Zeigt die Anzahl offener „Heute“-Aufgaben am App-Symbol & in der Kopfleiste",
+                                text = "Zeigt die Anzahl offener „Heute“-Aufgaben am App-Symbol (Startbildschirm/Taskleiste)",
                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
                                 color = colors.secondaryText
                             )

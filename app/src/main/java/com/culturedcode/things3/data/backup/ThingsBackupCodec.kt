@@ -155,7 +155,6 @@ data class BackupProjectTagRefDto(
 @Serializable
 data class BackupPreferencesDto(
     val sidebarVisible: Boolean? = null,
-    val showTodayAppBadge: Boolean? = null,
     val dailyDigestEnabled: Boolean? = null,
     val dailyDigestHour: Int? = null,
     val dailyDigestMinute: Int? = null,

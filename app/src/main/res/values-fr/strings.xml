@@ -163,4 +163,116 @@
     <string name="move_none_option">Aucun projet / Aucun domaine</string>
     <string name="auth_forgot_password">Mot de passe oublié ? Réinitialiser</string>
     <string name="widget_description">Widget interactif Thingsbook avec changement de vue instantané (Aujourd’hui, Boîte de réception, Planifié, À tout moment, Un jour).</string>
+
+    <!-- Magic Plus ("New") Context Menu & Tooltip -->
+    <string name="magic_plus_fab_tooltip">Créer (Cliquer pour le menu • Glisser pour placer)</string>
+    <string name="magic_plus_todo_sub_view">Créer dans la vue actuelle</string>
+    <string name="magic_plus_todo_sub_project">Créer dans le projet actuel</string>
+    <string name="magic_plus_todo_sub_area">Créer dans le domaine actuel</string>
+    <string name="magic_plus_todo_sub_inbox">Créer dans la Boîte de réception</string>
+    <string name="magic_plus_heading_sub">Insérer une section dans le projet</string>
+    <string name="magic_plus_project_sub_default">Avec étapes et date cible</string>
+    <string name="magic_plus_project_sub_area">Projet dans ce domaine</string>
+    <string name="magic_plus_project_sub_another">Créer un autre projet</string>
+    <string name="magic_plus_area_sub">Nouveau domaine de responsabilité</string>
+
+    <!-- Settings Modal -->
+    <string name="settings_title">Paramètres</string>
+    <string name="settings_subtitle">Base de données, Compte Cloud, Langue, Statistiques, Sauvegarde et CSV</string>
+    <string name="settings_close_tooltip">Fermer les paramètres</string>
+    <string name="settings_db_sync_section">Base de données et synchronisation</string>
+    <string name="settings_local_db_title">BD locale</string>
+    <string name="settings_local_db_desc">100 % hors ligne sur cet appareil (SQLite / Room)</string>
+    <string name="settings_cloud_sync_title">Cloud Sync</string>
+    <string name="settings_cloud_sync_desc">BD locale + sauvegarde en temps réel sur tous les appareils</string>
+    <string name="settings_account_status_label">Compte et état du Cloud</string>
+    <string name="settings_local_mode_active">Mode local actif (Aucune connexion cloud)</string>
+    <string name="settings_not_signed_in">Non connecté</string>
+    <string name="settings_sign_in_choose_account">Se connecter / Choisir un compte</string>
+    <string name="settings_open_account_sync">Ouvrir Compte et Sync</string>
+    <string name="settings_sync_short">Sync</string>
+    <string name="settings_configure_arrow">Configurer ›</string>
+    <string name="settings_sample_tasks_title">Tâches d\'exemple toujours présentes</string>
+    <string name="settings_sample_tasks_desc">Supprime uniquement les tâches de démonstration préinstallées</string>
+    <string name="settings_stats_section">Statistiques (Tâches et inventaire)</string>
+    <string name="settings_stat_open">Ouvertes</string>
+    <string name="settings_stat_completed">Terminées</string>
+    <string name="settings_stat_deleted">Supprimées</string>
+    <string name="settings_stat_canceled">Annulées</string>
+    <string name="settings_stat_today_active">★ Actives aujourd\'hui</string>
+    <string name="settings_stat_recurring">🔁 Tâches récurrentes</string>
+    <string name="settings_stat_active_projects">📁 Projets actifs</string>
+    <string name="settings_stat_saved_tags">🏷️ Tags enregistrés</string>
+    <string name="settings_stat_total_records">🗄️ Entrées totales en base</string>
+    <string name="settings_stat_tasks_count">%1$d tâches</string>
+    <string name="settings_stat_active_count">%1$d actives</string>
+    <string name="settings_stat_projects_count">%1$d projets</string>
+    <string name="settings_stat_tags_count">%1$d tags</string>
+    <string name="settings_stat_records_count">%1$d entrées</string>
+    <string name="settings_csv_section">Import et export (Fichier CSV)</string>
+    <string name="settings_csv_desc">Exportez toutes les tâches (statut, domaine, projet, date, échéance, tags et sous-tâches inclus) en fichier CSV ou importez des fichiers CSV existants.</string>
+    <string name="settings_csv_export">Exporter CSV</string>
+    <string name="settings_csv_share">Partager CSV</string>
+    <string name="settings_csv_import">Importer CSV</string>
+    <string name="settings_err_local_mode_sync">Le mode base locale est actif. Passez à Cloud Sync dans les Paramètres pour synchroniser.</string>
+
+    <!-- Backup & Restore -->
+    <string name="backup_section_title">Sauvegarde et restauration (Complète)</string>
+    <string name="backup_section_desc">Sauvegarde toutes les tâches, domaines, projets, titres, tags, sous-tâches et paramètres dans un fichier (.tbbackup) — avec protection par mot de passe AES-256 en option — et restaure l\'état complet.</string>
+    <string name="backup_create_button">Créer une sauvegarde</string>
+    <string name="backup_restore_button">Restaurer un fichier</string>
+    <string name="backup_create_dialog_title">Créer une sauvegarde complète</string>
+    <string name="backup_create_dialog_summary">%1$d tâches • %2$d projets • %3$d domaines • %4$d tags</string>
+    <string name="backup_close_dialog_tooltip">Fermer la fenêtre</string>
+    <string name="backup_password_protect_title">Protéger par mot de passe (facultatif)</string>
+    <string name="backup_password_protect_on">Actif : chiffrement AES-256-GCM et PBKDF2</string>
+    <string name="backup_password_protect_off">Désactivé : créer une sauvegarde non chiffrée</string>
+    <string name="backup_password_label">Mot de passe de sauvegarde</string>
+    <string name="backup_password_confirm_label">Confirmer le mot de passe</string>
+    <string name="backup_password_show">Afficher le mot de passe</string>
+    <string name="backup_password_hide">Masquer le mot de passe</string>
+    <string name="backup_password_warning">Important : sans ce mot de passe, une sauvegarde chiffrée ne pourra plus être déchiffrée.</string>
+    <string name="backup_password_err_too_short">Veuillez choisir un mot de passe d\'au moins 4 caractères.</string>
+    <string name="backup_password_err_mismatch">Les mots de passe saisis ne correspondent pas.</string>
+    <string name="backup_save_to_file">Enregistrer en fichier…</string>
+    <string name="backup_share_tooltip">Partager le fichier de sauvegarde</string>
+    <string name="backup_unknown_date">Date inconnue</string>
+    <string name="backup_restore_encrypted_title">Sauvegarde protégée par mot de passe</string>
+    <string name="backup_restore_plain_title">Restaurer la sauvegarde</string>
+    <string name="backup_restore_encrypted_desc">Ce fichier de sauvegarde est chiffré. Veuillez saisir le mot de passe pour restaurer toutes les tâches, domaines, projets et tags.</string>
+    <string name="backup_restore_enter_password">Saisir le mot de passe</string>
+    <string name="backup_preview_header">Contenu du fichier de sauvegarde :</string>
+    <string name="backup_preview_details">• %1$d tâches et %2$d sous-tâches\n• %3$d projets et %4$d titres\n• %5$d domaines et %6$d tags</string>
+    <string name="backup_restore_replace_notice">Remarque : la restauration complète remplace toutes les entrées locales actuelles par le contenu de cette sauvegarde.</string>
+    <string name="backup_restore_confirm_decrypt">Déchiffrer et tout restaurer</string>
+    <string name="backup_restore_confirm_plain">Tout restaurer maintenant</string>
+
+    <!-- Backup & CSV Status Messages -->
+    <string name="csv_status_exported">✅ Fichier CSV enregistré (%1$d tâches).</string>
+    <string name="csv_status_shared">✅ Export CSV ouvert pour le partage.</string>
+    <string name="csv_status_imported">✅ %1$d tâches importées depuis le fichier CSV !</string>
+    <string name="csv_status_export_failed">❌ Échec de l\'export CSV : %1$s</string>
+    <string name="csv_status_import_failed">❌ Échec de l\'import CSV : %1$s</string>
+    <string name="backup_status_saved">✅ Sauvegarde enregistrée (%1$s) : %2$d tâches, %3$d projets, %4$d domaines et %5$d tags.</string>
+    <string name="backup_badge_encrypted">🔒 Protégée par mot de passe</string>
+    <string name="backup_badge_unencrypted">Non chiffrée</string>
+    <string name="backup_status_shared">✅ Sauvegarde (%1$s) ouverte pour le partage.</string>
+    <string name="backup_status_restored">✅ Restauration complète réussie : %1$d tâches, %2$d projets, %3$d domaines et %4$d tags restaurés !</string>
+    <string name="backup_status_failed">❌ Échec de la sauvegarde : %1$s</string>
+    <string name="backup_status_restore_failed">❌ Échec de la restauration : %1$s</string>
+    <string name="backup_err_wrong_password">Mot de passe incorrect. Veuillez vérifier le mot de passe saisi.</string>
+
+    <!-- Initial Setup & Account Merge -->
+    <string name="setup_banner_title">Configuration initiale — Tâches d\'exemple présentes</string>
+    <string name="setup_banner_hide_tooltip">Masquer l\'avis</string>
+    <string name="setup_banner_desc">Souhaitez-vous connecter votre compte (avec option de fusion de vos tâches) ou démarrer directement sans les tâches d\'exemple préinstallées ?</string>
+    <string name="setup_banner_connect_btn">Connecter et configurer le compte</string>
+    <string name="setup_banner_delete_samples_btn">Supprimer les tâches d\'exemple</string>
+    <string name="merge_dialog_default_account">votre compte Cloud</string>
+    <string name="merge_dialog_title">Fusionner les tâches ?</string>
+    <string name="merge_dialog_desc">Les tâches d\'exemple initiales sont encore présentes dans l\'application. Elles seront supprimées automatiquement afin de ne pas polluer votre compte.</string>
+    <string name="merge_dialog_hint_with_tasks">Vous avez également créé %1$d tâche(s) locale(s). Voulez-vous les fusionner avec les tâches enregistrées sur %2$s ?</string>
+    <string name="merge_dialog_hint_no_tasks">Voulez-vous fusionner vos entrées locales actuelles (sans les exemples) avec %1$s, ou charger uniquement les tâches de votre compte ?</string>
+    <string name="merge_dialog_confirm_merge">Oui, fusionner avec le compte (supprimer exemples)</string>
+    <string name="merge_dialog_confirm_replace">Non — charger uniquement le compte (effacer locales)</string>
 </resources>

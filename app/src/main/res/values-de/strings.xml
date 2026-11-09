@@ -163,4 +163,116 @@
     <string name="move_none_option">Kein Projekt / Kein Bereich</string>
     <string name="auth_forgot_password">Passwort vergessen? Zurücksetzen</string>
     <string name="widget_description">Interaktives Thingsbook-Aufgaben-Widget im Things-Design mit direktem Ansichtswechsel (Heute, Eingang, Geplant, Jederzeit, Irgendwann).</string>
+
+    <!-- Magic Plus ("New") Context Menu & Tooltip -->
+    <string name="magic_plus_fab_tooltip">Neu erstellen (Klicken für Menü • Ziehen zum Platzieren)</string>
+    <string name="magic_plus_todo_sub_view">In aktueller Ansicht anlegen</string>
+    <string name="magic_plus_todo_sub_project">Im aktuellen Projekt anlegen</string>
+    <string name="magic_plus_todo_sub_area">Im aktuellen Bereich anlegen</string>
+    <string name="magic_plus_todo_sub_inbox">Im Eingang anlegen</string>
+    <string name="magic_plus_heading_sub">Abschnitt im Projekt einfügen</string>
+    <string name="magic_plus_project_sub_default">Mit Schritten &amp; Zieldatum</string>
+    <string name="magic_plus_project_sub_area">Projekt in diesem Bereich</string>
+    <string name="magic_plus_project_sub_another">Weiteres Projekt erstellen</string>
+    <string name="magic_plus_area_sub">Neuer Verantwortungsbereich</string>
+
+    <!-- Settings Modal -->
+    <string name="settings_title">Einstellungen</string>
+    <string name="settings_subtitle">Datenbank, Cloud-Konto, Sprache, Statistik, Backup &amp; CSV</string>
+    <string name="settings_close_tooltip">Einstellungen schließen</string>
+    <string name="settings_db_sync_section">Datenbank &amp; Synchronisierung</string>
+    <string name="settings_local_db_title">Lokale DB</string>
+    <string name="settings_local_db_desc">100% Offline auf diesem Gerät (SQLite / Room)</string>
+    <string name="settings_cloud_sync_title">Cloud-Sync</string>
+    <string name="settings_cloud_sync_desc">Lokale DB + Echtzeit-Backup über alle Geräte</string>
+    <string name="settings_account_status_label">Konto &amp; Cloud-Status</string>
+    <string name="settings_local_mode_active">Lokaler Modus aktiv (Keine Cloud-Verbindung)</string>
+    <string name="settings_not_signed_in">Nicht angemeldet</string>
+    <string name="settings_sign_in_choose_account">Anmelden / Konto wählen</string>
+    <string name="settings_open_account_sync">Konto &amp; Sync öffnen</string>
+    <string name="settings_sync_short">Sync</string>
+    <string name="settings_configure_arrow">Konfigurieren ›</string>
+    <string name="settings_sample_tasks_title">Beispielaufgaben noch vorhanden</string>
+    <string name="settings_sample_tasks_desc">Löscht ausschließlich die vorinstallierten Demo-Aufgaben</string>
+    <string name="settings_stats_section">Statistiken (Aufgaben &amp; Bestand)</string>
+    <string name="settings_stat_open">Aktuell offen</string>
+    <string name="settings_stat_completed">Erledigt</string>
+    <string name="settings_stat_deleted">Gelöscht</string>
+    <string name="settings_stat_canceled">Abgebrochen</string>
+    <string name="settings_stat_today_active">★ Heute aktiv</string>
+    <string name="settings_stat_recurring">🔁 Wiederkehrende Aufgaben</string>
+    <string name="settings_stat_active_projects">📁 Aktive Projekte</string>
+    <string name="settings_stat_saved_tags">🏷️ Gespeicherte Tags</string>
+    <string name="settings_stat_total_records">🗄️ Datenbank-Einträge gesamt</string>
+    <string name="settings_stat_tasks_count">%1$d Aufgaben</string>
+    <string name="settings_stat_active_count">%1$d aktiv</string>
+    <string name="settings_stat_projects_count">%1$d Projekte</string>
+    <string name="settings_stat_tags_count">%1$d Tags</string>
+    <string name="settings_stat_records_count">%1$d Datensätze</string>
+    <string name="settings_csv_section">Import &amp; Export (CSV-Datei)</string>
+    <string name="settings_csv_desc">Exportiere alle Aufgaben (inkl. Status, Bereich, Projekt, Datum, Fälligkeit, Tags &amp; Unteraufgaben) als CSV-Datei oder importiere bestehende CSV-Dateien.</string>
+    <string name="settings_csv_export">CSV exportieren</string>
+    <string name="settings_csv_share">CSV teilen</string>
+    <string name="settings_csv_import">CSV importieren</string>
+    <string name="settings_err_local_mode_sync">Lokaler Datenbank-Modus ist aktiv. Wechsle in den Einstellungen auf Cloud-Sync, um zu synchronisieren.</string>
+
+    <!-- Backup & Restore -->
+    <string name="backup_section_title">Backup &amp; Restore (Komplettsicherung)</string>
+    <string name="backup_section_desc">Sichert sämtliche Aufgaben, Bereiche, Projekte, Überschriften, Tags, Unteraufgaben und Einstellungen in einer Datei (.tbbackup) — optional mit AES-256-Passwortschutz — und stellt den kompletten Stand wieder her.</string>
+    <string name="backup_create_button">Backup erstellen</string>
+    <string name="backup_restore_button">Restore aus Datei</string>
+    <string name="backup_create_dialog_title">Vollständiges Backup erstellen</string>
+    <string name="backup_create_dialog_summary">%1$d Aufgaben • %2$d Projekte • %3$d Bereiche • %4$d Tags</string>
+    <string name="backup_close_dialog_tooltip">Dialog schließen</string>
+    <string name="backup_password_protect_title">Mit Passwort schützen (optional)</string>
+    <string name="backup_password_protect_on">Aktiv: AES-256-GCM &amp; PBKDF2-Verschlüsselung</string>
+    <string name="backup_password_protect_off">Aus: Unverschlüsselte Backup-Datei erstellen</string>
+    <string name="backup_password_label">Backup-Passwort</string>
+    <string name="backup_password_confirm_label">Passwort wiederholen</string>
+    <string name="backup_password_show">Passwort anzeigen</string>
+    <string name="backup_password_hide">Passwort verbergen</string>
+    <string name="backup_password_warning">Wichtig: Ohne dieses Passwort lässt sich eine verschlüsselte Backup-Datei später nicht mehr entschlüsseln.</string>
+    <string name="backup_password_err_too_short">Bitte wähle ein Passwort mit mindestens 4 Zeichen.</string>
+    <string name="backup_password_err_mismatch">Die eingegebenen Passwörter stimmen nicht überein.</string>
+    <string name="backup_save_to_file">Als Datei speichern…</string>
+    <string name="backup_share_tooltip">Backup-Datei direkt teilen</string>
+    <string name="backup_unknown_date">Unbekanntes Datum</string>
+    <string name="backup_restore_encrypted_title">Passwortgeschütztes Backup</string>
+    <string name="backup_restore_plain_title">Backup wiederherstellen</string>
+    <string name="backup_restore_encrypted_desc">Diese Backup-Datei ist verschlüsselt. Bitte gib das Passwort ein, um sämtliche Aufgaben, Bereiche, Projekte und Tags wiederherzustellen.</string>
+    <string name="backup_restore_enter_password">Backup-Passwort eingeben</string>
+    <string name="backup_preview_header">Inhalt der Sicherungsdatei:</string>
+    <string name="backup_preview_details">• %1$d Aufgaben &amp; %2$d Unteraufgaben\n• %3$d Projekte &amp; %4$d Überschriften\n• %5$d Bereiche &amp; %6$d Tags</string>
+    <string name="backup_restore_replace_notice">Hinweis: Beim kompletten Restore werden die aktuell lokal vorhandenen Einträge vollständig durch den Stand dieser Backup-Datei ersetzt.</string>
+    <string name="backup_restore_confirm_decrypt">Entschlüsseln &amp; komplett wiederherstellen</string>
+    <string name="backup_restore_confirm_plain">Jetzt komplett wiederherstellen</string>
+
+    <!-- Backup & CSV Status Messages -->
+    <string name="csv_status_exported">✅ CSV-Datei erfolgreich gespeichert (%1$d Aufgaben).</string>
+    <string name="csv_status_shared">✅ CSV-Export zum Teilen geöffnet.</string>
+    <string name="csv_status_imported">✅ %1$d Aufgaben erfolgreich aus der CSV-Datei importiert!</string>
+    <string name="csv_status_export_failed">❌ CSV-Export fehlgeschlagen: %1$s</string>
+    <string name="csv_status_import_failed">❌ CSV-Import fehlgeschlagen: %1$s</string>
+    <string name="backup_status_saved">✅ Backup gespeichert (%1$s): %2$d Aufgaben, %3$d Projekte, %4$d Bereiche &amp; %5$d Tags.</string>
+    <string name="backup_badge_encrypted">🔒 Passwortgeschützt</string>
+    <string name="backup_badge_unencrypted">Unverschlüsselt</string>
+    <string name="backup_status_shared">✅ Backup (%1$s) zum Teilen geöffnet.</string>
+    <string name="backup_status_restored">✅ Komplettes Restore erfolgreich: %1$d Aufgaben, %2$d Projekte, %3$d Bereiche &amp; %4$d Tags wiederhergestellt!</string>
+    <string name="backup_status_failed">❌ Backup fehlgeschlagen: %1$s</string>
+    <string name="backup_status_restore_failed">❌ Restore fehlgeschlagen: %1$s</string>
+    <string name="backup_err_wrong_password">Falsches Passwort. Bitte überprüfe das eingegebene Passwort.</string>
+
+    <!-- Initial Setup & Account Merge -->
+    <string name="setup_banner_title">Ersteinrichtung — Beispielaufgaben vorhanden</string>
+    <string name="setup_banner_hide_tooltip">Hinweis ausblenden</string>
+    <string name="setup_banner_desc">Möchtest du dein Konto einrichten (inkl. Auswahl zum Zusammenführen deiner Aufgaben) oder direkt ohne die vorinstallierten Beispielaufgaben starten?</string>
+    <string name="setup_banner_connect_btn">Konto verbinden &amp; einrichten</string>
+    <string name="setup_banner_delete_samples_btn">Beispielaufgaben löschen</string>
+    <string name="merge_dialog_default_account">deinem Cloud-Konto</string>
+    <string name="merge_dialog_title">Aufgaben zusammenführen?</string>
+    <string name="merge_dialog_desc">In der App sind noch die anfänglichen Beispielaufgaben vorhanden. Diese Beispielaufgaben werden bei der Einrichtung automatisch gelöscht, damit sie nicht in dein Konto übernommen werden.</string>
+    <string name="merge_dialog_hint_with_tasks">Du hast zusätzlich %1$d eigene Aufgabe(n) lokal angelegt. Möchtest du diese aktuellen Aufgaben mit den auf %2$s gespeicherten Aufgaben zusammenführen?</string>
+    <string name="merge_dialog_hint_no_tasks">Möchtest du deine aktuellen lokalen Einträge (ohne Beispielaufgaben) mit den auf %1$s gespeicherten Aufgaben zusammenführen, oder ausschließlich die Aufgaben von deinem Konto laden?</string>
+    <string name="merge_dialog_confirm_merge">Ja, mit Konto zusammenführen (Beispiele löschen)</string>
+    <string name="merge_dialog_confirm_replace">Nein — nur Konto-Aufgaben laden (lokale löschen)</string>
 </resources>

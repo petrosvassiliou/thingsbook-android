@@ -365,7 +365,6 @@ fun ThingsSmartViewScreen(
                         isWideScreen = isWideScreen,
                         isSidebarVisible = isSidebarVisible,
                         isQuickFindOpen = isQuickFindOpen,
-                        todayCount = todayTasks.size + eveningTasks.size,
                         areas = areas,
                         activeProjects = activeProjects,
                         activeLocale = activeLocale
@@ -669,7 +668,6 @@ private fun ThingsTopHeaderAndQuickFindSection(
     isWideScreen: Boolean,
     isSidebarVisible: Boolean,
     isQuickFindOpen: Boolean,
-    todayCount: Int,
     areas: List<Area>,
     activeProjects: List<Project>,
     activeLocale: Locale
@@ -680,7 +678,6 @@ private fun ThingsTopHeaderAndQuickFindSection(
     val quickFindTasks by viewModel.quickFindTaskResults.collectAsState()
     val quickFindProjects by viewModel.quickFindProjectResults.collectAsState()
     val uiErrorMessage by viewModel.uiErrorMessage.collectAsState()
-    val showTodayAppBadge by viewModel.showTodayAppBadge.collectAsState()
     val hasSampleTasks by viewModel.hasSampleTasks.collectAsState()
     val isInitialSetupBannerDismissed by viewModel.isInitialSetupBannerDismissed.collectAsState()
     val currentUserIdentifier by viewModel.currentUserIdentifier.collectAsState()
@@ -693,8 +690,6 @@ private fun ThingsTopHeaderAndQuickFindSection(
         isWideScreen = isWideScreen,
         isSidebarVisible = isSidebarVisible,
         showBrandSymbol = !showSidebar,
-        todayCount = todayCount,
-        showTodayAppBadge = showTodayAppBadge,
         isQuickFindOpen = isQuickFindOpen,
         syncStatus = syncStatus,
         dailyDigestEnabled = dailyDigestConfig.enabled,
@@ -1191,7 +1186,6 @@ private fun ThingsModalsOverlay(
     val currentUserIdentifier by viewModel.currentUserIdentifier.collectAsState()
     val statistics by viewModel.statistics.collectAsState()
     val csvStatusMessage by viewModel.csvStatusMessage.collectAsState()
-    val showTodayAppBadge by viewModel.showTodayAppBadge.collectAsState()
     val hasSampleTasks by viewModel.hasSampleTasks.collectAsState()
     val pendingMergeAuthRequest by viewModel.pendingMergeAuthRequest.collectAsState()
     val pendingMergeNonSampleCount by viewModel.pendingMergeNonSampleCount.collectAsState()
@@ -1228,7 +1222,7 @@ private fun ThingsModalsOverlay(
         )
     }
 
-    // Comprehensive Settings Modal (⚙️ top-right: Local DB vs Cloud Sync, Account, Language, Today Badge, Statistics, Backup & Restore, CSV)
+    // Comprehensive Settings Modal (⚙️ top-right: Local DB vs Cloud Sync, Account, Language, Statistics, Backup & Restore, CSV)
     if (isSettingsModalOpen) {
         val isBackupBusy by viewModel.isBackupBusy.collectAsState()
         val backupStatusMessage by viewModel.backupStatusMessage.collectAsState()
@@ -1240,10 +1234,7 @@ private fun ThingsModalsOverlay(
             csvStatusMessage = csvStatusMessage,
             isBackupBusy = isBackupBusy,
             backupStatusMessage = backupStatusMessage,
-            showTodayAppBadge = showTodayAppBadge,
-            todayCount = statistics.todayTasksCount,
             hasSampleTasks = hasSampleTasks,
-            onSetShowTodayAppBadge = { viewModel.setShowTodayAppBadge(it) },
             onDeleteSampleTasksNow = { viewModel.deleteSampleTasksForLocalSetup() },
             onSetLocalOnlyDbMode = { viewModel.setLocalOnlyDbMode(it) },
             onOpenAuthAndSyncModal = {
@@ -1700,8 +1691,6 @@ private fun TopThingsbookBar(
     isWideScreen: Boolean,
     isSidebarVisible: Boolean,
     showBrandSymbol: Boolean,
-    todayCount: Int,
-    showTodayAppBadge: Boolean,
     isQuickFindOpen: Boolean,
     syncStatus: CloudSyncStatus,
     dailyDigestEnabled: Boolean,
@@ -1749,10 +1738,8 @@ private fun TopThingsbookBar(
             }
 
             if (showBrandSymbol) {
-                ThingsHoverTooltip(text = "Thingsbook • Heute") {
+                ThingsHoverTooltip(text = "Thingsbook • ${stringResource(R.string.view_today)}") {
                     ThingsbookBrandSymbol(
-                        todayCount = 0,
-                        showBadge = false,
                         size = 28.dp,
                         onClick = onSelectTodayView
                     )
@@ -1760,7 +1747,7 @@ private fun TopThingsbookBar(
             }
 
             // Quick Find Trigger Pill (opens inline!)
-            ThingsHoverTooltip(text = "Schnellsuche öffnen (Strg+F)") {
+            ThingsHoverTooltip(text = "${stringResource(R.string.quick_find_title)} (Ctrl+F)") {
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(10.dp))
@@ -1792,7 +1779,7 @@ private fun TopThingsbookBar(
             horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             // Gemini AI Button ✨
-            ThingsHoverTooltip(text = "Gemini KI-Assistent öffnen (Strg+G)") {
+            ThingsHoverTooltip(text = "${stringResource(R.string.gemini_hub_title)} (Ctrl+G)") {
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(10.dp))
@@ -1929,14 +1916,14 @@ private fun TopThingsbookBar(
             }
 
             // Additional Settings Button ⚙️ at the far top-right!
-            ThingsHoverTooltip(text = "Einstellungen öffnen") {
+            ThingsHoverTooltip(text = stringResource(R.string.settings_title)) {
                 IconButton(
                     onClick = onOpenSettings,
                     modifier = Modifier.size(34.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.Settings,
-                        contentDescription = "Einstellungen",
+                        contentDescription = stringResource(R.string.settings_title),
                         tint = colors.primaryText,
                         modifier = Modifier.size(19.dp)
                     )
@@ -3149,8 +3136,6 @@ private fun ThingsChromebookSidebar(
         ) {
             ThingsHoverTooltip(text = "Thingsbook") {
                 ThingsbookBrandSymbol(
-                    todayCount = 0,
-                    showBadge = false,
                     size = 28.dp,
                     onClick = { onSelectSmartView(SmartViewType.TODAY) }
                 )

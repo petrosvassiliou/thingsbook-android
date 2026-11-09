@@ -5,12 +5,15 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
+import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.culturedcode.things3.BuildConfig
+import com.culturedcode.things3.R
 import com.culturedcode.things3.data.ai.GeminiLogbookReviewResponse
 import com.culturedcode.things3.data.ai.ThingsbookGeminiService
 import com.culturedcode.things3.data.backup.BackupInspectionResult
@@ -18,7 +21,6 @@ import com.culturedcode.things3.data.backup.BackupPasswordRequiredException
 import com.culturedcode.things3.data.backup.BackupPreferencesDto
 import com.culturedcode.things3.data.backup.InvalidBackupPasswordException
 import com.culturedcode.things3.data.local.ThingsDatabase
-import com.culturedcode.things3.data.notifications.AppIconBadgeUpdater
 import com.culturedcode.things3.data.notifications.DailyDigestConfig
 import com.culturedcode.things3.data.notifications.ReminderScheduler
 import com.culturedcode.things3.data.repository.CloudSyncStatus
@@ -90,11 +92,11 @@ sealed interface PendingCloudAuthRequest {
 
     data class SignInGoogle(val optionalEmail: String?) : PendingCloudAuthRequest {
         override val displayAccountLabel: String
-            get() = optionalEmail?.takeIf { it.isNotBlank() } ?: "Google Cloud-Konto"
+            get() = optionalEmail?.takeIf { it.isNotBlank() }.orEmpty()
     }
 
     data object SignInAnonymous : PendingCloudAuthRequest {
-        override val displayAccountLabel: String get() = "Thingsbook Cloud-Konto"
+        override val displayAccountLabel: String get() = ""
     }
 }
 
@@ -108,6 +110,11 @@ class ThingsbookViewModel @Inject constructor(
     private val geminiService: ThingsbookGeminiService,
     private val reminderScheduler: ReminderScheduler
 ) : ViewModel() {
+
+    private fun getLocalizedString(@StringRes resId: Int, vararg args: Any): String {
+        val localizedCtx = runCatching { ContextCompat.getContextForLanguage(appContext) }.getOrDefault(appContext)
+        return localizedCtx.getString(resId, *args)
+    }
 
     private val _uiErrorMessage = MutableStateFlow<String?>(null)
     val uiErrorMessage: StateFlow<String?> = _uiErrorMessage.asStateFlow()
@@ -913,13 +920,13 @@ class ThingsbookViewModel @Inject constructor(
 
     fun triggerManualCloudSync() {
         if (_isLocalOnlyDbMode.value) {
-            _uiErrorMessage.value = "Lokaler Datenbank-Modus ist aktiv. Wechsle in den Einstellungen auf Cloud-Sync, um zu synchronisieren."
+            _uiErrorMessage.value = getLocalizedString(R.string.settings_err_local_mode_sync)
             return
         }
         safeVmScope.launch {
             syncRepository.syncBidirectionalDeltas().onFailure { err ->
                 Log.w(TAG, "Manual cloud sync failed", err)
-                _uiErrorMessage.value = err.localizedMessage ?: err.message ?: "Cloud-Synchronisierung fehlgeschlagen."
+                _uiErrorMessage.value = err.localizedMessage ?: err.message.orEmpty()
             }
         }
     }
@@ -1188,10 +1195,6 @@ class ThingsbookViewModel @Inject constructor(
     )
     val isLocalOnlyDbMode: StateFlow<Boolean> = _isLocalOnlyDbMode.asStateFlow()
 
-    // v1.5.0: Configurable "Heute" count badge on Thingsbook symbol (in-app & launcher/shelf badge)
-    private val _showTodayAppBadge = MutableStateFlow(settingsPrefs.getBoolean("show_today_app_badge", true))
-    val showTodayAppBadge: StateFlow<Boolean> = _showTodayAppBadge.asStateFlow()
-
     // v1.5.0: Initial setup sample task detection & Cloud Account Merge prompt
     val hasSampleTasks: StateFlow<Boolean> = repository.observeHasSampleTasks()
         .catch { emit(false) }
@@ -1287,13 +1290,6 @@ class ThingsbookViewModel @Inject constructor(
         _isSettingsModalOpen.value = open
     }
 
-    fun setShowTodayAppBadge(enabled: Boolean) {
-        _showTodayAppBadge.value = enabled
-        runCatching { settingsPrefs.edit().putBoolean("show_today_app_badge", enabled).apply() }
-        val currentTodayCount = todayDaytimeTasks.value.size + thisEveningTasks.value.size
-        AppIconBadgeUpdater.updateTodayAppBadge(appContext, currentTodayCount, enabled)
-    }
-
     fun setMagicPlusMenuOpen(open: Boolean) {
         _isMagicPlusMenuOpen.value = open
     }
@@ -1382,10 +1378,14 @@ class ThingsbookViewModel @Inject constructor(
             runCatchingCancellable {
                 repository.exportTasksToCsv()
             }.onSuccess { csv ->
-                _csvStatusMessage.value = "✅ CSV-Export erfolgreich erstellt (${statistics.value.openTasksCount + statistics.value.completedTasksCount} Aufgaben)."
+                val count = statistics.value.openTasksCount + statistics.value.completedTasksCount
+                _csvStatusMessage.value = getLocalizedString(R.string.csv_status_exported, count)
                 onCsvReady(csv)
             }.onFailure { err ->
-                val msg = "❌ CSV-Export fehlgeschlagen: ${err.localizedMessage ?: err.message}"
+                val msg = getLocalizedString(
+                    R.string.csv_status_export_failed,
+                    err.localizedMessage ?: err.message.orEmpty()
+                )
                 _csvStatusMessage.value = msg
                 _uiErrorMessage.value = msg
             }
@@ -1400,7 +1400,7 @@ class ThingsbookViewModel @Inject constructor(
                     val outputStream = runCatching {
                         appContext.contentResolver.openOutputStream(uri, "wt")
                     }.getOrNull() ?: appContext.contentResolver.openOutputStream(uri)
-                        ?: throw IllegalStateException("Zieldatei konnte nicht zum Schreiben geöffnet werden.")
+                        ?: throw IllegalStateException("Cannot open output stream for URI")
                     outputStream.use { out ->
                         out.write(csvContent.toByteArray(Charsets.UTF_8))
                         out.flush()
@@ -1408,10 +1408,13 @@ class ThingsbookViewModel @Inject constructor(
                 }
             }.onSuccess {
                 val totalExported = statistics.value.openTasksCount + statistics.value.completedTasksCount
-                _csvStatusMessage.value = "✅ CSV-Datei erfolgreich gespeichert ($totalExported Aufgaben)."
+                _csvStatusMessage.value = getLocalizedString(R.string.csv_status_exported, totalExported)
             }.onFailure { err ->
                 Log.w(TAG, "CSV export to URI failed", err)
-                val msg = "❌ CSV-Export fehlgeschlagen: ${err.localizedMessage ?: err.message}"
+                val msg = getLocalizedString(
+                    R.string.csv_status_export_failed,
+                    err.localizedMessage ?: err.message.orEmpty()
+                )
                 _csvStatusMessage.value = msg
                 _uiErrorMessage.value = msg
             }
@@ -1422,20 +1425,24 @@ class ThingsbookViewModel @Inject constructor(
         safeVmScope.launch {
             runCatchingCancellable {
                 val csvContent = repository.exportTasksToCsv()
+                val shareTitle = getLocalizedString(R.string.settings_csv_share)
                 val sendIntent = Intent(Intent.ACTION_SEND).apply {
                     type = "text/csv"
-                    putExtra(Intent.EXTRA_SUBJECT, "Thingsbook Aufgaben Export (${LocalDate.now()})")
+                    putExtra(Intent.EXTRA_SUBJECT, "Thingsbook CSV (${LocalDate.now()})")
                     putExtra(Intent.EXTRA_TEXT, csvContent)
                 }
-                val chooser = Intent.createChooser(sendIntent, "CSV teilen").apply {
+                val chooser = Intent.createChooser(sendIntent, shareTitle).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 appContext.startActivity(chooser)
             }.onSuccess {
-                _csvStatusMessage.value = "✅ CSV-Export zum Teilen geöffnet."
+                _csvStatusMessage.value = getLocalizedString(R.string.csv_status_shared)
             }.onFailure { err ->
                 Log.w(TAG, "Sharing CSV failed", err)
-                val msg = "❌ Teilen fehlgeschlagen: ${err.localizedMessage ?: err.message}"
+                val msg = getLocalizedString(
+                    R.string.csv_status_export_failed,
+                    err.localizedMessage ?: err.message.orEmpty()
+                )
                 _csvStatusMessage.value = msg
                 _uiErrorMessage.value = msg
             }
@@ -1447,9 +1454,12 @@ class ThingsbookViewModel @Inject constructor(
             runCatchingCancellable {
                 repository.importTasksFromCsv(csvContent)
             }.onSuccess { count ->
-                _csvStatusMessage.value = "✅ $count Aufgaben erfolgreich aus der CSV-Datei importiert!"
+                _csvStatusMessage.value = getLocalizedString(R.string.csv_status_imported, count)
             }.onFailure { err ->
-                val msg = "❌ CSV-Import fehlgeschlagen: ${err.localizedMessage ?: err.message}"
+                val msg = getLocalizedString(
+                    R.string.csv_status_import_failed,
+                    err.localizedMessage ?: err.message.orEmpty()
+                )
                 _csvStatusMessage.value = msg
                 _uiErrorMessage.value = msg
             }
@@ -1461,7 +1471,7 @@ class ThingsbookViewModel @Inject constructor(
             runCatchingCancellable {
                 val csvText = withContext(Dispatchers.IO) {
                     val inputStream = appContext.contentResolver.openInputStream(uri)
-                        ?: throw IllegalStateException("Ausgewählte CSV-Datei konnte nicht geöffnet werden.")
+                        ?: throw IllegalStateException("Cannot open input stream for CSV URI")
                     inputStream.use { stream ->
                         val reader = BufferedReader(InputStreamReader(stream, Charsets.UTF_8))
                         val sb = StringBuilder()
@@ -1472,7 +1482,7 @@ class ThingsbookViewModel @Inject constructor(
                             if (read == -1) break
                             totalChars += read
                             if (totalChars > MAX_CSV_IMPORT_CHARS) {
-                                throw IllegalArgumentException("Die ausgewählte CSV-Datei ist zu groß (maximal 10 MB).")
+                                throw IllegalArgumentException("CSV > 10 MB")
                             }
                             sb.append(buffer, 0, read)
                         }
@@ -1481,10 +1491,13 @@ class ThingsbookViewModel @Inject constructor(
                 }
                 repository.importTasksFromCsv(csvText)
             }.onSuccess { count ->
-                _csvStatusMessage.value = "✅ $count Aufgaben erfolgreich aus der CSV-Datei importiert!"
+                _csvStatusMessage.value = getLocalizedString(R.string.csv_status_imported, count)
             }.onFailure { err ->
                 Log.w(TAG, "CSV import from URI failed", err)
-                val msg = "❌ CSV-Import fehlgeschlagen: ${err.localizedMessage ?: err.message}"
+                val msg = getLocalizedString(
+                    R.string.csv_status_import_failed,
+                    err.localizedMessage ?: err.message.orEmpty()
+                )
                 _csvStatusMessage.value = msg
                 _uiErrorMessage.value = msg
             }
@@ -1538,7 +1551,6 @@ class ThingsbookViewModel @Inject constructor(
         val langTag = runCatching { AppCompatDelegate.getApplicationLocales().toLanguageTags() }.getOrDefault("")
         return BackupPreferencesDto(
             sidebarVisible = _isSidebarVisible.value,
-            showTodayAppBadge = _showTodayAppBadge.value,
             dailyDigestEnabled = digest?.enabled,
             dailyDigestHour = digest?.hour,
             dailyDigestMinute = digest?.minute,
@@ -1564,7 +1576,7 @@ class ThingsbookViewModel @Inject constructor(
                         val outputStream = runCatching {
                             appContext.contentResolver.openOutputStream(uri, "wt")
                         }.getOrNull() ?: appContext.contentResolver.openOutputStream(uri)
-                            ?: throw IllegalStateException("Zieldatei für das Backup konnte nicht geöffnet werden.")
+                            ?: throw IllegalStateException("Cannot open output stream for backup URI")
                         outputStream.use { out ->
                             out.write(backupBytes)
                             out.flush()
@@ -1573,11 +1585,23 @@ class ThingsbookViewModel @Inject constructor(
                     }
                 }.onSuccess { summary ->
                     _isBackupCreateDialogOpen.value = false
-                    val lockBadge = if (summary.encrypted) "🔒 Passwortgeschützt" else "Unverschlüsselt"
-                    _backupStatusMessage.value = "✅ Backup gespeichert ($lockBadge): ${summary.tasksCount} Aufgaben, ${summary.projectsCount} Projekte, ${summary.areasCount} Bereiche & ${summary.tagsCount} Tags."
+                    val lockBadge = getLocalizedString(
+                        if (summary.encrypted) R.string.backup_badge_encrypted else R.string.backup_badge_unencrypted
+                    )
+                    _backupStatusMessage.value = getLocalizedString(
+                        R.string.backup_status_saved,
+                        lockBadge,
+                        summary.tasksCount,
+                        summary.projectsCount,
+                        summary.areasCount,
+                        summary.tagsCount
+                    )
                 }.onFailure { err ->
                     Log.w(TAG, "Full backup export failed", err)
-                    val msg = "❌ Backup fehlgeschlagen: ${err.localizedMessage ?: err.message}"
+                    val msg = getLocalizedString(
+                        R.string.backup_status_failed,
+                        err.localizedMessage ?: err.message.orEmpty()
+                    )
                     _backupStatusMessage.value = msg
                     _uiErrorMessage.value = msg
                 }
@@ -1614,24 +1638,30 @@ class ThingsbookViewModel @Inject constructor(
                         )
                         contentUri to sum
                     }
+                    val shareTitle = getLocalizedString(R.string.backup_share_tooltip)
                     val sendIntent = Intent(Intent.ACTION_SEND).apply {
                         type = "application/octet-stream"
                         putExtra(Intent.EXTRA_SUBJECT, "Thingsbook Backup (${LocalDate.now()})")
                         putExtra(Intent.EXTRA_STREAM, shareUri)
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
-                    val chooser = Intent.createChooser(sendIntent, "Thingsbook Backup teilen").apply {
+                    val chooser = Intent.createChooser(sendIntent, shareTitle).apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
                     appContext.startActivity(chooser)
                     summary
                 }.onSuccess { summary ->
                     _isBackupCreateDialogOpen.value = false
-                    val lockBadge = if (summary.encrypted) "🔒 passwortgeschützt" else "unverschlüsselt"
-                    _backupStatusMessage.value = "✅ Backup ($lockBadge) zum Teilen geöffnet."
+                    val lockBadge = getLocalizedString(
+                        if (summary.encrypted) R.string.backup_badge_encrypted else R.string.backup_badge_unencrypted
+                    )
+                    _backupStatusMessage.value = getLocalizedString(R.string.backup_status_shared, lockBadge)
                 }.onFailure { err ->
                     Log.w(TAG, "Sharing full backup failed", err)
-                    val msg = "❌ Backup-Teilen fehlgeschlagen: ${err.localizedMessage ?: err.message}"
+                    val msg = getLocalizedString(
+                        R.string.backup_status_failed,
+                        err.localizedMessage ?: err.message.orEmpty()
+                    )
                     _backupStatusMessage.value = msg
                     _uiErrorMessage.value = msg
                 }
@@ -1657,7 +1687,7 @@ class ThingsbookViewModel @Inject constructor(
                         }.getOrNull()
 
                         val inputStream = appContext.contentResolver.openInputStream(uri)
-                            ?: throw IllegalStateException("Ausgewählte Backup-Datei konnte nicht geöffnet werden.")
+                            ?: throw IllegalStateException("Cannot open input stream for backup URI")
                         val rawBytes = inputStream.use { stream ->
                             val out = ByteArrayOutputStream()
                             val buf = ByteArray(8192)
@@ -1667,7 +1697,7 @@ class ThingsbookViewModel @Inject constructor(
                                 if (read == -1) break
                                 total += read
                                 if (total > MAX_BACKUP_FILE_BYTES) {
-                                    throw IllegalArgumentException("Die Backup-Datei ist zu groß (maximal 30 MB).")
+                                    throw IllegalArgumentException("Backup > 30 MB")
                                 }
                                 out.write(buf, 0, read)
                             }
@@ -1684,7 +1714,10 @@ class ThingsbookViewModel @Inject constructor(
                     _pendingRestoreSession.value = session
                 }.onFailure { err ->
                     Log.w(TAG, "Backup inspection failed", err)
-                    val msg = "❌ Backup-Datei konnte nicht geladen werden: ${err.localizedMessage ?: err.message}"
+                    val msg = getLocalizedString(
+                        R.string.backup_status_restore_failed,
+                        err.localizedMessage ?: err.message.orEmpty()
+                    )
                     _backupStatusMessage.value = msg
                     _uiErrorMessage.value = msg
                 }
@@ -1724,7 +1757,6 @@ class ThingsbookViewModel @Inject constructor(
                     _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
 
                     restoredPrefs.sidebarVisible?.let { setSidebarVisible(it) }
-                    restoredPrefs.showTodayAppBadge?.let { setShowTodayAppBadge(it) }
                     if (
                         restoredPrefs.dailyDigestEnabled != null &&
                         restoredPrefs.dailyDigestHour != null &&
@@ -1743,16 +1775,21 @@ class ThingsbookViewModel @Inject constructor(
                         com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.refreshAllWidgets(appContext)
                     }
 
-                    _backupStatusMessage.value =
-                        "✅ Komplettes Restore erfolgreich: ${summary.tasksCount} Aufgaben, ${summary.projectsCount} Projekte, ${summary.areasCount} Bereiche & ${summary.tagsCount} Tags wiederhergestellt!"
+                    _backupStatusMessage.value = getLocalizedString(
+                        R.string.backup_status_restored,
+                        summary.tasksCount,
+                        summary.projectsCount,
+                        summary.areasCount,
+                        summary.tagsCount
+                    )
                 }.onFailure { err ->
                     Log.w(TAG, "Full restore failed", err)
                     if (err is InvalidBackupPasswordException || err is BackupPasswordRequiredException) {
-                        _restoreDialogError.value = err.localizedMessage ?: "Falsches Passwort."
+                        _restoreDialogError.value = getLocalizedString(R.string.backup_err_wrong_password)
                     } else {
-                        val msg = err.localizedMessage ?: err.message ?: "Restore fehlgeschlagen."
-                        _restoreDialogError.value = msg
-                        _backupStatusMessage.value = "❌ Restore fehlgeschlagen: $msg"
+                        val detail = err.localizedMessage ?: err.message.orEmpty()
+                        _restoreDialogError.value = detail
+                        _backupStatusMessage.value = getLocalizedString(R.string.backup_status_restore_failed, detail)
                     }
                 }
             } finally {
@@ -1977,25 +2014,6 @@ class ThingsbookViewModel @Inject constructor(
                         runCatching {
                             com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.refreshAllWidgets(appContext)
                         }
-                    }
-            }
-        }
-        safeVmScope.launch {
-            runCatchingCancellable {
-                combine(
-                    todayDaytimeTasks,
-                    thisEveningTasks,
-                    _showTodayAppBadge
-                ) { daytime, evening, enabled ->
-                    Pair(daytime.size + evening.size, enabled)
-                }
-                    .catch { emit(Pair(0, false)) }
-                    .collect { (todayCount, enabled) ->
-                        AppIconBadgeUpdater.updateTodayAppBadge(
-                            context = appContext,
-                            todayCount = todayCount,
-                            enabled = enabled
-                        )
                     }
             }
         }

@@ -312,7 +312,7 @@ fun MagicPlusFab(
 
         // Draggable + Clickable Magic Plus Circle Button with zero ripple flash
         ThingsHoverTooltip(
-            text = "Neu erstellen (Klicken für Menü • Ziehen zum Platzieren)",
+            text = stringResource(R.string.magic_plus_fab_tooltip),
             enabled = !isDragging && !isMenuExpanded
         ) {
             Box(
@@ -443,16 +443,16 @@ private fun MagicPlusContextMenuCard(
     val colors = ThingsTheme.colors
 
     val todoSubtitle = when (contextMode) {
-        MagicPlusContextMode.PROJECT_DETAIL -> "Im aktuellen Projekt anlegen"
-        MagicPlusContextMode.AREA_DETAIL -> "Im aktuellen Bereich anlegen"
-        MagicPlusContextMode.LOGBOOK -> "Im Eingang anlegen"
-        MagicPlusContextMode.SMART_VIEW -> "In aktueller Ansicht anlegen"
+        MagicPlusContextMode.PROJECT_DETAIL -> stringResource(R.string.magic_plus_todo_sub_project)
+        MagicPlusContextMode.AREA_DETAIL -> stringResource(R.string.magic_plus_todo_sub_area)
+        MagicPlusContextMode.LOGBOOK -> stringResource(R.string.magic_plus_todo_sub_inbox)
+        MagicPlusContextMode.SMART_VIEW -> stringResource(R.string.magic_plus_todo_sub_view)
     }
 
     val projectSubtitle = when (contextMode) {
-        MagicPlusContextMode.AREA_DETAIL -> "Projekt in diesem Bereich"
-        MagicPlusContextMode.PROJECT_DETAIL -> "Weiteres Projekt erstellen"
-        else -> "Mit Schritten & Zieldatum"
+        MagicPlusContextMode.AREA_DETAIL -> stringResource(R.string.magic_plus_project_sub_area)
+        MagicPlusContextMode.PROJECT_DETAIL -> stringResource(R.string.magic_plus_project_sub_another)
+        else -> stringResource(R.string.magic_plus_project_sub_default)
     }
 
     // Pure crisp white/dark elevated card (`tonalElevation = 0.dp`) so icon badges never wash out
@@ -490,7 +490,7 @@ private fun MagicPlusContextMenuCard(
                     iconTint = Color(0xFF5856D6),
                     iconBg = Color(0xFF5856D6).copy(alpha = 0.12f),
                     title = stringResource(R.string.entity_heading),
-                    subtitle = "Abschnitt im Projekt einfügen",
+                    subtitle = stringResource(R.string.magic_plus_heading_sub),
                     onClick = onSelectHeading
                 )
             }
@@ -512,7 +512,7 @@ private fun MagicPlusContextMenuCard(
                     iconTint = colors.anytimeTeal,
                     iconBg = colors.anytimeTeal.copy(alpha = 0.14f),
                     title = stringResource(R.string.entity_area),
-                    subtitle = "Neuer Verantwortungsbereich",
+                    subtitle = stringResource(R.string.magic_plus_area_sub),
                     onClick = onSelectArea
                 )
             }

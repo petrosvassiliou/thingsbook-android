@@ -163,4 +163,116 @@
     <string name="move_none_option">Sin proyecto / Sin área</string>
     <string name="auth_forgot_password">¿Olvidaste tu contraseña? Restablecer</string>
     <string name="widget_description">Widget interactivo de Thingsbook con cambio rápido de vista (Hoy, Entrada, Programado, Cualquier momento, Algún día).</string>
+
+    <!-- Magic Plus ("New") Context Menu & Tooltip -->
+    <string name="magic_plus_fab_tooltip">Crear nuevo (Clic para menú • Arrastrar para colocar)</string>
+    <string name="magic_plus_todo_sub_view">Crear en la vista actual</string>
+    <string name="magic_plus_todo_sub_project">Crear en el proyecto actual</string>
+    <string name="magic_plus_todo_sub_area">Crear en el área actual</string>
+    <string name="magic_plus_todo_sub_inbox">Crear en Entrada</string>
+    <string name="magic_plus_heading_sub">Insertar sección en el proyecto</string>
+    <string name="magic_plus_project_sub_default">Con pasos y fecha objetivo</string>
+    <string name="magic_plus_project_sub_area">Proyecto en esta área</string>
+    <string name="magic_plus_project_sub_another">Crear otro proyecto</string>
+    <string name="magic_plus_area_sub">Nueva área de responsabilidad</string>
+
+    <!-- Settings Modal -->
+    <string name="settings_title">Ajustes</string>
+    <string name="settings_subtitle">Base de datos, Cuenta Cloud, Idioma, Estadísticas, Copia de seguridad y CSV</string>
+    <string name="settings_close_tooltip">Cerrar ajustes</string>
+    <string name="settings_db_sync_section">Base de datos y sincronización</string>
+    <string name="settings_local_db_title">BD local</string>
+    <string name="settings_local_db_desc">100 % sin conexión en este dispositivo (SQLite / Room)</string>
+    <string name="settings_cloud_sync_title">Cloud Sync</string>
+    <string name="settings_cloud_sync_desc">BD local + respaldo en tiempo real en todos los dispositivos</string>
+    <string name="settings_account_status_label">Cuenta y estado en la nube</string>
+    <string name="settings_local_mode_active">Modo local activo (Sin conexión a la nube)</string>
+    <string name="settings_not_signed_in">Sesión no iniciada</string>
+    <string name="settings_sign_in_choose_account">Iniciar sesión / Elegir cuenta</string>
+    <string name="settings_open_account_sync">Abrir Cuenta y Sync</string>
+    <string name="settings_sync_short">Sincronizar</string>
+    <string name="settings_configure_arrow">Configurar ›</string>
+    <string name="settings_sample_tasks_title">Tareas de ejemplo aún presentes</string>
+    <string name="settings_sample_tasks_desc">Elimina únicamente las tareas de demostración preinstaladas</string>
+    <string name="settings_stats_section">Estadísticas (Tareas e inventario)</string>
+    <string name="settings_stat_open">Abiertas</string>
+    <string name="settings_stat_completed">Completadas</string>
+    <string name="settings_stat_deleted">Eliminadas</string>
+    <string name="settings_stat_canceled">Canceladas</string>
+    <string name="settings_stat_today_active">★ Activas hoy</string>
+    <string name="settings_stat_recurring">🔁 Tareas recurrentes</string>
+    <string name="settings_stat_active_projects">📁 Proyectos activos</string>
+    <string name="settings_stat_saved_tags">🏷️ Etiquetas guardadas</string>
+    <string name="settings_stat_total_records">🗄️ Registros totales en BD</string>
+    <string name="settings_stat_tasks_count">%1$d tareas</string>
+    <string name="settings_stat_active_count">%1$d activas</string>
+    <string name="settings_stat_projects_count">%1$d proyectos</string>
+    <string name="settings_stat_tags_count">%1$d etiquetas</string>
+    <string name="settings_stat_records_count">%1$d registros</string>
+    <string name="settings_csv_section">Importar y exportar (Archivo CSV)</string>
+    <string name="settings_csv_desc">Exporta todas las tareas (incluidos estado, área, proyecto, fecha, fecha límite, etiquetas y subtareas) como archivo CSV o importa archivos CSV existentes.</string>
+    <string name="settings_csv_export">Exportar CSV</string>
+    <string name="settings_csv_share">Compartir CSV</string>
+    <string name="settings_csv_import">Importar CSV</string>
+    <string name="settings_err_local_mode_sync">El modo de BD local está activo. Cambia a Cloud Sync en Ajustes para sincronizar.</string>
+
+    <!-- Backup & Restore -->
+    <string name="backup_section_title">Copia de seguridad y restauración</string>
+    <string name="backup_section_desc">Guarda todas las tareas, áreas, proyectos, encabezados, etiquetas, subtareas y ajustes en un archivo (.tbbackup) — opcionalmente con contraseña AES-256 — y restaura el estado completo.</string>
+    <string name="backup_create_button">Crear copia</string>
+    <string name="backup_restore_button">Restaurar archivo</string>
+    <string name="backup_create_dialog_title">Crear copia de seguridad completa</string>
+    <string name="backup_create_dialog_summary">%1$d tareas • %2$d proyectos • %3$d áreas • %4$d etiquetas</string>
+    <string name="backup_close_dialog_tooltip">Cerrar diálogo</string>
+    <string name="backup_password_protect_title">Proteger con contraseña (opcional)</string>
+    <string name="backup_password_protect_on">Activo: cifrado AES-256-GCM y PBKDF2</string>
+    <string name="backup_password_protect_off">Desactivado: crear archivo sin cifrar</string>
+    <string name="backup_password_label">Contraseña de copia</string>
+    <string name="backup_password_confirm_label">Repetir contraseña</string>
+    <string name="backup_password_show">Mostrar contraseña</string>
+    <string name="backup_password_hide">Ocultar contraseña</string>
+    <string name="backup_password_warning">Importante: sin esta contraseña no será posible descifrar el archivo de copia más adelante.</string>
+    <string name="backup_password_err_too_short">Elige una contraseña de al menos 4 caracteres.</string>
+    <string name="backup_password_err_mismatch">Las contraseñas introducidas no coinciden.</string>
+    <string name="backup_save_to_file">Guardar en archivo…</string>
+    <string name="backup_share_tooltip">Compartir archivo de copia</string>
+    <string name="backup_unknown_date">Fecha desconocida</string>
+    <string name="backup_restore_encrypted_title">Copia protegida con contraseña</string>
+    <string name="backup_restore_plain_title">Restaurar copia de seguridad</string>
+    <string name="backup_restore_encrypted_desc">Este archivo de copia está cifrado. Introduce la contraseña para restaurar todas las tareas, áreas, proyectos y etiquetas.</string>
+    <string name="backup_restore_enter_password">Introducir contraseña</string>
+    <string name="backup_preview_header">Contenido del archivo de copia:</string>
+    <string name="backup_preview_details">• %1$d tareas y %2$d subtareas\n• %3$d proyectos y %4$d encabezados\n• %5$d áreas y %6$d etiquetas</string>
+    <string name="backup_restore_replace_notice">Nota: la restauración completa reemplaza todas las entradas locales actuales por el contenido de esta copia.</string>
+    <string name="backup_restore_confirm_decrypt">Descifrar y restaurar todo</string>
+    <string name="backup_restore_confirm_plain">Restaurar todo ahora</string>
+
+    <!-- Backup & CSV Status Messages -->
+    <string name="csv_status_exported">✅ Archivo CSV guardado (%1$d tareas).</string>
+    <string name="csv_status_shared">✅ Exportación CSV abierta para compartir.</string>
+    <string name="csv_status_imported">✅ ¡%1$d tareas importadas desde el archivo CSV!</string>
+    <string name="csv_status_export_failed">❌ Error al exportar CSV: %1$s</string>
+    <string name="csv_status_import_failed">❌ Error al importar CSV: %1$s</string>
+    <string name="backup_status_saved">✅ Copia guardada (%1$s): %2$d tareas, %3$d proyectos, %4$d áreas y %5$d etiquetas.</string>
+    <string name="backup_badge_encrypted">🔒 Protegida con contraseña</string>
+    <string name="backup_badge_unencrypted">Sin cifrar</string>
+    <string name="backup_status_shared">✅ Copia (%1$s) abierta para compartir.</string>
+    <string name="backup_status_restored">✅ Restauración completa: ¡%1$d tareas, %2$d proyectos, %3$d áreas y %4$d etiquetas restauradas!</string>
+    <string name="backup_status_failed">❌ Error en la copia: %1$s</string>
+    <string name="backup_status_restore_failed">❌ Error al restaurar: %1$s</string>
+    <string name="backup_err_wrong_password">Contraseña incorrecta. Comprueba la contraseña introducida.</string>
+
+    <!-- Initial Setup & Account Merge -->
+    <string name="setup_banner_title">Configuración inicial — Tareas de ejemplo presentes</string>
+    <string name="setup_banner_hide_tooltip">Ocultar aviso</string>
+    <string name="setup_banner_desc">¿Quieres conectar tu cuenta (con opción para combinar tus tareas) o empezar directamente sin las tareas de ejemplo preinstaladas?</string>
+    <string name="setup_banner_connect_btn">Conectar y configurar cuenta</string>
+    <string name="setup_banner_delete_samples_btn">Eliminar tareas de ejemplo</string>
+    <string name="merge_dialog_default_account">tu cuenta Cloud</string>
+    <string name="merge_dialog_title">¿Combinar tareas?</string>
+    <string name="merge_dialog_desc">Las tareas de ejemplo iniciales siguen presentes en la aplicación. Se eliminarán automáticamente durante la configuración para no subirse a tu cuenta.</string>
+    <string name="merge_dialog_hint_with_tasks">También has creado %1$d tarea(s) local(es). ¿Quieres combinarlas con las tareas guardadas en %2$s?</string>
+    <string name="merge_dialog_hint_no_tasks">¿Quieres combinar tus entradas locales actuales (sin los ejemplos) con %1$s, o cargar únicamente las tareas de tu cuenta?</string>
+    <string name="merge_dialog_confirm_merge">Sí, combinar con la cuenta (eliminar ejemplos)</string>
+    <string name="merge_dialog_confirm_replace">No — cargar solo de la cuenta (borrar locales)</string>
 </resources>

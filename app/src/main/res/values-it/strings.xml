@@ -163,4 +163,116 @@
     <string name="move_none_option">Nessun progetto / Nessuna area</string>
     <string name="auth_forgot_password">Password dimenticata? Reimposta</string>
     <string name="widget_description">Widget interattivo Thingsbook con cambio vista rapido (Oggi, Entrata, Programmati, Sempre, Prima o poi).</string>
+
+    <!-- Magic Plus ("New") Context Menu & Tooltip -->
+    <string name="magic_plus_fab_tooltip">Crea nuovo (Clicca per il menu • Trascina per posizionare)</string>
+    <string name="magic_plus_todo_sub_view">Crea nella vista attuale</string>
+    <string name="magic_plus_todo_sub_project">Crea nel progetto attuale</string>
+    <string name="magic_plus_todo_sub_area">Crea nell\'area attuale</string>
+    <string name="magic_plus_todo_sub_inbox">Crea in Entrata</string>
+    <string name="magic_plus_heading_sub">Inserisci sezione nel progetto</string>
+    <string name="magic_plus_project_sub_default">Con passaggi e data obiettivo</string>
+    <string name="magic_plus_project_sub_area">Progetto in quest\'area</string>
+    <string name="magic_plus_project_sub_another">Crea un altro progetto</string>
+    <string name="magic_plus_area_sub">Nuova area di responsabilità</string>
+
+    <!-- Settings Modal -->
+    <string name="settings_title">Impostazioni</string>
+    <string name="settings_subtitle">Database, Account Cloud, Lingua, Statistiche, Backup e CSV</string>
+    <string name="settings_close_tooltip">Chiudi impostazioni</string>
+    <string name="settings_db_sync_section">Database e sincronizzazione</string>
+    <string name="settings_local_db_title">DB locale</string>
+    <string name="settings_local_db_desc">100% offline su questo dispositivo (SQLite / Room)</string>
+    <string name="settings_cloud_sync_title">Cloud Sync</string>
+    <string name="settings_cloud_sync_desc">DB locale + backup in tempo reale su tutti i dispositivi</string>
+    <string name="settings_account_status_label">Account e stato Cloud</string>
+    <string name="settings_local_mode_active">Modalità locale attiva (Nessuna connessione cloud)</string>
+    <string name="settings_not_signed_in">Non connesso</string>
+    <string name="settings_sign_in_choose_account">Accedi / Scegli account</string>
+    <string name="settings_open_account_sync">Apri Account e Sync</string>
+    <string name="settings_sync_short">Sincronizza</string>
+    <string name="settings_configure_arrow">Configura ›</string>
+    <string name="settings_sample_tasks_title">Attività di esempio ancora presenti</string>
+    <string name="settings_sample_tasks_desc">Elimina esclusivamente le attività demo preinstallate</string>
+    <string name="settings_stats_section">Statistiche (Attività e archivio)</string>
+    <string name="settings_stat_open">Aperte</string>
+    <string name="settings_stat_completed">Completate</string>
+    <string name="settings_stat_deleted">Eliminate</string>
+    <string name="settings_stat_canceled">Annullate</string>
+    <string name="settings_stat_today_active">★ Attive oggi</string>
+    <string name="settings_stat_recurring">🔁 Attività ricorrenti</string>
+    <string name="settings_stat_active_projects">📁 Progetti attivi</string>
+    <string name="settings_stat_saved_tags">🏷️ Tag salvati</string>
+    <string name="settings_stat_total_records">🗄️ Record totali nel database</string>
+    <string name="settings_stat_tasks_count">%1$d attività</string>
+    <string name="settings_stat_active_count">%1$d attive</string>
+    <string name="settings_stat_projects_count">%1$d progetti</string>
+    <string name="settings_stat_tags_count">%1$d tag</string>
+    <string name="settings_stat_records_count">%1$d record</string>
+    <string name="settings_csv_section">Importa ed esporta (File CSV)</string>
+    <string name="settings_csv_desc">Esporta tutte le attività (inclusi stato, area, progetto, data, scadenza, tag e sotto-attività) come file CSV o importa file CSV esistenti.</string>
+    <string name="settings_csv_export">Esporta CSV</string>
+    <string name="settings_csv_share">Condividi CSV</string>
+    <string name="settings_csv_import">Importa CSV</string>
+    <string name="settings_err_local_mode_sync">La modalità database locale è attiva. Passa a Cloud Sync nelle Impostazioni per sincronizzare.</string>
+
+    <!-- Backup & Restore -->
+    <string name="backup_section_title">Backup e ripristino (Backup completo)</string>
+    <string name="backup_section_desc">Salva tutte le attività, aree, progetti, intestazioni, tag, sotto-attività e impostazioni in un unico file (.tbbackup) — opzionalmente protetto da password AES-256 — e ripristina lo stato completo.</string>
+    <string name="backup_create_button">Crea backup</string>
+    <string name="backup_restore_button">Ripristina da file</string>
+    <string name="backup_create_dialog_title">Crea backup completo</string>
+    <string name="backup_create_dialog_summary">%1$d attività • %2$d progetti • %3$d aree • %4$d tag</string>
+    <string name="backup_close_dialog_tooltip">Chiudi finestra</string>
+    <string name="backup_password_protect_title">Proteggi con password (opzionale)</string>
+    <string name="backup_password_protect_on">Attivo: crittografia AES-256-GCM e PBKDF2</string>
+    <string name="backup_password_protect_off">Disattivato: crea file di backup non crittografato</string>
+    <string name="backup_password_label">Password di backup</string>
+    <string name="backup_password_confirm_label">Ripeti password</string>
+    <string name="backup_password_show">Mostra password</string>
+    <string name="backup_password_hide">Nascondi password</string>
+    <string name="backup_password_warning">Importante: senza questa password non sarà possibile decrittografare il file di backup in futuro.</string>
+    <string name="backup_password_err_too_short">Scegli una password di almeno 4 caratteri.</string>
+    <string name="backup_password_err_mismatch">Le password inserite non corrispondono.</string>
+    <string name="backup_save_to_file">Salva come file…</string>
+    <string name="backup_share_tooltip">Condividi file di backup</string>
+    <string name="backup_unknown_date">Data sconosciuta</string>
+    <string name="backup_restore_encrypted_title">Backup protetto da password</string>
+    <string name="backup_restore_plain_title">Ripristina backup</string>
+    <string name="backup_restore_encrypted_desc">Questo file di backup è crittografato. Inserisci la password per ripristinare tutte le attività, aree, progetti e tag.</string>
+    <string name="backup_restore_enter_password">Inserisci password di backup</string>
+    <string name="backup_preview_header">Contenuto del file di backup:</string>
+    <string name="backup_preview_details">• %1$d attività e %2$d sotto-attività\n• %3$d progetti e %4$d intestazioni\n• %5$d aree e %6$d tag</string>
+    <string name="backup_restore_replace_notice">Nota: il ripristino completo sostituisce tutte le voci locali attuali con il contenuto di questo file di backup.</string>
+    <string name="backup_restore_confirm_decrypt">Decrittografa e ripristina tutto</string>
+    <string name="backup_restore_confirm_plain">Ripristina tutto ora</string>
+
+    <!-- Backup & CSV Status Messages -->
+    <string name="csv_status_exported">✅ File CSV salvato (%1$d attività).</string>
+    <string name="csv_status_shared">✅ Esportazione CSV aperta per la condivisione.</string>
+    <string name="csv_status_imported">✅ %1$d attività importate dal file CSV!</string>
+    <string name="csv_status_export_failed">❌ Esportazione CSV non riuscita: %1$s</string>
+    <string name="csv_status_import_failed">❌ Importazione CSV non riuscita: %1$s</string>
+    <string name="backup_status_saved">✅ Backup salvato (%1$s): %2$d attività, %3$d progetti, %4$d aree e %5$d tag.</string>
+    <string name="backup_badge_encrypted">🔒 Protetto da password</string>
+    <string name="backup_badge_unencrypted">Non crittografato</string>
+    <string name="backup_status_shared">✅ Backup (%1$s) aperto per la condivisione.</string>
+    <string name="backup_status_restored">✅ Ripristino completo riuscito: %1$d attività, %2$d progetti, %3$d aree e %4$d tag ripristinati!</string>
+    <string name="backup_status_failed">❌ Backup non riuscito: %1$s</string>
+    <string name="backup_status_restore_failed">❌ Ripristino non riuscito: %1$s</string>
+    <string name="backup_err_wrong_password">Password errata. Verifica la password inserita.</string>
+
+    <!-- Initial Setup & Account Merge -->
+    <string name="setup_banner_title">Configurazione iniziale — Attività di esempio presenti</string>
+    <string name="setup_banner_hide_tooltip">Nascondi avviso</string>
+    <string name="setup_banner_desc">Vuoi collegare il tuo account (con opzione per unire le tue attività) o iniziare subito senza le attività di esempio preinstallate?</string>
+    <string name="setup_banner_connect_btn">Collega e configura account</string>
+    <string name="setup_banner_delete_samples_btn">Elimina attività di esempio</string>
+    <string name="merge_dialog_default_account">il tuo account Cloud</string>
+    <string name="merge_dialog_title">Unire le attività?</string>
+    <string name="merge_dialog_desc">Nell\'app sono ancora presenti le attività di esempio iniziali. Verranno eliminate automaticamente durante la configurazione per non finire nel tuo account.</string>
+    <string name="merge_dialog_hint_with_tasks">Hai anche creato %1$d attività locali. Vuoi unirle alle attività salvate su %2$s?</string>
+    <string name="merge_dialog_hint_no_tasks">Vuoi unire le voci locali attuali (senza esempi) con %1$s, oppure caricare esclusivamente le attività dal tuo account?</string>
+    <string name="merge_dialog_confirm_merge">Sì, unisci all\'account (elimina esempi)</string>
+    <string name="merge_dialog_confirm_replace">No — carica solo dall\'account (elimina locali)</string>
 </resources>

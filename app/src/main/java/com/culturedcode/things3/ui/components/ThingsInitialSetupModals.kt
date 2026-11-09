@@ -107,13 +107,13 @@ fun ThingsInitialSetupBanner(
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
-                        text = "Ersteinrichtung — Beispielaufgaben vorhanden",
+                        text = stringResource(R.string.setup_banner_title),
                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                         color = colors.primaryText
                     )
                 }
 
-                ThingsHoverTooltip(text = "Hinweis ausblenden") {
+                ThingsHoverTooltip(text = stringResource(R.string.setup_banner_hide_tooltip)) {
                     IconButton(
                         onClick = onDismissBanner,
                         modifier = Modifier.size(26.dp)
@@ -129,7 +129,7 @@ fun ThingsInitialSetupBanner(
             }
 
             Text(
-                text = "Möchtest du dein Konto einrichten (inkl. Auswahl zum Zusammenführen deiner Aufgaben) oder direkt ohne die vorinstallierten Beispielaufgaben starten?",
+                text = stringResource(R.string.setup_banner_desc),
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.secondaryText
             )
@@ -150,7 +150,7 @@ fun ThingsInitialSetupBanner(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Konto verbinden & einrichten",
+                        text = stringResource(R.string.setup_banner_connect_btn),
                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
                     )
                 }
@@ -167,7 +167,7 @@ fun ThingsInitialSetupBanner(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Beispielaufgaben löschen",
+                        text = stringResource(R.string.setup_banner_delete_samples_btn),
                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                         color = colors.primaryText
                     )
@@ -193,7 +193,8 @@ fun SampleTasksAccountMergeDialog(
     onCancel: () -> Unit
 ) {
     val colors = ThingsTheme.colors
-    val displayAccount = accountLabel?.takeIf { it.isNotBlank() } ?: "deinem Cloud-Konto"
+    val displayAccount = accountLabel?.takeIf { it.isNotBlank() }
+        ?: stringResource(R.string.merge_dialog_default_account)
 
     Dialog(
         onDismissRequest = onCancel,
@@ -240,7 +241,7 @@ fun SampleTasksAccountMergeDialog(
                             )
                         }
                         Text(
-                            text = "Aufgaben zusammenführen?",
+                            text = stringResource(R.string.merge_dialog_title),
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = colors.primaryText
                         )
@@ -260,15 +261,15 @@ fun SampleTasksAccountMergeDialog(
                 }
 
                 Text(
-                    text = "In der App sind noch die anfänglichen Beispielaufgaben vorhanden. Diese Beispielaufgaben werden bei der Einrichtung automatisch gelöscht, damit sie nicht in dein Konto übernommen werden.",
+                    text = stringResource(R.string.merge_dialog_desc),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.secondaryText
                 )
 
                 val detailHint = if (nonSampleTaskCount > 0) {
-                    "Du hast zusätzlich $nonSampleTaskCount eigene Aufgabe(n) lokal angelegt. Möchtest du diese aktuellen Aufgaben mit den auf $displayAccount gespeicherten Aufgaben zusammenführen?"
+                    stringResource(R.string.merge_dialog_hint_with_tasks, nonSampleTaskCount, displayAccount)
                 } else {
-                    "Möchtest du deine aktuellen lokalen Einträge (ohne Beispielaufgaben) mit den auf $displayAccount gespeicherten Aufgaben zusammenführen, oder ausschließlich die Aufgaben von deinem Konto laden?"
+                    stringResource(R.string.merge_dialog_hint_no_tasks, displayAccount)
                 }
 
                 Surface(
@@ -293,7 +294,7 @@ fun SampleTasksAccountMergeDialog(
                     colors = ButtonDefaults.buttonColors(containerColor = colors.thingsBlue)
                 ) {
                     Text(
-                        text = "Ja, mit Konto zusammenführen (Beispiele löschen)",
+                        text = stringResource(R.string.merge_dialog_confirm_merge),
                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
                         color = Color.White,
                         modifier = Modifier.padding(vertical = 3.dp)
@@ -306,7 +307,7 @@ fun SampleTasksAccountMergeDialog(
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(
-                        text = "Nein — nur Konto-Aufgaben laden (lokale löschen)",
+                        text = stringResource(R.string.merge_dialog_confirm_replace),
                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
                         color = colors.primaryText,
                         modifier = Modifier.padding(vertical = 3.dp)
@@ -387,7 +388,7 @@ fun QuickCreateAreaDialog(
                         )
                         Column {
                             Text(
-                                text = "Neuer Bereich",
+                                text = stringResource(R.string.entity_new_area),
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = colors.primaryText
                             )

@@ -1,10 +1,14 @@
 package com.culturedcode.things3
 
 import android.app.Application
+import android.app.NotificationManager
 import android.content.Context
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.culturedcode.things3.data.notifications.ReminderScheduler
@@ -180,6 +184,18 @@ class Things3Application : Application(), Configuration.Provider {
         }
         // Defer non-critical background schedulers slightly so startup UI renders with zero contention
         Handler(Looper.getMainLooper()).postDelayed({
+            runCatching {
+                // Ensure any legacy desktop/taskbar badge artifacts from pre-1.6.9 installs are cleared
+                NotificationManagerCompat.from(this).cancel(90421)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val sysNm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                    sysNm?.deleteNotificationChannel("thingsbook_today_icon_badge_v2")
+                }
+                ShortcutManagerCompat.removeDynamicShortcuts(
+                    this,
+                    listOf("thingsbook_today_taskbar_count")
+                )
+            }
             runCatching {
                 SyncWorker.schedulePeriodicDeltaSync(this)
             }

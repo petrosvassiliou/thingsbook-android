@@ -90,7 +90,7 @@ import java.util.Locale
 private data class PasswordValidationResult(
     val isValid: Boolean,
     val passwordOrNull: String?,
-    val errorMessage: String?
+    val errorResId: Int?
 )
 
 private fun validateBackupPasswordInput(
@@ -99,23 +99,23 @@ private fun validateBackupPasswordInput(
     confirmation: String
 ): PasswordValidationResult {
     if (!usePassword) {
-        return PasswordValidationResult(isValid = true, passwordOrNull = null, errorMessage = null)
+        return PasswordValidationResult(isValid = true, passwordOrNull = null, errorResId = null)
     }
     if (password.length < 4) {
         return PasswordValidationResult(
             isValid = false,
             passwordOrNull = null,
-            errorMessage = "Bitte wähle ein Passwort mit mindestens 4 Zeichen."
+            errorResId = R.string.backup_password_err_too_short
         )
     }
     if (password != confirmation) {
         return PasswordValidationResult(
             isValid = false,
             passwordOrNull = null,
-            errorMessage = "Die eingegebenen Passwörter stimmen nicht überein."
+            errorResId = R.string.backup_password_err_mismatch
         )
     }
-    return PasswordValidationResult(isValid = true, passwordOrNull = password, errorMessage = null)
+    return PasswordValidationResult(isValid = true, passwordOrNull = password, errorResId = null)
 }
 
 /**
@@ -152,7 +152,7 @@ fun BackupAndRestoreSettingsSection(
                 modifier = Modifier.size(17.dp)
             )
             Text(
-                text = "Backup & Restore (Komplettsicherung)",
+                text = stringResource(R.string.backup_section_title),
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                 color = colors.primaryText
             )
@@ -160,7 +160,7 @@ fun BackupAndRestoreSettingsSection(
 
         Spacer(modifier = Modifier.height(6.dp))
         Text(
-            text = "Sichert sämtliche Aufgaben, Bereiche, Projekte, Überschriften, Tags, Unteraufgaben und Einstellungen in einer Datei (.tbbackup) — optional mit AES-256-Passwortschutz — und stellt den kompletten Stand wieder her.",
+            text = stringResource(R.string.backup_section_desc),
             style = MaterialTheme.typography.labelSmall,
             color = colors.secondaryText
         )
@@ -188,7 +188,7 @@ fun BackupAndRestoreSettingsSection(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Backup erstellen",
+                    text = stringResource(R.string.backup_create_button),
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                     color = Color.White
                 )
@@ -211,7 +211,7 @@ fun BackupAndRestoreSettingsSection(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Restore aus Datei",
+                    text = stringResource(R.string.backup_restore_button),
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                     color = colors.thingsBlue
                 )
@@ -257,12 +257,12 @@ fun ThingsBackupCreateDialog(
     var passwordField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
     var confirmField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
     var showPassword by remember { mutableStateOf(false) }
-    var localValidationError by remember { mutableStateOf<String?>(null) }
+    var localValidationErrorResId by remember { mutableStateOf<Int?>(null) }
 
     val passwordFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(usePassword) {
-        localValidationError = null
+        localValidationErrorResId = null
         if (usePassword) {
             delay(60)
             runCatching { passwordFocusRequester.requestFocus() }
@@ -320,19 +320,25 @@ fun ThingsBackupCreateDialog(
                         }
                         Column {
                             Text(
-                                text = "Vollständiges Backup erstellen",
+                                text = stringResource(R.string.backup_create_dialog_title),
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = colors.primaryText
                             )
                             Text(
-                                text = "$totalBackupTasks Aufgaben • ${statistics.activeProjectsCount} Projekte • ${statistics.areasCount} Bereiche • ${statistics.tagsCount} Tags",
+                                text = stringResource(
+                                    R.string.backup_create_dialog_summary,
+                                    totalBackupTasks,
+                                    statistics.activeProjectsCount,
+                                    statistics.areasCount,
+                                    statistics.tagsCount
+                                ),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = colors.secondaryText
                             )
                         }
                     }
 
-                    ThingsHoverTooltip(text = "Dialog schließen") {
+                    ThingsHoverTooltip(text = stringResource(R.string.backup_close_dialog_tooltip)) {
                         IconButton(
                             onClick = { if (!isBusy) onDismiss() },
                             modifier = Modifier.size(28.dp)
@@ -378,15 +384,15 @@ fun ThingsBackupCreateDialog(
                         )
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Mit Passwort schützen (optional)",
+                                text = stringResource(R.string.backup_password_protect_title),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                 color = colors.primaryText
                             )
                             Text(
                                 text = if (usePassword) {
-                                    "Aktiv: AES-256-GCM & PBKDF2-Verschlüsselung"
+                                    stringResource(R.string.backup_password_protect_on)
                                 } else {
-                                    "Aus: Unverschlüsselte Backup-Datei erstellen"
+                                    stringResource(R.string.backup_password_protect_off)
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (usePassword) colors.thingsBlue else colors.secondaryText
@@ -426,9 +432,9 @@ fun ThingsBackupCreateDialog(
                             value = passwordField,
                             onValueChange = {
                                 passwordField = it
-                                localValidationError = null
+                                localValidationErrorResId = null
                             },
-                            label = { Text("Backup-Passwort") },
+                            label = { Text(stringResource(R.string.backup_password_label)) },
                             singleLine = true,
                             visualTransformation = if (showPassword) {
                                 VisualTransformation.None
@@ -441,7 +447,11 @@ fun ThingsBackupCreateDialog(
                             ),
                             trailingIcon = {
                                 ThingsHoverTooltip(
-                                    text = if (showPassword) "Passwort verbergen" else "Passwort anzeigen"
+                                    text = if (showPassword) {
+                                        stringResource(R.string.backup_password_hide)
+                                    } else {
+                                        stringResource(R.string.backup_password_show)
+                                    }
                                 ) {
                                     IconButton(onClick = { showPassword = !showPassword }) {
                                         Icon(
@@ -473,9 +483,9 @@ fun ThingsBackupCreateDialog(
                             value = confirmField,
                             onValueChange = {
                                 confirmField = it
-                                localValidationError = null
+                                localValidationErrorResId = null
                             },
-                            label = { Text("Passwort wiederholen") },
+                            label = { Text(stringResource(R.string.backup_password_confirm_label)) },
                             singleLine = true,
                             visualTransformation = if (showPassword) {
                                 VisualTransformation.None
@@ -493,7 +503,7 @@ fun ThingsBackupCreateDialog(
                                         password = passwordField.text,
                                         confirmation = confirmField.text
                                     )
-                                    localValidationError = res.errorMessage
+                                    localValidationErrorResId = res.errorResId
                                     if (res.isValid) {
                                         onSaveToFile(res.passwordOrNull)
                                     }
@@ -512,14 +522,14 @@ fun ThingsBackupCreateDialog(
                         )
 
                         Text(
-                            text = "Wichtig: Ohne dieses Passwort lässt sich eine verschlüsselte Backup-Datei später nicht mehr entschlüsseln.",
+                            text = stringResource(R.string.backup_password_warning),
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                             color = colors.secondaryText
                         )
                     }
                 }
 
-                if (!localValidationError.isNullOrBlank()) {
+                localValidationErrorResId?.let { errRes ->
                     Surface(
                         color = colors.deadlineUrgentRed.copy(alpha = 0.12f),
                         shape = RoundedCornerShape(10.dp),
@@ -537,7 +547,7 @@ fun ThingsBackupCreateDialog(
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = localValidationError.orEmpty(),
+                                text = stringResource(errRes),
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
                                 color = colors.deadlineUrgentRed
                             )
@@ -557,7 +567,7 @@ fun ThingsBackupCreateDialog(
                                 password = passwordField.text,
                                 confirmation = confirmField.text
                             )
-                            localValidationError = res.errorMessage
+                            localValidationErrorResId = res.errorResId
                             if (res.isValid) {
                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                 onSaveToFile(res.passwordOrNull)
@@ -585,13 +595,13 @@ fun ThingsBackupCreateDialog(
                             Spacer(modifier = Modifier.width(6.dp))
                         }
                         Text(
-                            text = "Als Datei speichern…",
+                            text = stringResource(R.string.backup_save_to_file),
                             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
                             color = Color.White
                         )
                     }
 
-                    ThingsHoverTooltip(text = "Backup-Datei direkt teilen") {
+                    ThingsHoverTooltip(text = stringResource(R.string.backup_share_tooltip)) {
                         OutlinedButton(
                             onClick = {
                                 val res = validateBackupPasswordInput(
@@ -599,7 +609,7 @@ fun ThingsBackupCreateDialog(
                                     password = passwordField.text,
                                     confirmation = confirmField.text
                                 )
-                                localValidationError = res.errorMessage
+                                localValidationErrorResId = res.errorResId
                                 if (res.isValid) {
                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     onShareBackupFile(res.passwordOrNull)
@@ -610,7 +620,7 @@ fun ThingsBackupCreateDialog(
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.Share,
-                                contentDescription = "Backup teilen",
+                                contentDescription = stringResource(R.string.backup_share_tooltip),
                                 tint = colors.thingsBlue,
                                 modifier = Modifier.size(17.dp)
                             )
@@ -655,6 +665,7 @@ fun ThingsBackupRestoreDialog(
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
     val isPasswordProtected = inspection is BackupInspectionResult.PasswordProtected
+    val unknownDateLabel = stringResource(R.string.backup_unknown_date)
 
     var passwordField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
     var showPassword by remember { mutableStateOf(false) }
@@ -667,14 +678,14 @@ fun ThingsBackupRestoreDialog(
         }
     }
 
-    val formattedDate = remember(inspection.createdAt) {
+    val formattedDate = remember(inspection.createdAt, unknownDateLabel) {
         if (inspection.createdAt <= 0L) {
-            "Unbekanntes Datum"
+            unknownDateLabel
         } else {
             runCatching {
                 val fmt = DateTimeFormatter.ofPattern("dd.MM.yyyy • HH:mm", Locale.getDefault())
                 Instant.ofEpochMilli(inspection.createdAt).atZone(ZoneId.systemDefault()).format(fmt)
-            }.getOrDefault("Unbekanntes Datum")
+            }.getOrDefault(unknownDateLabel)
         }
     }
 
@@ -725,9 +736,9 @@ fun ThingsBackupRestoreDialog(
                         Column {
                             Text(
                                 text = if (isPasswordProtected) {
-                                    "Passwortgeschütztes Backup"
+                                    stringResource(R.string.backup_restore_encrypted_title)
                                 } else {
-                                    "Backup wiederherstellen"
+                                    stringResource(R.string.backup_restore_plain_title)
                                 },
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = colors.primaryText
@@ -743,7 +754,7 @@ fun ThingsBackupRestoreDialog(
                         }
                     }
 
-                    ThingsHoverTooltip(text = "Abbrechen") {
+                    ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
                         IconButton(
                             onClick = { if (!isBusy) onCancel() },
                             modifier = Modifier.size(28.dp)
@@ -761,7 +772,7 @@ fun ThingsBackupRestoreDialog(
                 when (inspection) {
                     is BackupInspectionResult.PasswordProtected -> {
                         Text(
-                            text = "Diese Backup-Datei ist verschlüsselt. Bitte gib das Passwort ein, um sämtliche Aufgaben, Bereiche, Projekte und Tags wiederherzustellen.",
+                            text = stringResource(R.string.backup_restore_encrypted_desc),
                             style = MaterialTheme.typography.bodyMedium,
                             color = colors.secondaryText
                         )
@@ -769,7 +780,7 @@ fun ThingsBackupRestoreDialog(
                         OutlinedTextField(
                             value = passwordField,
                             onValueChange = { passwordField = it },
-                            label = { Text("Backup-Passwort eingeben") },
+                            label = { Text(stringResource(R.string.backup_restore_enter_password)) },
                             singleLine = true,
                             enabled = !isBusy,
                             visualTransformation = if (showPassword) {
@@ -790,7 +801,11 @@ fun ThingsBackupRestoreDialog(
                             ),
                             trailingIcon = {
                                 ThingsHoverTooltip(
-                                    text = if (showPassword) "Passwort verbergen" else "Passwort anzeigen"
+                                    text = if (showPassword) {
+                                        stringResource(R.string.backup_password_hide)
+                                    } else {
+                                        stringResource(R.string.backup_password_show)
+                                    }
                                 ) {
                                     IconButton(onClick = { showPassword = !showPassword }) {
                                         Icon(
@@ -831,14 +846,20 @@ fun ThingsBackupRestoreDialog(
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Text(
-                                    text = "Inhalt der Sicherungsdatei:",
+                                    text = stringResource(R.string.backup_preview_header),
                                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                     color = colors.primaryText
                                 )
                                 Text(
-                                    text = "• ${s.tasksCount} Aufgaben & ${s.checklistItemsCount} Unteraufgaben\n" +
-                                        "• ${s.projectsCount} Projekte & ${s.headingsCount} Überschriften\n" +
-                                        "• ${s.areasCount} Bereiche & ${s.tagsCount} Tags",
+                                    text = stringResource(
+                                        R.string.backup_preview_details,
+                                        s.tasksCount,
+                                        s.checklistItemsCount,
+                                        s.projectsCount,
+                                        s.headingsCount,
+                                        s.areasCount,
+                                        s.tagsCount
+                                    ),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = colors.secondaryText
                                 )
@@ -853,7 +874,7 @@ fun ThingsBackupRestoreDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "Hinweis: Beim kompletten Restore werden die aktuell lokal vorhandenen Einträge vollständig durch den Stand dieser Backup-Datei ersetzt.",
+                        text = stringResource(R.string.backup_restore_replace_notice),
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.secondaryText,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)
@@ -914,9 +935,9 @@ fun ThingsBackupRestoreDialog(
                     }
                     Text(
                         text = if (isPasswordProtected) {
-                            "Entschlüsseln & komplett wiederherstellen"
+                            stringResource(R.string.backup_restore_confirm_decrypt)
                         } else {
-                            "Jetzt komplett wiederherstellen"
+                            stringResource(R.string.backup_restore_confirm_plain)
                         },
                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
                         color = Color.White,

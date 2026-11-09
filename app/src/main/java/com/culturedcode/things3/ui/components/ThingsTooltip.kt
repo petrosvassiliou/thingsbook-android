@@ -4,19 +4,14 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -53,7 +48,6 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntRect
@@ -61,7 +55,6 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.roundToIntRect
 import androidx.compose.ui.unit.sp
-import com.culturedcode.things3.data.notifications.AppIconBadgeUpdater
 import com.culturedcode.things3.ui.theme.ThingsTheme
 import kotlinx.coroutines.delay
 
@@ -297,13 +290,9 @@ fun ThingsHoverTooltip(
 
 /**
  * The Thingsbook in-app Brand Symbol (rounded macOS-style cobalt squircle with white checkmark).
- * Intentionally never renders a count badge inside the app UI.
  */
 @Composable
-@Suppress("UNUSED_PARAMETER")
 fun ThingsbookBrandSymbol(
-    todayCount: Int = 0,
-    showBadge: Boolean = false,
     modifier: Modifier = Modifier,
     size: Dp = 26.dp,
     onClick: (() -> Unit)? = null
@@ -367,42 +356,5 @@ fun ThingsbookBrandSymbol(
                 )
             )
         }
-    }
-}
-
-/**
- * Preview of the circular Chromebook Taskbar / Android Launcher Thingsbook icon
- * (`ic_taskbar_icon_badge_0` .. `ic_taskbar_icon_badge_20plus`) with the subtle
- * Taskbar active-app bar underneath.
- */
-@Composable
-fun ThingsbookTaskbarSymbolPreview(
-    todayCount: Int,
-    showBadge: Boolean,
-    modifier: Modifier = Modifier,
-    size: Dp = 34.dp
-) {
-    val previewCount = if (todayCount > 0) todayCount else 3
-    val iconRes = AppIconBadgeUpdater.getTaskbarIconDrawableRes(
-        todayCount = previewCount,
-        enabled = showBadge
-    )
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Image(
-            painter = painterResource(id = iconRes),
-            contentDescription = null,
-            modifier = Modifier.size(size)
-        )
-        Spacer(modifier = Modifier.height(2.dp))
-        Box(
-            modifier = Modifier
-                .width(size * 0.42f)
-                .height(2.5.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(Color(0xFF9EA8FF))
-        )
     }
 }

@@ -163,4 +163,116 @@
     <string name="move_none_option">No Project / No Area</string>
     <string name="auth_forgot_password">Forgot password? Reset</string>
     <string name="widget_description">Interactive Thingsbook To-Do list widget with instant view switching (Today, Inbox, Upcoming, Anytime, Someday).</string>
+
+    <!-- Magic Plus ("New") Context Menu & Tooltip -->
+    <string name="magic_plus_fab_tooltip">Create new (Click for menu • Drag to place)</string>
+    <string name="magic_plus_todo_sub_view">Create in current view</string>
+    <string name="magic_plus_todo_sub_project">Create in current project</string>
+    <string name="magic_plus_todo_sub_area">Create in current area</string>
+    <string name="magic_plus_todo_sub_inbox">Create in Inbox</string>
+    <string name="magic_plus_heading_sub">Insert section in project</string>
+    <string name="magic_plus_project_sub_default">With steps &amp; target date</string>
+    <string name="magic_plus_project_sub_area">Project in this area</string>
+    <string name="magic_plus_project_sub_another">Create another project</string>
+    <string name="magic_plus_area_sub">New area of responsibility</string>
+
+    <!-- Settings Modal -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_subtitle">Database, Cloud Account, Language, Statistics, Backup &amp; CSV</string>
+    <string name="settings_close_tooltip">Close Settings</string>
+    <string name="settings_db_sync_section">Database &amp; Synchronization</string>
+    <string name="settings_local_db_title">Local DB</string>
+    <string name="settings_local_db_desc">100% offline on this device (SQLite / Room)</string>
+    <string name="settings_cloud_sync_title">Cloud Sync</string>
+    <string name="settings_cloud_sync_desc">Local DB + real-time backup across all devices</string>
+    <string name="settings_account_status_label">Account &amp; Cloud Status</string>
+    <string name="settings_local_mode_active">Local mode active (No cloud connection)</string>
+    <string name="settings_not_signed_in">Not signed in</string>
+    <string name="settings_sign_in_choose_account">Sign In / Choose Account</string>
+    <string name="settings_open_account_sync">Open Account &amp; Sync</string>
+    <string name="settings_sync_short">Sync</string>
+    <string name="settings_configure_arrow">Configure ›</string>
+    <string name="settings_sample_tasks_title">Sample tasks still present</string>
+    <string name="settings_sample_tasks_desc">Deletes only the pre-installed demo tasks</string>
+    <string name="settings_stats_section">Statistics (To-Dos &amp; Inventory)</string>
+    <string name="settings_stat_open">Open</string>
+    <string name="settings_stat_completed">Completed</string>
+    <string name="settings_stat_deleted">Deleted</string>
+    <string name="settings_stat_canceled">Canceled</string>
+    <string name="settings_stat_today_active">★ Active Today</string>
+    <string name="settings_stat_recurring">🔁 Recurring To-Dos</string>
+    <string name="settings_stat_active_projects">📁 Active Projects</string>
+    <string name="settings_stat_saved_tags">🏷️ Saved Tags</string>
+    <string name="settings_stat_total_records">🗄️ Total Database Records</string>
+    <string name="settings_stat_tasks_count">%1$d To-Dos</string>
+    <string name="settings_stat_active_count">%1$d active</string>
+    <string name="settings_stat_projects_count">%1$d Projects</string>
+    <string name="settings_stat_tags_count">%1$d Tags</string>
+    <string name="settings_stat_records_count">%1$d records</string>
+    <string name="settings_csv_section">Import &amp; Export (CSV File)</string>
+    <string name="settings_csv_desc">Export all To-Dos (including status, area, project, date, deadline, tags &amp; checklist items) as a CSV file, or import existing CSV files.</string>
+    <string name="settings_csv_export">Export CSV</string>
+    <string name="settings_csv_share">Share CSV</string>
+    <string name="settings_csv_import">Import CSV</string>
+    <string name="settings_err_local_mode_sync">Local database mode is active. Switch to Cloud Sync in Settings to synchronize.</string>
+
+    <!-- Backup & Restore -->
+    <string name="backup_section_title">Backup &amp; Restore (Full Backup)</string>
+    <string name="backup_section_desc">Backs up all To-Dos, Areas, Projects, Headings, Tags, checklist items, and settings in a single file (.tbbackup) — optionally with AES-256 password protection — and restores the complete state.</string>
+    <string name="backup_create_button">Create Backup</string>
+    <string name="backup_restore_button">Restore from File</string>
+    <string name="backup_create_dialog_title">Create Full Backup</string>
+    <string name="backup_create_dialog_summary">%1$d To-Dos • %2$d Projects • %3$d Areas • %4$d Tags</string>
+    <string name="backup_close_dialog_tooltip">Close dialog</string>
+    <string name="backup_password_protect_title">Protect with password (optional)</string>
+    <string name="backup_password_protect_on">Active: AES-256-GCM &amp; PBKDF2 encryption</string>
+    <string name="backup_password_protect_off">Off: Create unencrypted backup file</string>
+    <string name="backup_password_label">Backup password</string>
+    <string name="backup_password_confirm_label">Confirm password</string>
+    <string name="backup_password_show">Show password</string>
+    <string name="backup_password_hide">Hide password</string>
+    <string name="backup_password_warning">Important: Without this password, an encrypted backup file cannot be decrypted later.</string>
+    <string name="backup_password_err_too_short">Please choose a password with at least 4 characters.</string>
+    <string name="backup_password_err_mismatch">The entered passwords do not match.</string>
+    <string name="backup_save_to_file">Save to File…</string>
+    <string name="backup_share_tooltip">Share backup file</string>
+    <string name="backup_unknown_date">Unknown date</string>
+    <string name="backup_restore_encrypted_title">Password-Protected Backup</string>
+    <string name="backup_restore_plain_title">Restore Backup</string>
+    <string name="backup_restore_encrypted_desc">This backup file is encrypted. Please enter the password to restore all To-Dos, Areas, Projects, and Tags.</string>
+    <string name="backup_restore_enter_password">Enter backup password</string>
+    <string name="backup_preview_header">Backup file contents:</string>
+    <string name="backup_preview_details">• %1$d To-Dos &amp; %2$d checklist items\n• %3$d Projects &amp; %4$d Headings\n• %5$d Areas &amp; %6$d Tags</string>
+    <string name="backup_restore_replace_notice">Note: Full restore replaces all current local entries with the contents of this backup file.</string>
+    <string name="backup_restore_confirm_decrypt">Decrypt &amp; Restore Everything</string>
+    <string name="backup_restore_confirm_plain">Restore Everything Now</string>
+
+    <!-- Backup & CSV Status Messages -->
+    <string name="csv_status_exported">✅ CSV file saved (%1$d To-Dos).</string>
+    <string name="csv_status_shared">✅ CSV export opened for sharing.</string>
+    <string name="csv_status_imported">✅ %1$d To-Dos imported from CSV file!</string>
+    <string name="csv_status_export_failed">❌ CSV export failed: %1$s</string>
+    <string name="csv_status_import_failed">❌ CSV import failed: %1$s</string>
+    <string name="backup_status_saved">✅ Backup saved (%1$s): %2$d To-Dos, %3$d Projects, %4$d Areas &amp; %5$d Tags.</string>
+    <string name="backup_badge_encrypted">🔒 Password-protected</string>
+    <string name="backup_badge_unencrypted">Unencrypted</string>
+    <string name="backup_status_shared">✅ Backup (%1$s) opened for sharing.</string>
+    <string name="backup_status_restored">✅ Full restore complete: %1$d To-Dos, %2$d Projects, %3$d Areas &amp; %4$d Tags restored!</string>
+    <string name="backup_status_failed">❌ Backup failed: %1$s</string>
+    <string name="backup_status_restore_failed">❌ Restore failed: %1$s</string>
+    <string name="backup_err_wrong_password">Incorrect password. Please check the entered password.</string>
+
+    <!-- Initial Setup & Account Merge -->
+    <string name="setup_banner_title">Initial Setup — Sample Tasks Present</string>
+    <string name="setup_banner_hide_tooltip">Dismiss notice</string>
+    <string name="setup_banner_desc">Would you like to connect your account (with an option to merge your tasks) or start clean without the pre-installed sample tasks?</string>
+    <string name="setup_banner_connect_btn">Connect &amp; Set Up Account</string>
+    <string name="setup_banner_delete_samples_btn">Delete Sample Tasks</string>
+    <string name="merge_dialog_default_account">your Cloud account</string>
+    <string name="merge_dialog_title">Merge To-Dos?</string>
+    <string name="merge_dialog_desc">Initial sample tasks are still present in the app. They will be automatically deleted during setup so they don\'t get uploaded to your account.</string>
+    <string name="merge_dialog_hint_with_tasks">You also created %1$d local To-Do(s). Would you like to merge them with the To-Dos stored in %2$s?</string>
+    <string name="merge_dialog_hint_no_tasks">Would you like to merge your current local entries (excluding sample tasks) with %1$s, or load strictly the To-Dos from your account?</string>
+    <string name="merge_dialog_confirm_merge">Yes, merge with account (delete samples)</string>
+    <string name="merge_dialog_confirm_replace">No — load account tasks only (discard local)</string>
 </resources>

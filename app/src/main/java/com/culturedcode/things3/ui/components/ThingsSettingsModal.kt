@@ -71,14 +71,14 @@ import com.culturedcode.things3.ui.viewmodel.ThingsbookStatistics
 import java.time.LocalDate
 
 /**
- * Comprehensive Thingsbook Settings Modal (`Einstellungen` ⚙️):
+ * Comprehensive Thingsbook Settings Modal (`Settings` / `Einstellungen` ⚙️):
  * 1. Database Mode: Local Room DB (Offline-Only) vs. Cloud Sync (Firebase Firestore) + Sample Tasks Cleanup
  * 2. Account Management: Full email address display, Sync Now, Login/Switch Account, Sign Out
- * 3. App Language Selection & Configurable "Heute" Badge on the Thingsbook Symbol
+ * 3. App Language Selection & Daily Notification Settings
  * 4. Live Task & Productivity Statistics: Open, Today, Upcoming, Anytime, Inbox, Someday, Recurring, Completed, Canceled, Deleted, Projects, Areas (X/8), Tags
  * 5. Full Backup & Restore (`.tbbackup` with optional AES-256-GCM password protection)
  * 6. CSV Import & Export: Export all tasks to `.csv` file or share via Intent; Import tasks from `.csv` file
- * 7. App Version Info (`Thingsbook v1.6.0`)
+ * 7. App Version Info
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -90,10 +90,7 @@ fun ThingsSettingsModal(
     csvStatusMessage: String?,
     isBackupBusy: Boolean = false,
     backupStatusMessage: String? = null,
-    showTodayAppBadge: Boolean = true,
-    todayCount: Int = statistics.todayTasksCount,
     hasSampleTasks: Boolean = false,
-    onSetShowTodayAppBadge: (Boolean) -> Unit = {},
     onDeleteSampleTasksNow: () -> Unit = {},
     onSetLocalOnlyDbMode: (Boolean) -> Unit,
     onOpenAuthAndSyncModal: () -> Unit,
@@ -161,7 +158,8 @@ fun ThingsSettingsModal(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
                     ) {
                         Box(
                             modifier = Modifier
@@ -179,19 +177,19 @@ fun ThingsSettingsModal(
                         }
                         Column {
                             Text(
-                                text = "Einstellungen",
+                                text = stringResource(R.string.settings_title),
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = colors.primaryText
                             )
                             Text(
-                                text = "Datenbank, Cloud-Konto, Sprache, Statistik, Backup & CSV",
+                                text = stringResource(R.string.settings_subtitle),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = colors.secondaryText
                             )
                         }
                     }
 
-                    ThingsHoverTooltip(text = "Einstellungen schließen") {
+                    ThingsHoverTooltip(text = stringResource(R.string.settings_close_tooltip)) {
                         IconButton(onClick = onDismiss, modifier = Modifier.size(30.dp)) {
                             Icon(
                                 imageVector = Icons.Outlined.Close,
@@ -208,11 +206,11 @@ fun ThingsSettingsModal(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // =============================================================
-                // 1. Datenbank-Modus (Lokale DB vs. Cloud-Sync) & Konto
+                // 1. Database Mode (Local DB vs. Cloud Sync) & Account
                 // =============================================================
                 SettingsSectionHeader(
                     icon = Icons.Outlined.Storage,
-                    title = "Datenbank & Synchronisierung"
+                    title = stringResource(R.string.settings_db_sync_section)
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
@@ -220,7 +218,7 @@ fun ThingsSettingsModal(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Option A: Lokale Datenbank (Offline)
+                    // Option A: Local Database (Offline)
                     val localSelected = isLocalOnlyDbMode
                     Surface(
                         modifier = Modifier
@@ -249,21 +247,21 @@ fun ThingsSettingsModal(
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Text(
-                                    text = "Lokale DB",
+                                    text = stringResource(R.string.settings_local_db_title),
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                     color = if (localSelected) colors.thingsBlue else colors.primaryText
                                 )
                             }
                             Spacer(modifier = Modifier.height(3.dp))
                             Text(
-                                text = "100% Offline auf diesem Gerät (SQLite / Room)",
+                                text = stringResource(R.string.settings_local_db_desc),
                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
                                 color = colors.secondaryText
                             )
                         }
                     }
 
-                    // Option B: Cloud-Sync (Firestore + Lokale DB)
+                    // Option B: Cloud Sync (Firestore + Local DB)
                     val cloudSelected = !isLocalOnlyDbMode
                     Surface(
                         modifier = Modifier
@@ -292,14 +290,14 @@ fun ThingsSettingsModal(
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Text(
-                                    text = "Cloud Sync",
+                                    text = stringResource(R.string.settings_cloud_sync_title),
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                     color = if (cloudSelected) colors.thingsBlue else colors.primaryText
                                 )
                             }
                             Spacer(modifier = Modifier.height(3.dp))
                             Text(
-                                text = "Lokale DB + Echtzeit-Backup über alle Geräte",
+                                text = stringResource(R.string.settings_cloud_sync_desc),
                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
                                 color = colors.secondaryText
                             )
@@ -333,15 +331,15 @@ fun ThingsSettingsModal(
                             )
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Konto & Cloud-Status",
+                                    text = stringResource(R.string.settings_account_status_label),
                                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                                     color = colors.secondaryText
                                 )
                                 Text(
                                     text = when {
-                                        isLocalOnlyDbMode -> "Lokaler Modus aktiv (Keine Cloud-Verbindung)"
+                                        isLocalOnlyDbMode -> stringResource(R.string.settings_local_mode_active)
                                         !currentUserIdentifier.isNullOrBlank() -> currentUserIdentifier
-                                        else -> "Nicht angemeldet"
+                                        else -> stringResource(R.string.settings_not_signed_in)
                                     },
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                     color = colors.primaryText
@@ -371,7 +369,11 @@ fun ThingsSettingsModal(
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = if (currentUserIdentifier.isNullOrBlank()) "Anmelden / Konto wählen" else "Konto & Sync öffnen",
+                                        text = if (currentUserIdentifier.isNullOrBlank()) {
+                                            stringResource(R.string.settings_sign_in_choose_account)
+                                        } else {
+                                            stringResource(R.string.settings_open_account_sync)
+                                        },
                                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                                         color = Color.White
                                     )
@@ -386,7 +388,7 @@ fun ThingsSettingsModal(
                                         shape = RoundedCornerShape(9.dp)
                                     ) {
                                         Text(
-                                            text = "Sync",
+                                            text = stringResource(R.string.settings_sync_short),
                                             style = MaterialTheme.typography.labelMedium,
                                             color = colors.thingsBlue
                                         )
@@ -399,7 +401,7 @@ fun ThingsSettingsModal(
                                         shape = RoundedCornerShape(9.dp)
                                     ) {
                                         Text(
-                                            text = "Abmelden",
+                                            text = stringResource(R.string.auth_sign_out),
                                             style = MaterialTheme.typography.labelMedium,
                                             color = colors.deadlineUrgentRed
                                         )
@@ -415,7 +417,7 @@ fun ThingsSettingsModal(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // =============================================================
-                // 2. Sprache (App Language) & Benachrichtigungen
+                // 2. App Language & Notifications
                 // =============================================================
                 SettingsSectionHeader(
                     icon = Icons.Outlined.Language,
@@ -425,11 +427,11 @@ fun ThingsSettingsModal(
 
                 val languageOptions = listOf(
                     "" to stringResource(R.string.settings_system_default),
-                    "de" to "Deutsch",
-                    "en" to "English",
-                    "it" to "Italiano",
-                    "fr" to "Français",
-                    "es" to "Español"
+                    "de" to stringResource(R.string.lang_de),
+                    "en" to stringResource(R.string.lang_en),
+                    "it" to stringResource(R.string.lang_it),
+                    "fr" to stringResource(R.string.lang_fr),
+                    "es" to stringResource(R.string.lang_es)
                 )
 
                 FlowRow(
@@ -510,82 +512,10 @@ fun ThingsSettingsModal(
                         )
                     }
                     Text(
-                        text = "Konfigurieren ›",
+                        text = stringResource(R.string.settings_configure_arrow),
                         style = MaterialTheme.typography.labelMedium,
                         color = colors.thingsBlue
                     )
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Configurable "Heute"-Anzahl auf dem Taskbar-Symbol (Chromebook Shelf / Android Launcher)
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = colors.tagPillBg.copy(alpha = 0.6f),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        ThingsbookTaskbarSymbolPreview(
-                            todayCount = todayCount,
-                            showBadge = showTodayAppBadge,
-                            size = 34.dp
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "„Heute“-Anzahl auf dem Taskbar-Symbol",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = colors.primaryText
-                            )
-                            Text(
-                                text = "Zeigt die Anzahl offener „Heute“-Aufgaben direkt auf dem Taskbar- / Launcher-Symbol",
-                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
-                                color = colors.secondaryText
-                            )
-                        }
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (showTodayAppBadge) colors.thingsBlue else colors.cardSurface)
-                                    .clickable {
-                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        onSetShowTodayAppBadge(true)
-                                    }
-                                    .padding(horizontal = 9.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    text = "Ein",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = if (showTodayAppBadge) Color.White else colors.secondaryText
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (!showTodayAppBadge) colors.thingsBlue else colors.cardSurface)
-                                    .clickable {
-                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        onSetShowTodayAppBadge(false)
-                                    }
-                                    .padding(horizontal = 9.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    text = "Aus",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = if (!showTodayAppBadge) Color.White else colors.secondaryText
-                                )
-                            }
-                        }
-                    }
                 }
 
                 // Optional 1-click sample tasks removal when demo data is still present
@@ -611,12 +541,12 @@ fun ThingsSettingsModal(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Beispielaufgaben noch vorhanden",
+                                    text = stringResource(R.string.settings_sample_tasks_title),
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                     color = colors.primaryText
                                 )
                                 Text(
-                                    text = "Löscht ausschließlich die vorinstallierten Demo-Aufgaben",
+                                    text = stringResource(R.string.settings_sample_tasks_desc),
                                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
                                     color = colors.secondaryText
                                 )
@@ -637,7 +567,7 @@ fun ThingsSettingsModal(
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "Löschen",
+                                    text = stringResource(R.string.action_delete),
                                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                                     color = colors.deadlineUrgentRed
                                 )
@@ -651,39 +581,39 @@ fun ThingsSettingsModal(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // =============================================================
-                // 3. Aufgaben- & Produktivitäts-Statistiken
+                // 3. Task & Productivity Statistics
                 // =============================================================
                 SettingsSectionHeader(
                     icon = Icons.Outlined.Analytics,
-                    title = "Statistiken (Aufgaben & Bestand)"
+                    title = stringResource(R.string.settings_stats_section)
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Primary KPI Row: Aktuell offen, Erledigt, Gelöscht, Abgebrochen
+                // Primary KPI Row: Open, Completed, Deleted, Canceled
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     StatisticMetricCard(
-                        label = "Aktuell offen",
+                        label = stringResource(R.string.settings_stat_open),
                         value = statistics.openTasksCount.toString(),
                         accentColor = colors.thingsBlue,
                         modifier = Modifier.weight(1f)
                     )
                     StatisticMetricCard(
-                        label = "Erledigt",
+                        label = stringResource(R.string.settings_stat_completed),
                         value = statistics.completedTasksCount.toString(),
                         accentColor = colors.anytimeTeal,
                         modifier = Modifier.weight(1f)
                     )
                     StatisticMetricCard(
-                        label = "Gelöscht",
+                        label = stringResource(R.string.settings_stat_deleted),
                         value = statistics.deletedTasksCount.toString(),
                         accentColor = colors.deadlineUrgentRed,
                         modifier = Modifier.weight(1f)
                     )
                     StatisticMetricCard(
-                        label = "Abgebrochen",
+                        label = stringResource(R.string.settings_stat_canceled),
                         value = statistics.canceledTasksCount.toString(),
                         accentColor = colors.secondaryText,
                         modifier = Modifier.weight(1f)
@@ -704,20 +634,50 @@ fun ThingsSettingsModal(
                             .padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        StatDetailRow("★ Heute aktiv", "${statistics.todayTasksCount} Aufgaben")
-                        StatDetailRow("📅 Geplant (Upcoming)", "${statistics.upcomingTasksCount} Aufgaben")
-                        StatDetailRow("📥 Eingang (Inbox)", "${statistics.inboxTasksCount} Aufgaben")
-                        StatDetailRow("🗂 Jederzeit (Anytime)", "${statistics.anytimeTasksCount} Aufgaben")
-                        StatDetailRow("📦 Irgendwann (Someday)", "${statistics.somedayTasksCount} Aufgaben")
-                        StatDetailRow("🔁 Wiederkehrende Aufgaben", "${statistics.recurringTasksCount} aktiv")
+                        StatDetailRow(
+                            label = stringResource(R.string.settings_stat_today_active),
+                            value = stringResource(R.string.settings_stat_tasks_count, statistics.todayTasksCount)
+                        )
+                        StatDetailRow(
+                            label = "📅 ${stringResource(R.string.view_upcoming)}",
+                            value = stringResource(R.string.settings_stat_tasks_count, statistics.upcomingTasksCount)
+                        )
+                        StatDetailRow(
+                            label = "📥 ${stringResource(R.string.view_inbox)}",
+                            value = stringResource(R.string.settings_stat_tasks_count, statistics.inboxTasksCount)
+                        )
+                        StatDetailRow(
+                            label = "🗂 ${stringResource(R.string.view_anytime)}",
+                            value = stringResource(R.string.settings_stat_tasks_count, statistics.anytimeTasksCount)
+                        )
+                        StatDetailRow(
+                            label = "📦 ${stringResource(R.string.view_someday)}",
+                            value = stringResource(R.string.settings_stat_tasks_count, statistics.somedayTasksCount)
+                        )
+                        StatDetailRow(
+                            label = stringResource(R.string.settings_stat_recurring),
+                            value = stringResource(R.string.settings_stat_active_count, statistics.recurringTasksCount)
+                        )
                         HorizontalDivider(
                             color = colors.hairlineDivider,
                             modifier = Modifier.padding(vertical = 2.dp)
                         )
-                        StatDetailRow("📁 Aktive Projekte", "${statistics.activeProjectsCount} Projekte")
-                        StatDetailRow("📦 Bereiche (Areas)", "${statistics.areasCount} / ${ThingsRepository.MAX_AREAS}")
-                        StatDetailRow("🏷️ Gespeicherte Tags", "${statistics.tagsCount} Tags")
-                        StatDetailRow("🗄️ Datenbank-Einträge gesamt", "${statistics.totalRecordsCount} Datensätze")
+                        StatDetailRow(
+                            label = stringResource(R.string.settings_stat_active_projects),
+                            value = stringResource(R.string.settings_stat_projects_count, statistics.activeProjectsCount)
+                        )
+                        StatDetailRow(
+                            label = "📦 ${stringResource(R.string.entity_areas)}",
+                            value = "${statistics.areasCount} / ${ThingsRepository.MAX_AREAS}"
+                        )
+                        StatDetailRow(
+                            label = stringResource(R.string.settings_stat_saved_tags),
+                            value = stringResource(R.string.settings_stat_tags_count, statistics.tagsCount)
+                        )
+                        StatDetailRow(
+                            label = stringResource(R.string.settings_stat_total_records),
+                            value = stringResource(R.string.settings_stat_records_count, statistics.totalRecordsCount)
+                        )
                     }
                 }
 
@@ -726,7 +686,7 @@ fun ThingsSettingsModal(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // =============================================================
-                // 4. Vollständiges Backup & Restore (.tbbackup + Passwortschutz)
+                // 4. Full Backup & Restore (.tbbackup + Password Protection)
                 // =============================================================
                 BackupAndRestoreSettingsSection(
                     isBackupBusy = isBackupBusy,
@@ -741,15 +701,15 @@ fun ThingsSettingsModal(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // =============================================================
-                // 5. CSV Import & Export Funktion
+                // 5. CSV Import & Export
                 // =============================================================
                 SettingsSectionHeader(
                     icon = Icons.Outlined.FileDownload,
-                    title = "Import & Export (CSV-Datei)"
+                    title = stringResource(R.string.settings_csv_section)
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Exportiere alle Aufgaben (inkl. Status, Bereich, Projekt, Datum, Fälligkeit, Tags & Unteraufgaben) als CSV-Datei oder importiere bestehende CSV-Dateien.",
+                    text = stringResource(R.string.settings_csv_desc),
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.secondaryText
                 )
@@ -778,26 +738,28 @@ fun ThingsSettingsModal(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "CSV exportieren",
+                            text = stringResource(R.string.settings_csv_export),
                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                             color = Color.White
                         )
                     }
 
                     // Share CSV via Android Share Sheet
-                    OutlinedButton(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onShareCsv()
-                        },
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Share,
-                            contentDescription = "CSV teilen",
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(16.dp)
-                        )
+                    ThingsHoverTooltip(text = stringResource(R.string.settings_csv_share)) {
+                        OutlinedButton(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onShareCsv()
+                            },
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Share,
+                                contentDescription = stringResource(R.string.settings_csv_share),
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
 
                     // Import CSV from file
@@ -821,7 +783,7 @@ fun ThingsSettingsModal(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "CSV importieren",
+                            text = stringResource(R.string.settings_csv_import),
                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                             color = colors.thingsBlue
                         )
@@ -830,9 +792,10 @@ fun ThingsSettingsModal(
 
                 if (!csvStatusMessage.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(8.dp))
+                    val isCsvError = csvStatusMessage.startsWith("❌")
                     Surface(
                         shape = RoundedCornerShape(9.dp),
-                        color = colors.thingsBlueSoft,
+                        color = if (isCsvError) colors.deadlineUrgentRed.copy(alpha = 0.12f) else colors.thingsBlueSoft,
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onClearCsvMessage() }
@@ -840,7 +803,7 @@ fun ThingsSettingsModal(
                         Text(
                             text = csvStatusMessage,
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                            color = colors.thingsBlue,
+                            color = if (isCsvError) colors.deadlineUrgentRed else colors.thingsBlue,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                         )
                     }

@@ -275,4 +275,7 @@
     <string name="merge_dialog_hint_no_tasks">Voulez-vous fusionner vos entrées locales actuelles (sans les exemples) avec %1$s, ou charger uniquement les tâches de votre compte ?</string>
     <string name="merge_dialog_confirm_merge">Oui, fusionner avec le compte (supprimer exemples)</string>
     <string name="merge_dialog_confirm_replace">Non — charger uniquement le compte (effacer locales)</string>
+    <string name="subtask_move_up">Monter l\'élément</string>
+    <string name="subtask_move_down">Descendre l\'élément</string>
+    <string name="subtask_delete">Supprimer l\'élément</string>
 </resources>

@@ -12,9 +12,9 @@ Eine eigenständige, native Android-Produktivitäts-App (für **Android-Smartpho
 
 ---
 
-## Direkt-Download (Installierbares Android-APK — Version 1.6.9)
+## Direkt-Download (Installierbares Android-APK — Version 1.6.10)
 
-- **[Thingsbook-v1.6.9-full.apk herunterladen (v1.6.9 — Vollständige 5-Sprachen-Lokalisierung der Einstellungen & des „Neu“-Dialogs, Entfernung des Desktop-/Taskbar-Badges & komplettes Backup/Restore)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.9-full.apk)**
+- **[Thingsbook-v1.6.10-full.apk herunterladen (v1.6.10 — Neue Unteraufgaben direkt per Eingabe-/Return-Taste anlegen, 5-Sprachen-Lokalisierung & komplettes Backup/Restore)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.10-full.apk)**
 
 ---
 

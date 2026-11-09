@@ -482,6 +482,22 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
+    fun insertChecklistItemAfter(
+        taskId: String,
+        afterItemId: String?,
+        newItemId: String,
+        title: String = ""
+    ) {
+        safeVmScope.launch {
+            repository.insertChecklistItemAfter(
+                taskId = taskId,
+                afterItemId = afterItemId,
+                newItemId = newItemId,
+                title = title
+            )
+        }
+    }
+
     fun toggleChecklistItem(itemId: String, isCompleted: Boolean) {
         safeVmScope.launch {
             repository.toggleChecklistItem(itemId, isCompleted)

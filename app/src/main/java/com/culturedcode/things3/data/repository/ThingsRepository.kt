@@ -938,17 +938,23 @@ class ThingsRepository @Inject constructor(
     suspend fun addChecklistItem(
         taskId: String,
         title: String,
-        sortOrder: Double = System.currentTimeMillis().toDouble()
+        sortOrder: Double? = null,
+        itemId: String = UUID.randomUUID().toString()
     ): String {
         val now = System.currentTimeMillis()
-        val id = UUID.randomUUID().toString()
+        val resolvedSortOrder = if (sortOrder != null && sortOrder.isFinite()) {
+            sortOrder
+        } else {
+            val existingMax = database.checklistDao().getForTaskSync(taskId).maxOfOrNull { it.sortOrder }
+            if (existingMax != null && existingMax.isFinite()) existingMax + 1000.0 else 1000.0
+        }
         database.checklistDao().upsert(
             ChecklistItemEntity(
-                id = id,
+                id = itemId,
                 taskId = taskId,
                 title = title,
                 isCompleted = false,
-                sortOrder = if (sortOrder.isFinite()) sortOrder else now.toDouble(),
+                sortOrder = resolvedSortOrder,
                 createdAt = now,
                 updatedAt = now,
                 isDeleted = false,
@@ -956,7 +962,64 @@ class ThingsRepository @Inject constructor(
             )
         )
         syncRepository.triggerBackgroundSync()
-        return id
+        return itemId
+    }
+
+    suspend fun insertChecklistItemAfter(
+        taskId: String,
+        afterItemId: String?,
+        newItemId: String = UUID.randomUUID().toString(),
+        title: String = ""
+    ): String {
+        val now = System.currentTimeMillis()
+        val items = database.checklistDao().getForTaskSync(taskId).sortedBy { it.sortOrder }
+        if (items.isEmpty()) {
+            return addChecklistItem(taskId = taskId, title = title, sortOrder = 1000.0, itemId = newItemId)
+        }
+
+        val targetIndex = if (afterItemId != null) {
+            items.indexOfFirst { it.id == afterItemId }
+        } else {
+            -1
+        }
+
+        if (targetIndex == -1 || targetIndex == items.lastIndex) {
+            val nextOrder = items.last().sortOrder + 1000.0
+            return addChecklistItem(taskId = taskId, title = title, sortOrder = nextOrder, itemId = newItemId)
+        }
+
+        val currentOrder = items[targetIndex].sortOrder
+        val followingOrder = items[targetIndex + 1].sortOrder
+        if (followingOrder - currentOrder > 0.0001) {
+            val midOrder = (currentOrder + followingOrder) / 2.0
+            return addChecklistItem(taskId = taskId, title = title, sortOrder = midOrder, itemId = newItemId)
+        }
+
+        val updated = mutableListOf<ChecklistItemEntity>()
+        var orderCursor = 1000.0
+        items.forEachIndexed { idx, existing ->
+            updated.add(existing.copy(sortOrder = orderCursor, updatedAt = now, isDirty = true))
+            orderCursor += 1000.0
+            if (idx == targetIndex) {
+                updated.add(
+                    ChecklistItemEntity(
+                        id = newItemId,
+                        taskId = taskId,
+                        title = title,
+                        isCompleted = false,
+                        sortOrder = orderCursor,
+                        createdAt = now,
+                        updatedAt = now,
+                        isDeleted = false,
+                        isDirty = true
+                    )
+                )
+                orderCursor += 1000.0
+            }
+        }
+        database.checklistDao().upsertAll(updated)
+        syncRepository.triggerBackgroundSync()
+        return newItemId
     }
 
     suspend fun addChecklistItemsBatch(taskId: String, titles: List<String>) {

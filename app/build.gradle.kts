@@ -17,12 +17,24 @@ android {
         applicationId = "com.culturedcode.things3"
         minSdk = 26
         targetSdk = 35
-        versionCode = 26
-        versionName = "1.6.9"
+        versionCode = 27
+        versionName = "1.6.10"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         resourceConfigurations += listOf("en", "de", "it", "fr", "es")
+    }
+
+    signingConfigs {
+        getByName("debug") {
+            val persistentKeystore = file("${System.getProperty("user.home")}/.gemini/thingsbook-debug.keystore")
+            if (persistentKeystore.isFile) {
+                storeFile = persistentKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
     }
 
     buildTypes {

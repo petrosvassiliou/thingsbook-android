@@ -66,6 +66,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -87,6 +88,11 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -124,6 +130,7 @@ import com.culturedcode.things3.ui.theme.ThingsTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
+import java.util.UUID
 import kotlin.math.roundToInt
 
 private fun PointerEvent.isRightClickTrigger(previousButtonsSecondary: Boolean): Boolean {
@@ -180,6 +187,7 @@ fun ExpandableTaskCard(
     onCreateAndAssignTag: ((String) -> Unit)? = null,
     onOpenFullTagManager: (() -> Unit)? = null,
     onAddChecklistItem: (String) -> Unit,
+    onInsertChecklistItemAfter: ((afterItemId: String?, newItemId: String, title: String) -> Unit)? = null,
     onToggleChecklistItem: (String, Boolean) -> Unit,
     onRenameChecklistItem: ((String, String) -> Unit)? = null,
     onMoveChecklistItem: ((String, Boolean) -> Unit)? = null,
@@ -674,6 +682,7 @@ fun ExpandableTaskCard(
                         isGeneratingMagicBreakdown = isGeneratingMagicBreakdown,
                         locale = locale,
                         onAddChecklistItem = onAddChecklistItem,
+                        onInsertChecklistItemAfter = onInsertChecklistItemAfter,
                         onToggleChecklistItem = onToggleChecklistItem,
                         onRenameChecklistItem = onRenameChecklistItem,
                         onMoveChecklistItem = onMoveChecklistItem,
@@ -942,6 +951,7 @@ private fun ExpandedTaskCardBody(
     isGeneratingMagicBreakdown: Boolean,
     locale: Locale,
     onAddChecklistItem: (String) -> Unit,
+    onInsertChecklistItemAfter: ((afterItemId: String?, newItemId: String, title: String) -> Unit)?,
     onToggleChecklistItem: (String, Boolean) -> Unit,
     onRenameChecklistItem: ((String, String) -> Unit)?,
     onMoveChecklistItem: ((String, Boolean) -> Unit)?,
@@ -957,6 +967,8 @@ private fun ExpandedTaskCardBody(
 ) {
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
+    val newChecklistFocusRequester = remember(task.id) { FocusRequester() }
+    var pendingAutoFocusSubtaskId by remember(task.id) { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier
@@ -1018,115 +1030,169 @@ private fun ExpandedTaskCardBody(
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 task.checklistItems.forEachIndexed { idx, item ->
-                    InlineChecklistRow(
-                        item = item,
-                        canMoveUp = idx > 0,
-                        canMoveDown = idx < task.checklistItems.lastIndex,
-                        onFocusDelta = onSubtaskFocusDelta,
-                        onToggle = { checked ->
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onToggleChecklistItem(item.id, checked)
-                        },
-                        onRename = { newSubtaskTitle ->
-                            onRenameChecklistItem?.invoke(item.id, newSubtaskTitle)
-                        },
-                        onMoveUp = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onMoveChecklistItem?.invoke(item.id, true)
-                        },
-                        onMoveDown = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onMoveChecklistItem?.invoke(item.id, false)
-                        },
-                        onDelete = {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onDeleteChecklistItem?.invoke(item.id)
-                        }
-                    )
+                    key(item.id) {
+                        InlineChecklistRow(
+                            item = item,
+                            canMoveUp = idx > 0,
+                            canMoveDown = idx < task.checklistItems.lastIndex,
+                            shouldAutoFocus = pendingAutoFocusSubtaskId == item.id,
+                            onAutoFocusConsumed = {
+                                if (pendingAutoFocusSubtaskId == item.id) {
+                                    pendingAutoFocusSubtaskId = null
+                                }
+                            },
+                            onFocusDelta = onSubtaskFocusDelta,
+                            onToggle = { checked ->
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onToggleChecklistItem(item.id, checked)
+                            },
+                            onRename = { newSubtaskTitle ->
+                                onRenameChecklistItem?.invoke(item.id, newSubtaskTitle)
+                            },
+                            onReturnCreateSubtask = { remainingCurrentTitle, nextInitialTitle ->
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                if (remainingCurrentTitle != item.title) {
+                                    onRenameChecklistItem?.invoke(item.id, remainingCurrentTitle)
+                                }
+                                val nextSubtaskId = UUID.randomUUID().toString()
+                                pendingAutoFocusSubtaskId = nextSubtaskId
+                                if (onInsertChecklistItemAfter != null) {
+                                    onInsertChecklistItemAfter(item.id, nextSubtaskId, nextInitialTitle)
+                                } else {
+                                    onAddChecklistItem(nextInitialTitle)
+                                }
+                            },
+                            onReturnOnEmptySubtask = {
+                                onDeleteChecklistItem?.invoke(item.id)
+                                runCatching { newChecklistFocusRequester.requestFocus() }
+                            },
+                            onMoveUp = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onMoveChecklistItem?.invoke(item.id, true)
+                            },
+                            onMoveDown = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onMoveChecklistItem?.invoke(item.id, false)
+                            },
+                            onDelete = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onDeleteChecklistItem?.invoke(item.id)
+                            }
+                        )
+                    }
                 }
             }
             Spacer(modifier = Modifier.height(6.dp))
         }
 
         // Add new subtask inline field + explicit '+' Button
-        var newChecklistField by remember(task.id) {
-            mutableStateOf(TextFieldValue(text = "", selection = TextRange(0)))
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .background(colors.tagPillBg.copy(alpha = 0.65f))
-                .padding(horizontal = 8.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.Checklist,
-                contentDescription = null,
-                tint = colors.thingsBlue,
-                modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            BasicTextField(
-                value = newChecklistField,
-                onValueChange = {
-                    newChecklistField = it
-                },
-                textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.primaryText),
-                cursorBrush = SolidColor(colors.thingsBlue),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(
-                    onDone = {
-                        if (newChecklistField.text.isNotBlank()) {
-                            onAddChecklistItem(newChecklistField.text.trim())
-                            newChecklistField = TextFieldValue(text = "", selection = TextRange(0))
-                        }
-                    }
-                ),
+        key("new_checklist_input_row_${task.id}") {
+            var newChecklistField by remember(task.id) {
+                mutableStateOf(TextFieldValue(text = "", selection = TextRange(0)))
+            }
+            val submitNewChecklistEntry = {
+                val cleaned = newChecklistField.text.replace("\r", "").replace("\n", " ").trim()
+                if (cleaned.isNotEmpty()) {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onAddChecklistItem(cleaned)
+                    newChecklistField = TextFieldValue(text = "", selection = TextRange(0))
+                    runCatching { newChecklistFocusRequester.requestFocus() }
+                }
+            }
+            Row(
                 modifier = Modifier
-                    .weight(1f)
-                    .onFocusChanged { focusState ->
-                        onNewChecklistFocusChanged(focusState.isFocused)
-                        if (focusState.isFocused) {
-                            val txt = newChecklistField.text
-                            newChecklistField = newChecklistField.copy(
-                                selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(colors.tagPillBg.copy(alpha = 0.65f))
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Checklist,
+                    contentDescription = null,
+                    tint = colors.thingsBlue,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                BasicTextField(
+                    value = newChecklistField,
+                    onValueChange = { incoming ->
+                        if ('\n' in incoming.text || '\r' in incoming.text) {
+                            val parts = incoming.text.replace("\r\n", "\n").replace('\r', '\n').split('\n')
+                            var addedAny = false
+                            for (i in 0 until parts.lastIndex) {
+                                val line = parts[i].trim()
+                                if (line.isNotEmpty()) {
+                                    onAddChecklistItem(line)
+                                    addedAny = true
+                                }
+                            }
+                            if (addedAny) {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            }
+                            val trailing = parts.last()
+                            newChecklistField = TextFieldValue(
+                                text = trailing,
+                                selection = TextRange(trailing.length)
                             )
+                        } else {
+                            newChecklistField = incoming
                         }
                     },
-                decorationBox = { inner ->
-                    Box {
-                        if (newChecklistField.text.isEmpty()) {
-                            Text(
-                                text = stringResource(R.string.placeholder_add_checklist_item),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = colors.tertiaryText
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.primaryText),
+                    cursorBrush = SolidColor(colors.thingsBlue),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    keyboardActions = KeyboardActions(
+                        onNext = { submitNewChecklistEntry() },
+                        onDone = { submitNewChecklistEntry() }
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(newChecklistFocusRequester)
+                        .onPreviewKeyEvent { keyEvent ->
+                            if (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) {
+                                if (keyEvent.type == KeyEventType.KeyDown) {
+                                    submitNewChecklistEntry()
+                                }
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        .onFocusChanged { focusState ->
+                            onNewChecklistFocusChanged(focusState.isFocused)
+                        },
+                    decorationBox = { inner ->
+                        Box {
+                            if (newChecklistField.text.isEmpty()) {
+                                Text(
+                                    text = stringResource(R.string.placeholder_add_checklist_item),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = colors.tertiaryText
+                                )
+                            }
+                            inner()
+                        }
+                    }
+                )
+                if (newChecklistField.text.isNotBlank()) {
+                    ThingsHoverTooltip(text = stringResource(R.string.placeholder_add_checklist_item)) {
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(colors.thingsBlue)
+                                .clickable { submitNewChecklistEntry() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Add,
+                                contentDescription = stringResource(R.string.placeholder_add_checklist_item),
+                                tint = Color.White,
+                                modifier = Modifier.size(15.dp)
                             )
                         }
-                        inner()
-                    }
-                }
-            )
-            if (newChecklistField.text.isNotBlank()) {
-                ThingsHoverTooltip(text = stringResource(R.string.placeholder_add_checklist_item)) {
-                    Box(
-                        modifier = Modifier
-                            .size(24.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(colors.thingsBlue)
-                            .clickable {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onAddChecklistItem(newChecklistField.text.trim())
-                                newChecklistField = TextFieldValue(text = "", selection = TextRange(0))
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Add,
-                            contentDescription = stringResource(R.string.placeholder_add_checklist_item),
-                            tint = Color.White,
-                            modifier = Modifier.size(15.dp)
-                        )
                     }
                 }
             }
@@ -1746,20 +1812,26 @@ private fun InlineChecklistRow(
     item: ChecklistItem,
     canMoveUp: Boolean,
     canMoveDown: Boolean,
+    shouldAutoFocus: Boolean = false,
+    onAutoFocusConsumed: () -> Unit = {},
     onFocusDelta: (Int) -> Unit,
     onToggle: (Boolean) -> Unit,
     onRename: (String) -> Unit,
+    onReturnCreateSubtask: (remainingCurrentTitle: String, nextInitialTitle: String) -> Unit,
+    onReturnOnEmptySubtask: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onDelete: () -> Unit
 ) {
     val colors = ThingsTheme.colors
+    val subtaskFocusRequester = remember(item.id) { FocusRequester() }
     var isSubtaskFocused by remember(item.id) { mutableStateOf(false) }
     var editedSubtaskField by remember(item.id) {
+        val cleanTitle = item.title.replace("\r", "").replace("\n", " ")
         mutableStateOf(
             TextFieldValue(
-                text = item.title,
-                selection = if (item.title.isEmpty()) TextRange(0) else TextRange(0, item.title.length)
+                text = cleanTitle,
+                selection = TextRange(cleanTitle.length)
             )
         )
     }
@@ -1772,12 +1844,52 @@ private fun InlineChecklistRow(
         }
     }
 
-    LaunchedEffect(item.id, item.title) {
-        if (!isSubtaskFocused && editedSubtaskField.text != item.title) {
-            editedSubtaskField = TextFieldValue(
-                text = item.title,
-                selection = if (item.title.isEmpty()) TextRange(0) else TextRange(0, item.title.length)
+    LaunchedEffect(item.id, shouldAutoFocus) {
+        if (shouldAutoFocus) {
+            editedSubtaskField = editedSubtaskField.copy(
+                selection = TextRange(editedSubtaskField.text.length)
             )
+            runCatching { subtaskFocusRequester.requestFocus() }
+            onAutoFocusConsumed()
+        }
+    }
+
+    LaunchedEffect(item.id, item.title) {
+        val sanitizedTitle = item.title.replace("\r", "").replace("\n", " ")
+        if (!isSubtaskFocused && editedSubtaskField.text != sanitizedTitle) {
+            editedSubtaskField = TextFieldValue(
+                text = sanitizedTitle,
+                selection = TextRange(sanitizedTitle.length)
+            )
+        }
+    }
+
+    val handleSubtaskReturnKey: () -> Unit = {
+        val currentText = editedSubtaskField.text.replace("\r", "").replace("\n", " ")
+        if (currentText.isBlank()) {
+            onReturnOnEmptySubtask()
+        } else {
+            val sel = editedSubtaskField.selection
+            val splitAtMiddle = sel.collapsed && sel.start in 1 until currentText.length
+            val remainingCurrent = if (splitAtMiddle) {
+                currentText.substring(0, sel.start).trimEnd()
+            } else {
+                currentText.trim()
+            }
+            val nextInitial = if (splitAtMiddle && remainingCurrent.isNotBlank()) {
+                currentText.substring(sel.start).trimStart()
+            } else {
+                ""
+            }
+            val finalCurrent = if (remainingCurrent.isBlank()) currentText.trim() else remainingCurrent
+            editedSubtaskField = TextFieldValue(
+                text = finalCurrent,
+                selection = TextRange(finalCurrent.length)
+            )
+            if (finalCurrent != item.title) {
+                onRename(finalCurrent)
+            }
+            onReturnCreateSubtask(finalCurrent, nextInitial)
         }
     }
 
@@ -1796,39 +1908,69 @@ private fun InlineChecklistRow(
         Spacer(modifier = Modifier.width(8.dp))
         BasicTextField(
             value = editedSubtaskField,
-            onValueChange = {
-                editedSubtaskField = it
-                onRename(it.text)
+            onValueChange = { incoming ->
+                if ('\n' in incoming.text || '\r' in incoming.text) {
+                    val normalized = incoming.text.replace("\r\n", "\n").replace('\r', '\n')
+                    val newlineIdx = normalized.indexOf('\n')
+                    val before = normalized.substring(0, newlineIdx).trim()
+                    val after = normalized.substring(newlineIdx + 1).replace("\n", " ").trim()
+                    if (before.isEmpty() && after.isEmpty()) {
+                        onReturnOnEmptySubtask()
+                    } else {
+                        val finalCurrent = if (before.isNotEmpty()) before else after
+                        val nextInitial = if (before.isNotEmpty()) after else ""
+                        editedSubtaskField = TextFieldValue(
+                            text = finalCurrent,
+                            selection = TextRange(finalCurrent.length)
+                        )
+                        onRename(finalCurrent)
+                        onReturnCreateSubtask(finalCurrent, nextInitial)
+                    }
+                } else {
+                    editedSubtaskField = incoming
+                    onRename(incoming.text)
+                }
             },
+            singleLine = true,
             textStyle = MaterialTheme.typography.bodyMedium.copy(
                 color = if (item.isCompleted) colors.tertiaryText else colors.primaryText,
                 textDecoration = if (item.isCompleted) TextDecoration.LineThrough else TextDecoration.None
             ),
             cursorBrush = SolidColor(colors.thingsBlue),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+            keyboardActions = KeyboardActions(
+                onNext = { handleSubtaskReturnKey() },
+                onDone = { handleSubtaskReturnKey() }
+            ),
             modifier = Modifier
                 .weight(1f)
+                .focusRequester(subtaskFocusRequester)
+                .onPreviewKeyEvent { keyEvent ->
+                    if (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) {
+                        if (keyEvent.type == KeyEventType.KeyDown) {
+                            handleSubtaskReturnKey()
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                }
                 .onFocusChanged { focusState ->
                     if (isSubtaskFocused != focusState.isFocused) {
                         isSubtaskFocused = focusState.isFocused
                         onFocusDelta(if (focusState.isFocused) 1 else -1)
                     }
-                    if (focusState.isFocused) {
-                        val txt = editedSubtaskField.text
-                        editedSubtaskField = editedSubtaskField.copy(
-                            selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
-                        )
-                    }
                 }
         )
         if (canMoveUp) {
-            ThingsHoverTooltip(text = "Unteraufgabe nach oben") {
+            ThingsHoverTooltip(text = stringResource(R.string.subtask_move_up)) {
                 IconButton(
                     onClick = onMoveUp,
                     modifier = Modifier.size(22.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.ArrowUpward,
-                        contentDescription = "Unteraufgabe nach oben",
+                        contentDescription = stringResource(R.string.subtask_move_up),
                         tint = colors.secondaryText,
                         modifier = Modifier.size(13.dp)
                     )
@@ -1836,28 +1978,28 @@ private fun InlineChecklistRow(
             }
         }
         if (canMoveDown) {
-            ThingsHoverTooltip(text = "Unteraufgabe nach unten") {
+            ThingsHoverTooltip(text = stringResource(R.string.subtask_move_down)) {
                 IconButton(
                     onClick = onMoveDown,
                     modifier = Modifier.size(22.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.ArrowDownward,
-                        contentDescription = "Unteraufgabe nach unten",
+                        contentDescription = stringResource(R.string.subtask_move_down),
                         tint = colors.secondaryText,
                         modifier = Modifier.size(13.dp)
                     )
                 }
             }
         }
-        ThingsHoverTooltip(text = "Unteraufgabe löschen") {
+        ThingsHoverTooltip(text = stringResource(R.string.subtask_delete)) {
             IconButton(
                 onClick = onDelete,
                 modifier = Modifier.size(22.dp)
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Close,
-                    contentDescription = "Unteraufgabe löschen",
+                    contentDescription = stringResource(R.string.subtask_delete),
                     tint = colors.secondaryText,
                     modifier = Modifier.size(13.dp)
                 )

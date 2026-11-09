@@ -823,6 +823,9 @@ private fun ThingsTaskRowItem(
         onCreateAndAssignTag = { newTag -> viewModel.createAndAssignTagToTask(task, newTag) },
         onOpenFullTagManager = { viewModel.setTagManagerOpen(true) },
         onAddChecklistItem = { itemTitle -> viewModel.addChecklistItem(task.id, itemTitle) },
+        onInsertChecklistItemAfter = { afterId, newId, initialTitle ->
+            viewModel.insertChecklistItemAfter(task.id, afterId, newId, initialTitle)
+        },
         onToggleChecklistItem = { itemId, done -> viewModel.toggleChecklistItem(itemId, done) },
         onRenameChecklistItem = { itemId, newTitle -> viewModel.renameChecklistItem(itemId, newTitle) },
         onMoveChecklistItem = { itemId, moveUp -> viewModel.moveChecklistItem(task.id, itemId, moveUp) },

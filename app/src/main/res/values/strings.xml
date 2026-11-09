@@ -275,4 +275,7 @@
     <string name="merge_dialog_hint_no_tasks">Would you like to merge your current local entries (excluding sample tasks) with %1$s, or load strictly the To-Dos from your account?</string>
     <string name="merge_dialog_confirm_merge">Yes, merge with account (delete samples)</string>
     <string name="merge_dialog_confirm_replace">No — load account tasks only (discard local)</string>
+    <string name="subtask_move_up">Move checklist item up</string>
+    <string name="subtask_move_down">Move checklist item down</string>
+    <string name="subtask_delete">Delete checklist item</string>
 </resources>

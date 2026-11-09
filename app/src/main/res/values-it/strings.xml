@@ -275,4 +275,7 @@
     <string name="merge_dialog_hint_no_tasks">Vuoi unire le voci locali attuali (senza esempi) con %1$s, oppure caricare esclusivamente le attività dal tuo account?</string>
     <string name="merge_dialog_confirm_merge">Sì, unisci all\'account (elimina esempi)</string>
     <string name="merge_dialog_confirm_replace">No — carica solo dall\'account (elimina locali)</string>
+    <string name="subtask_move_up">Sposta voce in alto</string>
+    <string name="subtask_move_down">Sposta voce in basso</string>
+    <string name="subtask_delete">Elimina voce</string>
 </resources>

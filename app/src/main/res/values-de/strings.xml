@@ -275,4 +275,7 @@
     <string name="merge_dialog_hint_no_tasks">Möchtest du deine aktuellen lokalen Einträge (ohne Beispielaufgaben) mit den auf %1$s gespeicherten Aufgaben zusammenführen, oder ausschließlich die Aufgaben von deinem Konto laden?</string>
     <string name="merge_dialog_confirm_merge">Ja, mit Konto zusammenführen (Beispiele löschen)</string>
     <string name="merge_dialog_confirm_replace">Nein — nur Konto-Aufgaben laden (lokale löschen)</string>
+    <string name="subtask_move_up">Unteraufgabe nach oben</string>
+    <string name="subtask_move_down">Unteraufgabe nach unten</string>
+    <string name="subtask_delete">Unteraufgabe löschen</string>
 </resources>

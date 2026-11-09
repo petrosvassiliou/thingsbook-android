@@ -518,7 +518,7 @@ fun ThingsSettingsModal(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Configurable "Heute"-Anzahl am Thingsbook-Symbol (in-app & Launcher/Shelf Badge)
+                // Configurable "Heute"-Anzahl auf dem Taskbar-Symbol (Chromebook Shelf / Android Launcher)
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = colors.tagPillBg.copy(alpha = 0.6f),
@@ -531,19 +531,19 @@ fun ThingsSettingsModal(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        ThingsbookBrandSymbol(
+                        ThingsbookTaskbarSymbolPreview(
                             todayCount = todayCount,
                             showBadge = showTodayAppBadge,
-                            size = 30.dp
+                            size = 34.dp
                         )
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "„Heute“-Anzahl am Thingsbook-Symbol",
+                                text = "„Heute“-Anzahl auf dem Taskbar-Symbol",
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                 color = colors.primaryText
                             )
                             Text(
-                                text = "Zeigt die Anzahl offener „Heute“-Aufgaben am App-Symbol (Startbildschirm/Taskleiste)",
+                                text = "Zeigt die Anzahl offener „Heute“-Aufgaben direkt auf dem Taskbar- / Launcher-Symbol",
                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
                                 color = colors.secondaryText
                             )

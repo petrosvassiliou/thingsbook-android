@@ -1,6 +1,7 @@
 package com.culturedcode.things3
 
 import android.Manifest
+import android.app.ActivityManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -32,6 +33,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.culturedcode.things3.data.notifications.AppIconBadgeUpdater
+import com.culturedcode.things3.domain.model.TaskbarBadgeResolver
 import com.culturedcode.things3.ui.components.ThingsTooltipHostBox
 import com.culturedcode.things3.ui.screens.ThingsSmartViewScreen
 import com.culturedcode.things3.ui.theme.Things3Theme
@@ -49,7 +52,13 @@ class MainActivity : AppCompatActivity() {
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { _ -> }
+    ) { granted ->
+        if (granted) {
+            runCatching {
+                AppIconBadgeUpdater.refreshAfterPermissionGranted(applicationContext)
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         CrashGuardian.install(applicationContext)
@@ -70,6 +79,10 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         activeActivityRef = WeakReference(this)
+        applyWindowTaskDescription(
+            todayCount = AppIconBadgeUpdater.currentTodayCount(),
+            enabled = AppIconBadgeUpdater.isBadgeEnabled()
+        )
     }
 
     override fun onDestroy() {
@@ -77,6 +90,31 @@ class MainActivity : AppCompatActivity() {
             activeActivityRef = null
         }
         super.onDestroy()
+    }
+
+    internal fun applyWindowTaskDescription(todayCount: Int, enabled: Boolean) {
+        if (isFinishing || isDestroyed) return
+        runCatching {
+            val appName = getString(R.string.app_name)
+            val label = TaskbarBadgeResolver.resolveTaskDescriptionTitle(appName, todayCount, enabled)
+            val iconRes = AppIconBadgeUpdater.getTaskbarIconDrawableRes(todayCount, enabled)
+            val primaryColor = Color.parseColor("#165DFC")
+
+            val taskDesc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ActivityManager.TaskDescription.Builder()
+                    .setLabel(label)
+                    .setIcon(iconRes)
+                    .setPrimaryColor(primaryColor)
+                    .build()
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                @Suppress("DEPRECATION")
+                ActivityManager.TaskDescription(label, iconRes, primaryColor)
+            } else {
+                @Suppress("DEPRECATION")
+                ActivityManager.TaskDescription(label)
+            }
+            setTaskDescription(taskDesc)
+        }
     }
 
     private fun mountComposeContent() {
@@ -286,6 +324,17 @@ class MainActivity : AppCompatActivity() {
 
         @Volatile
         private var lastRecoveryAttemptMillis: Long = 0L
+
+        fun applyActiveWindowTaskbarBadge(todayCount: Int, enabled: Boolean) {
+            val activity = activeActivityRef?.get() ?: return
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                activity.applyWindowTaskDescription(todayCount, enabled)
+            } else {
+                Handler(Looper.getMainLooper()).post {
+                    activeActivityRef?.get()?.applyWindowTaskDescription(todayCount, enabled)
+                }
+            }
+        }
 
         fun notifyMainThreadCrash(throwable: Throwable) {
             val activity = activeActivityRef?.get() ?: return

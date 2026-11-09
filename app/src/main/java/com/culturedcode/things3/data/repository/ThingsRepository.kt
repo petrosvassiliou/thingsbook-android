@@ -621,6 +621,22 @@ class ThingsRepository @Inject constructor(
         syncRepository.triggerBackgroundSync()
     }
 
+    /** Drag & Drop inside a Project: assigns the task to `headingId` (null = no heading) with a new `sortOrder`. */
+    suspend fun repositionTaskInProject(taskId: String, headingId: String?, sortOrder: Double) {
+        val existing = database.taskDao().getById(taskId) ?: return
+        if (existing.projectId == null) return
+        val now = System.currentTimeMillis()
+        database.taskDao().upsert(
+            existing.copy(
+                headingId = headingId,
+                sortOrder = if (sortOrder.isFinite()) sortOrder else existing.sortOrder,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.triggerBackgroundSync()
+    }
+
     suspend fun ensureDefaultWorkAndHomeAreas() {
         val activeAreas = database.areaDao().getActiveAreasList()
         if (activeAreas.isEmpty()) {

@@ -1,5 +1,20 @@
 package com.culturedcode.things3.ui.screens
 
+import androidx.compose.ui.draw.alpha
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.geometry.Offset
+import com.culturedcode.things3.ui.components.MagicPlusDropMode
+import com.culturedcode.things3.ui.components.MagicPlusPositionalDropHandler
+import com.culturedcode.things3.ui.components.ProjectDragDropController
+import com.culturedcode.things3.ui.components.ProjectDragKind
+import com.culturedcode.things3.ui.components.ProjectDragSession
+import com.culturedcode.things3.ui.components.ProjectListEntry
+import com.culturedcode.things3.ui.components.ProjectTaskDragHandle
+import com.culturedcode.things3.ui.components.ProjectDropIndicatorOverlay
+import com.culturedcode.things3.ui.components.ProjectDragAutoScrollEffect
+import com.culturedcode.things3.ui.components.projectDropSurface
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -194,6 +209,7 @@ fun ThingsSmartViewScreen(
     val allTags by viewModel.allTags.collectAsState()
 
     var magicDragState by remember { mutableStateOf(MagicPlusDragState()) }
+    val projectDragController = remember { ProjectDragDropController() }
     var showCreateProjectDialog by remember { mutableStateOf(false) }
     var projectDialogPreselectedAreaId by remember { mutableStateOf<String?>(null) }
     var editingProject by remember { mutableStateOf<Project?>(null) }
@@ -443,6 +459,7 @@ fun ThingsSmartViewScreen(
                         expandedTaskId = expandedTaskId,
                         selectedTaskIds = selectedTaskIds,
                         magicDragState = magicDragState,
+                        projectDragController = projectDragController,
                         activeLocale = activeLocale,
                         onRequestCreateProjectInArea = { areaId ->
                             projectDialogPreselectedAreaId = areaId
@@ -521,6 +538,7 @@ fun ThingsSmartViewScreen(
             primaryTasks = primaryTasks,
             projectHeadings = projectHeadings,
             areasCount = areas.size,
+            projectDragController = projectDragController,
             onDragStateChanged = { state -> magicDragState = state },
             onRequestCreateProject = { areaId ->
                 projectDialogPreselectedAreaId = areaId
@@ -557,10 +575,46 @@ private fun MagicPlusOverlaySection(
     primaryTasks: List<TaskItem>,
     projectHeadings: List<Heading>,
     areasCount: Int,
+    projectDragController: ProjectDragDropController,
     onDragStateChanged: (MagicPlusDragState) -> Unit,
     onRequestCreateProject: (String?) -> Unit
 ) {
     val isMagicPlusMenuOpen by viewModel.isMagicPlusMenuOpen.collectAsState()
+    val isProjectView = navTarget is ActiveNavigationTarget.ProjectDetail
+    val positionalHandler = remember(isProjectView, projectDragController, viewModel) {
+        if (!isProjectView) {
+            null
+        } else {
+            object : MagicPlusPositionalDropHandler {
+                private fun kindFor(mode: MagicPlusDropMode) =
+                    if (mode == MagicPlusDropMode.INSERT_HEADING) ProjectDragKind.NEW_HEADING else ProjectDragKind.NEW_TODO
+
+                override fun onDragStart(windowCenter: Offset, mode: MagicPlusDropMode) {
+                    projectDragController.start(kindFor(mode), windowCenter)
+                }
+
+                override fun onDragMove(windowCenter: Offset, mode: MagicPlusDropMode) {
+                    projectDragController.move(windowCenter, kindFor(mode))
+                }
+
+                override fun onDragEnd(mode: MagicPlusDropMode) {
+                    val session = projectDragController.finish()
+                    if (session?.target != null) {
+                        applyProjectDrop(viewModel, session, projectDragController)
+                    } else if (mode == MagicPlusDropMode.INSERT_HEADING) {
+                        viewModel.createHeadingInCurrentProject(projectDragController.headings.size, "")
+                    } else {
+                        val ungrouped = projectDragController.sectionTasks[null].orEmpty()
+                        viewModel.createTaskInProjectSection(null, ungrouped, ungrouped.size)
+                    }
+                }
+
+                override fun onDragCancel() {
+                    projectDragController.cancel()
+                }
+            }
+        }
+    }
     val contextMode = when (navTarget) {
         is ActiveNavigationTarget.ProjectDetail -> MagicPlusContextMode.PROJECT_DETAIL
         is ActiveNavigationTarget.AreaDetail -> MagicPlusContextMode.AREA_DETAIL
@@ -607,8 +661,29 @@ private fun MagicPlusOverlaySection(
             },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 24.dp, bottom = 28.dp)
+                .padding(end = 24.dp, bottom = 28.dp),
+            positionalDropHandler = positionalHandler
         )
+    }
+}
+
+/** Applies a finished Project drag session (Magic Plus or task handle) to the data layer. */
+private fun applyProjectDrop(
+    viewModel: ThingsbookViewModel,
+    session: ProjectDragSession,
+    controller: ProjectDragDropController
+) {
+    val target = session.target ?: return
+    val section = controller.sectionTasks[target.headingId].orEmpty()
+    when (session.kind) {
+        ProjectDragKind.NEW_TODO ->
+            viewModel.createTaskInProjectSection(target.headingId, section, target.indexInSection)
+        ProjectDragKind.NEW_HEADING ->
+            viewModel.createHeadingInCurrentProject(target.headingInsertIndex, "")
+        ProjectDragKind.MOVE_TASK -> {
+            val taskId = session.draggedTaskId ?: return
+            viewModel.moveTaskWithinProject(taskId, target.headingId, section, target.indexInSection)
+        }
     }
 }
 
@@ -792,9 +867,13 @@ private fun ThingsTaskRowItem(
     selectedTaskIds: Set<String>,
     allVisibleTaskIds: List<String>,
     magicBreakdownTaskId: String?,
-    activeLocale: Locale
+    activeLocale: Locale,
+    dragHandle: (@Composable () -> Unit)? = null,
+    modifier: Modifier = Modifier
 ) {
     ExpandableTaskCard(
+        modifier = modifier,
+        collapsedTrailingContent = dragHandle,
         task = task,
         allTags = allTags,
         allAreas = areas,
@@ -856,6 +935,7 @@ private fun ThingsMainTaskLazyList(
     expandedTaskId: String?,
     selectedTaskIds: Set<String>,
     magicDragState: MagicPlusDragState,
+    projectDragController: ProjectDragDropController,
     activeLocale: Locale,
     onRequestCreateProjectInArea: (String) -> Unit,
     onRequestEditProject: (Project) -> Unit,
@@ -868,8 +948,79 @@ private fun ThingsMainTaskLazyList(
     val logbookAiReview by viewModel.logbookAiReview.collectAsState()
     val isGeminiBusy by viewModel.isGeminiBusy.collectAsState()
 
+    val listState = rememberLazyListState()
+
+    // Project sections as displayed: tasks without (valid) heading first, then one section per heading
+    val projectSections: Map<String?, List<TaskItem>> = remember(isProjectView, primaryTasks, projectHeadings) {
+        if (!isProjectView) {
+            emptyMap()
+        } else {
+            val headingIdSet = projectHeadings.mapTo(HashSet()) { it.id }
+            val result = LinkedHashMap<String?, List<TaskItem>>()
+            result[null] = primaryTasks.filter { it.headingId == null || it.headingId !in headingIdSet }
+            projectHeadings.forEach { h -> result[h.id] = primaryTasks.filter { it.headingId == h.id } }
+            result
+        }
+    }
+
+    // Register list geometry semantics for position-based Drag & Drop (Magic Plus + task handles)
+    SideEffect {
+        projectDragController.isProjectListActive = isProjectView
+        projectDragController.listState = listState
+        projectDragController.headings = if (isProjectView) projectHeadings else emptyList()
+        projectDragController.sectionTasks = projectSections
+        projectDragController.entries = if (!isProjectView) {
+            emptyMap()
+        } else {
+            val map = HashMap<Any, ProjectListEntry>()
+            projectSections[null].orEmpty().forEachIndexed { i, t ->
+                map["ungrouped_${t.id}"] = ProjectListEntry.TaskRow(t.id, null, i)
+            }
+            projectHeadings.forEachIndexed { hIdx, h ->
+                map["heading_${h.id}"] = ProjectListEntry.HeadingRow(h.id, hIdx)
+                if (h.id !in collapsedHeadingIds) {
+                    projectSections[h.id].orEmpty().forEachIndexed { i, t ->
+                        map[t.id] = ProjectListEntry.TaskRow(t.id, h.id, i)
+                    }
+                }
+            }
+            map
+        }
+    }
+    DisposableEffect(projectDragController) {
+        onDispose {
+            projectDragController.cancel()
+            projectDragController.isProjectListActive = false
+        }
+    }
+    LaunchedEffect(isProjectView) {
+        if (!isProjectView) projectDragController.cancel()
+    }
+    ProjectDragAutoScrollEffect(controller = projectDragController, listState = listState)
+
+    val draggedTaskId = projectDragController.session?.draggedTaskId
+    val taskDragHandleFor: (TaskItem) -> (@Composable () -> Unit)? = { task ->
+        if (isProjectView && task.status == TaskStatus.OPEN && selectedTaskIds.isEmpty()) {
+            { ProjectTaskDragHandle(task = task, controller = projectDragController) }
+        } else {
+            null
+        }
+    }
+
+    Box(
+        modifier = modifier.then(
+            if (isProjectView) {
+                Modifier.projectDropSurface(projectDragController) { session ->
+                    applyProjectDrop(viewModel, session, projectDragController)
+                }
+            } else {
+                Modifier
+            }
+        )
+    ) {
     LazyColumn(
-        modifier = modifier,
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 110.dp)
     ) {
         // If viewing Logbook, show the Gemini Logbook Reflection Card at the top
@@ -975,17 +1126,14 @@ private fun ThingsMainTaskLazyList(
             }
         }
 
-        // If viewing a Project, render ungrouped tasks first, then collapsible Headings!
-        if (isProjectView && projectHeadings.isNotEmpty()) {
-            val ungroupedTasks = primaryTasks.filter { it.headingId == null }
-            itemsIndexed(
+        // If viewing a Project, render tasks without heading first, then collapsible Headings
+        // (Drag & Drop of the Magic Plus and of tasks is resolved by position via ProjectDragDropController)
+        if (isProjectView) {
+            val ungroupedTasks = projectSections[null].orEmpty()
+            items(
                 items = ungroupedTasks,
-                key = { _, task -> "ungrouped_${task.id}" }
-            ) { index, task ->
-                MagicPlusInsertionGap(
-                    visible = magicDragState.isDragging && magicDragState.dropIndex == index,
-                    dropMode = magicDragState.dropMode
-                )
+                key = { task -> "ungrouped_${task.id}" }
+            ) { task ->
                 ThingsTaskRowItem(
                     task = task,
                     viewModel = viewModel,
@@ -998,31 +1146,32 @@ private fun ThingsMainTaskLazyList(
                     selectedTaskIds = selectedTaskIds,
                     allVisibleTaskIds = allVisibleTaskIds,
                     magicBreakdownTaskId = magicBreakdownTaskId,
-                    activeLocale = activeLocale
+                    activeLocale = activeLocale,
+                    dragHandle = taskDragHandleFor(task),
+                    modifier = Modifier.alpha(if (task.id == draggedTaskId) 0.35f else 1f)
                 )
             }
 
-            projectHeadings.forEachIndexed { hIdx, heading ->
+            projectHeadings.forEach { heading ->
+                val tasksInHeading = projectSections[heading.id].orEmpty()
                 item(key = "heading_${heading.id}") {
                     ProjectHeadingSectionHeader(
                         heading = heading,
                         isCollapsed = heading.id in collapsedHeadingIds,
                         onToggleCollapse = { viewModel.toggleHeadingCollapsed(heading.id) },
                         onRenameHeading = { newTitle -> viewModel.renameHeading(heading.id, newTitle) },
-                        onDeleteHeading = { viewModel.deleteHeading(heading.id) }
+                        onDeleteHeading = { viewModel.deleteHeading(heading.id) },
+                        onAddTaskUnderHeading = {
+                            viewModel.createTaskInProjectSection(heading.id, tasksInHeading, tasksInHeading.size)
+                        }
                     )
                 }
 
                 if (heading.id !in collapsedHeadingIds) {
-                    val tasksInHeading = primaryTasks.filter { it.headingId == heading.id }
-                    itemsIndexed(
+                    items(
                         items = tasksInHeading,
-                        key = { _, task -> task.id }
-                    ) { index, task ->
-                        MagicPlusInsertionGap(
-                            visible = magicDragState.isDragging && magicDragState.dropIndex == index && hIdx == 0 && ungroupedTasks.isEmpty(),
-                            dropMode = magicDragState.dropMode
-                        )
+                        key = { task -> task.id }
+                    ) { task ->
                         ThingsTaskRowItem(
                             task = task,
                             viewModel = viewModel,
@@ -1035,7 +1184,9 @@ private fun ThingsMainTaskLazyList(
                             selectedTaskIds = selectedTaskIds,
                             allVisibleTaskIds = allVisibleTaskIds,
                             magicBreakdownTaskId = magicBreakdownTaskId,
-                            activeLocale = activeLocale
+                            activeLocale = activeLocale,
+                            dragHandle = taskDragHandleFor(task),
+                            modifier = Modifier.alpha(if (task.id == draggedTaskId) 0.35f else 1f)
                         )
                     }
                 }
@@ -1164,6 +1315,10 @@ private fun ThingsMainTaskLazyList(
                 )
             }
         }
+    }
+    if (isProjectView) {
+        ProjectDropIndicatorOverlay(controller = projectDragController)
+    }
     }
 }
 
@@ -2586,7 +2741,8 @@ private fun ProjectHeadingSectionHeader(
     isCollapsed: Boolean,
     onToggleCollapse: () -> Unit,
     onRenameHeading: (String) -> Unit,
-    onDeleteHeading: () -> Unit
+    onDeleteHeading: () -> Unit,
+    onAddTaskUnderHeading: () -> Unit
 ) {
     val colors = ThingsTheme.colors
     var isEditing by remember(heading.id) { mutableStateOf(heading.title.isEmpty()) }
@@ -2690,8 +2846,22 @@ private fun ProjectHeadingSectionHeader(
                 )
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    // Mini "+": create a To-Do directly under this heading
+                    ThingsHoverTooltip(text = stringResource(R.string.heading_add_task)) {
+                        IconButton(
+                            onClick = onAddTaskUnderHeading,
+                            modifier = Modifier.size(26.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Add,
+                                contentDescription = stringResource(R.string.heading_add_task),
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                    }
                     IconButton(
                         onClick = {
                             editedTitleField = TextFieldValue(
@@ -2720,12 +2890,17 @@ private fun ProjectHeadingSectionHeader(
                             modifier = Modifier.size(15.dp)
                         )
                     }
-                    Icon(
-                        imageVector = if (isCollapsed) Icons.Outlined.ExpandMore else Icons.Outlined.ExpandLess,
-                        contentDescription = stringResource(R.string.action_collapse_heading),
-                        tint = colors.secondaryText,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    IconButton(
+                        onClick = onToggleCollapse,
+                        modifier = Modifier.size(26.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isCollapsed) Icons.Outlined.ExpandMore else Icons.Outlined.ExpandLess,
+                            contentDescription = stringResource(R.string.action_collapse_heading),
+                            tint = colors.secondaryText,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         }

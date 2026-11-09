@@ -50,6 +50,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +63,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
@@ -87,6 +90,17 @@ enum class MagicPlusContextMode {
     AREA_DETAIL,
     PROJECT_DETAIL,
     LOGBOOK
+}
+
+/**
+ * Optional position-based drop handling (used in Project views): receives the FAB center in window
+ * coordinates so the list can resolve the exact drop position (incl. the heading section).
+ */
+interface MagicPlusPositionalDropHandler {
+    fun onDragStart(windowCenter: Offset, mode: MagicPlusDropMode)
+    fun onDragMove(windowCenter: Offset, mode: MagicPlusDropMode)
+    fun onDragEnd(mode: MagicPlusDropMode)
+    fun onDragCancel()
 }
 
 data class MagicPlusDragState(
@@ -199,7 +213,8 @@ fun MagicPlusFab(
     onDragStateChanged: (MagicPlusDragState) -> Unit,
     onDropCreateTodoAt: (Int) -> Unit,
     onDropCreateHeadingAt: (Int) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    positionalDropHandler: MagicPlusPositionalDropHandler? = null
 ) {
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
@@ -211,6 +226,9 @@ fun MagicPlusFab(
     var isDragging by remember { mutableStateOf(false) }
     var lastHapticSlot by remember { mutableIntStateOf(-1) }
     var lastDropMode by remember { mutableStateOf(MagicPlusDropMode.NONE) }
+    val fabCoordsHolder = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    var dragStartCenter by remember { mutableStateOf(Offset.Zero) }
+    val currentPositionalHandler by rememberUpdatedState(positionalDropHandler)
 
     val fabInteractionSource = remember { MutableInteractionSource() }
     val isFabPressed by fabInteractionSource.collectIsPressedAsState()
@@ -323,6 +341,7 @@ fun MagicPlusFab(
                             y = dragOffset.y.takeIf { it.isFinite() }?.roundToInt() ?: 0
                         )
                     }
+                    .onGloballyPositioned { fabCoordsHolder[0] = it }
                     .graphicsLayer {
                         val safeScale = if (fabScale.isFinite()) fabScale else 1f
                         scaleX = safeScale
@@ -361,6 +380,18 @@ fun MagicPlusFab(
                                         dropMode = MagicPlusDropMode.INSERT_TODO
                                     )
                                 )
+                                val coords = fabCoordsHolder[0]
+                                dragStartCenter = if (coords != null && coords.isAttached) {
+                                    coords.localToWindow(
+                                        Offset(coords.size.width / 2f, coords.size.height / 2f)
+                                    ) - dragOffset
+                                } else {
+                                    Offset.Zero
+                                }
+                                currentPositionalHandler?.onDragStart(
+                                    dragStartCenter + dragOffset,
+                                    MagicPlusDropMode.INSERT_TODO
+                                )
                             },
                             onDragEnd = {
                                 val finalSlot = lastHapticSlot.coerceIn(0, itemCount.coerceAtLeast(0))
@@ -370,13 +401,17 @@ fun MagicPlusFab(
                                 onDragStateChanged(MagicPlusDragState(isDragging = false))
                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
 
-                                if (finalMode == MagicPlusDropMode.INSERT_HEADING && allowHeadingDrop) {
+                                val positional = currentPositionalHandler
+                                if (positional != null) {
+                                    positional.onDragEnd(finalMode)
+                                } else if (finalMode == MagicPlusDropMode.INSERT_HEADING && allowHeadingDrop) {
                                     onDropCreateHeadingAt(finalSlot)
                                 } else {
                                     onDropCreateTodoAt(finalSlot)
                                 }
                             },
                             onDragCancel = {
+                                currentPositionalHandler?.onDragCancel()
                                 isDragging = false
                                 dragOffset = Offset.Zero
                                 onDragStateChanged(MagicPlusDragState(isDragging = false))
@@ -399,7 +434,16 @@ fun MagicPlusFab(
                                     MagicPlusDropMode.INSERT_TODO
                                 }
 
-                                if (computedSlot != lastHapticSlot || mode != lastDropMode) {
+                                val positional = currentPositionalHandler
+                                if (positional != null) {
+                                    positional.onDragMove(dragStartCenter + dragOffset, mode)
+                                    if (mode != lastDropMode) {
+                                        lastDropMode = mode
+                                        onDragStateChanged(
+                                            MagicPlusDragState(isDragging = true, dropIndex = computedSlot, dropMode = mode)
+                                        )
+                                    }
+                                } else if (computedSlot != lastHapticSlot || mode != lastDropMode) {
                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     lastHapticSlot = computedSlot
                                     lastDropMode = mode

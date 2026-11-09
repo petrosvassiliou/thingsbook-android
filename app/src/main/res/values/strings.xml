@@ -278,4 +278,8 @@
     <string name="subtask_move_up">Move checklist item up</string>
     <string name="subtask_move_down">Move checklist item down</string>
     <string name="subtask_delete">Delete checklist item</string>
+    <string name="heading_add_task">Add to-do under this heading</string>
+    <string name="task_drag_handle">Drag to move</string>
+    <string name="drop_move_here">Move here</string>
+    <string name="drop_heading_here">Release to insert Heading here</string>
 </resources>

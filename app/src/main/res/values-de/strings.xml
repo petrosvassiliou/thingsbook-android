@@ -278,4 +278,8 @@
     <string name="subtask_move_up">Unteraufgabe nach oben</string>
     <string name="subtask_move_down">Unteraufgabe nach unten</string>
     <string name="subtask_delete">Unteraufgabe löschen</string>
+    <string name="heading_add_task">Aufgabe unter dieser Überschrift hinzufügen</string>
+    <string name="task_drag_handle">Ziehen zum Verschieben</string>
+    <string name="drop_move_here">Hierher verschieben</string>
+    <string name="drop_heading_here">Loslassen, um Überschrift hier einzufügen</string>
 </resources>

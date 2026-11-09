@@ -278,4 +278,8 @@
     <string name="subtask_move_up">Monter l\'élément</string>
     <string name="subtask_move_down">Descendre l\'élément</string>
     <string name="subtask_delete">Supprimer l\'élément</string>
+    <string name="heading_add_task">Ajouter une tâche sous ce titre</string>
+    <string name="task_drag_handle">Faire glisser pour déplacer</string>
+    <string name="drop_move_here">Déplacer ici</string>
+    <string name="drop_heading_here">Relâcher pour insérer le titre ici</string>
 </resources>

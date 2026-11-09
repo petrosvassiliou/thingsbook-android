@@ -195,7 +195,8 @@ fun ExpandableTaskCard(
     onTriggerGeminiMagicBreakdown: () -> Unit,
     onDeleteTask: () -> Unit,
     modifier: Modifier = Modifier,
-    locale: Locale = Locale.getDefault()
+    locale: Locale = Locale.getDefault(),
+    collapsedTrailingContent: (@Composable () -> Unit)? = null
 ) {
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
@@ -638,6 +639,10 @@ fun ExpandableTaskCard(
 
                     if (!isExpanded) {
                         CollapsedTaskInlineBadges(task = task, locale = locale)
+                        if (collapsedTrailingContent != null && !isCompletingAnim) {
+                            Spacer(modifier = Modifier.width(4.dp))
+                            collapsedTrailingContent()
+                        }
                     }
                 }
 

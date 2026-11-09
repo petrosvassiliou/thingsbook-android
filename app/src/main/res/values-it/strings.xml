@@ -278,4 +278,8 @@
     <string name="subtask_move_up">Sposta voce in alto</string>
     <string name="subtask_move_down">Sposta voce in basso</string>
     <string name="subtask_delete">Elimina voce</string>
+    <string name="heading_add_task">Aggiungi attività sotto questa intestazione</string>
+    <string name="task_drag_handle">Trascina per spostare</string>
+    <string name="drop_move_here">Sposta qui</string>
+    <string name="drop_heading_here">Rilascia per inserire l\'intestazione qui</string>
 </resources>

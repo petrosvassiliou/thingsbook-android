@@ -278,4 +278,8 @@
     <string name="subtask_move_up">Subir elemento</string>
     <string name="subtask_move_down">Bajar elemento</string>
     <string name="subtask_delete">Eliminar elemento</string>
+    <string name="heading_add_task">Añadir tarea bajo este encabezado</string>
+    <string name="task_drag_handle">Arrastrar para mover</string>
+    <string name="drop_move_here">Mover aquí</string>
+    <string name="drop_heading_here">Suelta para insertar el encabezado aquí</string>
 </resources>

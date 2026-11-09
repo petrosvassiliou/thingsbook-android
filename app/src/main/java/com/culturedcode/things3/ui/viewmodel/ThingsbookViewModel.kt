@@ -609,6 +609,74 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Creates a new To-Do directly inside a Project section (`headingId` = null → tasks without heading)
+     * at `indexInSection` of `sectionTasks` (as displayed), expands the heading and opens the new card.
+     */
+    fun createTaskInProjectSection(
+        headingId: String?,
+        sectionTasks: List<TaskItem>,
+        indexInSection: Int,
+        defaultTitle: String = ""
+    ) {
+        val target = _navigationTarget.value as? ActiveNavigationTarget.ProjectDetail ?: return
+        if (headingId != null) expandHeading(headingId)
+        safeVmScope.launch {
+            val idx = indexInSection.coerceIn(0, sectionTasks.size)
+            val order = repository.computeMidpointSortOrder(
+                sectionTasks.getOrNull(idx - 1)?.sortOrder,
+                sectionTasks.getOrNull(idx)?.sortOrder
+            )
+            val areaId = activeProjects.value.find { it.id == target.projectId }?.areaId
+            val createdId = repository.createOrUpdateTask(
+                title = defaultTitle,
+                notes = "",
+                status = TaskStatus.OPEN,
+                scheduleState = ScheduleState.ANYTIME,
+                whenDate = null,
+                projectId = target.projectId,
+                headingId = headingId,
+                areaId = areaId,
+                sortOrder = order
+            )
+            _expandedTaskId.value = createdId
+        }
+    }
+
+    /**
+     * Drag & Drop inside a Project: moves `taskId` into the section `headingId` at `indexInSection`
+     * of the displayed `sectionTasks` (which may still contain the dragged task itself).
+     */
+    fun moveTaskWithinProject(
+        taskId: String,
+        headingId: String?,
+        sectionTasks: List<TaskItem>,
+        indexInSection: Int
+    ) {
+        val currentIdx = sectionTasks.indexOfFirst { it.id == taskId }
+        var idx = indexInSection.coerceIn(0, sectionTasks.size)
+        if (currentIdx >= 0) {
+            // Dropped onto its own position → nothing to do
+            if (idx == currentIdx || idx == currentIdx + 1) return
+            if (currentIdx < idx) idx -= 1
+        }
+        val others = sectionTasks.filter { it.id != taskId }
+        idx = idx.coerceIn(0, others.size)
+        if (headingId != null) expandHeading(headingId)
+        safeVmScope.launch {
+            val order = repository.computeMidpointSortOrder(
+                others.getOrNull(idx - 1)?.sortOrder,
+                others.getOrNull(idx)?.sortOrder
+            )
+            repository.repositionTaskInProject(taskId, headingId, order)
+        }
+    }
+
+    fun expandHeading(headingId: String) {
+        val current = _collapsedHeadingIds.value
+        if (headingId in current) _collapsedHeadingIds.value = current - headingId
+    }
+
     fun createHeadingInCurrentProject(dropIndex: Int, defaultHeadingTitle: String) {
         val target = _navigationTarget.value as? ActiveNavigationTarget.ProjectDetail ?: return
         safeVmScope.launch {

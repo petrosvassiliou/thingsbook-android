@@ -97,20 +97,13 @@ class MainActivity : AppCompatActivity() {
         runCatching {
             val appName = getString(R.string.app_name)
             val label = TaskbarBadgeResolver.resolveTaskDescriptionTitle(appName, todayCount, enabled)
-            val iconRes = AppIconBadgeUpdater.getTaskbarIconDrawableRes(todayCount, enabled)
+            val iconBitmap = AppIconBadgeUpdater.renderTaskbarIconBitmap(this, todayCount, enabled, 144)
             val primaryColor = Color.parseColor("#165DFC")
 
-            val taskDesc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                ActivityManager.TaskDescription.Builder()
-                    .setLabel(label)
-                    .setIcon(iconRes)
-                    .setPrimaryColor(primaryColor)
-                    .build()
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                @Suppress("DEPRECATION")
-                ActivityManager.TaskDescription(label, iconRes, primaryColor)
+            @Suppress("DEPRECATION")
+            val taskDesc = if (iconBitmap != null) {
+                ActivityManager.TaskDescription(label, iconBitmap, primaryColor)
             } else {
-                @Suppress("DEPRECATION")
                 ActivityManager.TaskDescription(label)
             }
             setTaskDescription(taskDesc)

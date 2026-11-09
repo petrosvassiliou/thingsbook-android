@@ -12,9 +12,9 @@ Eine eigenständige, native Android-Produktivitäts-App (für **Android-Smartpho
 
 ---
 
-## Direkt-Download (Installierbares Android-APK — Version 1.6.7)
+## Direkt-Download (Installierbares Android-APK — Version 1.6.8)
 
-- **[Thingsbook-v1.6.7-full.apk herunterladen (v1.6.7 — Konfigurierbare „Heute“-Aufgabenanzahl direkt auf dem Taskbar- / Launcher-Symbol inkl. Taskbar-Vorschau in den Einstellungen, Rechtsklick-Aufgabenmarkierung & komplettes Backup/Restore)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.7-full.apk)**
+- **[Thingsbook-v1.6.8-full.apk herunterladen (v1.6.8 — Absturzfreie Taskbar-Badge-Aktualisierung ohne Activity-Alias-Abschaltung beim Erledigen/Ändern von Aufgaben, Rechtsklick-Aufgabenmarkierung & komplettes Backup/Restore)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.8-full.apk)**
 
 ---
 

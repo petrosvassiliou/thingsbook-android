@@ -8,9 +8,12 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.os.Build
 import android.util.Log
 import androidx.annotation.DrawableRes
+import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -21,16 +24,20 @@ import com.culturedcode.things3.MainActivity
 import com.culturedcode.things3.R
 import com.culturedcode.things3.domain.model.TaskbarBadgeResolver
 import com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * Synchronizes the live count of open "Today" tasks (`Heute` + `Heute Abend`) with:
- * 1. Dynamic Taskbar & Launcher `<activity-alias>` icons (`LauncherBadge0` .. `LauncherBadge20Plus`)
- *    targeting [com.culturedcode.things3.LauncherEntryActivity] so ChromeOS Shelf / Taskbar and
- *    Android Launchers display the exact red Today count badge directly on the Thingsbook icon
- *    without ever closing or interrupting [MainActivity].
- * 2. Running window `ActivityManager.TaskDescription` icon & title (`"Thingsbook (3)"`).
- * 3. Taskbar right-click / long-press dynamic shortcut (`ShortcutManagerCompat`).
- * 4. Android 8.0+ / OEM Launcher notification badge (`setNumber(count)` + `setShowBadge(true)`).
+ * 1. Running window `ActivityManager.TaskDescription` pre-rendered `Bitmap` icon & title (`"Thingsbook (3)"`).
+ * 2. Taskbar right-click / long-press dynamic shortcut (`ShortcutManagerCompat`) with pre-rendered `Bitmap` badge icon.
+ * 3. Android 8.0+ / ChromeOS Shelf / OEM Launcher notification badge (`setNumber(count)` + `setShowBadge(true)` + `largeIcon`).
+ *
+ * IMPORTANT: Never disables or toggles `<activity-alias>` components via `PackageManager.setComponentEnabledSetting`,
+ * because Android's `system_server` (`RootWindowContainer.finishDisabledPackageActivities`) forcibly terminates
+ * the running task whenever its launch alias is disabled.
  */
 object AppIconBadgeUpdater {
 
@@ -39,6 +46,8 @@ object AppIconBadgeUpdater {
     private const val BADGE_NOTIFICATION_ID = 90421
     private const val TODAY_SHORTCUT_ID = "thingsbook_today_taskbar_count"
 
+    private val badgeIoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     @Volatile
     private var lastKnownTodayCount: Int = 0
 
@@ -46,13 +55,10 @@ object AppIconBadgeUpdater {
     private var lastKnownEnabled: Boolean = true
 
     @Volatile
-    private var lastAppliedAliasSuffix: String? = null
+    private var lastAppliedCount: Int = -1
 
     @Volatile
-    private var lastAppliedNotificationCount: Int = -1
-
-    @Volatile
-    private var lastAppliedNotificationEnabled: Boolean? = null
+    private var lastAppliedEnabled: Boolean? = null
 
     @DrawableRes
     fun getTaskbarIconDrawableRes(todayCount: Int, enabled: Boolean): Int {
@@ -82,30 +88,50 @@ object AppIconBadgeUpdater {
         }
     }
 
+    fun renderTaskbarIconBitmap(
+        context: Context,
+        todayCount: Int,
+        enabled: Boolean,
+        sizePx: Int = 144
+    ): Bitmap? {
+        return runCatching {
+            val resId = getTaskbarIconDrawableRes(todayCount, enabled)
+            val drawable = AppCompatResources.getDrawable(context, resId)?.mutate() ?: return null
+            val safeSize = sizePx.coerceIn(48, 256)
+            val bitmap = Bitmap.createBitmap(safeSize, safeSize, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            drawable.setBounds(0, 0, safeSize, safeSize)
+            drawable.draw(canvas)
+            bitmap
+        }.getOrNull()
+    }
+
     fun updateTodayAppBadge(context: Context, todayCount: Int, enabled: Boolean) {
         val safeCount = todayCount.coerceAtLeast(0)
         lastKnownTodayCount = safeCount
         lastKnownEnabled = enabled
 
         val effectiveCount = TaskbarBadgeResolver.resolveEffectiveCount(safeCount, enabled)
+        if (lastAppliedCount == effectiveCount && lastAppliedEnabled == enabled) return
+        lastAppliedCount = effectiveCount
+        lastAppliedEnabled = enabled
 
-        // 1. Live window TaskDescription on active MainActivity (Taskbar / Overview icon & title)
+        // 1. Live window TaskDescription on active MainActivity (uses pre-rendered Bitmap safely)
         MainActivity.applyActiveWindowTaskbarBadge(safeCount, enabled)
 
-        // 2. Dynamic Taskbar / Shelf / Launcher <activity-alias> icon
-        updateLauncherActivityAlias(context, safeCount, enabled)
-
-        // 3. Taskbar right-click / long-press Dynamic Shortcut with badge icon
-        updateDynamicTaskbarShortcut(context, effectiveCount, enabled)
-
-        // 4. OEM & standard launcher badge broadcasts + system notification badge
-        dispatchLauncherBadgeBroadcasts(context, effectiveCount)
-        updateAndroidSystemBadgeNotification(context, effectiveCount, enabled)
+        // 2. Perform all system/launcher IPC updates asynchronously off the Main UI thread
+        val appCtx = context.applicationContext
+        badgeIoScope.launch {
+            val badgeBitmap = renderTaskbarIconBitmap(appCtx, effectiveCount, enabled, 144)
+            updateDynamicTaskbarShortcut(appCtx, effectiveCount, enabled, badgeBitmap)
+            dispatchLauncherBadgeBroadcasts(appCtx, effectiveCount)
+            updateAndroidSystemBadgeNotification(appCtx, effectiveCount, enabled, badgeBitmap)
+        }
     }
 
     fun refreshAfterPermissionGranted(context: Context) {
-        lastAppliedNotificationCount = -1
-        lastAppliedNotificationEnabled = null
+        lastAppliedCount = -1
+        lastAppliedEnabled = null
         updateTodayAppBadge(context, lastKnownTodayCount, lastKnownEnabled)
     }
 
@@ -113,62 +139,11 @@ object AppIconBadgeUpdater {
 
     fun isBadgeEnabled(): Boolean = lastKnownEnabled
 
-    private fun updateLauncherActivityAlias(
-        context: Context,
-        todayCount: Int,
-        enabled: Boolean
-    ) {
-        runCatching {
-            val targetSuffix = TaskbarBadgeResolver.resolveAliasSuffix(todayCount, enabled)
-            if (lastAppliedAliasSuffix == targetSuffix) return
-
-            val pm = context.packageManager
-            val pkg = context.packageName
-            val allSuffixes = TaskbarBadgeResolver.allAliasSuffixes()
-            val targetComponent = ComponentName(pkg, "$pkg.LauncherBadge$targetSuffix")
-
-            // Enable the target alias FIRST so at least one LAUNCHER component is always active
-            val currentTargetState = pm.getComponentEnabledSetting(targetComponent)
-            val shouldEnableTarget = if (targetSuffix == "0") {
-                currentTargetState != PackageManager.COMPONENT_ENABLED_STATE_ENABLED &&
-                    currentTargetState != PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
-            } else {
-                currentTargetState != PackageManager.COMPONENT_ENABLED_STATE_ENABLED
-            }
-            if (shouldEnableTarget) {
-                pm.setComponentEnabledSetting(
-                    targetComponent,
-                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-                    PackageManager.DONT_KILL_APP
-                )
-            }
-
-            // Disable any other alias that is currently enabled
-            for (suffix in allSuffixes) {
-                if (suffix == targetSuffix) continue
-                val comp = ComponentName(pkg, "$pkg.LauncherBadge$suffix")
-                val state = pm.getComponentEnabledSetting(comp)
-                val isCurrentlyEnabled = state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED ||
-                    (suffix == "0" && state == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT)
-                if (isCurrentlyEnabled) {
-                    pm.setComponentEnabledSetting(
-                        comp,
-                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-                        PackageManager.DONT_KILL_APP
-                    )
-                }
-            }
-
-            lastAppliedAliasSuffix = targetSuffix
-        }.onFailure { err ->
-            Log.w(TAG, "Taskbar launcher alias update skipped", err)
-        }
-    }
-
     private fun updateDynamicTaskbarShortcut(
         context: Context,
         effectiveCount: Int,
-        enabled: Boolean
+        enabled: Boolean,
+        badgeBitmap: Bitmap?
     ) {
         runCatching {
             if (!enabled || effectiveCount <= 0) {
@@ -194,12 +169,17 @@ object AppIconBadgeUpdater {
             } else {
                 "Heute • $effectiveCount offene Aufgaben"
             }
-            val iconRes = getTaskbarIconDrawableRes(effectiveCount, true)
+
+            val iconCompat = if (badgeBitmap != null) {
+                IconCompat.createWithBitmap(badgeBitmap)
+            } else {
+                IconCompat.createWithResource(context, R.mipmap.ic_launcher)
+            }
 
             val shortcut = ShortcutInfoCompat.Builder(context, TODAY_SHORTCUT_ID)
                 .setShortLabel(shortLabel)
                 .setLongLabel(longLabel)
-                .setIcon(IconCompat.createWithResource(context, iconRes))
+                .setIcon(iconCompat)
                 .setIntent(openTodayIntent)
                 .setRank(0)
                 .build()
@@ -213,20 +193,13 @@ object AppIconBadgeUpdater {
     private fun updateAndroidSystemBadgeNotification(
         context: Context,
         effectiveCount: Int,
-        enabled: Boolean
+        enabled: Boolean,
+        badgeBitmap: Bitmap?
     ) {
         runCatching {
-            if (lastAppliedNotificationCount == effectiveCount &&
-                lastAppliedNotificationEnabled == enabled
-            ) {
-                return
-            }
-
             val nm = NotificationManagerCompat.from(context)
             if (!enabled || effectiveCount <= 0) {
                 nm.cancel(BADGE_NOTIFICATION_ID)
-                lastAppliedNotificationCount = 0
-                lastAppliedNotificationEnabled = enabled
                 return
             }
 
@@ -235,7 +208,11 @@ object AppIconBadgeUpdater {
                     context,
                     Manifest.permission.POST_NOTIFICATIONS
                 ) == PackageManager.PERMISSION_GRANTED
-                if (!granted) return
+                if (!granted) {
+                    // Reset cached count so once permission is granted it will re-post
+                    lastAppliedCount = -1
+                    return
+                }
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -275,7 +252,7 @@ object AppIconBadgeUpdater {
                 "$effectiveCount Aufgaben für Heute offen"
             }
 
-            val notification = NotificationCompat.Builder(context, BADGE_CHANNEL_ID)
+            val builder = NotificationCompat.Builder(context, BADGE_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification_thingsbook)
                 .setContentTitle("${context.getString(R.string.view_today)} ($effectiveCount)")
                 .setContentText(label)
@@ -285,11 +262,12 @@ object AppIconBadgeUpdater {
                 .setOnlyAlertOnce(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setContentIntent(pendingIntent)
-                .build()
 
-            nm.notify(BADGE_NOTIFICATION_ID, notification)
-            lastAppliedNotificationCount = effectiveCount
-            lastAppliedNotificationEnabled = true
+            if (badgeBitmap != null) {
+                builder.setLargeIcon(badgeBitmap)
+            }
+
+            nm.notify(BADGE_NOTIFICATION_ID, builder.build())
         }.onFailure { err ->
             Log.w(TAG, "System app icon badge update skipped", err)
         }
@@ -297,10 +275,7 @@ object AppIconBadgeUpdater {
 
     private fun dispatchLauncherBadgeBroadcasts(context: Context, count: Int) {
         runCatching {
-            val pkg = context.packageName
-            val activeSuffix = TaskbarBadgeResolver.resolveAliasSuffix(count, count > 0)
-            val component = ComponentName(pkg, "$pkg.LauncherBadge$activeSuffix")
-
+            val component = ComponentName(context.packageName, MainActivity::class.java.name)
             val badgeIntent = Intent("android.intent.action.BADGE_COUNT_UPDATE").apply {
                 putExtra("badge_count", count)
                 putExtra("badge_count_package_name", component.packageName)

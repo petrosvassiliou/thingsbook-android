@@ -23,6 +23,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
@@ -53,10 +55,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -186,6 +194,12 @@ fun ThingsAreaManagerModal(
                                 .padding(horizontal = 10.dp, vertical = 8.dp)
                         ) {
                             if (isEditing) {
+                                val commitRenameArea = {
+                                    if (editingAreaField.text.isNotBlank()) {
+                                        onRenameArea(area.id, editingAreaField.text.trim())
+                                        editingAreaId = null
+                                    }
+                                }
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically,
@@ -195,8 +209,20 @@ fun ThingsAreaManagerModal(
                                         value = editingAreaField,
                                         onValueChange = { editingAreaField = it },
                                         singleLine = true,
+                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                        keyboardActions = KeyboardActions(onDone = { commitRenameArea() }),
                                         modifier = Modifier
                                             .weight(1f)
+                                            .onPreviewKeyEvent { keyEvent ->
+                                                if (keyEvent.type == KeyEventType.KeyDown &&
+                                                    (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
+                                                ) {
+                                                    commitRenameArea()
+                                                    true
+                                                } else {
+                                                    false
+                                                }
+                                            }
                                             .onFocusChanged { focusState ->
                                                 if (focusState.isFocused) {
                                                     val txt = editingAreaField.text
@@ -207,14 +233,7 @@ fun ThingsAreaManagerModal(
                                             },
                                         label = { Text(stringResource(R.string.areas_rename_label)) }
                                     )
-                                    IconButton(
-                                        onClick = {
-                                            if (editingAreaField.text.isNotBlank()) {
-                                                onRenameArea(area.id, editingAreaField.text.trim())
-                                                editingAreaId = null
-                                            }
-                                        }
-                                    ) {
+                                    IconButton(onClick = commitRenameArea) {
                                         Icon(
                                             imageVector = Icons.Outlined.Check,
                                             contentDescription = stringResource(R.string.action_save),
@@ -357,6 +376,14 @@ fun ThingsAreaManagerModal(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
 
+                    val submitCreateArea = {
+                        if (newAreaField.text.isNotBlank()) {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onCreateArea(newAreaField.text.trim())
+                            newAreaField = TextFieldValue(text = "", selection = TextRange(0))
+                        }
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -373,8 +400,20 @@ fun ThingsAreaManagerModal(
                                 )
                             },
                             singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { submitCreateArea() }),
                             modifier = Modifier
                                 .weight(1f)
+                                .onPreviewKeyEvent { keyEvent ->
+                                    if (keyEvent.type == KeyEventType.KeyDown &&
+                                        (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
+                                    ) {
+                                        submitCreateArea()
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }
                                 .onFocusChanged { focusState ->
                                     if (focusState.isFocused) {
                                         val txt = newAreaField.text
@@ -389,13 +428,7 @@ fun ThingsAreaManagerModal(
                                 .size(42.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(colors.thingsBlue)
-                                .clickable {
-                                    if (newAreaField.text.isNotBlank()) {
-                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        onCreateArea(newAreaField.text.trim())
-                                        newAreaField = TextFieldValue(text = "", selection = TextRange(0))
-                                    }
-                                },
+                                .clickable { submitCreateArea() },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(

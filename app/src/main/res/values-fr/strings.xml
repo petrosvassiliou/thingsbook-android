@@ -302,4 +302,35 @@
     <string name="settings_updates_download_failed">Échec du téléchargement de la mise à jour : %1$s</string>
     <string name="update_banner_title">Nouvelle version v%1$s disponible</string>
     <string name="update_banner_action_btn">Mettre à jour</string>
+
+    <!-- Multi-Selection, Context Menu, Swipe & Repeat Dialog -->
+    <string name="multiselect_count">%1$d sélectionnée(s)</string>
+    <string name="multiselect_select_all">Tout sélectionner dans cette vue (Ctrl+A)</string>
+    <string name="multiselect_clear">Effacer la sélection (Échap)</string>
+    <string name="swipe_select">Sélectionner</string>
+    <string name="swipe_deselect">Désélectionner</string>
+    <string name="context_select_task">Sélectionner la tâche (Sélection multiple)</string>
+    <string name="context_deselect_task">Effacer la sélection</string>
+    <string name="context_when_date_reminder">Quand ? (Date et rappel)</string>
+    <string name="context_adjust_deadline">Ajuster l\'échéance</string>
+    <string name="context_configure_repeat">Configurer la répétition</string>
+    <string name="context_assign_tags">Attribuer des tags</string>
+    <string name="repeat_dialog_title">Répéter (Mode Things)</string>
+    <string name="repeat_mode_fixed">Régulièrement</string>
+    <string name="repeat_mode_after">Après achèvement</string>
+    <string name="repeat_mode_fixed_desc">Rythme fixe du calendrier (comme « Regularly » dans Things pour Mac).</string>
+    <string name="repeat_mode_after_desc">La prochaine tâche est créée uniquement une fois celle-ci terminée.</string>
+    <string name="repeat_unit_days">Jours</string>
+    <string name="repeat_unit_weeks">Semaines</string>
+    <string name="repeat_unit_months">Mois</string>
+    <string name="repeat_unit_years">Années</string>
+    <string name="repeat_weekdays_label">Ces jours de la semaine :</string>
+    <string name="repeat_month_day_label">Jour du mois :</string>
+    <string name="repeat_last_day">Dernier jour</string>
+    <string name="repeat_ends_label">Fin :</string>
+    <string name="repeat_ends_never">Jamais</string>
+    <string name="repeat_ends_pick_date">Choisir une date…</string>
+    <string name="repeat_off_btn">Off</string>
+    <string name="sidebar_show">Afficher la barre latérale</string>
+    <string name="sidebar_hide">Masquer la barre latérale</string>
 </resources>

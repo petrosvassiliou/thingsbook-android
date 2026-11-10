@@ -280,6 +280,7 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
             appWidgetId: Int
         ) {
             val mgr = appWidgetManager ?: return
+            val localizedContext = androidx.core.content.ContextCompat.getContextForLanguage(context)
             val selectedView = getSelectedViewForWidget(context, appWidgetId)
             val entryPoint = EntryPointAccessors.fromApplication(
                 context.applicationContext,
@@ -302,19 +303,21 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
 
             views.setTextViewText(R.id.widget_view_icon, iconText)
             views.setTextColor(R.id.widget_view_icon, Color.parseColor(iconColorHex))
-            views.setTextViewText(R.id.widget_view_title, context.getString(titleRes))
+            views.setTextViewText(R.id.widget_view_title, localizedContext.getString(titleRes))
             views.setTextViewText(R.id.widget_task_count, tasks.size.toString())
+            views.setTextViewText(R.id.widget_empty_view, localizedContext.getString(R.string.empty_view))
 
             // 2. Highlight Active View Tab in Segmented Bar & Attach Click PendingIntents
             val tabs = listOf(
-                VIEW_TODAY to R.id.widget_tab_today,
-                VIEW_INBOX to R.id.widget_tab_inbox,
-                VIEW_UPCOMING to R.id.widget_tab_upcoming,
-                VIEW_ANYTIME to R.id.widget_tab_anytime,
-                VIEW_SOMEDAY to R.id.widget_tab_someday
+                Triple(VIEW_TODAY, R.id.widget_tab_today, R.string.view_today),
+                Triple(VIEW_INBOX, R.id.widget_tab_inbox, R.string.view_inbox),
+                Triple(VIEW_UPCOMING, R.id.widget_tab_upcoming, R.string.view_upcoming),
+                Triple(VIEW_ANYTIME, R.id.widget_tab_anytime, R.string.view_anytime),
+                Triple(VIEW_SOMEDAY, R.id.widget_tab_someday, R.string.view_someday)
             )
-            for ((viewCode, tabViewId) in tabs) {
+            for ((viewCode, tabViewId, tabTitleRes) in tabs) {
                 val isActive = viewCode == selectedView
+                views.setTextViewText(tabViewId, localizedContext.getString(tabTitleRes))
                 views.setInt(
                     tabViewId,
                     "setBackgroundResource",

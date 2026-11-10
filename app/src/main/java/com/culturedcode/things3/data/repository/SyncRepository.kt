@@ -9,6 +9,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.room.withTransaction
 import com.culturedcode.things3.data.local.ThingsDatabase
+import com.culturedcode.things3.data.local.entity.TaskEntity
+import com.culturedcode.things3.data.notifications.ReminderScheduler
 import com.culturedcode.things3.data.remote.dto.AreaFirestoreDto
 import com.culturedcode.things3.data.remote.dto.ChecklistItemFirestoreDto
 import com.culturedcode.things3.data.remote.dto.CloudDeltaBatchPayload
@@ -17,6 +19,7 @@ import com.culturedcode.things3.data.remote.dto.HeadingFirestoreDto
 import com.culturedcode.things3.data.remote.dto.ProjectFirestoreDto
 import com.culturedcode.things3.data.remote.dto.TagFirestoreDto
 import com.culturedcode.things3.data.remote.dto.TaskFirestoreDto
+import com.culturedcode.things3.domain.model.TaskStatus
 import com.culturedcode.things3.domain.util.runCatchingCancellable
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -85,8 +88,19 @@ class SyncRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val database: ThingsDatabase,
     private val firestore: FirebaseFirestore,
-    private val firebaseAuth: FirebaseAuth
+    private val firebaseAuth: FirebaseAuth,
+    private val reminderScheduler: ReminderScheduler
 ) {
+    private fun syncTaskReminderSchedule(entity: TaskEntity) {
+        val now = System.currentTimeMillis()
+        if (!entity.isDeleted && entity.status == TaskStatus.OPEN &&
+            entity.reminderTime != null && entity.reminderTime > now
+        ) {
+            reminderScheduler.scheduleExactReminder(entity.id, entity.title, entity.reminderTime)
+        } else {
+            reminderScheduler.cancelReminder(entity.id)
+        }
+    }
     private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
         Log.w("SyncRepository", "Unhandled background sync exception", throwable)
     }
@@ -294,10 +308,17 @@ class SyncRepository @Inject constructor(
             if (!isLocalOnlyDbModeEnabled()) {
                 if (isLiveFirebaseConfigured()) {
                     pullDeltaRecordsFromFirestore(userId, 0L)
-                    pushDirtyRecordsToFirestore(userId)
                 }
                 pullDeltaRecordsFromBuiltInCloud(userId, channelTopic, 0L)
-                pushDirtyRecordsToBuiltInCloud(userId, channelTopic)
+                val cloudOk = pushDirtyRecordsToBuiltInCloud(userId, channelTopic, markAsSynced = false)
+                val fbOk = if (isLiveFirebaseConfigured()) {
+                    runCatchingCancellable { pushDirtyRecordsToFirestore(userId, markAsSynced = true) }.isSuccess
+                } else {
+                    false
+                }
+                if (cloudOk && !fbOk) {
+                    pushDirtyRecordsToBuiltInCloud(userId, channelTopic, markAsSynced = true)
+                }
                 saveLastSyncTimestamp(userId, System.currentTimeMillis())
                 _syncStatus.value = CloudSyncStatus.SYNCED
                 startRealtimeMultiDeviceSync(userId, channelTopic)
@@ -354,10 +375,17 @@ class SyncRepository @Inject constructor(
                 var maxPulled = 0L
                 if (isLiveFirebaseConfigured()) {
                     maxPulled = maxOf(maxPulled, pullDeltaRecordsFromFirestore(userId, 0L))
-                    pushDirtyRecordsToFirestore(userId)
                 }
                 maxPulled = maxOf(maxPulled, pullDeltaRecordsFromBuiltInCloud(userId, channelTopic, 0L))
-                pushDirtyRecordsToBuiltInCloud(userId, channelTopic)
+                val cloudOk = pushDirtyRecordsToBuiltInCloud(userId, channelTopic, markAsSynced = false)
+                val fbOk = if (isLiveFirebaseConfigured()) {
+                    runCatchingCancellable { pushDirtyRecordsToFirestore(userId, markAsSynced = true) }.isSuccess
+                } else {
+                    false
+                }
+                if (cloudOk && !fbOk) {
+                    pushDirtyRecordsToBuiltInCloud(userId, channelTopic, markAsSynced = true)
+                }
                 saveLastSyncTimestamp(userId, maxOf(maxPulled, System.currentTimeMillis()))
                 _syncStatus.value = CloudSyncStatus.SYNCED
                 startRealtimeMultiDeviceSync(userId, channelTopic)
@@ -425,10 +453,17 @@ class SyncRepository @Inject constructor(
             if (!isLocalOnlyDbModeEnabled()) {
                 if (isLiveFirebaseConfigured()) {
                     pullDeltaRecordsFromFirestore(uid, 0L)
-                    pushDirtyRecordsToFirestore(uid)
                 }
                 pullDeltaRecordsFromBuiltInCloud(uid, channelTopic, 0L)
-                pushDirtyRecordsToBuiltInCloud(uid, channelTopic)
+                val cloudOk = pushDirtyRecordsToBuiltInCloud(uid, channelTopic, markAsSynced = false)
+                val fbOk = if (isLiveFirebaseConfigured()) {
+                    runCatchingCancellable { pushDirtyRecordsToFirestore(uid, markAsSynced = true) }.isSuccess
+                } else {
+                    false
+                }
+                if (cloudOk && !fbOk) {
+                    pushDirtyRecordsToBuiltInCloud(uid, channelTopic, markAsSynced = true)
+                }
                 saveLastSyncTimestamp(uid, System.currentTimeMillis())
 
                 _syncStatus.value = CloudSyncStatus.SYNCED
@@ -500,12 +535,18 @@ class SyncRepository @Inject constructor(
                 val liveFb = isLiveFirebaseConfigured()
                 var anyTransportSucceeded = false
 
-                if (liveFb) {
-                    val fbPushOk = runCatchingCancellable { pushDirtyRecordsToFirestore(userId) }.isSuccess
-                    if (fbPushOk) anyTransportSucceeded = true
-                }
-                val cloudPushOk = pushDirtyRecordsToBuiltInCloud(userId, channelTopic)
+                // Push to secondary transport first without clearing isDirty so Firestore also sees the dirty snapshot
+                val cloudPushOk = pushDirtyRecordsToBuiltInCloud(userId, channelTopic, markAsSynced = !liveFb)
                 if (cloudPushOk) anyTransportSucceeded = true
+
+                if (liveFb) {
+                    val fbPushOk = runCatchingCancellable { pushDirtyRecordsToFirestore(userId, markAsSynced = true) }.isSuccess
+                    if (fbPushOk) {
+                        anyTransportSucceeded = true
+                    } else if (cloudPushOk) {
+                        pushDirtyRecordsToBuiltInCloud(userId, channelTopic, markAsSynced = true)
+                    }
+                }
 
                 val lastSync = getLastSyncTimestamp(userId)
                 var maxObservedTimestamp = lastSync
@@ -556,7 +597,11 @@ class SyncRepository @Inject constructor(
         }.getOrDefault(false)
     }
 
-    private suspend fun pushDirtyRecordsToBuiltInCloud(userId: String, channelTopic: String): Boolean {
+    private suspend fun pushDirtyRecordsToBuiltInCloud(
+        userId: String,
+        channelTopic: String,
+        markAsSynced: Boolean = true
+    ): Boolean {
         if (isLocalOnlyDbModeEnabled()) return false
 
         val dirtyAreas = database.areaDao().getDirtyAreas()
@@ -649,13 +694,25 @@ class SyncRepository @Inject constructor(
             }
         }
 
-        if (allSucceeded) {
-            if (dirtyAreas.isNotEmpty()) database.areaDao().markSyncedSafe(dirtyAreas.map { it.id })
-            if (dirtyProjects.isNotEmpty()) database.projectDao().markSyncedSafe(dirtyProjects.map { it.id })
-            if (dirtyHeadings.isNotEmpty()) database.headingDao().markSyncedSafe(dirtyHeadings.map { it.id })
-            if (dirtyTasks.isNotEmpty()) database.taskDao().markSyncedSafe(dirtyTasks.map { it.id })
-            if (dirtyChecklists.isNotEmpty()) database.checklistDao().markSyncedSafe(dirtyChecklists.map { it.id })
-            if (dirtyTags.isNotEmpty()) database.tagDao().markSyncedSafe(dirtyTags.map { it.id })
+        if (allSucceeded && markAsSynced) {
+            if (dirtyAreas.isNotEmpty()) {
+                database.areaDao().markSyncedSafe(dirtyAreas.map { it.id }, dirtyAreas.maxOf { it.updatedAt })
+            }
+            if (dirtyProjects.isNotEmpty()) {
+                database.projectDao().markSyncedSafe(dirtyProjects.map { it.id }, dirtyProjects.maxOf { it.updatedAt })
+            }
+            if (dirtyHeadings.isNotEmpty()) {
+                database.headingDao().markSyncedSafe(dirtyHeadings.map { it.id }, dirtyHeadings.maxOf { it.updatedAt })
+            }
+            if (dirtyTasks.isNotEmpty()) {
+                database.taskDao().markSyncedSafe(dirtyTasks.map { it.id }, dirtyTasks.maxOf { it.updatedAt })
+            }
+            if (dirtyChecklists.isNotEmpty()) {
+                database.checklistDao().markSyncedSafe(dirtyChecklists.map { it.id }, dirtyChecklists.maxOf { it.updatedAt })
+            }
+            if (dirtyTags.isNotEmpty()) {
+                database.tagDao().markSyncedSafe(dirtyTags.map { it.id }, dirtyTags.maxOf { it.updatedAt })
+            }
         }
         return allSucceeded
     }
@@ -686,6 +743,7 @@ class SyncRepository @Inject constructor(
         currentMaxTimestamp: Long
     ): Long {
         var maxTimestamp = currentMaxTimestamp
+        val updatedTasks = mutableListOf<TaskEntity>()
 
         database.withTransaction {
             for (dto in batch.tags) {
@@ -728,7 +786,9 @@ class SyncRepository @Inject constructor(
                 if (dto.id.isBlank()) continue
                 val local = database.taskDao().getById(dto.id)
                 if (local == null || dto.updatedAt >= local.updatedAt) {
-                    database.taskDao().upsertTaskWithTags(dto.toEntity(), dto.tagIds)
+                    val entity = dto.toEntity()
+                    database.taskDao().upsertTaskWithTags(entity, dto.tagIds)
+                    updatedTasks += entity
                 }
                 if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
             }
@@ -742,6 +802,8 @@ class SyncRepository @Inject constructor(
                 if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
             }
         }
+
+        updatedTasks.forEach { syncTaskReminderSchedule(it) }
 
         if (batch.batchTimestamp > maxTimestamp) {
             maxTimestamp = batch.batchTimestamp
@@ -863,9 +925,10 @@ class SyncRepository @Inject constructor(
         if (isLocalOnlyDbModeEnabled()) return
         detachRealtimeDeltaListeners()
 
+        val pollIntervalMs = if (isLiveFirebaseConfigured()) 30_000L else 15_000L
         realtimeCloudPollJob = scope.launch {
             while (isActive) {
-                delay(8000L)
+                delay(pollIntervalMs)
                 if (isLocalOnlyDbModeEnabled()) break
                 syncBidirectionalDeltas()
             }
@@ -917,7 +980,7 @@ class SyncRepository @Inject constructor(
         }
     }
 
-    suspend fun pushDirtyRecordsToFirestore(userId: String) {
+    suspend fun pushDirtyRecordsToFirestore(userId: String, markAsSynced: Boolean = true) {
         if (isLocalOnlyDbModeEnabled()) return
         val userDoc = firestore.collection("users").document(userId)
 
@@ -950,12 +1013,26 @@ class SyncRepository @Inject constructor(
             batch.commit().await()
         }
 
-        if (dirtyAreas.isNotEmpty()) database.areaDao().markSyncedSafe(dirtyAreas.map { it.id })
-        if (dirtyProjects.isNotEmpty()) database.projectDao().markSyncedSafe(dirtyProjects.map { it.id })
-        if (dirtyHeadings.isNotEmpty()) database.headingDao().markSyncedSafe(dirtyHeadings.map { it.id })
-        if (dirtyTasks.isNotEmpty()) database.taskDao().markSyncedSafe(dirtyTasks.map { it.id })
-        if (dirtyChecklists.isNotEmpty()) database.checklistDao().markSyncedSafe(dirtyChecklists.map { it.id })
-        if (dirtyTags.isNotEmpty()) database.tagDao().markSyncedSafe(dirtyTags.map { it.id })
+        if (markAsSynced) {
+            if (dirtyAreas.isNotEmpty()) {
+                database.areaDao().markSyncedSafe(dirtyAreas.map { it.id }, dirtyAreas.maxOf { it.updatedAt })
+            }
+            if (dirtyProjects.isNotEmpty()) {
+                database.projectDao().markSyncedSafe(dirtyProjects.map { it.id }, dirtyProjects.maxOf { it.updatedAt })
+            }
+            if (dirtyHeadings.isNotEmpty()) {
+                database.headingDao().markSyncedSafe(dirtyHeadings.map { it.id }, dirtyHeadings.maxOf { it.updatedAt })
+            }
+            if (dirtyTasks.isNotEmpty()) {
+                database.taskDao().markSyncedSafe(dirtyTasks.map { it.id }, dirtyTasks.maxOf { it.updatedAt })
+            }
+            if (dirtyChecklists.isNotEmpty()) {
+                database.checklistDao().markSyncedSafe(dirtyChecklists.map { it.id }, dirtyChecklists.maxOf { it.updatedAt })
+            }
+            if (dirtyTags.isNotEmpty()) {
+                database.tagDao().markSyncedSafe(dirtyTags.map { it.id }, dirtyTags.maxOf { it.updatedAt })
+            }
+        }
     }
 
     suspend fun pullDeltaRecordsFromFirestore(userId: String, lastSyncTimestamp: Long): Long {
@@ -1028,7 +1105,9 @@ class SyncRepository @Inject constructor(
             if (dto.id.isBlank()) continue
             val local = database.taskDao().getById(dto.id)
             if (local == null || dto.updatedAt >= local.updatedAt) {
-                database.taskDao().upsertTaskWithTags(dto.toEntity(), dto.tagIds)
+                val entity = dto.toEntity()
+                database.taskDao().upsertTaskWithTags(entity, dto.tagIds)
+                syncTaskReminderSchedule(entity)
             }
             if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
         }
@@ -1073,7 +1152,9 @@ class SyncRepository @Inject constructor(
                                     if (dto.id.isNotBlank()) {
                                         val local = database.taskDao().getById(dto.id)
                                         if (local == null || dto.updatedAt >= local.updatedAt) {
-                                            database.taskDao().upsertTaskWithTags(dto.toEntity(), dto.tagIds)
+                                            val entity = dto.toEntity()
+                                            database.taskDao().upsertTaskWithTags(entity, dto.tagIds)
+                                            syncTaskReminderSchedule(entity)
                                             saveLastSyncTimestamp(userId, maxOf(getLastSyncTimestamp(userId), dto.updatedAt))
                                         }
                                     }

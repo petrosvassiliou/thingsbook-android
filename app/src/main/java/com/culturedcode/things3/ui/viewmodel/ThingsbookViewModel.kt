@@ -298,18 +298,7 @@ class ThingsbookViewModel @Inject constructor(
     val activeProjectTasks: StateFlow<List<TaskItem>> = _navigationTarget
         .flatMapLatest { target ->
             if (target is ActiveNavigationTarget.ProjectDetail) {
-                combine(
-                    todayDaytimeTasks,
-                    thisEveningTasks,
-                    upcomingTasks,
-                    anytimeTasks,
-                    somedayTasks
-                ) { today, evening, upcoming, anytime, someday ->
-                    (today + evening + upcoming + anytime + someday)
-                        .distinctBy { it.id }
-                        .filter { it.projectId == target.projectId }
-                        .sortedBy { it.sortOrder }
-                }
+                repository.observeTasksForProject(target.projectId)
             } else {
                 flowOf(emptyList())
             }
@@ -321,18 +310,7 @@ class ThingsbookViewModel @Inject constructor(
     val activeAreaTasks: StateFlow<List<TaskItem>> = _navigationTarget
         .flatMapLatest { target ->
             if (target is ActiveNavigationTarget.AreaDetail) {
-                combine(
-                    todayDaytimeTasks,
-                    thisEveningTasks,
-                    upcomingTasks,
-                    anytimeTasks,
-                    somedayTasks
-                ) { today, evening, upcoming, anytime, someday ->
-                    (today + evening + upcoming + anytime + someday)
-                        .distinctBy { it.id }
-                        .filter { it.areaId == target.areaId && it.projectId == null }
-                        .sortedBy { it.sortOrder }
-                }
+                repository.observeTasksForArea(target.areaId)
             } else {
                 flowOf(emptyList())
             }
@@ -357,10 +335,28 @@ class ThingsbookViewModel @Inject constructor(
 
     fun selectSmartView(viewType: SmartViewType) {
         _expandedTaskId.value = null
+        clearTaskSelection()
         _navigationTarget.value = ActiveNavigationTarget.SmartView(viewType)
     }
 
     fun handleWidgetLaunchIntent(viewName: String?, taskId: String?, quickAdd: Boolean) {
+        clearTaskSelection()
+        if (viewName == null && !taskId.isNullOrBlank()) {
+            _expandedTaskId.value = taskId
+            safeVmScope.launch {
+                val entity = repository.getTaskEntityById(taskId)
+                val resolvedView = when (entity?.scheduleState) {
+                    ScheduleState.INBOX -> SmartViewType.INBOX
+                    ScheduleState.UPCOMING -> SmartViewType.UPCOMING
+                    ScheduleState.ANYTIME -> SmartViewType.ANYTIME
+                    ScheduleState.SOMEDAY -> SmartViewType.SOMEDAY
+                    else -> SmartViewType.TODAY
+                }
+                _navigationTarget.value = ActiveNavigationTarget.SmartView(resolvedView)
+                _expandedTaskId.value = taskId
+            }
+            return
+        }
         val targetView = when (viewName?.uppercase(Locale.ROOT)) {
             "INBOX" -> SmartViewType.INBOX
             "UPCOMING" -> SmartViewType.UPCOMING
@@ -378,11 +374,13 @@ class ThingsbookViewModel @Inject constructor(
 
     fun selectProject(projectId: String) {
         _expandedTaskId.value = null
+        clearTaskSelection()
         _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(projectId)
     }
 
     fun selectArea(areaId: String) {
         _expandedTaskId.value = null
+        clearTaskSelection()
         _navigationTarget.value = ActiveNavigationTarget.AreaDetail(areaId)
     }
 
@@ -438,6 +436,7 @@ class ThingsbookViewModel @Inject constructor(
                 LocaleListCompat.forLanguageTags(languageTag)
             }
             AppCompatDelegate.setApplicationLocales(localeList)
+            com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.refreshAllWidgets(appContext)
         }.onFailure { err ->
             Log.w(TAG, "Failed switching language to '$languageTag'", err)
             _uiErrorMessage.value = err.localizedMessage ?: "Sprache konnte nicht geändert werden."
@@ -447,8 +446,13 @@ class ThingsbookViewModel @Inject constructor(
     fun updateTaskStatus(taskId: String, status: TaskStatus) {
         safeVmScope.launch {
             repository.updateTaskStatus(taskId, status)
-            if (status != TaskStatus.OPEN && _expandedTaskId.value == taskId) {
-                _expandedTaskId.value = null
+            if (status != TaskStatus.OPEN) {
+                if (_expandedTaskId.value == taskId) {
+                    _expandedTaskId.value = null
+                }
+                if (taskId in _selectedTaskIds.value) {
+                    _selectedTaskIds.value = _selectedTaskIds.value - taskId
+                }
             }
         }
     }
@@ -550,6 +554,9 @@ class ThingsbookViewModel @Inject constructor(
             if (_expandedTaskId.value == taskId) {
                 _expandedTaskId.value = null
             }
+            if (taskId in _selectedTaskIds.value) {
+                _selectedTaskIds.value = _selectedTaskIds.value - taskId
+            }
             repository.softDeleteTask(taskId)
         }
     }
@@ -570,17 +577,20 @@ class ThingsbookViewModel @Inject constructor(
 
             val zone = ZoneId.systemDefault()
             val todayEpoch = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
+            val tomorrowEpoch = LocalDate.now(zone).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
 
             val target = _navigationTarget.value
             val (scheduleState, whenDate, projectId) = when (target) {
                 is ActiveNavigationTarget.SmartView -> when (target.type) {
                     SmartViewType.INBOX -> Triple(ScheduleState.INBOX, null, null)
                     SmartViewType.TODAY -> Triple(ScheduleState.TODAY, todayEpoch, null)
-                    SmartViewType.UPCOMING -> Triple(
-                        ScheduleState.UPCOMING,
-                        LocalDate.now(zone).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli(),
-                        null
-                    )
+                    SmartViewType.UPCOMING -> {
+                        val neighbor = currentList.getOrNull(dropIndex) ?: currentList.getOrNull(dropIndex - 1)
+                        val neighborEpoch = (neighbor?.whenDate ?: neighbor?.deadline)
+                            ?.takeIf { it >= tomorrowEpoch }
+                            ?: tomorrowEpoch
+                        Triple(ScheduleState.UPCOMING, neighborEpoch, null)
+                    }
                     SmartViewType.ANYTIME -> Triple(ScheduleState.ANYTIME, null, null)
                     SmartViewType.SOMEDAY -> Triple(ScheduleState.SOMEDAY, null, null)
                     SmartViewType.LOGBOOK -> Triple(ScheduleState.TODAY, todayEpoch, null)
@@ -1847,6 +1857,7 @@ class ThingsbookViewModel @Inject constructor(
                     _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
 
                     restoredPrefs.sidebarVisible?.let { setSidebarVisible(it) }
+                    restoredPrefs.languageTag?.let { switchAppLanguage(it) }
                     if (
                         restoredPrefs.dailyDigestEnabled != null &&
                         restoredPrefs.dailyDigestHour != null &&

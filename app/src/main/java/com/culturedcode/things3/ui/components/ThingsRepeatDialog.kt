@@ -40,20 +40,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.culturedcode.things3.R
 import com.culturedcode.things3.domain.model.RecurrenceMode
 import com.culturedcode.things3.domain.model.RecurrenceRule
 import com.culturedcode.things3.domain.model.RecurrenceUnit
 import com.culturedcode.things3.ui.theme.ThingsTheme
+import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
 import java.util.Locale
 
 @Composable
@@ -63,6 +68,7 @@ fun ThingsRepeatBadge(
     onClick: (() -> Unit)? = null
 ) {
     val colors = ThingsTheme.colors
+    val locale = LocalConfiguration.current.locales.get(0) ?: Locale.getDefault()
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(6.dp))
@@ -74,12 +80,12 @@ fun ThingsRepeatBadge(
     ) {
         Icon(
             imageVector = Icons.Outlined.Repeat,
-            contentDescription = "Wiederholen",
+            contentDescription = stringResource(R.string.action_repeat),
             tint = colors.thingsBlue,
             modifier = Modifier.size(13.dp)
         )
         Text(
-            text = rule.formatShortLabel(),
+            text = rule.formatShortLabel(locale),
             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
             color = colors.thingsBlue
         )
@@ -181,7 +187,7 @@ fun ThingsRepeatDialog(
                             modifier = Modifier.size(16.dp)
                         )
                         Text(
-                            text = "Wiederholen (Things-Modus)",
+                            text = stringResource(R.string.repeat_dialog_title),
                             style = MaterialTheme.typography.labelLarge.copy(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp
@@ -195,7 +201,7 @@ fun ThingsRepeatDialog(
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Close,
-                            contentDescription = null,
+                            contentDescription = stringResource(R.string.action_cancel),
                             tint = colors.secondaryText,
                             modifier = Modifier.size(15.dp)
                         )
@@ -227,7 +233,7 @@ fun ThingsRepeatDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Nach Zeitplan",
+                            text = stringResource(R.string.repeat_mode_fixed),
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 11.sp
@@ -250,7 +256,7 @@ fun ThingsRepeatDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Nach Erledigung",
+                            text = stringResource(R.string.repeat_mode_after),
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 11.sp
@@ -264,9 +270,9 @@ fun ThingsRepeatDialog(
 
                 Text(
                     text = if (mode == RecurrenceMode.FIXED_SCHEDULE) {
-                        "Fester Kalender-Rhythmus (wie „Regularly“ in Things for Mac)."
+                        stringResource(R.string.repeat_mode_fixed_desc)
                     } else {
-                        "Nächste Aufgabe wird erst erstellt, nachdem diese abgehakt wurde."
+                        stringResource(R.string.repeat_mode_after_desc)
                     },
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
                     color = colors.secondaryText
@@ -280,10 +286,10 @@ fun ThingsRepeatDialog(
                     horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     val units = listOf(
-                        RecurrenceUnit.DAYS to "Tage",
-                        RecurrenceUnit.WEEKS to "Wochen",
-                        RecurrenceUnit.MONTHS to "Monate",
-                        RecurrenceUnit.YEARS to "Jahre"
+                        RecurrenceUnit.DAYS to stringResource(R.string.repeat_unit_days),
+                        RecurrenceUnit.WEEKS to stringResource(R.string.repeat_unit_weeks),
+                        RecurrenceUnit.MONTHS to stringResource(R.string.repeat_unit_months),
+                        RecurrenceUnit.YEARS to stringResource(R.string.repeat_unit_years)
                     )
                     units.forEach { (u, label) ->
                         val selected = unit == u
@@ -328,18 +334,8 @@ fun ThingsRepeatDialog(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    val unitWord = when (unit) {
-                        RecurrenceUnit.DAYS -> if (interval == 1) "Tag" else "Tage"
-                        RecurrenceUnit.WEEKS -> if (interval == 1) "Woche" else "Wochen"
-                        RecurrenceUnit.MONTHS -> if (interval == 1) "Monat" else "Monate"
-                        RecurrenceUnit.YEARS -> if (interval == 1) "Jahr" else "Jahre"
-                    }
                     Text(
-                        text = if (mode == RecurrenceMode.AFTER_COMPLETION) {
-                            "$interval $unitWord nach Erledigung"
-                        } else {
-                            "Alle $interval $unitWord"
-                        },
+                        text = previewRule.formatShortLabel(locale),
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 12.sp
@@ -403,7 +399,7 @@ fun ThingsRepeatDialog(
                 if (mode == RecurrenceMode.FIXED_SCHEDULE && unit == RecurrenceUnit.WEEKS) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "An diesen Wochentagen:",
+                        text = stringResource(R.string.repeat_weekdays_label),
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                         color = colors.secondaryText
                     )
@@ -412,15 +408,15 @@ fun ThingsRepeatDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        val weekdays = listOf(
-                            1 to "Mo",
-                            2 to "Di",
-                            3 to "Mi",
-                            4 to "Do",
-                            5 to "Fr",
-                            6 to "Sa",
-                            7 to "So"
-                        )
+                        val weekdays = (1..7).map { dow ->
+                            val shortName = runCatching {
+                                DayOfWeek.of(dow)
+                                    .getDisplayName(TextStyle.SHORT, locale)
+                                    .removeSuffix(".")
+                                    .take(2)
+                            }.getOrDefault(dow.toString())
+                            dow to shortName
+                        }
                         weekdays.forEach { (dow, label) ->
                             val isSelected = dow in selectedDaysOfWeek
                             Box(
@@ -455,7 +451,7 @@ fun ThingsRepeatDialog(
                 if (mode == RecurrenceMode.FIXED_SCHEDULE && unit == RecurrenceUnit.MONTHS) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Tag des Monats:",
+                        text = stringResource(R.string.repeat_month_day_label),
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                         color = colors.secondaryText
                     )
@@ -466,10 +462,11 @@ fun ThingsRepeatDialog(
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
+                        val lastDayText = stringResource(R.string.repeat_last_day)
                         val monthDays = listOf(1, 5, 10, 15, 20, 25, -1)
                         monthDays.forEach { dom ->
                             val isSelected = selectedDayOfMonth == dom
-                            val label = if (dom == -1) "Letzter Tag" else "$dom."
+                            val label = if (dom == -1) lastDayText else "$dom."
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(7.dp))
@@ -503,7 +500,7 @@ fun ThingsRepeatDialog(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "Endet:",
+                        text = stringResource(R.string.repeat_ends_label),
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                         color = colors.secondaryText
                     )
@@ -520,7 +517,7 @@ fun ThingsRepeatDialog(
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = "Nie",
+                                text = stringResource(R.string.repeat_ends_never),
                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                                 color = if (neverEnds) Color.White else colors.primaryText
                             )
@@ -531,7 +528,7 @@ fun ThingsRepeatDialog(
                                 Instant.ofEpochMilli(epoch).atZone(zone).toLocalDate()
                                     .format(DateTimeFormatter.ofPattern("d. MMM yyyy", locale))
                             }.getOrNull()
-                        } ?: "Datum wählen…"
+                        } ?: stringResource(R.string.repeat_ends_pick_date)
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
@@ -576,7 +573,7 @@ fun ThingsRepeatDialog(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "Aus",
+                                text = stringResource(R.string.repeat_off_btn),
                                 style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
                                 color = colors.deadlineUrgentRed
                             )
@@ -597,7 +594,7 @@ fun ThingsRepeatDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Speichern (${previewRule.formatShortLabel()})",
+                            text = "${stringResource(R.string.action_save)} (${previewRule.formatShortLabel(locale)})",
                             style = MaterialTheme.typography.labelMedium.copy(
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 11.5.sp
@@ -622,3 +619,4 @@ fun ThingsRepeatDialog(
         )
     }
 }
+

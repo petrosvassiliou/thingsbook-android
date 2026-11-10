@@ -49,12 +49,12 @@ interface AreaDao {
     @Upsert
     suspend fun upsertAll(areas: List<AreaEntity>)
 
-    @Query("UPDATE areas SET isDirty = 0 WHERE id IN (:ids)")
-    suspend fun markSynced(ids: List<String>)
+    @Query("UPDATE areas SET isDirty = 0 WHERE id IN (:ids) AND updatedAt <= :maxUpdatedAt")
+    suspend fun markSynced(ids: List<String>, maxUpdatedAt: Long = Long.MAX_VALUE)
 
-    suspend fun markSyncedSafe(ids: List<String>) {
+    suspend fun markSyncedSafe(ids: List<String>, maxUpdatedAt: Long = Long.MAX_VALUE) {
         ids.chunked(500).forEach { chunk ->
-            if (chunk.isNotEmpty()) markSynced(chunk)
+            if (chunk.isNotEmpty()) markSynced(chunk, maxUpdatedAt)
         }
     }
 
@@ -128,12 +128,12 @@ interface ProjectDao {
     @Query("UPDATE projects SET areaId = NULL, updatedAt = :now, isDirty = 1 WHERE areaId = :areaId")
     suspend fun clearAreaFromProjects(areaId: String, now: Long)
 
-    @Query("UPDATE projects SET isDirty = 0 WHERE id IN (:ids)")
-    suspend fun markSynced(ids: List<String>)
+    @Query("UPDATE projects SET isDirty = 0 WHERE id IN (:ids) AND updatedAt <= :maxUpdatedAt")
+    suspend fun markSynced(ids: List<String>, maxUpdatedAt: Long = Long.MAX_VALUE)
 
-    suspend fun markSyncedSafe(ids: List<String>) {
+    suspend fun markSyncedSafe(ids: List<String>, maxUpdatedAt: Long = Long.MAX_VALUE) {
         ids.chunked(500).forEach { chunk ->
-            if (chunk.isNotEmpty()) markSynced(chunk)
+            if (chunk.isNotEmpty()) markSynced(chunk, maxUpdatedAt)
         }
     }
 
@@ -185,14 +185,17 @@ interface HeadingDao {
     @Upsert
     suspend fun upsertAll(headings: List<HeadingEntity>)
 
-    @Query("UPDATE headings SET isDirty = 0 WHERE id IN (:ids)")
-    suspend fun markSynced(ids: List<String>)
+    @Query("UPDATE headings SET isDirty = 0 WHERE id IN (:ids) AND updatedAt <= :maxUpdatedAt")
+    suspend fun markSynced(ids: List<String>, maxUpdatedAt: Long = Long.MAX_VALUE)
 
-    suspend fun markSyncedSafe(ids: List<String>) {
+    suspend fun markSyncedSafe(ids: List<String>, maxUpdatedAt: Long = Long.MAX_VALUE) {
         ids.chunked(500).forEach { chunk ->
-            if (chunk.isNotEmpty()) markSynced(chunk)
+            if (chunk.isNotEmpty()) markSynced(chunk, maxUpdatedAt)
         }
     }
+
+    @Query("UPDATE headings SET isDeleted = 1, updatedAt = :now, isDirty = 1 WHERE projectId = :projectId AND isDeleted = 0")
+    suspend fun softDeleteHeadingsForProject(projectId: String, now: Long)
 
     @Query("SELECT COUNT(*) FROM tasks WHERE headingId = :headingId AND isDeleted = 0")
     suspend fun countActiveTasksInHeading(headingId: String): Int
@@ -228,7 +231,7 @@ interface TaskDao {
 
     /**
      * Today Smart View (Daytime section): Open tasks scheduled for TODAY, or with whenDate <= endOfToday,
-     * or with deadline <= endOfToday, excluding THIS_EVENING.
+     * or with deadline <= endOfToday, excluding THIS_EVENING and tasks in completed/deleted projects.
      */
     @Transaction
     @Query(
@@ -237,6 +240,7 @@ interface TaskDao {
         WHERE isDeleted = 0
           AND status = 'OPEN'
           AND scheduleState != 'THIS_EVENING'
+          AND (projectId IS NULL OR NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = tasks.projectId AND (p.isDeleted = 1 OR p.status != 'ACTIVE')))
           AND (
               scheduleState = 'TODAY'
               OR (whenDate IS NOT NULL AND whenDate <= :endOfTodayMillis)
@@ -257,13 +261,15 @@ interface TaskDao {
         WHERE isDeleted = 0
           AND status = 'OPEN'
           AND scheduleState = 'THIS_EVENING'
+          AND (projectId IS NULL OR NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = tasks.projectId AND (p.isDeleted = 1 OR p.status != 'ACTIVE')))
         ORDER BY sortOrder ASC
         """
     )
     fun observeThisEveningTasks(): Flow<List<TaskWithDetails>>
 
     /**
-     * Upcoming Smart View: Chronological timeline of future scheduled tasks, deadlines, and recurring templates.
+     * Upcoming Smart View: Chronological timeline of future scheduled tasks, deadlines, and recurring templates,
+     * excluding tasks already active in Today or This Evening.
      */
     @Transaction
     @Query(
@@ -271,6 +277,10 @@ interface TaskDao {
         SELECT * FROM tasks
         WHERE isDeleted = 0
           AND status = 'OPEN'
+          AND scheduleState NOT IN ('TODAY', 'THIS_EVENING')
+          AND (whenDate IS NULL OR whenDate > :endOfTodayMillis)
+          AND (deadline IS NULL OR deadline > :endOfTodayMillis)
+          AND (projectId IS NULL OR NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = tasks.projectId AND (p.isDeleted = 1 OR p.status != 'ACTIVE')))
           AND (
               scheduleState = 'UPCOMING'
               OR (whenDate IS NOT NULL AND whenDate > :endOfTodayMillis)
@@ -294,6 +304,7 @@ interface TaskDao {
           AND scheduleState = 'ANYTIME'
           AND whenDate IS NULL
           AND recurrenceRuleJson IS NULL
+          AND (projectId IS NULL OR NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = tasks.projectId AND (p.isDeleted = 1 OR p.status != 'ACTIVE')))
         ORDER BY sortOrder ASC
         """
     )
@@ -309,6 +320,7 @@ interface TaskDao {
         WHERE isDeleted = 0
           AND status = 'OPEN'
           AND scheduleState = 'SOMEDAY'
+          AND (projectId IS NULL OR NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = tasks.projectId AND (p.isDeleted = 1 OR p.status != 'ACTIVE')))
         ORDER BY sortOrder ASC
         """
     )
@@ -329,11 +341,11 @@ interface TaskDao {
     fun observeLogbookTasks(): Flow<List<TaskWithDetails>>
 
     @Transaction
-    @Query("SELECT * FROM tasks WHERE projectId = :projectId AND isDeleted = 0 ORDER BY sortOrder ASC")
+    @Query("SELECT * FROM tasks WHERE projectId = :projectId AND isDeleted = 0 AND status = 'OPEN' ORDER BY sortOrder ASC")
     fun observeTasksForProject(projectId: String): Flow<List<TaskWithDetails>>
 
     @Transaction
-    @Query("SELECT * FROM tasks WHERE areaId = :areaId AND projectId IS NULL AND isDeleted = 0 ORDER BY sortOrder ASC")
+    @Query("SELECT * FROM tasks WHERE areaId = :areaId AND projectId IS NULL AND isDeleted = 0 AND status = 'OPEN' ORDER BY sortOrder ASC")
     fun observeTasksForArea(areaId: String): Flow<List<TaskWithDetails>>
 
     /**
@@ -391,12 +403,12 @@ interface TaskDao {
     @Query("UPDATE tasks SET headingId = NULL, updatedAt = :now, isDirty = 1 WHERE headingId = :headingId")
     suspend fun clearHeadingFromTasks(headingId: String, now: Long)
 
-    @Query("UPDATE tasks SET isDirty = 0 WHERE id IN (:ids)")
-    suspend fun markSynced(ids: List<String>)
+    @Query("UPDATE tasks SET isDirty = 0 WHERE id IN (:ids) AND updatedAt <= :maxUpdatedAt")
+    suspend fun markSynced(ids: List<String>, maxUpdatedAt: Long = Long.MAX_VALUE)
 
-    suspend fun markSyncedSafe(ids: List<String>) {
+    suspend fun markSyncedSafe(ids: List<String>, maxUpdatedAt: Long = Long.MAX_VALUE) {
         ids.chunked(500).forEach { chunk ->
-            if (chunk.isNotEmpty()) markSynced(chunk)
+            if (chunk.isNotEmpty()) markSynced(chunk, maxUpdatedAt)
         }
     }
 
@@ -405,6 +417,7 @@ interface TaskDao {
         SELECT * FROM tasks
         WHERE isDeleted = 0
           AND status = 'OPEN'
+          AND (projectId IS NULL OR NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = tasks.projectId AND (p.isDeleted = 1 OR p.status != 'ACTIVE')))
           AND (
               scheduleState IN ('TODAY', 'THIS_EVENING')
               OR (whenDate IS NOT NULL AND whenDate <= :endOfTodayMillis)
@@ -498,12 +511,12 @@ interface ChecklistDao {
     @Upsert
     suspend fun upsertAll(items: List<ChecklistItemEntity>)
 
-    @Query("UPDATE checklist_items SET isDirty = 0 WHERE id IN (:ids)")
-    suspend fun markSynced(ids: List<String>)
+    @Query("UPDATE checklist_items SET isDirty = 0 WHERE id IN (:ids) AND updatedAt <= :maxUpdatedAt")
+    suspend fun markSynced(ids: List<String>, maxUpdatedAt: Long = Long.MAX_VALUE)
 
-    suspend fun markSyncedSafe(ids: List<String>) {
+    suspend fun markSyncedSafe(ids: List<String>, maxUpdatedAt: Long = Long.MAX_VALUE) {
         ids.chunked(500).forEach { chunk ->
-            if (chunk.isNotEmpty()) markSynced(chunk)
+            if (chunk.isNotEmpty()) markSynced(chunk, maxUpdatedAt)
         }
     }
 
@@ -543,12 +556,12 @@ interface TagDao {
     @Query("DELETE FROM project_tags WHERE tagId = :tagId")
     suspend fun deleteProjectTagCrossRefsForTag(tagId: String)
 
-    @Query("UPDATE tags SET isDirty = 0 WHERE id IN (:ids)")
-    suspend fun markSynced(ids: List<String>)
+    @Query("UPDATE tags SET isDirty = 0 WHERE id IN (:ids) AND updatedAt <= :maxUpdatedAt")
+    suspend fun markSynced(ids: List<String>, maxUpdatedAt: Long = Long.MAX_VALUE)
 
-    suspend fun markSyncedSafe(ids: List<String>) {
+    suspend fun markSyncedSafe(ids: List<String>, maxUpdatedAt: Long = Long.MAX_VALUE) {
         ids.chunked(500).forEach { chunk ->
-            if (chunk.isNotEmpty()) markSynced(chunk)
+            if (chunk.isNotEmpty()) markSynced(chunk, maxUpdatedAt)
         }
     }
 

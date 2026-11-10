@@ -950,36 +950,37 @@ private fun SwipeActionBackgroundLayer(
             if (isSwipingRightForWhen) {
                 Icon(
                     imageVector = Icons.Outlined.CalendarToday,
-                    contentDescription = "Wann?",
+                    contentDescription = stringResource(R.string.action_when),
                     tint = Color(0xFF1A1C1E),
                     modifier = Modifier.size(16.dp)
                 )
                 Text(
-                    text = "Wann?",
+                    text = "${stringResource(R.string.action_when)}?",
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                     color = Color(0xFF1A1C1E)
                 )
             } else if (isDeepSwipeLeftForDelete) {
                 Text(
-                    text = "Löschen",
+                    text = stringResource(R.string.action_delete),
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                     color = Color.White
                 )
                 Icon(
                     imageVector = Icons.Outlined.DeleteOutline,
-                    contentDescription = "Löschen",
+                    contentDescription = stringResource(R.string.action_delete),
                     tint = Color.White,
                     modifier = Modifier.size(17.dp)
                 )
             } else {
+                val selectLabel = if (isSelected) stringResource(R.string.swipe_deselect) else stringResource(R.string.swipe_select)
                 Text(
-                    text = if (isSelected) "Abwählen" else "Auswählen",
+                    text = selectLabel,
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                     color = Color.White
                 )
                 Icon(
                     imageVector = Icons.Outlined.MoreHoriz,
-                    contentDescription = "Auswählen",
+                    contentDescription = selectLabel,
                     tint = Color.White,
                     modifier = Modifier.size(18.dp)
                 )
@@ -1330,7 +1331,7 @@ private fun ExpandedTaskCardBody(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            ThingsHoverTooltip(text = "Aufgabe automatisch mit Gemini KI in konkrete Schritte zerlegen") {
+            ThingsHoverTooltip(text = stringResource(R.string.gemini_magic_breakdown_desc)) {
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
@@ -1369,7 +1370,7 @@ private fun ExpandedTaskCardBody(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(0.dp)
             ) {
-                ThingsHoverTooltip(text = "Wann? (Datum & Erinnerung)") {
+                ThingsHoverTooltip(text = stringResource(R.string.context_when_date_reminder)) {
                     IconButton(
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -1386,7 +1387,7 @@ private fun ExpandedTaskCardBody(
                     }
                 }
 
-                ThingsHoverTooltip(text = "Wiederholung konfigurieren") {
+                ThingsHoverTooltip(text = stringResource(R.string.context_configure_repeat)) {
                     IconButton(
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -1396,14 +1397,14 @@ private fun ExpandedTaskCardBody(
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Repeat,
-                            contentDescription = "Wiederholen",
+                            contentDescription = stringResource(R.string.action_repeat),
                             tint = if (task.recurrenceRule != null) colors.thingsBlue else colors.secondaryText,
                             modifier = Modifier.size(16.dp)
                         )
                     }
                 }
 
-                ThingsHoverTooltip(text = "Projekt / Bereich zuweisen") {
+                ThingsHoverTooltip(text = stringResource(R.string.move_dialog_title)) {
                     IconButton(
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -1413,7 +1414,7 @@ private fun ExpandedTaskCardBody(
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Folder,
-                            contentDescription = "Projekt / Bereich zuweisen",
+                            contentDescription = stringResource(R.string.move_dialog_title),
                             tint = if (task.projectId != null || task.areaId != null) colors.thingsBlue else colors.secondaryText,
                             modifier = Modifier.size(16.dp)
                         )
@@ -1546,7 +1547,7 @@ private fun TaskContextDropdownMenu(
             DropdownMenuItem(
                 text = {
                     Text(
-                        text = if (isSelected) "Auswahl aufheben" else "Aufgabe auswählen (Mehrfachauswahl)",
+                        text = if (isSelected) stringResource(R.string.context_deselect_task) else stringResource(R.string.context_select_task),
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.thingsBlue
                     )
@@ -1569,7 +1570,7 @@ private fun TaskContextDropdownMenu(
         DropdownMenuItem(
             text = {
                 Text(
-                    text = if (isCompleted) "Als offen markieren" else "Als erledigt markieren",
+                    text = if (isCompleted) stringResource(R.string.action_reopen_todo) else stringResource(R.string.action_complete),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.primaryText
                 )
@@ -1590,7 +1591,7 @@ private fun TaskContextDropdownMenu(
         DropdownMenuItem(
             text = {
                 Text(
-                    text = "Wann? (Datum & Erinnerung)",
+                    text = stringResource(R.string.context_when_date_reminder),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.primaryText
                 )
@@ -1611,7 +1612,7 @@ private fun TaskContextDropdownMenu(
         DropdownMenuItem(
             text = {
                 Text(
-                    text = "Fälligkeit / Deadline anpassen",
+                    text = stringResource(R.string.context_adjust_deadline),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.primaryText
                 )
@@ -1632,7 +1633,7 @@ private fun TaskContextDropdownMenu(
         DropdownMenuItem(
             text = {
                 Text(
-                    text = "Wiederholung konfigurieren",
+                    text = stringResource(R.string.context_configure_repeat),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.primaryText
                 )
@@ -1653,7 +1654,7 @@ private fun TaskContextDropdownMenu(
         DropdownMenuItem(
             text = {
                 Text(
-                    text = "Verschieben (Bereich / Projekt)",
+                    text = stringResource(R.string.move_dialog_title),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.primaryText
                 )
@@ -1674,7 +1675,7 @@ private fun TaskContextDropdownMenu(
         DropdownMenuItem(
             text = {
                 Text(
-                    text = "Tags zuweisen",
+                    text = stringResource(R.string.context_assign_tags),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.primaryText
                 )
@@ -1695,7 +1696,7 @@ private fun TaskContextDropdownMenu(
         DropdownMenuItem(
             text = {
                 Text(
-                    text = "In Teilaufgaben zerlegen (Gemini ✨)",
+                    text = "${stringResource(R.string.gemini_magic_breakdown)} (Gemini ✨)",
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.thingsBlue
                 )
@@ -1717,7 +1718,7 @@ private fun TaskContextDropdownMenu(
         DropdownMenuItem(
             text = {
                 Text(
-                    text = "Als abgebrochen markieren",
+                    text = stringResource(R.string.action_cancel_todo),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.secondaryText
                 )
@@ -1738,7 +1739,7 @@ private fun TaskContextDropdownMenu(
         DropdownMenuItem(
             text = {
                 Text(
-                    text = "Aufgabe löschen",
+                    text = stringResource(R.string.action_delete),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.deadlineUrgentRed
                 )

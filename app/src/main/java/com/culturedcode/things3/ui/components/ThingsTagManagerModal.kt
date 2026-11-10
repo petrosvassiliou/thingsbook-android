@@ -48,6 +48,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
@@ -131,6 +136,18 @@ fun ThingsTagManagerModal(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                val submitCreateTag = {
+                    if (newTagNameField.text.isNotBlank()) {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onCreateTag(
+                            newTagNameField.text.trim(),
+                            newTagShortcutField.text.trim().ifEmpty { null }
+                        )
+                        newTagNameField = TextFieldValue(text = "", selection = TextRange(0))
+                        newTagShortcutField = TextFieldValue(text = "", selection = TextRange(0))
+                    }
+                }
+
                 // Create New Tag Bar
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -150,21 +167,19 @@ fun ThingsTagManagerModal(
                         },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(
-                            onDone = {
-                                if (newTagNameField.text.isNotBlank()) {
-                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onCreateTag(
-                                        newTagNameField.text.trim(),
-                                        newTagShortcutField.text.trim().ifEmpty { null }
-                                    )
-                                    newTagNameField = TextFieldValue(text = "", selection = TextRange(0))
-                                    newTagShortcutField = TextFieldValue(text = "", selection = TextRange(0))
-                                }
-                            }
-                        ),
+                        keyboardActions = KeyboardActions(onDone = { submitCreateTag() }),
                         modifier = Modifier
                             .weight(1f)
+                            .onPreviewKeyEvent { keyEvent ->
+                                if (keyEvent.type == KeyEventType.KeyDown &&
+                                    (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
+                                ) {
+                                    submitCreateTag()
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
                             .onFocusChanged { focusState ->
                                 if (focusState.isFocused) {
                                     val txt = newTagNameField.text
@@ -187,8 +202,20 @@ fun ThingsTagManagerModal(
                             )
                         },
                         singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { submitCreateTag() }),
                         modifier = Modifier
                             .width(82.dp)
+                            .onPreviewKeyEvent { keyEvent ->
+                                if (keyEvent.type == KeyEventType.KeyDown &&
+                                    (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
+                                ) {
+                                    submitCreateTag()
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
                             .onFocusChanged { focusState ->
                                 if (focusState.isFocused) {
                                     val txt = newTagShortcutField.text
@@ -203,17 +230,7 @@ fun ThingsTagManagerModal(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Button(
-                    onClick = {
-                        if (newTagNameField.text.isNotBlank()) {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onCreateTag(
-                                newTagNameField.text.trim(),
-                                newTagShortcutField.text.trim().ifEmpty { null }
-                            )
-                            newTagNameField = TextFieldValue(text = "", selection = TextRange(0))
-                            newTagShortcutField = TextFieldValue(text = "", selection = TextRange(0))
-                        }
-                    },
+                    onClick = { submitCreateTag() },
                     enabled = newTagNameField.text.isNotBlank(),
                     colors = ButtonDefaults.buttonColors(containerColor = colors.thingsBlue),
                     shape = RoundedCornerShape(10.dp),
@@ -259,6 +276,16 @@ fun ThingsTagManagerModal(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 if (isEditingThis) {
+                                    val commitRenameTag = {
+                                        if (editingTagTitleField.text.isNotBlank()) {
+                                            onRenameTag(
+                                                tag.id,
+                                                editingTagTitleField.text.trim(),
+                                                editingTagShortcutField.text.trim().ifEmpty { null }
+                                            )
+                                        }
+                                        editingTagId = null
+                                    }
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -270,8 +297,20 @@ fun ThingsTagManagerModal(
                                             value = editingTagTitleField,
                                             onValueChange = { editingTagTitleField = it },
                                             singleLine = true,
+                                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                            keyboardActions = KeyboardActions(onDone = { commitRenameTag() }),
                                             modifier = Modifier
                                                 .weight(1f)
+                                                .onPreviewKeyEvent { keyEvent ->
+                                                    if (keyEvent.type == KeyEventType.KeyDown &&
+                                                        (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
+                                                    ) {
+                                                        commitRenameTag()
+                                                        true
+                                                    } else {
+                                                        false
+                                                    }
+                                                }
                                                 .onFocusChanged { focusState ->
                                                     if (focusState.isFocused) {
                                                         val txt = editingTagTitleField.text
@@ -292,8 +331,20 @@ fun ThingsTagManagerModal(
                                                 )
                                             },
                                             singleLine = true,
+                                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                            keyboardActions = KeyboardActions(onDone = { commitRenameTag() }),
                                             modifier = Modifier
                                                 .width(68.dp)
+                                                .onPreviewKeyEvent { keyEvent ->
+                                                    if (keyEvent.type == KeyEventType.KeyDown &&
+                                                        (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
+                                                    ) {
+                                                        commitRenameTag()
+                                                        true
+                                                    } else {
+                                                        false
+                                                    }
+                                                }
                                                 .onFocusChanged { focusState ->
                                                     if (focusState.isFocused) {
                                                         val txt = editingTagShortcutField.text
@@ -303,18 +354,7 @@ fun ThingsTagManagerModal(
                                                     }
                                                 }
                                         )
-                                        IconButton(
-                                            onClick = {
-                                                if (editingTagTitleField.text.isNotBlank()) {
-                                                    onRenameTag(
-                                                        tag.id,
-                                                        editingTagTitleField.text.trim(),
-                                                        editingTagShortcutField.text.trim().ifEmpty { null }
-                                                    )
-                                                }
-                                                editingTagId = null
-                                            }
-                                        ) {
+                                        IconButton(onClick = commitRenameTag) {
                                             Icon(
                                                 imageVector = Icons.Outlined.Check,
                                                 contentDescription = stringResource(R.string.action_save),

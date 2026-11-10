@@ -302,4 +302,35 @@
     <string name="settings_updates_download_failed">Error al descargar la actualización: %1$s</string>
     <string name="update_banner_title">Nueva versión v%1$s disponible</string>
     <string name="update_banner_action_btn">Actualizar ahora</string>
+
+    <!-- Multi-Selection, Context Menu, Swipe & Repeat Dialog -->
+    <string name="multiselect_count">%1$d seleccionada(s)</string>
+    <string name="multiselect_select_all">Seleccionar todo en esta vista (Ctrl+A)</string>
+    <string name="multiselect_clear">Quitar selección (Esc)</string>
+    <string name="swipe_select">Seleccionar</string>
+    <string name="swipe_deselect">Deseleccionar</string>
+    <string name="context_select_task">Seleccionar tarea (Selección múltiple)</string>
+    <string name="context_deselect_task">Quitar selección</string>
+    <string name="context_when_date_reminder">¿Cuándo? (Fecha y recordatorio)</string>
+    <string name="context_adjust_deadline">Ajustar fecha límite</string>
+    <string name="context_configure_repeat">Configurar repetición</string>
+    <string name="context_assign_tags">Asignar etiquetas</string>
+    <string name="repeat_dialog_title">Repetir (Modo Things)</string>
+    <string name="repeat_mode_fixed">Regularmente</string>
+    <string name="repeat_mode_after">Al completar</string>
+    <string name="repeat_mode_fixed_desc">Calendario fijo (como «Regularly» en Things para Mac).</string>
+    <string name="repeat_mode_after_desc">La siguiente tarea se crea solo después de completar esta.</string>
+    <string name="repeat_unit_days">Días</string>
+    <string name="repeat_unit_weeks">Semanas</string>
+    <string name="repeat_unit_months">Meses</string>
+    <string name="repeat_unit_years">Años</string>
+    <string name="repeat_weekdays_label">En estos días de la semana:</string>
+    <string name="repeat_month_day_label">Día del mes:</string>
+    <string name="repeat_last_day">Último día</string>
+    <string name="repeat_ends_label">Termina:</string>
+    <string name="repeat_ends_never">Nunca</string>
+    <string name="repeat_ends_pick_date">Elegir fecha…</string>
+    <string name="repeat_off_btn">Desact.</string>
+    <string name="sidebar_show">Mostrar barra lateral</string>
+    <string name="sidebar_hide">Ocultar barra lateral</string>
 </resources>

@@ -309,61 +309,78 @@ class ReminderReceiver : BroadcastReceiver() {
                 val taskId = intent.getStringExtra(EXTRA_TASK_ID)?.takeIf { it.isNotBlank() } ?: return
                 if (!canPostNotifications(context)) return
 
-                val taskTitle = intent.getStringExtra(EXTRA_TASK_TITLE)
+                val fallbackTitle = intent.getStringExtra(EXTRA_TASK_TITLE)
                     ?.takeIf { it.isNotBlank() }
                     ?: context.getString(R.string.entity_todo)
-                ensureChannels(context, notificationManager)
 
-                val openAppIntent = PendingIntent.getActivity(
-                    context,
-                    taskId.hashCode(),
-                    Intent(context, MainActivity::class.java),
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
+                val pendingResult = goAsync()
+                scope.launch {
+                    try {
+                        val dbTask = repository.getTaskEntityById(taskId)
+                        if (dbTask != null && (dbTask.isDeleted || dbTask.status != TaskStatus.OPEN)) {
+                            return@launch
+                        }
+                        val resolvedTitle = dbTask?.title?.takeIf { it.isNotBlank() } ?: fallbackTitle
+                        ensureChannels(context, notificationManager)
 
-                val completeIntent = PendingIntent.getBroadcast(
-                    context,
-                    (taskId + "_complete").hashCode(),
-                    Intent(context, ReminderReceiver::class.java).apply {
-                        action = ACTION_COMPLETE_TASK
-                        data = Uri.parse("thingsbook://complete/$taskId")
-                        putExtra(EXTRA_TASK_ID, taskId)
-                    },
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
+                        val openAppIntent = PendingIntent.getActivity(
+                            context,
+                            taskId.hashCode(),
+                            Intent(context, MainActivity::class.java).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                                data = Uri.parse("thingsbook://open_task/$taskId")
+                                putExtra(com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.EXTRA_TASK_ID, taskId)
+                            },
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                        )
 
-                val eveningIntent = PendingIntent.getBroadcast(
-                    context,
-                    (taskId + "_evening").hashCode(),
-                    Intent(context, ReminderReceiver::class.java).apply {
-                        action = ACTION_DEFER_THIS_EVENING
-                        data = Uri.parse("thingsbook://evening/$taskId")
-                        putExtra(EXTRA_TASK_ID, taskId)
-                    },
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
+                        val completeIntent = PendingIntent.getBroadcast(
+                            context,
+                            (taskId + "_complete").hashCode(),
+                            Intent(context, ReminderReceiver::class.java).apply {
+                                action = ACTION_COMPLETE_TASK
+                                data = Uri.parse("thingsbook://complete/$taskId")
+                                putExtra(EXTRA_TASK_ID, taskId)
+                            },
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                        )
 
-                val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-                    .setSmallIcon(R.drawable.ic_notification_thingsbook)
-                    .setContentTitle(taskTitle)
-                    .setContentText(context.getString(R.string.action_reminder))
-                    .setPriority(NotificationCompat.PRIORITY_HIGH)
-                    .setAutoCancel(true)
-                    .setContentIntent(openAppIntent)
-                    .addAction(
-                        android.R.drawable.checkbox_on_background,
-                        context.getString(R.string.action_complete),
-                        completeIntent
-                    )
-                    .addAction(
-                        android.R.drawable.ic_menu_recent_history,
-                        context.getString(R.string.view_this_evening),
-                        eveningIntent
-                    )
-                    .build()
+                        val eveningIntent = PendingIntent.getBroadcast(
+                            context,
+                            (taskId + "_evening").hashCode(),
+                            Intent(context, ReminderReceiver::class.java).apply {
+                                action = ACTION_DEFER_THIS_EVENING
+                                data = Uri.parse("thingsbook://evening/$taskId")
+                                putExtra(EXTRA_TASK_ID, taskId)
+                            },
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                        )
 
-                runCatching {
-                    notificationManager.notify(taskId.hashCode(), notification)
+                        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                            .setSmallIcon(R.drawable.ic_notification_thingsbook)
+                            .setContentTitle(resolvedTitle)
+                            .setContentText(context.getString(R.string.action_reminder))
+                            .setPriority(NotificationCompat.PRIORITY_HIGH)
+                            .setAutoCancel(true)
+                            .setContentIntent(openAppIntent)
+                            .addAction(
+                                android.R.drawable.checkbox_on_background,
+                                context.getString(R.string.action_complete),
+                                completeIntent
+                            )
+                            .addAction(
+                                android.R.drawable.ic_menu_recent_history,
+                                context.getString(R.string.view_this_evening),
+                                eveningIntent
+                            )
+                            .build()
+
+                        runCatching {
+                            notificationManager.notify(taskId.hashCode(), notification)
+                        }
+                    } finally {
+                        pendingResult.finish()
+                    }
                 }
             }
 

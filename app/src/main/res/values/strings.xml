@@ -302,4 +302,35 @@
     <string name="settings_updates_download_failed">Update download failed: %1$s</string>
     <string name="update_banner_title">New version v%1$s is available</string>
     <string name="update_banner_action_btn">Update Now</string>
+
+    <!-- Multi-Selection, Context Menu, Swipe & Repeat Dialog -->
+    <string name="multiselect_count">%1$d selected</string>
+    <string name="multiselect_select_all">Select all in this view (Ctrl+A)</string>
+    <string name="multiselect_clear">Clear selection (Esc)</string>
+    <string name="swipe_select">Select</string>
+    <string name="swipe_deselect">Deselect</string>
+    <string name="context_select_task">Select To-Do (Multi-select)</string>
+    <string name="context_deselect_task">Clear selection</string>
+    <string name="context_when_date_reminder">When? (Date &amp; Reminder)</string>
+    <string name="context_adjust_deadline">Adjust Deadline</string>
+    <string name="context_configure_repeat">Configure Repeat</string>
+    <string name="context_assign_tags">Assign Tags</string>
+    <string name="repeat_dialog_title">Repeat (Things Mode)</string>
+    <string name="repeat_mode_fixed">Regularly</string>
+    <string name="repeat_mode_after">After Completion</string>
+    <string name="repeat_mode_fixed_desc">Fixed calendar schedule (like \"Regularly\" in Things for Mac).</string>
+    <string name="repeat_mode_after_desc">Next To-Do is created only after this one is completed.</string>
+    <string name="repeat_unit_days">Days</string>
+    <string name="repeat_unit_weeks">Weeks</string>
+    <string name="repeat_unit_months">Months</string>
+    <string name="repeat_unit_years">Years</string>
+    <string name="repeat_weekdays_label">On these weekdays:</string>
+    <string name="repeat_month_day_label">Day of month:</string>
+    <string name="repeat_last_day">Last day</string>
+    <string name="repeat_ends_label">Ends:</string>
+    <string name="repeat_ends_never">Never</string>
+    <string name="repeat_ends_pick_date">Pick date…</string>
+    <string name="repeat_off_btn">Off</string>
+    <string name="sidebar_show">Show sidebar</string>
+    <string name="sidebar_hide">Hide sidebar</string>
 </resources>

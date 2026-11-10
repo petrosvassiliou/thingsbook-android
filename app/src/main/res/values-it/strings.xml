@@ -302,4 +302,35 @@
     <string name="settings_updates_download_failed">Download aggiornamento non riuscito: %1$s</string>
     <string name="update_banner_title">Nuova versione v%1$s disponibile</string>
     <string name="update_banner_action_btn">Aggiorna ora</string>
+
+    <!-- Multi-Selection, Context Menu, Swipe & Repeat Dialog -->
+    <string name="multiselect_count">%1$d selezionate</string>
+    <string name="multiselect_select_all">Seleziona tutto in questa vista (Ctrl+A)</string>
+    <string name="multiselect_clear">Annulla selezione (Esc)</string>
+    <string name="swipe_select">Seleziona</string>
+    <string name="swipe_deselect">Deseleziona</string>
+    <string name="context_select_task">Seleziona attività (Selezione multipla)</string>
+    <string name="context_deselect_task">Annulla selezione</string>
+    <string name="context_when_date_reminder">Quando? (Data e promemoria)</string>
+    <string name="context_adjust_deadline">Modifica scadenza</string>
+    <string name="context_configure_repeat">Configura ripetizione</string>
+    <string name="context_assign_tags">Assegna tag</string>
+    <string name="repeat_dialog_title">Ripeti (Modalità Things)</string>
+    <string name="repeat_mode_fixed">Regolarmente</string>
+    <string name="repeat_mode_after">Dopo il completamento</string>
+    <string name="repeat_mode_fixed_desc">Pianificazione fissa del calendario (come \"Regularly\" in Things per Mac).</string>
+    <string name="repeat_mode_after_desc">La prossima attività viene creata solo dopo il completamento di questa.</string>
+    <string name="repeat_unit_days">Giorni</string>
+    <string name="repeat_unit_weeks">Settimane</string>
+    <string name="repeat_unit_months">Mesi</string>
+    <string name="repeat_unit_years">Anni</string>
+    <string name="repeat_weekdays_label">In questi giorni della settimana:</string>
+    <string name="repeat_month_day_label">Giorno del mese:</string>
+    <string name="repeat_last_day">Ultimo giorno</string>
+    <string name="repeat_ends_label">Termina:</string>
+    <string name="repeat_ends_never">Mai</string>
+    <string name="repeat_ends_pick_date">Scegli data…</string>
+    <string name="repeat_off_btn">Off</string>
+    <string name="sidebar_show">Mostra barra laterale</string>
+    <string name="sidebar_hide">Nascondi barra laterale</string>
 </resources>

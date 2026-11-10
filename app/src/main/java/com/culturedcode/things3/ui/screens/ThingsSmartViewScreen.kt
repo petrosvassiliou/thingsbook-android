@@ -126,8 +126,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -336,7 +339,22 @@ fun ThingsSmartViewScreen(
                             viewModel.setGeminiModalOpen(true)
                             true
                         }
-                        event.key == Key.Escape -> viewModel.dismissTopmostOverlay()
+                        event.key == Key.Escape -> when {
+                            showCreateProjectDialog -> {
+                                showCreateProjectDialog = false
+                                editingProject = null
+                                true
+                            }
+                            showBatchMoveDialog -> {
+                                showBatchMoveDialog = false
+                                true
+                            }
+                            isMobileDrawerOpen -> {
+                                isMobileDrawerOpen = false
+                                true
+                            }
+                            else -> viewModel.dismissTopmostOverlay()
+                        }
                         else -> false
                     }
                 } else {
@@ -1271,6 +1289,7 @@ private fun ThingsMainTaskLazyList(
     val magicBreakdownTaskId by viewModel.magicBreakdownTaskId.collectAsState()
     val logbookAiReview by viewModel.logbookAiReview.collectAsState()
     val isGeminiBusy by viewModel.isGeminiBusy.collectAsState()
+    val geminiErrorMessage by viewModel.geminiErrorMessage.collectAsState()
 
     val listState = rememberLazyListState()
 
@@ -1353,6 +1372,7 @@ private fun ThingsMainTaskLazyList(
                 GeminiLogbookReflectionCard(
                     review = logbookAiReview,
                     isGenerating = isGeminiBusy,
+                    errorMessage = geminiErrorMessage,
                     onGenerateReflection = {
                         viewModel.generateGeminiLogbookReflection(activeLocale)
                     },
@@ -1523,7 +1543,10 @@ private fun ThingsMainTaskLazyList(
                 .groupBy { task -> computeUpcomingTargetDate(task, todayDate, zone) }
                 .toSortedMap()
 
+            var cumulativeTaskOffset = 0
             groupedUpcoming.entries.forEachIndexed { groupIdx, (targetDate, dayTasks) ->
+                val groupBaseIndex = cumulativeTaskOffset
+                cumulativeTaskOffset += dayTasks.size
                 item(key = "upcoming_day_header_${targetDate.toEpochDay()}") {
                     UpcomingDayGroupHeader(
                         date = targetDate,
@@ -1536,8 +1559,9 @@ private fun ThingsMainTaskLazyList(
                     items = dayTasks,
                     key = { _, task -> "upcoming_${targetDate.toEpochDay()}_${task.id}" }
                 ) { index, task ->
+                    val globalIndex = groupBaseIndex + index
                     MagicPlusInsertionGap(
-                        visible = magicDragState.isDragging && magicDragState.dropIndex == index && groupIdx == 0,
+                        visible = magicDragState.isDragging && magicDragState.dropIndex == globalIndex,
                         dropMode = magicDragState.dropMode
                     )
                     ThingsTaskRowItem(
@@ -1967,14 +1991,14 @@ private fun ThingsMultiSelectionBar(
                     .padding(horizontal = 9.dp, vertical = 4.dp)
             ) {
                 Text(
-                    text = "$selectedCount ausgewählt",
+                    text = stringResource(R.string.multiselect_count, selectedCount),
                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                     color = Color.White
                 )
             }
 
             if (selectedCount < totalVisibleCount) {
-                ThingsHoverTooltip(text = "Alle Aufgaben in dieser Ansicht auswählen (Strg+A)") {
+                ThingsHoverTooltip(text = stringResource(R.string.multiselect_select_all)) {
                     IconButton(
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -1984,7 +2008,7 @@ private fun ThingsMultiSelectionBar(
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.SelectAll,
-                            contentDescription = "Alle auswählen",
+                            contentDescription = stringResource(R.string.multiselect_select_all),
                             tint = colors.thingsBlue,
                             modifier = Modifier.size(18.dp)
                         )
@@ -1993,7 +2017,7 @@ private fun ThingsMultiSelectionBar(
             }
 
             ThingsTagPill(
-                title = "★ Heute",
+                title = "★ ${stringResource(R.string.view_today)}",
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onScheduleToday()
@@ -2001,7 +2025,7 @@ private fun ThingsMultiSelectionBar(
             )
 
             ThingsTagPill(
-                title = "📅 Morgen",
+                title = "📅 ${stringResource(R.string.date_tomorrow)}",
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onScheduleTomorrow()
@@ -2009,7 +2033,7 @@ private fun ThingsMultiSelectionBar(
             )
 
             ThingsTagPill(
-                title = "📁 Verschieben",
+                title = "📁 ${stringResource(R.string.action_move)}",
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onOpenBatchMove()
@@ -2017,14 +2041,14 @@ private fun ThingsMultiSelectionBar(
             )
 
             ThingsTagPill(
-                title = "✓ Erledigen",
+                title = "✓ ${stringResource(R.string.action_complete)}",
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onBatchComplete()
                 }
             )
 
-            ThingsHoverTooltip(text = "Ausgewählte Aufgaben löschen") {
+            ThingsHoverTooltip(text = stringResource(R.string.action_delete)) {
                 IconButton(
                     onClick = {
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -2034,14 +2058,14 @@ private fun ThingsMultiSelectionBar(
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.DeleteOutline,
-                        contentDescription = "Ausgewählte löschen",
+                        contentDescription = stringResource(R.string.action_delete),
                         tint = colors.deadlineUrgentRed,
                         modifier = Modifier.size(18.dp)
                     )
                 }
             }
 
-            ThingsHoverTooltip(text = "Auswahl aufheben (Esc)") {
+            ThingsHoverTooltip(text = stringResource(R.string.multiselect_clear)) {
                 IconButton(
                     onClick = {
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -2051,7 +2075,7 @@ private fun ThingsMultiSelectionBar(
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.Close,
-                        contentDescription = "Auswahl aufheben",
+                        contentDescription = stringResource(R.string.multiselect_clear),
                         tint = colors.secondaryText,
                         modifier = Modifier.size(18.dp)
                     )
@@ -2131,7 +2155,7 @@ private fun AreaProjectOverviewRow(
                 }
 
                 if (canMoveUp) {
-                    ThingsHoverTooltip(text = "Projekt nach oben verschieben") {
+                    ThingsHoverTooltip(text = stringResource(R.string.action_move)) {
                         IconButton(onClick = onMoveUp, modifier = Modifier.size(26.dp)) {
                             Icon(
                                 imageVector = Icons.Outlined.ArrowUpward,
@@ -2143,7 +2167,7 @@ private fun AreaProjectOverviewRow(
                     }
                 }
                 if (canMoveDown) {
-                    ThingsHoverTooltip(text = "Projekt nach unten verschieben") {
+                    ThingsHoverTooltip(text = stringResource(R.string.action_move)) {
                         IconButton(onClick = onMoveDown, modifier = Modifier.size(26.dp)) {
                             Icon(
                                 imageVector = Icons.Outlined.ArrowDownward,
@@ -2214,8 +2238,9 @@ private fun TopThingsbookBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(if (isWideScreen) 8.dp else 4.dp)
         ) {
+            val sidebarTooltip = if (isSidebarVisible) stringResource(R.string.sidebar_hide) else stringResource(R.string.sidebar_show)
             ThingsHoverTooltip(
-                text = if (isSidebarVisible) "Seitenleiste ausblenden" else "Seitenleiste einblenden"
+                text = sidebarTooltip
             ) {
                 IconButton(
                     onClick = onToggleSidebar,
@@ -2223,7 +2248,7 @@ private fun TopThingsbookBar(
                 ) {
                     Icon(
                         imageVector = if (isSidebarVisible) Icons.AutoMirrored.Outlined.MenuOpen else Icons.Outlined.Menu,
-                        contentDescription = if (isSidebarVisible) "Seitenleiste ausblenden" else "Seitenleiste einblenden",
+                        contentDescription = sidebarTooltip,
                         tint = colors.thingsBlue,
                         modifier = Modifier.size(if (isWideScreen) 20.dp else 19.dp)
                     )
@@ -2788,12 +2813,30 @@ private fun ViewTitleHeader(
                             modifier = Modifier.size(26.dp)
                         )
                         if (isRenamingAreaInline && currentArea != null) {
+                            val commitAreaRename = {
+                                if (inlineAreaField.text.isNotBlank()) {
+                                    onRenameArea(currentArea.id, inlineAreaField.text.trim())
+                                    isRenamingAreaInline = false
+                                }
+                            }
                             OutlinedTextField(
                                 value = inlineAreaField,
                                 onValueChange = { inlineAreaField = it },
                                 singleLine = true,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = { commitAreaRename() }),
                                 modifier = Modifier
                                     .weight(1f)
+                                    .onPreviewKeyEvent { keyEvent ->
+                                        if (keyEvent.type == KeyEventType.KeyDown &&
+                                            (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
+                                        ) {
+                                            commitAreaRename()
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    }
                                     .onFocusChanged { focusState ->
                                         if (focusState.isFocused) {
                                             val txt = inlineAreaField.text
@@ -2803,14 +2846,7 @@ private fun ViewTitleHeader(
                                         }
                                     }
                             )
-                            IconButton(
-                                onClick = {
-                                    if (inlineAreaField.text.isNotBlank()) {
-                                        onRenameArea(currentArea.id, inlineAreaField.text.trim())
-                                        isRenamingAreaInline = false
-                                    }
-                                }
-                            ) {
+                            IconButton(onClick = commitAreaRename) {
                                 Icon(
                                     imageVector = Icons.Outlined.Check,
                                     contentDescription = stringResource(R.string.action_save),
@@ -3125,6 +3161,12 @@ private fun ProjectHeadingSectionHeader(
             .padding(horizontal = 20.dp, vertical = 8.dp)
     ) {
         if (isEditing) {
+            val commitHeadingRename = {
+                if (editedTitleField.text.isNotBlank()) {
+                    onRenameHeading(editedTitleField.text.trim())
+                    isEditing = false
+                }
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -3141,9 +3183,21 @@ private fun ProjectHeadingSectionHeader(
                         )
                     },
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { commitHeadingRename() }),
                     modifier = Modifier
                         .weight(1f)
                         .focusRequester(headingFocusRequester)
+                        .onPreviewKeyEvent { keyEvent ->
+                            if (keyEvent.type == KeyEventType.KeyDown &&
+                                (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
+                            ) {
+                                commitHeadingRename()
+                                true
+                            } else {
+                                false
+                            }
+                        }
                         .onFocusChanged { focusState ->
                             if (focusState.isFocused) {
                                 val txt = editedTitleField.text
@@ -3153,14 +3207,7 @@ private fun ProjectHeadingSectionHeader(
                             }
                         }
                 )
-                IconButton(
-                    onClick = {
-                        if (editedTitleField.text.isNotBlank()) {
-                            onRenameHeading(editedTitleField.text.trim())
-                            isEditing = false
-                        }
-                    }
-                ) {
+                IconButton(onClick = commitHeadingRename) {
                     Icon(
                         imageVector = Icons.Outlined.Check,
                         contentDescription = stringResource(R.string.action_save),
@@ -3861,17 +3908,32 @@ private fun ThingsChromebookSidebar(
                         }
                         .padding(horizontal = 10.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    ProjectProgressRing(progress = project.progress, size = 16.dp)
-                    Text(
-                        text = project.title,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (selected) colors.thingsBlue else colors.primaryText
-                        ),
-                        maxLines = 1
-                    )
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        ProjectProgressRing(progress = project.progress, size = 16.dp)
+                        Text(
+                            text = project.title,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (selected) colors.thingsBlue else colors.primaryText
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (project.deadline != null) {
+                        Icon(
+                            imageVector = Icons.Outlined.Flag,
+                            contentDescription = null,
+                            tint = colors.deadlineUrgentRed,
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
                 }
             }
         }

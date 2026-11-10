@@ -12,9 +12,9 @@ Eine eigenständige, native Android-Produktivitäts-App (für **Android-Smartpho
 
 ---
 
-## Direkt-Download (Installierbares Android-APK — Version 1.6.16)
+## Direkt-Download (Installierbares Android-APK — Version 1.6.17)
 
-- **[Thingsbook-v1.6.16-full.apk herunterladen (v1.6.16 — Sichtbares Hamburger-Menü-Icon oben links auf Smartphones)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.16-full.apk)**
+- **[Thingsbook-v1.6.17-full.apk herunterladen (v1.6.17 — Komplettes QS-Release: UI/Logik-Fixes, Cloud-Sync & Reminder-Härtung, 5-Sprachen-Lokalisierung)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.17-full.apk)**
 
 ---
 

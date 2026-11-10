@@ -107,6 +107,16 @@ class ThingsRepository @Inject constructor(
             .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
             .catch { emit(emptyList()) }
 
+    fun observeTasksForProject(projectId: String): Flow<List<TaskItem>> =
+        database.taskDao().observeTasksForProject(projectId)
+            .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
+            .catch { emit(emptyList()) }
+
+    fun observeTasksForArea(areaId: String): Flow<List<TaskItem>> =
+        database.taskDao().observeTasksForArea(areaId)
+            .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
+            .catch { emit(emptyList()) }
+
     fun observeActiveProjectsWithProgress(): Flow<List<Project>> =
         database.projectDao().observeActiveProjectsWithProgress()
             .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
@@ -125,6 +135,9 @@ class ThingsRepository @Inject constructor(
     fun observeAllTasksRaw(): Flow<List<TaskEntity>> =
         database.taskDao().observeAllTasksRaw()
             .catch { emit(emptyList()) }
+
+    suspend fun getTaskEntityById(taskId: String): TaskEntity? =
+        runCatchingCancellable { database.taskDao().getById(taskId) }.getOrNull()
 
     suspend fun getTasksForWidgetView(viewName: String): List<TaskItem> {
         return runCatchingCancellable {
@@ -232,12 +245,23 @@ class ThingsRepository @Inject constructor(
             TaskStatus.OPEN -> null
         }
 
+        val normalizedSchedule = if (
+            scheduleState == ScheduleState.INBOX &&
+            whenDate == null &&
+            recurrenceRule == null &&
+            (projectId != null || areaId != null)
+        ) {
+            ScheduleState.ANYTIME
+        } else {
+            scheduleState
+        }
+
         val entity = TaskEntity(
             id = id,
             title = title,
             notes = notes,
             status = status,
-            scheduleState = scheduleState,
+            scheduleState = normalizedSchedule,
             whenDate = whenDate,
             deadline = deadline,
             reminderTime = reminderTime,
@@ -385,6 +409,7 @@ class ThingsRepository @Inject constructor(
         val existing = database.taskDao().getById(taskId) ?: return
         if (existing.title == newTitle && existing.notes == newNotes) return
         val now = System.currentTimeMillis()
+        val titleChanged = existing.title != newTitle
         database.taskDao().upsert(
             existing.copy(
                 title = newTitle,
@@ -393,6 +418,11 @@ class ThingsRepository @Inject constructor(
                 isDirty = true
             )
         )
+        if (titleChanged && !existing.isDeleted && existing.status == TaskStatus.OPEN &&
+            existing.reminderTime != null && existing.reminderTime > now
+        ) {
+            reminderScheduler.scheduleExactReminder(taskId, newTitle, existing.reminderTime)
+        }
         syncRepository.triggerBackgroundSync()
     }
 
@@ -639,7 +669,9 @@ class ThingsRepository @Inject constructor(
 
     suspend fun ensureDefaultWorkAndHomeAreas() {
         val activeAreas = database.areaDao().getActiveAreasList()
-        if (activeAreas.isEmpty()) {
+        val existingWork = database.areaDao().getById("area-work-001")
+        val existingHome = database.areaDao().getById("area-home-002")
+        if (activeAreas.isEmpty() && existingWork == null && existingHome == null) {
             val now = System.currentTimeMillis()
             database.areaDao().upsertAll(
                 listOf(
@@ -885,6 +917,7 @@ class ThingsRepository @Inject constructor(
         val now = System.currentTimeMillis()
         database.withTransaction {
             database.taskDao().clearProjectFromTasks(projectId, now)
+            database.headingDao().softDeleteHeadingsForProject(projectId, now)
             database.projectDao().upsert(
                 existing.copy(
                     isDeleted = true,
@@ -1169,6 +1202,31 @@ class ThingsRepository @Inject constructor(
         database.withTransaction {
             database.tagDao().deleteTaskTagCrossRefsForTag(tagId)
             database.tagDao().deleteProjectTagCrossRefsForTag(tagId)
+
+            val affectedTasks = database.taskDao().getAllNonDeletedTasksList().mapNotNull { t ->
+                val list = decodeStringList(t.tagIdsJson)
+                if (tagId in list) {
+                    t.copy(tagIdsJson = json.encodeToString(list - tagId), updatedAt = now, isDirty = true)
+                } else null
+            }
+            if (affectedTasks.isNotEmpty()) database.taskDao().upsertAll(affectedTasks)
+
+            val affectedProjects = database.projectDao().getAllNonDeletedProjectsList().mapNotNull { p ->
+                val list = decodeStringList(p.tagIdsJson)
+                if (tagId in list) {
+                    p.copy(tagIdsJson = json.encodeToString(list - tagId), updatedAt = now, isDirty = true)
+                } else null
+            }
+            if (affectedProjects.isNotEmpty()) database.projectDao().upsertAll(affectedProjects)
+
+            val affectedAreas = database.areaDao().getActiveAreasList().mapNotNull { a ->
+                val list = decodeStringList(a.tagIdsJson)
+                if (tagId in list) {
+                    a.copy(tagIdsJson = json.encodeToString(list - tagId), updatedAt = now, isDirty = true)
+                } else null
+            }
+            if (affectedAreas.isNotEmpty()) database.areaDao().upsertAll(affectedAreas)
+
             database.tagDao().upsert(
                 existing.copy(
                     isDeleted = true,
@@ -1892,17 +1950,27 @@ class ThingsRepository @Inject constructor(
             .distinctBy { it.id }
             .map { t ->
                 val taskStatus = runCatching { TaskStatus.valueOf(t.status) }.getOrDefault(TaskStatus.OPEN)
-                val taskSchedule = runCatching { ScheduleState.valueOf(t.scheduleState) }.getOrDefault(ScheduleState.INBOX)
+                val rawTaskSchedule = runCatching { ScheduleState.valueOf(t.scheduleState) }.getOrDefault(ScheduleState.INBOX)
                 val cleanProjectId = t.projectId?.takeIf { it in validProjectIds }
                 val cleanHeadingId = t.headingId?.takeIf { hId ->
                     cleanProjectId != null && headingProjectMap[hId] == cleanProjectId
                 }
-                val cleanAreaId = if (cleanProjectId != null) null else t.areaId?.takeIf { it in validAreaIds }
+                val cleanAreaId = t.areaId?.takeIf { it in validAreaIds }
                 val combinedTagIds = (decodeStringList(t.tagIdsJson) + explicitTaskTagsByTask[t.id].orEmpty())
                     .filter { it in validTagIds }
                     .distinct()
                 val validRecurrenceJson = t.recurrenceRuleJson?.takeIf { raw ->
                     raw.isNotBlank() && runCatching { json.decodeFromString<RecurrenceRule>(raw) }.isSuccess
+                }
+                val taskSchedule = if (
+                    rawTaskSchedule == ScheduleState.INBOX &&
+                    t.whenDate == null &&
+                    validRecurrenceJson == null &&
+                    (cleanProjectId != null || cleanAreaId != null)
+                ) {
+                    ScheduleState.ANYTIME
+                } else {
+                    rawTaskSchedule
                 }
 
                 TaskEntity(

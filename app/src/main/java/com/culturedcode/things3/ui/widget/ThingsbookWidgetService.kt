@@ -72,13 +72,14 @@ private class ThingsbookRemoteViewsFactory(
 
     override fun getViewAt(position: Int): RemoteViews? = runCatching {
         val task = tasks.getOrNull(position) ?: return@runCatching null
+        val localizedContext = androidx.core.content.ContextCompat.getContextForLanguage(context)
         val rv = RemoteViews(context.packageName, R.layout.widget_thingsbook_task_item)
 
-        val displayTitle = task.title.ifBlank { context.getString(R.string.entity_new_todo) }
+        val displayTitle = task.title.ifBlank { localizedContext.getString(R.string.entity_new_todo) }
         rv.setTextViewText(R.id.widget_item_title, displayTitle)
 
         // Format compact right-side badge (Recurrence, Reminder, Date, or first Tag)
-        val badgeText = buildTaskMetadataBadge(task)
+        val badgeText = buildTaskMetadataBadge(task, localizedContext)
         if (badgeText != null) {
             rv.setViewVisibility(R.id.widget_item_badge, View.VISIBLE)
             rv.setTextViewText(R.id.widget_item_badge, badgeText)
@@ -113,9 +114,9 @@ private class ThingsbookRemoteViewsFactory(
         Log.w("ThingsWidgetSvc", "Failed inflating RemoteViews at position $position", err)
     }.getOrNull()
 
-    private fun buildTaskMetadataBadge(task: TaskItem): String? = runCatching {
+    private fun buildTaskMetadataBadge(task: TaskItem, localizedContext: Context): String? = runCatching {
         val zone = ZoneId.systemDefault()
-        val locale = Locale.getDefault()
+        val locale = localizedContext.resources.configuration.locales.get(0) ?: Locale.getDefault()
 
         if (task.reminderTime != null) {
             val timeStr = Instant.ofEpochMilli(task.reminderTime)

@@ -46,10 +46,20 @@ import java.lang.ref.WeakReference
 class MainActivity : AppCompatActivity() {
 
     private var launchIntentState by mutableStateOf<Intent?>(null)
+    var hardwareKeyShortcutHandler: ((android.view.KeyEvent) -> Boolean)? = null
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { _ -> }
+
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            if (hardwareKeyShortcutHandler?.invoke(event) == true) {
+                return true
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         CrashGuardian.install(applicationContext)

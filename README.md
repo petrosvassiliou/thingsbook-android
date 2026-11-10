@@ -12,9 +12,9 @@ Eine eigenständige, native Android-Produktivitäts-App (für **Android-Smartpho
 
 ---
 
-## Direkt-Download (Installierbares Android-APK — Version 1.6.17)
+## Direkt-Download (Installierbares Android-APK — Version 1.6.18)
 
-- **[Thingsbook-v1.6.17-full.apk herunterladen (v1.6.17 — Komplettes QS-Release: UI/Logik-Fixes, Cloud-Sync & Reminder-Härtung, 5-Sprachen-Lokalisierung)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.17-full.apk)**
+- **[Thingsbook-v1.6.18-full.apk herunterladen (v1.6.18 — Globale Tastenkürzel Ctrl+N für Aufgaben & Ctrl+Shift+N für Projekte)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.18-full.apk)**
 
 ---
 
@@ -22,7 +22,7 @@ Eine eigenständige, native Android-Produktivitäts-App (für **Android-Smartpho
 
 - **Adaptives UI für Android-Smartphones, Tablets & Foldables:**
   - **Android-Smartphones (`< 700dp`):** Einhand-optimiertes Layout mit horizontaler Smart-View-Leiste, Wischgeste nach unten für *Quick Find*, flüssiger 120-Hz-Inline-Karten-Expansion (`spring(dampingRatio = 0.8f, stiffness = 400f)`) und ziehbarem **„Magic Plus“ (`+`)** Floating Action Button für direktes Drag & Drop in die Liste.
-  - **Große Displays / Android-Tablets & Foldables (`>= 700dp`):** 2-Spalten-Ansicht mit permanenter Seitenleiste (inkl. Live-Zählern & Projekt-Fortschrittsringen), zentrierter Arbeitsfläche (`max 840dp`) und Unterstützung für externe Tastaturen (`Strg+F` Quick Find, `Strg+N` Neue Aufgabe, `Strg+G` Gemini AI Hub, `Esc` Schließen).
+  - **Große Displays / Android-Tablets & Foldables (`>= 700dp`):** 2-Spalten-Ansicht mit permanenter Seitenleiste (inkl. Live-Zählern & Projekt-Fortschrittsringen), zentrierter Arbeitsfläche (`max 840dp`) und Unterstützung für externe Tastaturen (`Ctrl+N` Neue Aufgabe, `Ctrl+Shift+N` Neues Projekt, `Ctrl+F` Quick Find, `Ctrl+G` Gemini AI Hub, `Esc` Schließen).
 - **Offline-First Room Database + SQLite FTS5 (`unicode61 remove_diacritics 2`) + Komplettes Backup & Restore:**
   - Komplette GTD-Hierarchie: `Areas` (Lebensbereiche), `Projects` (mit Live-Pie-Chart-Fortschrittsring), `Headings` (Überschriften innerhalb von Projekten), `Tasks` (mit `whenDate`, `deadline`, `recurrenceRule`, `reminderTime`, LexoRank `sortOrder` und Long-Press auf die Checkbox für *Abgebrochen* mit `X`-Icon), `ChecklistItems` und hierarchische `Tags`.
   - **Backup & Restore (`.tbbackup`):** Vollständige Sicherung sämtlicher Entitäten & Einstellungen in einer einzelnen Datei — wahlweise unverschlüsselt oder mit **AES-256-GCM & PBKDF2-HMAC-SHA256 (120.000 Iterationen)** passwortgeschützt, inklusive atomarem Komplett-Restore nach Passworteingabe.

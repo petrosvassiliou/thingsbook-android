@@ -524,6 +524,7 @@ private fun MagicPlusContextMenuCard(
                 iconBg = colors.thingsBlueSoft,
                 title = stringResource(R.string.entity_todo),
                 subtitle = todoSubtitle,
+                shortcutBadge = "Ctrl+N",
                 onClick = onSelectTodo
             )
 
@@ -546,6 +547,7 @@ private fun MagicPlusContextMenuCard(
                 iconBg = colors.thingsBlueSoft,
                 title = stringResource(R.string.entity_project),
                 subtitle = projectSubtitle,
+                shortcutBadge = "Ctrl+Shift+N",
                 onClick = onSelectProject
             )
 
@@ -571,6 +573,7 @@ private fun MagicPlusOptionRow(
     iconBg: Color,
     title: String,
     subtitle: String,
+    shortcutBadge: String? = null,
     onClick: () -> Unit
 ) {
     val colors = ThingsTheme.colors
@@ -619,11 +622,33 @@ private fun MagicPlusOptionRow(
         }
 
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                color = colors.primaryText
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = colors.primaryText
+                )
+                if (!shortcutBadge.isNullOrBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(colors.tagPillBg)
+                            .padding(horizontal = 5.dp, vertical = 1.5.dp)
+                    ) {
+                        Text(
+                            text = shortcutBadge,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Medium
+                            ),
+                            color = colors.secondaryText
+                        )
+                    }
+                }
+            }
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),

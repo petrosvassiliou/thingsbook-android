@@ -106,6 +106,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -119,11 +120,13 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.text.KeyboardActions
@@ -136,6 +139,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.culturedcode.things3.BuildConfig
+import com.culturedcode.things3.MainActivity
 import com.culturedcode.things3.R
 import com.culturedcode.things3.data.repository.CloudSyncStatus
 import com.culturedcode.things3.data.repository.ThingsRepository
@@ -315,6 +319,80 @@ fun ThingsSmartViewScreen(
         SmartViewType.LOGBOOK to logbookTasks.size
     )
 
+    val triggerCreateTaskShortcut by rememberUpdatedState {
+        showCreateProjectDialog = false
+        editingProject = null
+        showBatchMoveDialog = false
+        isMobileDrawerOpen = false
+        viewModel.setMagicPlusMenuOpen(false)
+        viewModel.createTaskAtPosition(primaryTasks, 0, "", forceTopUngroupedInProject = true)
+    }
+
+    val triggerCreateProjectShortcut by rememberUpdatedState {
+        showBatchMoveDialog = false
+        isMobileDrawerOpen = false
+        viewModel.setMagicPlusMenuOpen(false)
+        projectDialogPreselectedAreaId = currentArea?.id ?: currentProject?.areaId
+        editingProject = null
+        showCreateProjectDialog = true
+    }
+
+    val context = LocalContext.current
+    val currentHardwareShortcutHandler by rememberUpdatedState<(android.view.KeyEvent) -> Boolean> { nativeEvent ->
+        val ctrlOrMeta = nativeEvent.isCtrlPressed || nativeEvent.isMetaPressed
+        when {
+            ctrlOrMeta && nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_N -> {
+                triggerCreateProjectShortcut()
+                true
+            }
+            ctrlOrMeta && !nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_N -> {
+                triggerCreateTaskShortcut()
+                true
+            }
+            ctrlOrMeta && !nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_F -> {
+                viewModel.setQuickFindOpen(!isQuickFindOpen)
+                true
+            }
+            ctrlOrMeta && !nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_G -> {
+                viewModel.setGeminiModalOpen(true)
+                true
+            }
+            ctrlOrMeta && !nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_A &&
+                expandedTaskId == null && !showCreateProjectDialog && !showBatchMoveDialog -> {
+                viewModel.selectAllTasks(allVisibleTaskIds)
+                true
+            }
+            nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_ESCAPE -> when {
+                showCreateProjectDialog -> {
+                    showCreateProjectDialog = false
+                    editingProject = null
+                    true
+                }
+                showBatchMoveDialog -> {
+                    showBatchMoveDialog = false
+                    true
+                }
+                isMobileDrawerOpen -> {
+                    isMobileDrawerOpen = false
+                    true
+                }
+                else -> viewModel.dismissTopmostOverlay()
+            }
+            else -> false
+        }
+    }
+
+    DisposableEffect(context) {
+        val activity = context as? MainActivity
+        val delegate: (android.view.KeyEvent) -> Boolean = { ev -> currentHardwareShortcutHandler(ev) }
+        activity?.hardwareKeyShortcutHandler = delegate
+        onDispose {
+            if (activity?.hardwareKeyShortcutHandler === delegate) {
+                activity.hardwareKeyShortcutHandler = null
+            }
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -323,19 +401,23 @@ fun ThingsSmartViewScreen(
                 if (event.type == KeyEventType.KeyDown) {
                     val ctrlOrMeta = event.isCtrlPressed || event.isMetaPressed
                     when {
-                        ctrlOrMeta && event.key == Key.F -> {
+                        ctrlOrMeta && event.isShiftPressed && event.key == Key.N -> {
+                            triggerCreateProjectShortcut()
+                            true
+                        }
+                        ctrlOrMeta && !event.isShiftPressed && event.key == Key.N -> {
+                            triggerCreateTaskShortcut()
+                            true
+                        }
+                        ctrlOrMeta && !event.isShiftPressed && event.key == Key.F -> {
                             viewModel.setQuickFindOpen(!isQuickFindOpen)
                             true
                         }
-                        ctrlOrMeta && event.key == Key.A && expandedTaskId == null -> {
+                        ctrlOrMeta && !event.isShiftPressed && event.key == Key.A && expandedTaskId == null -> {
                             viewModel.selectAllTasks(allVisibleTaskIds)
                             true
                         }
-                        ctrlOrMeta && event.key == Key.N -> {
-                            viewModel.createTaskAtPosition(primaryTasks, 0, "")
-                            true
-                        }
-                        ctrlOrMeta && event.key == Key.G -> {
+                        ctrlOrMeta && !event.isShiftPressed && event.key == Key.G -> {
                             viewModel.setGeminiModalOpen(true)
                             true
                         }
@@ -771,7 +853,7 @@ private fun MagicPlusOverlaySection(
             isMenuExpanded = isMagicPlusMenuOpen,
             onMenuExpandedChange = { viewModel.setMagicPlusMenuOpen(it) },
             onCreateTodo = {
-                viewModel.createTaskAtPosition(primaryTasks, 0, "")
+                viewModel.createTaskAtPosition(primaryTasks, 0, "", forceTopUngroupedInProject = true)
             },
             onCreateProject = {
                 onRequestCreateProject(currentArea?.id)
@@ -1338,6 +1420,16 @@ private fun ThingsMainTaskLazyList(
     }
     LaunchedEffect(isProjectView) {
         if (!isProjectView) projectDragController.cancel()
+    }
+    LaunchedEffect(expandedTaskId, primaryTasks.size) {
+        val targetId = expandedTaskId ?: return@LaunchedEffect
+        val isAlreadyVisible = listState.layoutInfo.visibleItemsInfo.any { info ->
+            val k = info.key?.toString().orEmpty()
+            k == targetId || k == "ungrouped_$targetId"
+        }
+        if (!isAlreadyVisible && primaryTasks.firstOrNull()?.id == targetId) {
+            runCatching { listState.animateScrollToItem(0) }
+        }
     }
     ProjectDragAutoScrollEffect(controller = projectDragController, listState = listState)
 
@@ -3946,7 +4038,7 @@ private fun ThingsChromebookSidebar(
                 .padding(top = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            ThingsHoverTooltip(text = "Neues Projekt anlegen") {
+            ThingsHoverTooltip(text = "${stringResource(R.string.entity_new_project)} (Ctrl+Shift+N)") {
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))

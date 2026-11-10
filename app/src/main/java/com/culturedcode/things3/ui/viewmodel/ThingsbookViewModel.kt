@@ -568,7 +568,8 @@ class ThingsbookViewModel @Inject constructor(
     fun createTaskAtPosition(
         currentList: List<TaskItem>,
         dropIndex: Int,
-        defaultTitle: String
+        defaultTitle: String,
+        forceTopUngroupedInProject: Boolean = false
     ) {
         safeVmScope.launch {
             val prevOrder = currentList.getOrNull(dropIndex - 1)?.sortOrder
@@ -593,7 +594,7 @@ class ThingsbookViewModel @Inject constructor(
                     }
                     SmartViewType.ANYTIME -> Triple(ScheduleState.ANYTIME, null, null)
                     SmartViewType.SOMEDAY -> Triple(ScheduleState.SOMEDAY, null, null)
-                    SmartViewType.LOGBOOK -> Triple(ScheduleState.TODAY, todayEpoch, null)
+                    SmartViewType.LOGBOOK -> Triple(ScheduleState.INBOX, null, null)
                 }
                 is ActiveNavigationTarget.ProjectDetail -> Triple(ScheduleState.ANYTIME, null, target.projectId)
                 is ActiveNavigationTarget.AreaDetail -> Triple(ScheduleState.ANYTIME, null, null)
@@ -605,8 +606,15 @@ class ThingsbookViewModel @Inject constructor(
                 else -> null
             }
 
-            val neighboringHeadingId = currentList.getOrNull(dropIndex - 1)?.headingId
-                ?: currentList.getOrNull(dropIndex)?.headingId
+            val neighboringHeadingId = if (forceTopUngroupedInProject && target is ActiveNavigationTarget.ProjectDetail) {
+                null
+            } else {
+                currentList.getOrNull(dropIndex - 1)?.headingId
+                    ?: currentList.getOrNull(dropIndex)?.headingId
+            }
+            if (neighboringHeadingId != null) {
+                expandHeading(neighboringHeadingId)
+            }
 
             val createdId = repository.createOrUpdateTask(
                 title = defaultTitle,
@@ -619,6 +627,10 @@ class ThingsbookViewModel @Inject constructor(
                 areaId = areaId,
                 sortOrder = midpointOrder
             )
+
+            if (target == ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK)) {
+                _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.INBOX)
+            }
 
             // Expand newly dropped card inline immediately
             _expandedTaskId.value = createdId

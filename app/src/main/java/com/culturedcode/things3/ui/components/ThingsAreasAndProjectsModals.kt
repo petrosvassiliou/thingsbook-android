@@ -45,6 +45,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,10 +53,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.key.Key
+import kotlinx.coroutines.delay
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -537,6 +541,25 @@ fun CreateOrEditProjectDialog(
         mutableStateOf(existingProject?.deadline)
     }
     var showDeadlineCalendar by remember { mutableStateOf(false) }
+    val titleFocusRequester = remember { FocusRequester() }
+
+    val submitProject = {
+        if (titleField.text.isNotBlank()) {
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            onSaveProject(
+                titleField.text.trim(),
+                notesField.text.trim(),
+                selectedAreaId,
+                deadlineEpochMillis
+            )
+            onDismiss()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        delay(60)
+        runCatching { titleFocusRequester.requestFocus() }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -601,8 +624,21 @@ fun CreateOrEditProjectDialog(
                         )
                     },
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { submitProject() }),
                     modifier = Modifier
                         .fillMaxWidth()
+                        .focusRequester(titleFocusRequester)
+                        .onPreviewKeyEvent { keyEvent ->
+                            if (keyEvent.type == KeyEventType.KeyDown &&
+                                (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
+                            ) {
+                                submitProject()
+                                true
+                            } else {
+                                false
+                            }
+                        }
                         .onFocusChanged { focusState ->
                             if (focusState.isFocused) {
                                 val txt = titleField.text

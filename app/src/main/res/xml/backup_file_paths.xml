@@ -3,7 +3,4 @@
     <cache-path
         name="shared_backups"
         path="backups/" />
-    <cache-path
-        name="app_updates"
-        path="updates/" />
 </paths>

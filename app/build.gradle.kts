@@ -17,8 +17,8 @@ android {
         applicationId = "com.culturedcode.things3"
         minSdk = 26
         targetSdk = 35
-        versionCode = 30
-        versionName = "1.6.13"
+        versionCode = 31
+        versionName = "1.6.14"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -39,12 +39,18 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
+            isMinifyEnabled = false
+            isDebuggable = false
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
+    }
+
+    lint {
+        checkReleaseBuilds = false
     }
 
     compileOptions {

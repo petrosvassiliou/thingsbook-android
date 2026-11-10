@@ -3,26 +3,19 @@ package com.culturedcode.things3.data.update
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.provider.Settings
-import androidx.core.content.FileProvider
 import com.culturedcode.things3.BuildConfig
 import com.culturedcode.things3.domain.util.runCatchingCancellable
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import java.io.BufferedInputStream
-import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.coroutines.coroutineContext
 
 data class AppReleaseInfo(
     val versionName: String,
@@ -276,140 +269,18 @@ class AppUpdateManager @Inject constructor(
         }
     }
 
-    suspend fun downloadUpdateApk(
-        release: AppReleaseInfo,
-        onProgress: (percent: Int?, downloadedBytes: Long, totalBytes: Long?) -> Unit
-    ): File = withContext(Dispatchers.IO) {
-        val updatesDir = File(context.cacheDir, "updates").apply { mkdirs() }
-        val safeVersion = release.versionName.replace(Regex("""[^0-9A-Za-z._-]"""), "_")
-        val targetFile = File(updatesDir, "Thingsbook-v$safeVersion-full.apk")
-        val partFile = File(updatesDir, "Thingsbook-v$safeVersion-full.apk.part")
-
-        // Reuse already verified cached APK if previously downloaded in this session
-        if (targetFile.isFile && targetFile.length() >= MIN_VALID_APK_BYTES && verifyFileHasZipHeader(targetFile)) {
-            val len = targetFile.length()
-            onProgress(100, len, len)
-            return@withContext targetFile
-        }
-
-        // Remove stale APKs/partial downloads so cache stays clean
-        updatesDir.listFiles()?.forEach { f ->
-            runCatching { f.delete() }
-        }
-
-        var connection: HttpURLConnection? = null
-        try {
-            connection = openConnectionFollowingRedirects(
-                initialUrl = release.apkDownloadUrl,
-                acceptHeader = "application/octet-stream, application/vnd.android.package-archive, */*",
-                connectTimeoutMs = 15_000,
-                readTimeoutMs = 45_000
-            )
-            val status = connection.responseCode
-            if (status !in 200..299) {
-                throw IOException("HTTP $status while downloading update APK")
-            }
-
-            val contentLength = connection.contentLengthLong.takeIf { it > 0L }
-            var totalRead = 0L
-            val headerProbe = ByteArray(4)
-            var headerFilled = 0
-
-            BufferedInputStream(connection.inputStream, 32 * 1024).use { input ->
-                FileOutputStream(partFile).use { output ->
-                    val buffer = ByteArray(16 * 1024)
-                    var lastReportedTime = 0L
-                    var lastReportedPercent = -1
-
-                    while (true) {
-                        coroutineContext.ensureActive()
-                        val read = input.read(buffer)
-                        if (read == -1) break
-                        if (read == 0) continue
-
-                        if (headerFilled < 4) {
-                            val toCopy = minOf(4 - headerFilled, read)
-                            System.arraycopy(buffer, 0, headerProbe, headerFilled, toCopy)
-                            headerFilled += toCopy
-                            if (headerFilled == 4 && !AppUpdateParser.isValidApkHeader(headerProbe, 4)) {
-                                throw IOException("Downloaded file is not a valid Android APK package")
-                            }
-                        }
-
-                        output.write(buffer, 0, read)
-                        totalRead += read
-
-                        val percent = contentLength?.let { total ->
-                            ((totalRead * 100L) / total).toInt().coerceIn(0, 100)
-                        }
-                        val now = System.currentTimeMillis()
-                        if (now - lastReportedTime >= 110L || (percent != null && percent != lastReportedPercent && percent % 2 == 0)) {
-                            lastReportedTime = now
-                            if (percent != null) lastReportedPercent = percent
-                            onProgress(percent, totalRead, contentLength)
-                        }
-                    }
-                    output.flush()
-                }
-            }
-
-            if (totalRead < MIN_VALID_APK_BYTES || !AppUpdateParser.isValidApkHeader(headerProbe, headerFilled)) {
-                partFile.delete()
-                throw IOException("Incomplete APK download ($totalRead bytes)")
-            }
-
-            if (targetFile.exists()) targetFile.delete()
-            if (!partFile.renameTo(targetFile)) {
-                partFile.copyTo(targetFile, overwrite = true)
-                partFile.delete()
-            }
-
-            onProgress(100, totalRead, totalRead)
-            targetFile
-        } catch (t: Throwable) {
-            runCatching { partFile.delete() }
-            throw t
-        } finally {
-            runCatching { connection?.disconnect() }
-        }
-    }
-
-    fun canInstallPackages(): Boolean {
-        return runCatching { context.packageManager.canRequestPackageInstalls() }.getOrDefault(true)
-    }
-
-    fun openUnknownSourcesSettings() {
-        val packageIntent = Intent(
-            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-            Uri.parse("package:${context.packageName}")
-        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-
-        runCatching {
-            context.startActivity(packageIntent)
-        }.onFailure {
-            runCatching {
-                context.startActivity(
-                    Intent(Settings.ACTION_SECURITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            }
-        }
-    }
-
-    fun launchApkInstaller(apkFile: File): Result<Unit> = runCatching {
-        require(apkFile.isFile && apkFile.length() >= MIN_VALID_APK_BYTES) {
-            "APK file is missing or incomplete"
-        }
-        val contentUri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            apkFile
-        )
-        val installIntent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(contentUri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    /**
+     * Opens the direct APK download URL in the system browser (e.g. Chrome) so the browser handles
+     * the APK download and installation without requiring REQUEST_INSTALL_PACKAGES in Thingsbook.
+     */
+    fun openApkDownloadInBrowser(release: AppReleaseInfo): Result<Unit> = runCatching {
+        val targetUrl = release.apkDownloadUrl.takeIf { it.startsWith("https://") }
+            ?: release.releasePageUrl.takeIf { it.startsWith("https://") }
+            ?: AppUpdateParser.RELEASES_PAGE_URL
+        val viewIntent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        context.startActivity(installIntent)
+        context.startActivity(viewIntent)
     }
 
     fun openReleasePageInBrowser(url: String) {
@@ -421,14 +292,6 @@ class AppUpdateManager @Inject constructor(
             context.startActivity(viewIntent)
         }
     }
-
-    private fun verifyFileHasZipHeader(file: File): Boolean = runCatching {
-        file.inputStream().use { input ->
-            val buf = ByteArray(4)
-            val count = input.read(buf)
-            AppUpdateParser.isValidApkHeader(buf, count)
-        }
-    }.getOrDefault(false)
 
     private fun httpGetTextFollowingRedirects(
         url: String,
@@ -484,7 +347,6 @@ class AppUpdateManager @Inject constructor(
     }
 
     companion object {
-        private const val MIN_VALID_APK_BYTES = 100_000L
         private const val MAX_REDIRECT_HOPS = 8
         private val REDIRECT_STATUS_CODES = setOf(301, 302, 303, 307, 308)
     }

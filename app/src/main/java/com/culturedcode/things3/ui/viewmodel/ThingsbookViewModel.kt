@@ -2132,54 +2132,17 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun startUpdateDownloadAndInstall(release: AppReleaseInfo) {
-        if (_appUpdateState.value is AppUpdateUiState.Downloading) return
-
-        activeUpdateJob?.cancel()
-        activeUpdateJob = safeVmScope.launch {
-            _appUpdateState.value = AppUpdateUiState.Downloading(
-                release = release,
-                progressPercent = 0,
-                downloadedBytes = 0L,
-                totalBytes = null
-            )
-            runCatchingCancellable {
-                appUpdateManager.downloadUpdateApk(release) { percent, downloaded, total ->
-                    _appUpdateState.value = AppUpdateUiState.Downloading(
-                        release = release,
-                        progressPercent = percent,
-                        downloadedBytes = downloaded,
-                        totalBytes = total
-                    )
-                }
-            }.onSuccess { apkFile ->
-                if (appUpdateManager.canInstallPackages()) {
-                    _appUpdateState.value = AppUpdateUiState.ReadyToInstall(
-                        release = release,
-                        apkFilePath = apkFile.absolutePath,
-                        needsInstallPermission = false
-                    )
-                    appUpdateManager.launchApkInstaller(apkFile).onFailure { installErr ->
-                        val detail = installErr.localizedMessage ?: installErr.message ?: "Installer error"
-                        _appUpdateState.value = AppUpdateUiState.Error(
-                            message = getLocalizedString(R.string.settings_updates_download_failed, detail),
-                            fallbackReleaseUrl = release.releasePageUrl
-                        )
-                    }
-                } else {
-                    _appUpdateState.value = AppUpdateUiState.ReadyToInstall(
-                        release = release,
-                        apkFilePath = apkFile.absolutePath,
-                        needsInstallPermission = true
-                    )
-                    appUpdateManager.openUnknownSourcesSettings()
-                }
-            }.onFailure { err ->
-                val detail = err.localizedMessage ?: err.message ?: "Download error"
-                _appUpdateState.value = AppUpdateUiState.Error(
-                    message = getLocalizedString(R.string.settings_updates_download_failed, detail),
-                    fallbackReleaseUrl = release.releasePageUrl
-                )
+        appUpdateManager.openApkDownloadInBrowser(release).onSuccess {
+            val current = _appUpdateState.value
+            if (current is AppUpdateUiState.UpdateAvailable) {
+                _appUpdateState.value = current.copy(showPromptBanner = false)
             }
+        }.onFailure { err ->
+            val detail = err.localizedMessage ?: err.message ?: "Browser error"
+            _appUpdateState.value = AppUpdateUiState.Error(
+                message = getLocalizedString(R.string.settings_updates_download_failed, detail),
+                fallbackReleaseUrl = release.releasePageUrl
+            )
         }
     }
 
@@ -2195,32 +2158,10 @@ class ThingsbookViewModel @Inject constructor(
 
     fun installDownloadedUpdate() {
         val ready = _appUpdateState.value as? AppUpdateUiState.ReadyToInstall ?: return
-        val apkFile = File(ready.apkFilePath)
-        if (!apkFile.isFile) {
-            startUpdateDownloadAndInstall(ready.release)
-            return
-        }
-        if (!appUpdateManager.canInstallPackages()) {
-            _appUpdateState.value = ready.copy(needsInstallPermission = true)
-            appUpdateManager.openUnknownSourcesSettings()
-            return
-        }
-        _appUpdateState.value = ready.copy(needsInstallPermission = false)
-        appUpdateManager.launchApkInstaller(apkFile).onFailure { installErr ->
-            val detail = installErr.localizedMessage ?: installErr.message ?: "Installer error"
-            _appUpdateState.value = AppUpdateUiState.Error(
-                message = getLocalizedString(R.string.settings_updates_download_failed, detail),
-                fallbackReleaseUrl = ready.release.releasePageUrl
-            )
-        }
+        startUpdateDownloadAndInstall(ready.release)
     }
 
-    fun onAppResumed() {
-        val ready = _appUpdateState.value as? AppUpdateUiState.ReadyToInstall ?: return
-        if (ready.needsInstallPermission && appUpdateManager.canInstallPackages()) {
-            installDownloadedUpdate()
-        }
-    }
+    fun onAppResumed() = Unit
 
     fun dismissUpdateBanner() {
         when (val current = _appUpdateState.value) {

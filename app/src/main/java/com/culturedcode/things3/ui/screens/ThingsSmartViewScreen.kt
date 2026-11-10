@@ -43,12 +43,17 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.shadow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.MenuOpen
 import androidx.compose.material.icons.outlined.Add
@@ -286,6 +291,18 @@ fun ThingsSmartViewScreen(
     // Adaptive Layout Detection: Tablets & Foldables (>= 700dp) vs. Android Phones (< 700dp)
     val isWideScreen = configuration.screenWidthDp >= 700
     val showSidebar = isWideScreen && isSidebarVisible
+    var isMobileDrawerOpen by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isWideScreen) {
+        if (isWideScreen && isMobileDrawerOpen) {
+            isMobileDrawerOpen = false
+        }
+    }
+
+    BackHandler(enabled = !isWideScreen && isMobileDrawerOpen) {
+        isMobileDrawerOpen = false
+    }
+
     val smartViewCounts = mapOf(
         SmartViewType.INBOX to inboxTasks.size,
         SmartViewType.TODAY to (todayTasks.size + eveningTasks.size),
@@ -402,14 +419,16 @@ fun ThingsSmartViewScreen(
                         viewModel = viewModel,
                         isWideScreen = isWideScreen,
                         isSidebarVisible = isSidebarVisible,
+                        isMobileDrawerOpen = isMobileDrawerOpen,
+                        onToggleMobileDrawer = { isMobileDrawerOpen = !isMobileDrawerOpen },
                         isQuickFindOpen = isQuickFindOpen,
                         areas = areas,
                         activeProjects = activeProjects,
                         activeLocale = activeLocale
                     )
 
-                    // Show Horizontal View Switcher Strip on Phones (< 700dp) OR whenever the Sidebar is hidden!
-                    if (!showSidebar) {
+                    // On Foldables & Googlebook (>= 700dp), show horizontal strip when the permanent sidebar is collapsed
+                    if (isWideScreen && !showSidebar) {
                         SmartViewNavigationStrip(
                             navTarget = navTarget,
                             areas = areas,
@@ -568,6 +587,77 @@ fun ThingsSmartViewScreen(
                 showCreateProjectDialog = true
             }
         )
+
+        // Phone-Only (< 700dp) Slide-Over Hamburger Navigation Drawer
+        if (!isWideScreen) {
+            AnimatedVisibility(
+                visible = isMobileDrawerOpen,
+                enter = fadeIn(animationSpec = tween(durationMillis = 180)),
+                exit = fadeOut(animationSpec = tween(durationMillis = 180))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.44f))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = { isMobileDrawerOpen = false }
+                        )
+                )
+            }
+
+            AnimatedVisibility(
+                visible = isMobileDrawerOpen,
+                enter = slideInHorizontally(animationSpec = tween(durationMillis = 220)) { -it } +
+                    fadeIn(animationSpec = tween(durationMillis = 180)),
+                exit = slideOutHorizontally(animationSpec = tween(durationMillis = 200)) { -it } +
+                    fadeOut(animationSpec = tween(durationMillis = 160))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .statusBarsPadding()
+                        .shadow(16.dp)
+                ) {
+                    ThingsChromebookSidebar(
+                        viewModel = viewModel,
+                        navTarget = navTarget,
+                        smartViewCounts = smartViewCounts,
+                        areas = areas,
+                        projects = activeProjects,
+                        onSelectSmartView = {
+                            isMobileDrawerOpen = false
+                            viewModel.selectSmartView(it)
+                        },
+                        onSelectArea = {
+                            isMobileDrawerOpen = false
+                            viewModel.selectArea(it)
+                        },
+                        onSelectProject = {
+                            isMobileDrawerOpen = false
+                            viewModel.selectProject(it)
+                        },
+                        onOpenAreaManager = {
+                            isMobileDrawerOpen = false
+                            viewModel.setAreaManagerOpen(true)
+                        },
+                        onCreateNewProject = { areaId ->
+                            isMobileDrawerOpen = false
+                            projectDialogPreselectedAreaId = areaId
+                            editingProject = null
+                            showCreateProjectDialog = true
+                        },
+                        onCloseDrawer = { isMobileDrawerOpen = false }
+                    )
+                    VerticalDivider(
+                        color = colors.hairlineDivider,
+                        thickness = 1.dp,
+                        modifier = Modifier.fillMaxHeight()
+                    )
+                }
+            }
+        }
 
         ThingsModalsOverlay(
             viewModel = viewModel,
@@ -940,6 +1030,8 @@ private fun ThingsTopHeaderAndQuickFindSection(
     viewModel: ThingsbookViewModel,
     isWideScreen: Boolean,
     isSidebarVisible: Boolean,
+    isMobileDrawerOpen: Boolean,
+    onToggleMobileDrawer: () -> Unit,
     isQuickFindOpen: Boolean,
     areas: List<Area>,
     activeProjects: List<Project>,
@@ -959,16 +1051,22 @@ private fun ThingsTopHeaderAndQuickFindSection(
 
     val showSidebar = isWideScreen && isSidebarVisible
 
-    // Top Utility & Navigation Bar (Sidebar Toggle, Thingsbook Symbol when sidebar hidden, Quick Find, Gemini AI ✨, Areas 📦, Tags 🏷️, Notifications 🔔, Language, Cloud Sync, Settings ⚙️)
+    // Top Utility & Navigation Bar (Sidebar/Hamburger Toggle, Thingsbook Symbol when sidebar hidden, Quick Find, Gemini AI ✨, Areas 📦, Tags 🏷️, Notifications 🔔, Language, Cloud Sync, Settings ⚙️)
     TopThingsbookBar(
         isWideScreen = isWideScreen,
-        isSidebarVisible = isSidebarVisible,
+        isSidebarVisible = if (isWideScreen) isSidebarVisible else isMobileDrawerOpen,
         showBrandSymbol = !showSidebar,
         isQuickFindOpen = isQuickFindOpen,
         syncStatus = syncStatus,
         dailyDigestEnabled = dailyDigestConfig.enabled,
         showLanguageMenu = showLanguageMenu,
-        onToggleSidebar = { viewModel.toggleSidebarVisible() },
+        onToggleSidebar = {
+            if (isWideScreen) {
+                viewModel.toggleSidebarVisible()
+            } else {
+                onToggleMobileDrawer()
+            }
+        },
         onSelectTodayView = { viewModel.selectSmartView(SmartViewType.TODAY) },
         onToggleLanguageMenu = { showLanguageMenu = it },
         onSelectLanguage = { tag ->
@@ -3550,7 +3648,8 @@ private fun ThingsChromebookSidebar(
     onSelectArea: (String) -> Unit,
     onSelectProject: (String) -> Unit,
     onOpenAreaManager: () -> Unit,
-    onCreateNewProject: (String?) -> Unit
+    onCreateNewProject: (String?) -> Unit,
+    onCloseDrawer: (() -> Unit)? = null
 ) {
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
@@ -3570,19 +3669,37 @@ private fun ThingsChromebookSidebar(
                 .fillMaxWidth()
                 .padding(horizontal = 6.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            ThingsHoverTooltip(text = "Thingsbook") {
-                ThingsbookBrandSymbol(
-                    size = 28.dp,
-                    onClick = { onSelectSmartView(SmartViewType.TODAY) }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                ThingsHoverTooltip(text = "Thingsbook") {
+                    ThingsbookBrandSymbol(
+                        size = 28.dp,
+                        onClick = { onSelectSmartView(SmartViewType.TODAY) }
+                    )
+                }
+                Text(
+                    text = stringResource(R.string.app_name),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = colors.primaryText
                 )
             }
-            Text(
-                text = stringResource(R.string.app_name),
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = colors.primaryText
-            )
+            if (onCloseDrawer != null) {
+                IconButton(
+                    onClick = onCloseDrawer,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Close,
+                        contentDescription = stringResource(R.string.action_cancel),
+                        tint = colors.secondaryText,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(2.dp))

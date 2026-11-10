@@ -12,9 +12,9 @@ Eine eigenständige, native Android-Produktivitäts-App (für **Android-Smartpho
 
 ---
 
-## Direkt-Download (Installierbares Android-APK — Version 1.6.14)
+## Direkt-Download (Installierbares Android-APK — Version 1.6.15)
 
-- **[Thingsbook-v1.6.14-full.apk herunterladen (v1.6.14 — Play-Protect-kompatibler Release-Build ohne REQUEST_INSTALL_PACKAGES & mit Browser-Update-Download)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.14-full.apk)**
+- **[Thingsbook-v1.6.15-full.apk herunterladen (v1.6.15 — Hamburger-Slide-Over-Menü für Smartphones; Foldables & Googlebook unverändert)](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.15-full.apk)**
 
 ---
 

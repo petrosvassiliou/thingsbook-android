@@ -2200,42 +2200,40 @@ private fun TopThingsbookBar(
     onOpenSettings: () -> Unit
 ) {
     val colors = ThingsTheme.colors
-    val iconButtonSize = if (isWideScreen) 34.dp else 31.dp
+    val iconButtonSize = if (isWideScreen) 34.dp else 29.dp
     val iconGlyphSize = if (isWideScreen) 19.dp else 18.dp
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = if (isWideScreen) 16.dp else 12.dp, vertical = 8.dp),
+            .padding(horizontal = if (isWideScreen) 16.dp else 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(if (isWideScreen) 8.dp else 6.dp)
+            horizontalArrangement = Arrangement.spacedBy(if (isWideScreen) 8.dp else 4.dp)
         ) {
-            if (isWideScreen) {
-                ThingsHoverTooltip(
-                    text = if (isSidebarVisible) "Seitenleiste ausblenden" else "Seitenleiste einblenden"
+            ThingsHoverTooltip(
+                text = if (isSidebarVisible) "Seitenleiste ausblenden" else "Seitenleiste einblenden"
+            ) {
+                IconButton(
+                    onClick = onToggleSidebar,
+                    modifier = Modifier.size(iconButtonSize)
                 ) {
-                    IconButton(
-                        onClick = onToggleSidebar,
-                        modifier = Modifier.size(34.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isSidebarVisible) Icons.AutoMirrored.Outlined.MenuOpen else Icons.Outlined.Menu,
-                            contentDescription = if (isSidebarVisible) "Seitenleiste ausblenden" else "Seitenleiste einblenden",
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
+                    Icon(
+                        imageVector = if (isSidebarVisible) Icons.AutoMirrored.Outlined.MenuOpen else Icons.Outlined.Menu,
+                        contentDescription = if (isSidebarVisible) "Seitenleiste ausblenden" else "Seitenleiste einblenden",
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(if (isWideScreen) 20.dp else 19.dp)
+                    )
                 }
             }
 
             if (showBrandSymbol) {
                 ThingsHoverTooltip(text = "Thingsbook • ${stringResource(R.string.view_today)}") {
                     ThingsbookBrandSymbol(
-                        size = if (isWideScreen) 28.dp else 26.dp,
+                        size = if (isWideScreen) 28.dp else 25.dp,
                         onClick = onSelectTodayView
                     )
                 }

@@ -16,6 +16,7 @@ import com.culturedcode.things3.ui.components.ProjectDropIndicatorOverlay
 import com.culturedcode.things3.ui.components.ProjectDragAutoScrollEffect
 import com.culturedcode.things3.ui.components.projectDropSurface
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
@@ -76,16 +77,24 @@ import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.SystemUpdateAlt
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.culturedcode.things3.data.update.AppUpdateUiState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -185,6 +194,19 @@ fun ThingsSmartViewScreen(
     val haptics = LocalHapticFeedback.current
     val configuration = LocalConfiguration.current
     val activeLocale = configuration.locales[0] ?: Locale.getDefault()
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.onAppResumed()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     val navTarget by viewModel.navigationTarget.collectAsState()
     val expandedTaskId by viewModel.expandedTaskId.collectAsState()
@@ -738,6 +760,182 @@ private fun ThingsErrorBanner(
 }
 
 @Composable
+private fun ThingsAutoUpdateBanner(
+    updateState: AppUpdateUiState,
+    onUpdateNow: () -> Unit,
+    onInstallNow: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val colors = ThingsTheme.colors
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .border(1.dp, colors.thingsBlue.copy(alpha = 0.38f), RoundedCornerShape(12.dp)),
+        color = colors.thingsBlueSoft,
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        when (updateState) {
+            is AppUpdateUiState.UpdateAvailable -> {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.SystemUpdateAlt,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.update_banner_title, updateState.release.versionName),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = colors.thingsBlue,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (updateState.release.releaseNotes.isNotBlank()) {
+                            Text(
+                                text = updateState.release.releaseNotes.lineSequence().firstOrNull().orEmpty(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.secondaryText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    Button(
+                        onClick = onUpdateNow,
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.thingsBlue),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.update_banner_action_btn),
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = Color.White
+                        )
+                    }
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(26.dp)) {
+                        Icon(
+                            imageVector = Icons.Outlined.Close,
+                            contentDescription = stringResource(R.string.action_cancel),
+                            tint = colors.secondaryText,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
+                }
+            }
+
+            is AppUpdateUiState.Downloading -> {
+                val pct = updateState.progressPercent
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 9.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = if (pct != null) {
+                                stringResource(
+                                    R.string.settings_updates_downloading,
+                                    updateState.release.versionName,
+                                    pct
+                                )
+                            } else {
+                                stringResource(
+                                    R.string.settings_updates_downloading_indeterminate,
+                                    updateState.release.versionName
+                                )
+                            },
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = colors.thingsBlue
+                        )
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.action_cancel),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(5.dp))
+                    if (pct != null) {
+                        LinearProgressIndicator(
+                            progress = { (pct / 100f).coerceIn(0f, 1f) },
+                            color = colors.thingsBlue,
+                            trackColor = colors.hairlineDivider,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(5.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                        )
+                    } else {
+                        LinearProgressIndicator(
+                            color = colors.thingsBlue,
+                            trackColor = colors.hairlineDivider,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(5.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                        )
+                    }
+                }
+            }
+
+            is AppUpdateUiState.ReadyToInstall -> {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.SystemUpdateAlt,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.settings_updates_ready_title, updateState.release.versionName),
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = colors.thingsBlue,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Button(
+                        onClick = onInstallNow,
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.thingsBlue),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.settings_updates_install_now_btn),
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+
+            else -> Unit
+        }
+    }
+}
+
+@Composable
 private fun ThingsTopHeaderAndQuickFindSection(
     viewModel: ThingsbookViewModel,
     isWideScreen: Boolean,
@@ -756,6 +954,7 @@ private fun ThingsTopHeaderAndQuickFindSection(
     val hasSampleTasks by viewModel.hasSampleTasks.collectAsState()
     val isInitialSetupBannerDismissed by viewModel.isInitialSetupBannerDismissed.collectAsState()
     val currentUserIdentifier by viewModel.currentUserIdentifier.collectAsState()
+    val appUpdateState by viewModel.appUpdateState.collectAsState()
     var showLanguageMenu by remember { mutableStateOf(false) }
 
     val showSidebar = isWideScreen && isSidebarVisible
@@ -784,6 +983,33 @@ private fun ThingsTopHeaderAndQuickFindSection(
         onManualSync = { viewModel.setAuthModalOpen(true) },
         onOpenSettings = { viewModel.setSettingsModalOpen(true) }
     )
+
+    val showAutoUpdateBanner = when (val st = appUpdateState) {
+        is AppUpdateUiState.UpdateAvailable -> st.showPromptBanner
+        is AppUpdateUiState.Downloading, is AppUpdateUiState.ReadyToInstall -> true
+        else -> false
+    }
+    AnimatedVisibility(
+        visible = showAutoUpdateBanner,
+        enter = expandVertically() + fadeIn(),
+        exit = shrinkVertically() + fadeOut()
+    ) {
+        ThingsAutoUpdateBanner(
+            updateState = appUpdateState,
+            onUpdateNow = {
+                val avail = appUpdateState as? AppUpdateUiState.UpdateAvailable ?: return@ThingsAutoUpdateBanner
+                viewModel.startUpdateDownloadAndInstall(avail.release)
+            },
+            onInstallNow = { viewModel.installDownloadedUpdate() },
+            onDismiss = {
+                if (appUpdateState is AppUpdateUiState.Downloading) {
+                    viewModel.cancelUpdateDownload()
+                } else {
+                    viewModel.dismissUpdateBanner()
+                }
+            }
+        )
+    }
 
     AnimatedVisibility(
         visible = !uiErrorMessage.isNullOrBlank(),
@@ -1380,10 +1606,12 @@ private fun ThingsModalsOverlay(
         )
     }
 
-    // Comprehensive Settings Modal (⚙️ top-right: Local DB vs Cloud Sync, Account, Language, Statistics, Backup & Restore, CSV)
+    // Comprehensive Settings Modal (⚙️ top-right: Local DB vs Cloud Sync, Account, Language, App Updates, Statistics, Backup & Restore, CSV)
     if (isSettingsModalOpen) {
         val isBackupBusy by viewModel.isBackupBusy.collectAsState()
         val backupStatusMessage by viewModel.backupStatusMessage.collectAsState()
+        val autoCheckUpdatesEnabled by viewModel.autoCheckUpdatesEnabled.collectAsState()
+        val appUpdateState by viewModel.appUpdateState.collectAsState()
         ThingsSettingsModal(
             isLocalOnlyDbMode = isLocalOnlyDbMode,
             syncStatus = syncStatus,
@@ -1393,6 +1621,14 @@ private fun ThingsModalsOverlay(
             isBackupBusy = isBackupBusy,
             backupStatusMessage = backupStatusMessage,
             hasSampleTasks = hasSampleTasks,
+            autoCheckUpdatesEnabled = autoCheckUpdatesEnabled,
+            appUpdateState = appUpdateState,
+            onSetAutoCheckUpdatesEnabled = { viewModel.setAutoCheckUpdatesEnabled(it) },
+            onSearchForUpdates = { viewModel.checkForAppUpdates(manual = true) },
+            onDownloadAndInstallUpdate = { release -> viewModel.startUpdateDownloadAndInstall(release) },
+            onInstallDownloadedUpdate = { viewModel.installDownloadedUpdate() },
+            onCancelUpdateDownload = { viewModel.cancelUpdateDownload() },
+            onOpenUpdateReleasePage = { url -> viewModel.openUpdateReleasePage(url) },
             onDeleteSampleTasksNow = { viewModel.deleteSampleTasksForLocalSetup() },
             onSetLocalOnlyDbMode = { viewModel.setLocalOnlyDbMode(it) },
             onOpenAuthAndSyncModal = {

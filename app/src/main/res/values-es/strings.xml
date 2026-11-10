@@ -282,4 +282,24 @@
     <string name="task_drag_handle">Arrastrar para mover</string>
     <string name="drop_move_here">Mover aquí</string>
     <string name="drop_heading_here">Suelta para insertar el encabezado aquí</string>
+
+    <!-- App Auto-Update & Manual Update Check -->
+    <string name="settings_updates_section">Actualizaciones de la app</string>
+    <string name="settings_updates_auto_title">Búsqueda automática de actualizaciones</string>
+    <string name="settings_updates_auto_desc">Comprueba automáticamente en GitHub al iniciar si hay una nueva versión</string>
+    <string name="settings_updates_search_btn">Buscar actualizaciones</string>
+    <string name="settings_updates_checking">Buscando actualizaciones…</string>
+    <string name="settings_updates_up_to_date">Thingsbook está actualizado (v%1$s)</string>
+    <string name="settings_updates_available_title">Actualización disponible: v%1$s (instalada: v%2$s)</string>
+    <string name="settings_updates_download_install_btn">Descargar e instalar</string>
+    <string name="settings_updates_downloading">Descargando v%1$s… %2$d%%</string>
+    <string name="settings_updates_downloading_indeterminate">Descargando v%1$s…</string>
+    <string name="settings_updates_ready_title">Actualización v%1$s descargada y lista</string>
+    <string name="settings_updates_permission_hint">Permite instalar aplicaciones desde esta fuente en los ajustes de Android y luego pulsa Instalar ahora.</string>
+    <string name="settings_updates_install_now_btn">Instalar ahora</string>
+    <string name="settings_updates_open_github_btn">Ver en GitHub</string>
+    <string name="settings_updates_check_failed">Error al buscar actualizaciones: %1$s</string>
+    <string name="settings_updates_download_failed">Error al descargar la actualización: %1$s</string>
+    <string name="update_banner_title">Nueva versión v%1$s disponible</string>
+    <string name="update_banner_action_btn">Actualizar ahora</string>
 </resources>

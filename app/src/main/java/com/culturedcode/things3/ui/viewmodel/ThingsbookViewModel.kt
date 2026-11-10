@@ -26,6 +26,10 @@ import com.culturedcode.things3.data.notifications.ReminderScheduler
 import com.culturedcode.things3.data.repository.CloudSyncStatus
 import com.culturedcode.things3.data.repository.SyncRepository
 import com.culturedcode.things3.data.repository.ThingsRepository
+import com.culturedcode.things3.data.update.AppReleaseInfo
+import com.culturedcode.things3.data.update.AppUpdateManager
+import com.culturedcode.things3.data.update.AppUpdateParser
+import com.culturedcode.things3.data.update.AppUpdateUiState
 import com.culturedcode.things3.domain.model.Area
 import com.culturedcode.things3.domain.model.Heading
 import com.culturedcode.things3.domain.model.Project
@@ -46,6 +50,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -108,7 +113,8 @@ class ThingsbookViewModel @Inject constructor(
     private val database: ThingsDatabase,
     private val syncRepository: SyncRepository,
     private val geminiService: ThingsbookGeminiService,
-    private val reminderScheduler: ReminderScheduler
+    private val reminderScheduler: ReminderScheduler,
+    private val appUpdateManager: AppUpdateManager
 ) : ViewModel() {
 
     private fun getLocalizedString(@StringRes resId: Int, vararg args: Any): String {
@@ -2064,6 +2070,174 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
+    // =========================================================================
+    // App Auto-Update & Manual "Search for Updates" (GitHub Releases + APK Installer)
+    // =========================================================================
+
+    private val _autoCheckUpdatesEnabled = MutableStateFlow(
+        coreSettingsPrefs.getBoolean("auto_check_updates_enabled", true)
+    )
+    val autoCheckUpdatesEnabled: StateFlow<Boolean> = _autoCheckUpdatesEnabled.asStateFlow()
+
+    private val _appUpdateState = MutableStateFlow<AppUpdateUiState>(AppUpdateUiState.Idle)
+    val appUpdateState: StateFlow<AppUpdateUiState> = _appUpdateState.asStateFlow()
+
+    private var activeUpdateJob: Job? = null
+
+    fun setAutoCheckUpdatesEnabled(enabled: Boolean) {
+        _autoCheckUpdatesEnabled.value = enabled
+        runCatching {
+            coreSettingsPrefs.edit().putBoolean("auto_check_updates_enabled", enabled).apply()
+        }
+        if (enabled && _appUpdateState.value is AppUpdateUiState.Idle) {
+            checkForAppUpdates(manual = false)
+        }
+    }
+
+    fun checkForAppUpdates(manual: Boolean) {
+        val current = _appUpdateState.value
+        if (current is AppUpdateUiState.Checking || current is AppUpdateUiState.Downloading) return
+
+        activeUpdateJob?.cancel()
+        activeUpdateJob = safeVmScope.launch {
+            _appUpdateState.value = AppUpdateUiState.Checking(isManual = manual)
+            runCatchingCancellable {
+                appUpdateManager.checkForUpdate()
+            }.onSuccess { release ->
+                if (AppUpdateParser.isNewerVersion(BuildConfig.VERSION_NAME, release.versionName)) {
+                    _appUpdateState.value = AppUpdateUiState.UpdateAvailable(
+                        release = release,
+                        showPromptBanner = true
+                    )
+                } else if (manual) {
+                    _appUpdateState.value = AppUpdateUiState.UpToDate(
+                        currentVersion = BuildConfig.VERSION_NAME
+                    )
+                } else {
+                    _appUpdateState.value = AppUpdateUiState.Idle
+                }
+            }.onFailure { err ->
+                if (manual) {
+                    val detail = err.localizedMessage ?: err.message ?: "Network error"
+                    _appUpdateState.value = AppUpdateUiState.Error(
+                        message = getLocalizedString(R.string.settings_updates_check_failed, detail),
+                        fallbackReleaseUrl = AppUpdateParser.RELEASES_PAGE_URL
+                    )
+                } else {
+                    Log.w(TAG, "Silent startup update check failed", err)
+                    _appUpdateState.value = AppUpdateUiState.Idle
+                }
+            }
+        }
+    }
+
+    fun startUpdateDownloadAndInstall(release: AppReleaseInfo) {
+        if (_appUpdateState.value is AppUpdateUiState.Downloading) return
+
+        activeUpdateJob?.cancel()
+        activeUpdateJob = safeVmScope.launch {
+            _appUpdateState.value = AppUpdateUiState.Downloading(
+                release = release,
+                progressPercent = 0,
+                downloadedBytes = 0L,
+                totalBytes = null
+            )
+            runCatchingCancellable {
+                appUpdateManager.downloadUpdateApk(release) { percent, downloaded, total ->
+                    _appUpdateState.value = AppUpdateUiState.Downloading(
+                        release = release,
+                        progressPercent = percent,
+                        downloadedBytes = downloaded,
+                        totalBytes = total
+                    )
+                }
+            }.onSuccess { apkFile ->
+                if (appUpdateManager.canInstallPackages()) {
+                    _appUpdateState.value = AppUpdateUiState.ReadyToInstall(
+                        release = release,
+                        apkFilePath = apkFile.absolutePath,
+                        needsInstallPermission = false
+                    )
+                    appUpdateManager.launchApkInstaller(apkFile).onFailure { installErr ->
+                        val detail = installErr.localizedMessage ?: installErr.message ?: "Installer error"
+                        _appUpdateState.value = AppUpdateUiState.Error(
+                            message = getLocalizedString(R.string.settings_updates_download_failed, detail),
+                            fallbackReleaseUrl = release.releasePageUrl
+                        )
+                    }
+                } else {
+                    _appUpdateState.value = AppUpdateUiState.ReadyToInstall(
+                        release = release,
+                        apkFilePath = apkFile.absolutePath,
+                        needsInstallPermission = true
+                    )
+                    appUpdateManager.openUnknownSourcesSettings()
+                }
+            }.onFailure { err ->
+                val detail = err.localizedMessage ?: err.message ?: "Download error"
+                _appUpdateState.value = AppUpdateUiState.Error(
+                    message = getLocalizedString(R.string.settings_updates_download_failed, detail),
+                    fallbackReleaseUrl = release.releasePageUrl
+                )
+            }
+        }
+    }
+
+    fun cancelUpdateDownload() {
+        val current = _appUpdateState.value as? AppUpdateUiState.Downloading ?: return
+        activeUpdateJob?.cancel()
+        activeUpdateJob = null
+        _appUpdateState.value = AppUpdateUiState.UpdateAvailable(
+            release = current.release,
+            showPromptBanner = false
+        )
+    }
+
+    fun installDownloadedUpdate() {
+        val ready = _appUpdateState.value as? AppUpdateUiState.ReadyToInstall ?: return
+        val apkFile = File(ready.apkFilePath)
+        if (!apkFile.isFile) {
+            startUpdateDownloadAndInstall(ready.release)
+            return
+        }
+        if (!appUpdateManager.canInstallPackages()) {
+            _appUpdateState.value = ready.copy(needsInstallPermission = true)
+            appUpdateManager.openUnknownSourcesSettings()
+            return
+        }
+        _appUpdateState.value = ready.copy(needsInstallPermission = false)
+        appUpdateManager.launchApkInstaller(apkFile).onFailure { installErr ->
+            val detail = installErr.localizedMessage ?: installErr.message ?: "Installer error"
+            _appUpdateState.value = AppUpdateUiState.Error(
+                message = getLocalizedString(R.string.settings_updates_download_failed, detail),
+                fallbackReleaseUrl = ready.release.releasePageUrl
+            )
+        }
+    }
+
+    fun onAppResumed() {
+        val ready = _appUpdateState.value as? AppUpdateUiState.ReadyToInstall ?: return
+        if (ready.needsInstallPermission && appUpdateManager.canInstallPackages()) {
+            installDownloadedUpdate()
+        }
+    }
+
+    fun dismissUpdateBanner() {
+        when (val current = _appUpdateState.value) {
+            is AppUpdateUiState.UpdateAvailable -> {
+                _appUpdateState.value = current.copy(showPromptBanner = false)
+            }
+            is AppUpdateUiState.UpToDate, is AppUpdateUiState.Error -> {
+                _appUpdateState.value = AppUpdateUiState.Idle
+            }
+            else -> Unit
+        }
+    }
+
+    fun openUpdateReleasePage(url: String) {
+        appUpdateManager.openReleasePageInBrowser(url)
+    }
+
     init {
         runCatching {
             val savedKey = coreSettingsPrefs.getString("gemini_api_key", "")?.trim().orEmpty()
@@ -2082,6 +2256,14 @@ class ThingsbookViewModel @Inject constructor(
                 repository.rescheduleAllOpenTaskReminders()
             }.onFailure { err ->
                 Log.w(TAG, "Failed rescheduling open task reminders", err)
+            }
+        }
+        safeVmScope.launch {
+            if (_autoCheckUpdatesEnabled.value) {
+                delay(1_500L)
+                if (_autoCheckUpdatesEnabled.value && _appUpdateState.value is AppUpdateUiState.Idle) {
+                    checkForAppUpdates(manual = false)
+                }
             }
         }
         safeVmScope.launch {

@@ -25,6 +25,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.Analytics
 import androidx.compose.material.icons.outlined.Check
@@ -37,17 +38,23 @@ import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.NotificationsActive
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.SystemUpdateAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -58,6 +65,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -66,19 +74,23 @@ import com.culturedcode.things3.BuildConfig
 import com.culturedcode.things3.R
 import com.culturedcode.things3.data.repository.CloudSyncStatus
 import com.culturedcode.things3.data.repository.ThingsRepository
+import com.culturedcode.things3.data.update.AppReleaseInfo
+import com.culturedcode.things3.data.update.AppUpdateUiState
 import com.culturedcode.things3.ui.theme.ThingsTheme
 import com.culturedcode.things3.ui.viewmodel.ThingsbookStatistics
 import java.time.LocalDate
+import java.util.Locale
 
 /**
  * Comprehensive Thingsbook Settings Modal (`Settings` / `Einstellungen` ⚙️):
  * 1. Database Mode: Local Room DB (Offline-Only) vs. Cloud Sync (Firebase Firestore) + Sample Tasks Cleanup
  * 2. Account Management: Full email address display, Sync Now, Login/Switch Account, Sign Out
  * 3. App Language Selection & Daily Notification Settings
- * 4. Live Task & Productivity Statistics: Open, Today, Upcoming, Anytime, Inbox, Someday, Recurring, Completed, Canceled, Deleted, Projects, Areas (X/8), Tags
- * 5. Full Backup & Restore (`.tbbackup` with optional AES-256-GCM password protection)
- * 6. CSV Import & Export: Export all tasks to `.csv` file or share via Intent; Import tasks from `.csv` file
- * 7. App Version Info
+ * 4. App Auto-Update & Manual "Search for Updates" (GitHub Releases + One-Click APK Download & Install)
+ * 5. Live Task & Productivity Statistics: Open, Today, Upcoming, Anytime, Inbox, Someday, Recurring, Completed, Canceled, Deleted, Projects, Areas (X/8), Tags
+ * 6. Full Backup & Restore (`.tbbackup` with optional AES-256-GCM password protection)
+ * 7. CSV Import & Export: Export all tasks to `.csv` file or share via Intent; Import tasks from `.csv` file
+ * 8. App Version Info
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -91,6 +103,14 @@ fun ThingsSettingsModal(
     isBackupBusy: Boolean = false,
     backupStatusMessage: String? = null,
     hasSampleTasks: Boolean = false,
+    autoCheckUpdatesEnabled: Boolean = true,
+    appUpdateState: AppUpdateUiState = AppUpdateUiState.Idle,
+    onSetAutoCheckUpdatesEnabled: (Boolean) -> Unit = {},
+    onSearchForUpdates: () -> Unit = {},
+    onDownloadAndInstallUpdate: (AppReleaseInfo) -> Unit = {},
+    onInstallDownloadedUpdate: () -> Unit = {},
+    onCancelUpdateDownload: () -> Unit = {},
+    onOpenUpdateReleasePage: (String) -> Unit = {},
     onDeleteSampleTasksNow: () -> Unit = {},
     onSetLocalOnlyDbMode: (Boolean) -> Unit,
     onOpenAuthAndSyncModal: () -> Unit,
@@ -581,6 +601,24 @@ fun ThingsSettingsModal(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // =============================================================
+                // App Auto-Update & Manual "Search for Updates"
+                // =============================================================
+                AppUpdateSettingsSection(
+                    autoCheckUpdatesEnabled = autoCheckUpdatesEnabled,
+                    appUpdateState = appUpdateState,
+                    onSetAutoCheckUpdatesEnabled = onSetAutoCheckUpdatesEnabled,
+                    onSearchForUpdates = onSearchForUpdates,
+                    onDownloadAndInstallUpdate = onDownloadAndInstallUpdate,
+                    onInstallDownloadedUpdate = onInstallDownloadedUpdate,
+                    onCancelUpdateDownload = onCancelUpdateDownload,
+                    onOpenUpdateReleasePage = onOpenUpdateReleasePage
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(color = colors.hairlineDivider)
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // =============================================================
                 // 3. Task & Productivity Statistics
                 // =============================================================
                 SettingsSectionHeader(
@@ -922,5 +960,416 @@ private fun StatDetailRow(
             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
             color = colors.primaryText
         )
+    }
+}
+
+@Composable
+private fun AppUpdateSettingsSection(
+    autoCheckUpdatesEnabled: Boolean,
+    appUpdateState: AppUpdateUiState,
+    onSetAutoCheckUpdatesEnabled: (Boolean) -> Unit,
+    onSearchForUpdates: () -> Unit,
+    onDownloadAndInstallUpdate: (AppReleaseInfo) -> Unit,
+    onInstallDownloadedUpdate: () -> Unit,
+    onCancelUpdateDownload: () -> Unit,
+    onOpenUpdateReleasePage: (String) -> Unit
+) {
+    val colors = ThingsTheme.colors
+    val haptics = LocalHapticFeedback.current
+    val isBusy = appUpdateState is AppUpdateUiState.Checking || appUpdateState is AppUpdateUiState.Downloading
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        SettingsSectionHeader(
+            icon = Icons.Outlined.SystemUpdateAlt,
+            title = stringResource(R.string.settings_updates_section)
+        )
+        Surface(
+            shape = RoundedCornerShape(7.dp),
+            color = colors.thingsBlueSoft
+        ) {
+            Text(
+                text = "v${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = colors.thingsBlue,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+            )
+        }
+    }
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    // Auto-Update Toggle Row
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(11.dp))
+            .background(colors.tagPillBg.copy(alpha = 0.6f))
+            .clickable {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onSetAutoCheckUpdatesEnabled(!autoCheckUpdatesEnabled)
+            }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.settings_updates_auto_title),
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                color = colors.primaryText
+            )
+            Text(
+                text = stringResource(R.string.settings_updates_auto_desc),
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
+                color = colors.secondaryText
+            )
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Switch(
+            checked = autoCheckUpdatesEnabled,
+            onCheckedChange = { enabled ->
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onSetAutoCheckUpdatesEnabled(enabled)
+            },
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = colors.thingsBlue,
+                uncheckedThumbColor = colors.secondaryText,
+                uncheckedTrackColor = colors.hairlineDivider
+            )
+        )
+    }
+
+    Spacer(modifier = Modifier.height(10.dp))
+
+    // "Search for Updates" / "Nach Updates suchen" Button
+    OutlinedButton(
+        onClick = {
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            onSearchForUpdates()
+        },
+        enabled = !isBusy,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        if (appUpdateState is AppUpdateUiState.Checking) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(15.dp),
+                strokeWidth = 2.dp,
+                color = colors.thingsBlue
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Outlined.Refresh,
+                contentDescription = null,
+                tint = colors.thingsBlue,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(7.dp))
+        Text(
+            text = if (appUpdateState is AppUpdateUiState.Checking) {
+                stringResource(R.string.settings_updates_checking)
+            } else {
+                stringResource(R.string.settings_updates_search_btn)
+            },
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = colors.thingsBlue
+        )
+    }
+
+    // Status / Action Card
+    when (appUpdateState) {
+        is AppUpdateUiState.Idle, is AppUpdateUiState.Checking -> Unit
+
+        is AppUpdateUiState.UpToDate -> {
+            Spacer(modifier = Modifier.height(8.dp))
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = colors.thingsBlueSoft,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Check,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.settings_updates_up_to_date, appUpdateState.currentVersion),
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.thingsBlue
+                    )
+                }
+            }
+        }
+
+        is AppUpdateUiState.UpdateAvailable -> {
+            val release = appUpdateState.release
+            Spacer(modifier = Modifier.height(10.dp))
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = colors.thingsBlueSoft,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, colors.thingsBlue.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = stringResource(
+                            R.string.settings_updates_available_title,
+                            release.versionName,
+                            BuildConfig.VERSION_NAME
+                        ),
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        color = colors.thingsBlue
+                    )
+                    if (release.releaseNotes.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = release.releaseNotes,
+                            style = MaterialTheme.typography.labelSmall.copy(lineHeight = 15.sp),
+                            color = colors.primaryText,
+                            maxLines = 8,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onDownloadAndInstallUpdate(release)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.thingsBlue),
+                            shape = RoundedCornerShape(9.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.SystemUpdateAlt,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = stringResource(R.string.settings_updates_download_install_btn),
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = Color.White
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = { onOpenUpdateReleasePage(release.releasePageUrl) },
+                            shape = RoundedCornerShape(9.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.OpenInNew,
+                                contentDescription = stringResource(R.string.settings_updates_open_github_btn),
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        is AppUpdateUiState.Downloading -> {
+            val pct = appUpdateState.progressPercent
+            Spacer(modifier = Modifier.height(10.dp))
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = colors.thingsBlueSoft,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = if (pct != null) {
+                                stringResource(
+                                    R.string.settings_updates_downloading,
+                                    appUpdateState.release.versionName,
+                                    pct
+                                )
+                            } else {
+                                stringResource(
+                                    R.string.settings_updates_downloading_indeterminate,
+                                    appUpdateState.release.versionName
+                                )
+                            },
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = colors.thingsBlue
+                        )
+                        val sizeLabel = formatDownloadBytes(
+                            downloaded = appUpdateState.downloadedBytes,
+                            total = appUpdateState.totalBytes
+                        )
+                        if (sizeLabel.isNotEmpty()) {
+                            Text(
+                                text = sizeLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.secondaryText
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    if (pct != null) {
+                        LinearProgressIndicator(
+                            progress = { (pct / 100f).coerceIn(0f, 1f) },
+                            color = colors.thingsBlue,
+                            trackColor = colors.hairlineDivider,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                        )
+                    } else {
+                        LinearProgressIndicator(
+                            color = colors.thingsBlue,
+                            trackColor = colors.hairlineDivider,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        OutlinedButton(
+                            onClick = onCancelUpdateDownload,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.action_cancel),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.secondaryText
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        is AppUpdateUiState.ReadyToInstall -> {
+            Spacer(modifier = Modifier.height(10.dp))
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = colors.thingsBlueSoft,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, colors.thingsBlue.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = stringResource(
+                            R.string.settings_updates_ready_title,
+                            appUpdateState.release.versionName
+                        ),
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        color = colors.thingsBlue
+                    )
+                    if (appUpdateState.needsInstallPermission) {
+                        Spacer(modifier = Modifier.height(5.dp))
+                        Text(
+                            text = stringResource(R.string.settings_updates_permission_hint),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.primaryText
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(9.dp))
+                    Button(
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onInstallDownloadedUpdate()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.thingsBlue),
+                        shape = RoundedCornerShape(9.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.SystemUpdateAlt,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.settings_updates_install_now_btn),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+        }
+
+        is AppUpdateUiState.Error -> {
+            Spacer(modifier = Modifier.height(8.dp))
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = colors.deadlineUrgentRed.copy(alpha = 0.12f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = appUpdateState.message,
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                        color = colors.deadlineUrgentRed
+                    )
+                    val fallbackUrl = appUpdateState.fallbackReleaseUrl
+                    if (!fallbackUrl.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = { onOpenUpdateReleasePage(fallbackUrl) },
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.OpenInNew,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = stringResource(R.string.settings_updates_open_github_btn),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.thingsBlue
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun formatDownloadBytes(downloaded: Long, total: Long?): String {
+    if (downloaded <= 0L && total == null) return ""
+    val dlMb = downloaded.toDouble() / (1024.0 * 1024.0)
+    return if (total != null && total > 0L) {
+        val totalMb = total.toDouble() / (1024.0 * 1024.0)
+        String.format(Locale.US, "%.1f / %.1f MB", dlMb, totalMb)
+    } else {
+        String.format(Locale.US, "%.1f MB", dlMb)
     }
 }

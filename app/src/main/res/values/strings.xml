@@ -282,4 +282,24 @@
     <string name="task_drag_handle">Drag to move</string>
     <string name="drop_move_here">Move here</string>
     <string name="drop_heading_here">Release to insert Heading here</string>
+
+    <!-- App Auto-Update & Manual Update Check -->
+    <string name="settings_updates_section">App Updates</string>
+    <string name="settings_updates_auto_title">Automatic update check</string>
+    <string name="settings_updates_auto_desc">Checks GitHub for a newer version when the app starts</string>
+    <string name="settings_updates_search_btn">Search for Updates</string>
+    <string name="settings_updates_checking">Searching for updates…</string>
+    <string name="settings_updates_up_to_date">You are up to date (v%1$s)</string>
+    <string name="settings_updates_available_title">Update available: v%1$s (installed: v%2$s)</string>
+    <string name="settings_updates_download_install_btn">Download &amp; Install</string>
+    <string name="settings_updates_downloading">Downloading v%1$s… %2$d%%</string>
+    <string name="settings_updates_downloading_indeterminate">Downloading v%1$s…</string>
+    <string name="settings_updates_ready_title">Update v%1$s downloaded and ready</string>
+    <string name="settings_updates_permission_hint">Please allow installing apps from Thingsbook in Android settings, then tap Install Now.</string>
+    <string name="settings_updates_install_now_btn">Install Now</string>
+    <string name="settings_updates_open_github_btn">View on GitHub</string>
+    <string name="settings_updates_check_failed">Could not check for updates: %1$s</string>
+    <string name="settings_updates_download_failed">Update download failed: %1$s</string>
+    <string name="update_banner_title">New version v%1$s is available</string>
+    <string name="update_banner_action_btn">Update Now</string>
 </resources>

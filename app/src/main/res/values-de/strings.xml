@@ -282,4 +282,24 @@
     <string name="task_drag_handle">Ziehen zum Verschieben</string>
     <string name="drop_move_here">Hierher verschieben</string>
     <string name="drop_heading_here">Loslassen, um Überschrift hier einzufügen</string>
+
+    <!-- App Auto-Update & Manual Update Check -->
+    <string name="settings_updates_section">App-Updates</string>
+    <string name="settings_updates_auto_title">Automatisch nach Updates suchen</string>
+    <string name="settings_updates_auto_desc">Prüft beim App-Start automatisch auf GitHub, ob eine neue Version vorliegt</string>
+    <string name="settings_updates_search_btn">Nach Updates suchen</string>
+    <string name="settings_updates_checking">Suche nach Updates…</string>
+    <string name="settings_updates_up_to_date">Thingsbook ist auf dem neuesten Stand (v%1$s)</string>
+    <string name="settings_updates_available_title">Update verfügbar: v%1$s (installiert: v%2$s)</string>
+    <string name="settings_updates_download_install_btn">Herunterladen &amp; installieren</string>
+    <string name="settings_updates_downloading">Lade v%1$s herunter… %2$d%%</string>
+    <string name="settings_updates_downloading_indeterminate">Lade v%1$s herunter…</string>
+    <string name="settings_updates_ready_title">Update v%1$s heruntergeladen und bereit</string>
+    <string name="settings_updates_permission_hint">Bitte erlaube in den Android-Einstellungen die Installation aus dieser Quelle und tippe dann auf Jetzt installieren.</string>
+    <string name="settings_updates_install_now_btn">Jetzt installieren</string>
+    <string name="settings_updates_open_github_btn">Auf GitHub öffnen</string>
+    <string name="settings_updates_check_failed">Update-Prüfung fehlgeschlagen: %1$s</string>
+    <string name="settings_updates_download_failed">Update-Download fehlgeschlagen: %1$s</string>
+    <string name="update_banner_title">Neue Version v%1$s verfügbar</string>
+    <string name="update_banner_action_btn">Jetzt aktualisieren</string>
 </resources>

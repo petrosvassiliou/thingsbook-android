@@ -282,4 +282,24 @@
     <string name="task_drag_handle">Faire glisser pour déplacer</string>
     <string name="drop_move_here">Déplacer ici</string>
     <string name="drop_heading_here">Relâcher pour insérer le titre ici</string>
+
+    <!-- App Auto-Update & Manual Update Check -->
+    <string name="settings_updates_section">Mises à jour</string>
+    <string name="settings_updates_auto_title">Vérification automatique des mises à jour</string>
+    <string name="settings_updates_auto_desc">Vérifie automatiquement sur GitHub au démarrage si une nouvelle version est disponible</string>
+    <string name="settings_updates_search_btn">Rechercher des mises à jour</string>
+    <string name="settings_updates_checking">Recherche de mises à jour…</string>
+    <string name="settings_updates_up_to_date">Thingsbook est à jour (v%1$s)</string>
+    <string name="settings_updates_available_title">Mise à jour disponible : v%1$s (installée : v%2$s)</string>
+    <string name="settings_updates_download_install_btn">Télécharger et installer</string>
+    <string name="settings_updates_downloading">Téléchargement de v%1$s… %2$d%%</string>
+    <string name="settings_updates_downloading_indeterminate">Téléchargement de v%1$s…</string>
+    <string name="settings_updates_ready_title">Mise à jour v%1$s téléchargée et prête</string>
+    <string name="settings_updates_permission_hint">Autorisez l\'installation depuis cette source dans les paramètres Android, puis appuyez sur Installer maintenant.</string>
+    <string name="settings_updates_install_now_btn">Installer maintenant</string>
+    <string name="settings_updates_open_github_btn">Voir sur GitHub</string>
+    <string name="settings_updates_check_failed">Échec de la recherche de mise à jour : %1$s</string>
+    <string name="settings_updates_download_failed">Échec du téléchargement de la mise à jour : %1$s</string>
+    <string name="update_banner_title">Nouvelle version v%1$s disponible</string>
+    <string name="update_banner_action_btn">Mettre à jour</string>
 </resources>

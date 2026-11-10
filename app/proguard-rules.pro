@@ -16,6 +16,8 @@
 -keepclassmembers class com.culturedcode.things3.data.ai.** { *; }
 -keepnames class com.culturedcode.things3.data.repository.** { *; }
 -keepclassmembers class com.culturedcode.things3.data.repository.** { *; }
+-keepnames class com.culturedcode.things3.data.update.** { *; }
+-keepclassmembers class com.culturedcode.things3.data.update.** { *; }
 
 -if @kotlinx.serialization.Serializable class **
 -keepclassmembers class <1> {

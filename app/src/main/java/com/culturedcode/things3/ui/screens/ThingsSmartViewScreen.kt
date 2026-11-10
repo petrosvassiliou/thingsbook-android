@@ -2102,16 +2102,19 @@ private fun TopThingsbookBar(
     onOpenSettings: () -> Unit
 ) {
     val colors = ThingsTheme.colors
+    val iconButtonSize = if (isWideScreen) 34.dp else 31.dp
+    val iconGlyphSize = if (isWideScreen) 19.dp else 18.dp
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = if (isWideScreen) 16.dp else 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(if (isWideScreen) 8.dp else 6.dp)
         ) {
             if (isWideScreen) {
                 ThingsHoverTooltip(
@@ -2134,20 +2137,23 @@ private fun TopThingsbookBar(
             if (showBrandSymbol) {
                 ThingsHoverTooltip(text = "Thingsbook • ${stringResource(R.string.view_today)}") {
                     ThingsbookBrandSymbol(
-                        size = 28.dp,
+                        size = if (isWideScreen) 28.dp else 26.dp,
                         onClick = onSelectTodayView
                     )
                 }
             }
 
-            // Quick Find Trigger Pill (opens inline!)
+            // Quick Find Trigger Pill (compact icon pill on phones so top-right icons never clip)
             ThingsHoverTooltip(text = "${stringResource(R.string.quick_find_title)} (Ctrl+F)") {
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(10.dp))
                         .background(if (isQuickFindOpen) colors.thingsBlueSoft else colors.tagPillBg)
                         .clickable(onClick = onOpenQuickFind)
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                        .padding(
+                            horizontal = if (isWideScreen) 12.dp else 9.dp,
+                            vertical = if (isWideScreen) 7.dp else 6.dp
+                        ),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
@@ -2157,169 +2163,187 @@ private fun TopThingsbookBar(
                         tint = if (isQuickFindOpen) colors.thingsBlue else colors.secondaryText,
                         modifier = Modifier.size(16.dp)
                     )
-                    Text(
-                        text = stringResource(R.string.quick_find_title),
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = if (isQuickFindOpen) FontWeight.Bold else FontWeight.Medium
-                        ),
-                        color = if (isQuickFindOpen) colors.thingsBlue else colors.secondaryText
-                    )
+                    if (isWideScreen) {
+                        Text(
+                            text = stringResource(R.string.quick_find_title),
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = if (isQuickFindOpen) FontWeight.Bold else FontWeight.Medium
+                            ),
+                            color = if (isQuickFindOpen) colors.thingsBlue else colors.secondaryText,
+                            maxLines = 1
+                        )
+                    }
                 }
             }
         }
 
+        Spacer(modifier = Modifier.width(if (isWideScreen) 8.dp else 4.dp))
+
         Row(
+            modifier = Modifier.weight(1f),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
+            horizontalArrangement = Arrangement.End
         ) {
-            // Gemini AI Button ✨
-            ThingsHoverTooltip(text = "${stringResource(R.string.gemini_hub_title)} (Ctrl+G)") {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(colors.thingsBlueSoft)
-                        .clickable(onClick = onOpenGeminiHub)
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.AutoAwesome,
-                        contentDescription = stringResource(R.string.gemini_hub_title),
-                        tint = colors.thingsBlue,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = "Gemini",
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = colors.thingsBlue
-                    )
-                }
-            }
-
-            // Areas Manager Button 📦 (Work, Home, max 8)
-            ThingsHoverTooltip(text = stringResource(R.string.areas_manage_title)) {
-                IconButton(
-                    onClick = onOpenAreaManager,
-                    modifier = Modifier.size(34.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Inventory2,
-                        contentDescription = stringResource(R.string.areas_manage_title),
-                        tint = colors.anytimeTeal,
-                        modifier = Modifier.size(19.dp)
-                    )
-                }
-            }
-
-            // Tag Management Button 🏷️
-            ThingsHoverTooltip(text = stringResource(R.string.tags_manage_title)) {
-                IconButton(
-                    onClick = onOpenTagManager,
-                    modifier = Modifier.size(34.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.LocalOffer,
-                        contentDescription = stringResource(R.string.tags_manage_title),
-                        tint = colors.secondaryText,
-                        modifier = Modifier.size(19.dp)
-                    )
-                }
-            }
-
-            // Daily & Task Notifications Button 🔔
-            ThingsHoverTooltip(text = stringResource(R.string.notifications_title)) {
-                IconButton(
-                    onClick = onOpenNotificationSettings,
-                    modifier = Modifier.size(34.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.NotificationsActive,
-                        contentDescription = stringResource(R.string.notifications_title),
-                        tint = if (dailyDigestEnabled) colors.thingsBlue else colors.secondaryText,
-                        modifier = Modifier.size(19.dp)
-                    )
-                }
-            }
-
-            // In-App Language Switcher (EN, DE, IT, FR, ES)
-            Box {
-                ThingsHoverTooltip(text = stringResource(R.string.settings_language)) {
-                    IconButton(
-                        onClick = { onToggleLanguageMenu(true) },
-                        modifier = Modifier.size(34.dp)
+            Row(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(if (isWideScreen) 2.dp else 1.dp)
+            ) {
+                // Gemini AI Button ✨
+                ThingsHoverTooltip(text = "${stringResource(R.string.gemini_hub_title)} (Ctrl+G)") {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(colors.thingsBlueSoft)
+                            .clickable(onClick = onOpenGeminiHub)
+                            .padding(
+                                horizontal = if (isWideScreen) 10.dp else 8.dp,
+                                vertical = if (isWideScreen) 6.dp else 5.dp
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.Language,
-                            contentDescription = stringResource(R.string.settings_language),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(19.dp)
+                            imageVector = Icons.Outlined.AutoAwesome,
+                            contentDescription = stringResource(R.string.gemini_hub_title),
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(if (isWideScreen) 16.dp else 15.dp)
+                        )
+                        Text(
+                            text = "Gemini",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.thingsBlue,
+                            maxLines = 1
                         )
                     }
                 }
 
-                DropdownMenu(
-                    expanded = showLanguageMenu,
-                    onDismissRequest = { onToggleLanguageMenu(false) }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.settings_system_default)) },
-                        onClick = { onSelectLanguage("") }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("🇬🇧 " + stringResource(R.string.lang_en)) },
-                        onClick = { onSelectLanguage("en") }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("🇩🇪 " + stringResource(R.string.lang_de)) },
-                        onClick = { onSelectLanguage("de") }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("🇮🇹 " + stringResource(R.string.lang_it)) },
-                        onClick = { onSelectLanguage("it") }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("🇫🇷 " + stringResource(R.string.lang_fr)) },
-                        onClick = { onSelectLanguage("fr") }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("🇪🇸 " + stringResource(R.string.lang_es)) },
-                        onClick = { onSelectLanguage("es") }
-                    )
-                }
-            }
-
-            // Cloud Delta-Sync Status Indicator ☁️
-            ThingsHoverTooltip(text = stringResource(R.string.sync_title)) {
-                IconButton(
-                    onClick = onManualSync,
-                    modifier = Modifier.size(34.dp)
-                ) {
-                    val (syncIcon, syncTint) = when (syncStatus) {
-                        CloudSyncStatus.SYNCED -> Icons.Outlined.CloudDone to colors.logbookGreen
-                        CloudSyncStatus.SYNCING -> Icons.Outlined.CloudSync to colors.thingsBlue
-                        CloudSyncStatus.OFFLINE -> Icons.Outlined.CloudOff to colors.secondaryText
+                // Areas Manager Button 📦 (Work, Home, max 8)
+                ThingsHoverTooltip(text = stringResource(R.string.areas_manage_title)) {
+                    IconButton(
+                        onClick = onOpenAreaManager,
+                        modifier = Modifier.size(iconButtonSize)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Inventory2,
+                            contentDescription = stringResource(R.string.areas_manage_title),
+                            tint = colors.anytimeTeal,
+                            modifier = Modifier.size(iconGlyphSize)
+                        )
                     }
-                    Icon(
-                        imageVector = syncIcon,
-                        contentDescription = stringResource(R.string.sync_title),
-                        tint = syncTint,
-                        modifier = Modifier.size(19.dp)
-                    )
+                }
+
+                // Tag Management Button 🏷️
+                ThingsHoverTooltip(text = stringResource(R.string.tags_manage_title)) {
+                    IconButton(
+                        onClick = onOpenTagManager,
+                        modifier = Modifier.size(iconButtonSize)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.LocalOffer,
+                            contentDescription = stringResource(R.string.tags_manage_title),
+                            tint = colors.secondaryText,
+                            modifier = Modifier.size(iconGlyphSize)
+                        )
+                    }
+                }
+
+                // Daily & Task Notifications Button 🔔
+                ThingsHoverTooltip(text = stringResource(R.string.notifications_title)) {
+                    IconButton(
+                        onClick = onOpenNotificationSettings,
+                        modifier = Modifier.size(iconButtonSize)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.NotificationsActive,
+                            contentDescription = stringResource(R.string.notifications_title),
+                            tint = if (dailyDigestEnabled) colors.thingsBlue else colors.secondaryText,
+                            modifier = Modifier.size(iconGlyphSize)
+                        )
+                    }
+                }
+
+                // In-App Language Switcher (EN, DE, IT, FR, ES)
+                Box {
+                    ThingsHoverTooltip(text = stringResource(R.string.settings_language)) {
+                        IconButton(
+                            onClick = { onToggleLanguageMenu(true) },
+                            modifier = Modifier.size(iconButtonSize)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Language,
+                                contentDescription = stringResource(R.string.settings_language),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(iconGlyphSize)
+                            )
+                        }
+                    }
+
+                    DropdownMenu(
+                        expanded = showLanguageMenu,
+                        onDismissRequest = { onToggleLanguageMenu(false) }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.settings_system_default)) },
+                            onClick = { onSelectLanguage("") }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("🇬🇧 " + stringResource(R.string.lang_en)) },
+                            onClick = { onSelectLanguage("en") }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("🇩🇪 " + stringResource(R.string.lang_de)) },
+                            onClick = { onSelectLanguage("de") }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("🇮🇹 " + stringResource(R.string.lang_it)) },
+                            onClick = { onSelectLanguage("it") }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("🇫🇷 " + stringResource(R.string.lang_fr)) },
+                            onClick = { onSelectLanguage("fr") }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("🇪🇸 " + stringResource(R.string.lang_es)) },
+                            onClick = { onSelectLanguage("es") }
+                        )
+                    }
+                }
+
+                // Cloud Delta-Sync Status Indicator ☁️
+                ThingsHoverTooltip(text = stringResource(R.string.sync_title)) {
+                    IconButton(
+                        onClick = onManualSync,
+                        modifier = Modifier.size(iconButtonSize)
+                    ) {
+                        val (syncIcon, syncTint) = when (syncStatus) {
+                            CloudSyncStatus.SYNCED -> Icons.Outlined.CloudDone to colors.logbookGreen
+                            CloudSyncStatus.SYNCING -> Icons.Outlined.CloudSync to colors.thingsBlue
+                            CloudSyncStatus.OFFLINE -> Icons.Outlined.CloudOff to colors.secondaryText
+                        }
+                        Icon(
+                            imageVector = syncIcon,
+                            contentDescription = stringResource(R.string.sync_title),
+                            tint = syncTint,
+                            modifier = Modifier.size(iconGlyphSize)
+                        )
+                    }
                 }
             }
 
-            // Additional Settings Button ⚙️ at the far top-right!
+            // Pinned Settings Button ⚙️ at the far top-right so it is always visible on phones and tablets
             ThingsHoverTooltip(text = stringResource(R.string.settings_title)) {
                 IconButton(
                     onClick = onOpenSettings,
-                    modifier = Modifier.size(34.dp)
+                    modifier = Modifier.size(iconButtonSize)
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.Settings,
                         contentDescription = stringResource(R.string.settings_title),
                         tint = colors.primaryText,
-                        modifier = Modifier.size(19.dp)
+                        modifier = Modifier.size(iconGlyphSize)
                     )
                 }
             }

@@ -447,7 +447,8 @@ fun ExpandableTaskCard(
                 isSelected = isSelected,
                 horizontalPadding = horizontalPadding,
                 verticalPadding = verticalPadding,
-                cornerRadius = cornerRadius
+                cornerRadius = cornerRadius,
+                modifier = Modifier.matchParentSize()
             )
         }
 
@@ -588,7 +589,7 @@ fun ExpandableTaskCard(
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = if (isExpanded) Alignment.CenterVertically else Alignment.Top
                 ) {
                     ThingsCheckbox(
                         status = effectiveVisualStatus,
@@ -633,16 +634,15 @@ fun ExpandableTaskCard(
                             assignedArea = assignedArea,
                             isCompletingAnim = isCompletingAnim,
                             strikeProgress = strikeFrac,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(top = 3.dp)
                         )
                     }
 
-                    if (!isExpanded) {
-                        CollapsedTaskInlineBadges(task = task, locale = locale)
-                        if (collapsedTrailingContent != null && !isCompletingAnim) {
-                            Spacer(modifier = Modifier.width(4.dp))
-                            collapsedTrailingContent()
-                        }
+                    if (!isExpanded && collapsedTrailingContent != null && !isCompletingAnim) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        collapsedTrailingContent()
                     }
                 }
 
@@ -654,6 +654,14 @@ fun ExpandableTaskCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(start = 40.dp, top = 2.dp)
+                    )
+                }
+
+                if (!isExpanded && hasCollapsedTaskBadges(task)) {
+                    CollapsedTaskInlineBadges(
+                        task = task,
+                        locale = locale,
+                        modifier = Modifier.padding(start = 40.dp, top = 6.dp)
                     )
                 }
 
@@ -752,6 +760,12 @@ fun ExpandableTaskCard(
     )
 }
 
+private data class StrikeLineMetric(
+    val left: Float,
+    val right: Float,
+    val centerY: Float
+)
+
 @Composable
 private fun CollapsedTaskTitleWithStrike(
     task: TaskItem,
@@ -763,7 +777,7 @@ private fun CollapsedTaskTitleWithStrike(
 ) {
     val colors = ThingsTheme.colors
     val isAlreadyDoneOrCanceled = task.status != TaskStatus.OPEN
-    var measuredLineWidthPx by remember(task.id, task.title) { mutableFloatStateOf(0f) }
+    var measuredLines by remember(task.id, task.title) { mutableStateOf<List<StrikeLineMetric>>(emptyList()) }
 
     val animatedTitleColor by animateColorAsState(
         targetValue = when {
@@ -788,30 +802,50 @@ private fun CollapsedTaskTitleWithStrike(
                 }
             ),
             color = if (task.title.isBlank()) colors.tertiaryText else animatedTitleColor,
-            maxLines = 1,
+            maxLines = 5,
             overflow = TextOverflow.Ellipsis,
             onTextLayout = { result ->
                 if (result.lineCount > 0) {
-                    measuredLineWidthPx = result.getLineRight(0).coerceAtLeast(0f)
+                    measuredLines = (0 until result.lineCount).map { idx ->
+                        val top = result.getLineTop(idx)
+                        val bottom = result.getLineBottom(idx)
+                        StrikeLineMetric(
+                            left = result.getLineLeft(idx).coerceAtLeast(0f),
+                            right = result.getLineRight(idx).coerceAtLeast(0f),
+                            centerY = top + (bottom - top) * 0.53f
+                        )
+                    }
                 }
             },
             modifier = Modifier.drawWithContent {
                 drawContent()
                 if (isCompletingAnim && strikeProgress > 0.01f) {
-                    val targetWidth = if (measuredLineWidthPx > 1f) {
-                        measuredLineWidthPx.coerceAtMost(size.width)
+                    val progress = strikeProgress.coerceIn(0f, 1f)
+                    if (measuredLines.isNotEmpty()) {
+                        measuredLines.forEach { line ->
+                            val lineWidth = (line.right - line.left).coerceAtLeast(0f).coerceAtMost(size.width)
+                            val endX = line.left + (lineWidth * progress)
+                            if (endX > line.left) {
+                                drawLine(
+                                    color = strikeLineColor,
+                                    start = Offset(line.left, line.centerY),
+                                    end = Offset(endX, line.centerY),
+                                    strokeWidth = 1.65.dp.toPx(),
+                                    cap = StrokeCap.Round
+                                )
+                            }
+                        }
                     } else {
-                        size.width
+                        val endX = (size.width * progress).coerceAtLeast(0f)
+                        val centerY = size.height * 0.53f
+                        drawLine(
+                            color = strikeLineColor,
+                            start = Offset(0f, centerY),
+                            end = Offset(endX, centerY),
+                            strokeWidth = 1.65.dp.toPx(),
+                            cap = StrokeCap.Round
+                        )
                     }
-                    val endX = (targetWidth * strikeProgress.coerceIn(0f, 1f)).coerceAtLeast(0f)
-                    val centerY = size.height * 0.53f
-                    drawLine(
-                        color = strikeLineColor,
-                        start = Offset(0f, centerY),
-                        end = Offset(endX, centerY),
-                        strokeWidth = 1.65.dp.toPx(),
-                        cap = StrokeCap.Round
-                    )
                 }
             }
         )
@@ -827,21 +861,34 @@ private fun CollapsedTaskTitleWithStrike(
                 text = contextSubtitle,
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
                 color = colors.secondaryText,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 1.dp)
             )
         }
     }
 }
 
+private fun hasCollapsedTaskBadges(task: TaskItem): Boolean {
+    return task.scheduleState == ScheduleState.THIS_EVENING ||
+        task.recurrenceRule != null ||
+        task.reminderTime != null ||
+        task.checklistItems.isNotEmpty() ||
+        task.tags.isNotEmpty() ||
+        task.deadline != null
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CollapsedTaskInlineBadges(
     task: TaskItem,
-    locale: Locale
+    locale: Locale,
+    modifier: Modifier = Modifier
 ) {
-    Row(
+    FlowRow(
+        modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(5.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         if (task.scheduleState == ScheduleState.THIS_EVENING) {
             ThingsWhenBadge(
@@ -860,7 +907,7 @@ private fun CollapsedTaskInlineBadges(
             val doneCount = task.checklistItems.count { it.isCompleted }
             ThingsTagPill(title = "☑ $doneCount/${task.checklistItems.size}")
         }
-        task.tags.take(2).forEach { tag ->
+        task.tags.forEach { tag ->
             ThingsTagPill(title = tag.title)
         }
         task.deadline?.let { dl ->
@@ -876,7 +923,8 @@ private fun SwipeActionBackgroundLayer(
     isSelected: Boolean,
     horizontalPadding: androidx.compose.ui.unit.Dp,
     verticalPadding: androidx.compose.ui.unit.Dp,
-    cornerRadius: androidx.compose.ui.unit.Dp
+    cornerRadius: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier
 ) {
     val colors = ThingsTheme.colors
     val isSwipingRightForWhen = animatedSwipeOffsetPx > 0f
@@ -887,10 +935,9 @@ private fun SwipeActionBackgroundLayer(
         else -> colors.thingsBlue.copy(alpha = 0.90f)
     }
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = horizontalPadding, vertical = verticalPadding)
-            .height(44.dp)
             .clip(RoundedCornerShape(cornerRadius))
             .background(bgHighlightColor)
             .padding(horizontal = 14.dp),

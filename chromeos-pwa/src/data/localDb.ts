@@ -1403,7 +1403,7 @@ class ThingsLocalDb {
         dailyDigestMinute: prefs.dailyDigestMinute,
         languageTag: prefs.language === 'system' ? '' : prefs.language
       },
-      appVersionName: '1.6.18-chromeos'
+      appVersionName: '1.6.19-chromeos'
     });
     const bytes = await encodeThingsBackup(payload, password);
     return {

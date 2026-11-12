@@ -368,8 +368,8 @@ export function buildBackupPayloadFromEntities(params: {
 export async function encodeThingsBackup(
   payload: ThingsbookBackupPayload,
   password: string | null,
-  appVersionName = '1.6.18-chromeos',
-  appVersionCode = 35
+  appVersionName = '1.6.19-chromeos',
+  appVersionCode = 36
 ): Promise<Uint8Array> {
   const jsonBytes = new TextEncoder().encode(JSON.stringify(payload));
   const compressed = await gzipCompress(jsonBytes);

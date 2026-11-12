@@ -218,6 +218,7 @@ class ThingsbookViewModel @Inject constructor(
     val authInfoMessage: StateFlow<String?> = _authInfoMessage.asStateFlow()
 
     val currentUserIdentifier: StateFlow<String?> = syncRepository.activeUserIdentifier
+    val currentEpochDay: StateFlow<Long> = repository.currentEpochDay
 
     // Core Data Streams from Room Single Source of Truth
     val inboxTasks: StateFlow<List<TaskItem>> = repository.observeInboxTasks()
@@ -2184,7 +2185,18 @@ class ThingsbookViewModel @Inject constructor(
         startUpdateDownloadAndInstall(ready.release)
     }
 
-    fun onAppResumed() = Unit
+    fun onAppResumed() {
+        safeVmScope.launch {
+            val changed = runCatchingCancellable {
+                repository.refreshCurrentDayAndRollover()
+            }.getOrDefault(false)
+            if (changed) {
+                runCatching {
+                    com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.refreshAllWidgets(appContext)
+                }
+            }
+        }
+    }
 
     fun dismissUpdateBanner() {
         when (val current = _appUpdateState.value) {
@@ -2217,9 +2229,36 @@ class ThingsbookViewModel @Inject constructor(
                 Log.w(TAG, "Failed ensuring default areas", err)
             }
             runCatchingCancellable {
+                repository.refreshCurrentDayAndRollover()
+            }.onFailure { err ->
+                Log.w(TAG, "Failed initial day rollover", err)
+            }
+            runCatchingCancellable {
                 repository.rescheduleAllOpenTaskReminders()
             }.onFailure { err ->
                 Log.w(TAG, "Failed rescheduling open task reminders", err)
+            }
+        }
+        // Automatic 00:00 Midnight Rollover Watcher while the app is running
+        safeVmScope.launch {
+            while (true) {
+                val zone = ZoneId.systemDefault()
+                val nowMillis = System.currentTimeMillis()
+                val nextMidnightMillis = LocalDate.now(zone)
+                    .plusDays(1)
+                    .atStartOfDay(zone)
+                    .toInstant()
+                    .toEpochMilli() + 50L
+                val msUntilMidnight = (nextMidnightMillis - nowMillis).coerceAtLeast(1_000L)
+                delay(minOf(msUntilMidnight, 15_000L))
+                val changed = runCatchingCancellable {
+                    repository.refreshCurrentDayAndRollover()
+                }.getOrDefault(false)
+                if (changed) {
+                    runCatching {
+                        com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.refreshAllWidgets(appContext)
+                    }
+                }
             }
         }
         safeVmScope.launch {

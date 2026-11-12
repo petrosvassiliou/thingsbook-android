@@ -276,6 +276,34 @@ export const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Reactive Day Boundary & 00:00 Midnight Rollover Watcher (Android v1.6.19 parity)
+  const [endOfToday, setEndOfToday] = useState<number>(() => endOfDayEpoch());
+
+  useEffect(() => {
+    let lastEndOfToday = endOfDayEpoch();
+    const checkDayBoundary = () => {
+      const latestEndOfToday = endOfDayEpoch();
+      if (latestEndOfToday !== lastEndOfToday) {
+        lastEndOfToday = latestEndOfToday;
+        setEndOfToday(latestEndOfToday);
+        void localDb.rolloverDueTasksForNewDay();
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkDayBoundary();
+      }
+    };
+    const intervalId = window.setInterval(checkDayBoundary, 15_000);
+    window.addEventListener('focus', checkDayBoundary);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', checkDayBoundary);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
   // Reminder & Daily Digest Ticker
   useEffect(() => {
     const tick = () => {
@@ -311,8 +339,7 @@ export const App: React.FC = () => {
     [snapshot.tags]
   );
 
-  // ==================== Exact Android v1.6.18 Smart View Queries ====================
-  const endOfToday = endOfDayEpoch();
+  // ==================== Exact Android v1.6.19 Smart View Queries ====================
   const openTasks = useMemo(
     () => snapshot.tasks.filter((tk) => !tk.isDeleted && tk.status === 'OPEN'),
     [snapshot.tasks]
@@ -414,7 +441,7 @@ export const App: React.FC = () => {
     [inboxTasks, todayDaytimeTasks, todayEveningTasks, upcomingTasks, anytimeTasks, somedayTasks]
   );
 
-  const statistics = useMemo(() => computeStatistics(snapshot), [snapshot]);
+  const statistics = useMemo(() => computeStatistics(snapshot), [snapshot, endOfToday]);
 
   // Raw tasks visible in the current view BEFORE tag filtering (for ViewTagFilterUtils parity)
   const currentViewBaseTasks = useMemo((): TaskRecord[] => {

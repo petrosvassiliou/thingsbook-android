@@ -207,16 +207,39 @@ fun ThingsSmartViewScreen(
     val configuration = LocalConfiguration.current
     val activeLocale = configuration.locales[0] ?: Locale.getDefault()
     val lifecycleOwner = LocalLifecycleOwner.current
+    val appCtx = LocalContext.current
 
-    DisposableEffect(lifecycleOwner, viewModel) {
+    DisposableEffect(lifecycleOwner, appCtx, viewModel) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.onAppResumed()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
+
+        val timeReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(ctx: android.content.Context?, intent: android.content.Intent?) {
+                viewModel.onAppResumed()
+            }
+        }
+        val filter = android.content.IntentFilter().apply {
+            addAction(android.content.Intent.ACTION_TIME_TICK)
+            addAction(android.content.Intent.ACTION_DATE_CHANGED)
+            addAction(android.content.Intent.ACTION_TIME_CHANGED)
+            addAction(android.content.Intent.ACTION_TIMEZONE_CHANGED)
+        }
+        runCatching {
+            androidx.core.content.ContextCompat.registerReceiver(
+                appCtx,
+                timeReceiver,
+                filter,
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+        }
+
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+            runCatching { appCtx.unregisterReceiver(timeReceiver) }
         }
     }
 
@@ -1295,50 +1318,53 @@ private fun ThingsTaskRowItem(
     dragHandle: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    ExpandableTaskCard(
-        modifier = modifier,
-        collapsedTrailingContent = dragHandle,
-        task = task,
-        allTags = allTags,
-        allAreas = areas,
-        allProjects = activeProjects,
-        allHeadings = allHeadings,
-        isExpanded = expandedTaskId == task.id,
-        isSelected = task.id in selectedTaskIds,
-        isSelectionModeActive = selectedTaskIds.isNotEmpty(),
-        suppressContextMenuExternal = expandedTaskId != null || isQuickFindOpen,
-        onToggleSelection = { viewModel.toggleTaskSelection(task.id) },
-        onRangeSelect = { viewModel.selectTaskRange(allVisibleTaskIds, task.id) },
-        isGeneratingMagicBreakdown = magicBreakdownTaskId == task.id,
-        onExpandToggle = { viewModel.toggleTaskExpansion(task.id) },
-        onStatusChange = { viewModel.updateTaskStatus(task.id, it) },
-        onTitleNotesChange = { t, n -> viewModel.updateTaskTitleAndNotes(task, t, n) },
-        onScheduleChange = { s, w -> viewModel.updateTaskSchedule(task, s, w) },
-        onScheduleWithReminderChange = { s, w, r ->
-            viewModel.updateTaskScheduleWithReminder(task, s, w, r)
-        },
-        onDeadlineChange = { dl -> viewModel.updateTaskDeadline(task, dl) },
-        onRecurrenceChange = { rule -> viewModel.updateTaskRecurrence(task.id, rule) },
-        onMoveTaskToContainer = { pId, hId, aId ->
-            viewModel.moveTaskToContainer(task.id, pId, hId, aId)
-        },
-        onUpdateTaskTags = { tagIds -> viewModel.updateTaskTags(task, tagIds) },
-        onCreateAndAssignTag = { newTag -> viewModel.createAndAssignTagToTask(task, newTag) },
-        onOpenFullTagManager = { viewModel.setTagManagerOpen(true) },
-        onAddChecklistItem = { itemTitle -> viewModel.addChecklistItem(task.id, itemTitle) },
-        onInsertChecklistItemAfter = { afterId, newId, initialTitle ->
-            viewModel.insertChecklistItemAfter(task.id, afterId, newId, initialTitle)
-        },
-        onToggleChecklistItem = { itemId, done -> viewModel.toggleChecklistItem(itemId, done) },
-        onRenameChecklistItem = { itemId, newTitle -> viewModel.renameChecklistItem(itemId, newTitle) },
-        onMoveChecklistItem = { itemId, moveUp -> viewModel.moveChecklistItem(task.id, itemId, moveUp) },
-        onDeleteChecklistItem = { itemId -> viewModel.deleteChecklistItem(itemId) },
-        onTriggerGeminiMagicBreakdown = {
-            viewModel.triggerGeminiMagicBreakdown(task, activeLocale)
-        },
-        onDeleteTask = { viewModel.deleteTask(task.id) },
-        locale = activeLocale
-    )
+    val currentEpochDay by viewModel.currentEpochDay.collectAsState()
+    androidx.compose.runtime.key(currentEpochDay) {
+        ExpandableTaskCard(
+            modifier = modifier,
+            collapsedTrailingContent = dragHandle,
+            task = task,
+            allTags = allTags,
+            allAreas = areas,
+            allProjects = activeProjects,
+            allHeadings = allHeadings,
+            isExpanded = expandedTaskId == task.id,
+            isSelected = task.id in selectedTaskIds,
+            isSelectionModeActive = selectedTaskIds.isNotEmpty(),
+            suppressContextMenuExternal = expandedTaskId != null || isQuickFindOpen,
+            onToggleSelection = { viewModel.toggleTaskSelection(task.id) },
+            onRangeSelect = { viewModel.selectTaskRange(allVisibleTaskIds, task.id) },
+            isGeneratingMagicBreakdown = magicBreakdownTaskId == task.id,
+            onExpandToggle = { viewModel.toggleTaskExpansion(task.id) },
+            onStatusChange = { viewModel.updateTaskStatus(task.id, it) },
+            onTitleNotesChange = { t, n -> viewModel.updateTaskTitleAndNotes(task, t, n) },
+            onScheduleChange = { s, w -> viewModel.updateTaskSchedule(task, s, w) },
+            onScheduleWithReminderChange = { s, w, r ->
+                viewModel.updateTaskScheduleWithReminder(task, s, w, r)
+            },
+            onDeadlineChange = { dl -> viewModel.updateTaskDeadline(task, dl) },
+            onRecurrenceChange = { rule -> viewModel.updateTaskRecurrence(task.id, rule) },
+            onMoveTaskToContainer = { pId, hId, aId ->
+                viewModel.moveTaskToContainer(task.id, pId, hId, aId)
+            },
+            onUpdateTaskTags = { tagIds -> viewModel.updateTaskTags(task, tagIds) },
+            onCreateAndAssignTag = { newTag -> viewModel.createAndAssignTagToTask(task, newTag) },
+            onOpenFullTagManager = { viewModel.setTagManagerOpen(true) },
+            onAddChecklistItem = { itemTitle -> viewModel.addChecklistItem(task.id, itemTitle) },
+            onInsertChecklistItemAfter = { afterId, newId, initialTitle ->
+                viewModel.insertChecklistItemAfter(task.id, afterId, newId, initialTitle)
+            },
+            onToggleChecklistItem = { itemId, done -> viewModel.toggleChecklistItem(itemId, done) },
+            onRenameChecklistItem = { itemId, newTitle -> viewModel.renameChecklistItem(itemId, newTitle) },
+            onMoveChecklistItem = { itemId, moveUp -> viewModel.moveChecklistItem(task.id, itemId, moveUp) },
+            onDeleteChecklistItem = { itemId -> viewModel.deleteChecklistItem(itemId) },
+            onTriggerGeminiMagicBreakdown = {
+                viewModel.triggerGeminiMagicBreakdown(task, activeLocale)
+            },
+            onDeleteTask = { viewModel.deleteTask(task.id) },
+            locale = activeLocale
+        )
+    }
 }
 
 @Composable
@@ -1366,6 +1392,7 @@ private fun ThingsMainTaskLazyList(
     modifier: Modifier = Modifier
 ) {
     val colors = ThingsTheme.colors
+    val currentEpochDay by viewModel.currentEpochDay.collectAsState()
     val collapsedHeadingIds by viewModel.collapsedHeadingIds.collectAsState()
     val allHeadings by viewModel.allHeadings.collectAsState()
     val magicBreakdownTaskId by viewModel.magicBreakdownTaskId.collectAsState()
@@ -1630,7 +1657,7 @@ private fun ThingsMainTaskLazyList(
         } else if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.UPCOMING)) {
             // Upcoming Smart View ("Geplant"): Group tasks chronologically by day ("Gruppierung pro Tag")
             val zone = ZoneId.systemDefault()
-            val todayDate = LocalDate.now(zone)
+            val todayDate = LocalDate.ofEpochDay(currentEpochDay)
             val groupedUpcoming = primaryTasks
                 .groupBy { task -> computeUpcomingTargetDate(task, todayDate, zone) }
                 .toSortedMap()

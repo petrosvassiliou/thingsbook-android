@@ -40,9 +40,14 @@ import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
 import com.culturedcode.things3.domain.util.runCatchingCancellable
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -72,13 +77,50 @@ class ThingsRepository @Inject constructor(
         return LocalDate.now(zone).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1L
     }
 
+    private val _endOfTodayMillis = MutableStateFlow(endOfTodayEpochMillis())
+    private val _currentEpochDay = MutableStateFlow(LocalDate.now(ZoneId.systemDefault()).toEpochDay())
+    val currentEpochDay: StateFlow<Long> = _currentEpochDay.asStateFlow()
+
+    /**
+     * Re-evaluates the current local day boundaries (e.g. when crossing 00:00 midnight, resuming the app,
+     * or changing timezone) and rolls over any due UPCOMING tasks or yesterday's THIS_EVENING tasks to TODAY.
+     */
+    suspend fun refreshCurrentDayAndRollover(): Boolean {
+        val zone = ZoneId.systemDefault()
+        val today = LocalDate.now(zone)
+        val startOfToday = today.atStartOfDay(zone).toInstant().toEpochMilli()
+        val endOfToday = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1L
+        val epochDay = today.toEpochDay()
+
+        val dayChanged = _endOfTodayMillis.value != endOfToday || _currentEpochDay.value != epochDay
+        _endOfTodayMillis.value = endOfToday
+        _currentEpochDay.value = epochDay
+
+        val now = System.currentTimeMillis()
+        val promotedUpcoming = runCatchingCancellable {
+            database.taskDao().rolloverDueUpcomingTasksToToday(endOfToday, now)
+        }.getOrDefault(0)
+        val promotedEvening = runCatchingCancellable {
+            database.taskDao().rolloverYesterdayEveningTasksToToday(startOfToday, now)
+        }.getOrDefault(0)
+
+        if (promotedUpcoming > 0 || promotedEvening > 0) {
+            syncRepository.triggerBackgroundSync()
+        }
+        return dayChanged || promotedUpcoming > 0 || promotedEvening > 0
+    }
+
     fun observeInboxTasks(): Flow<List<TaskItem>> =
         database.taskDao().observeInboxTasks()
             .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
             .catch { emit(emptyList()) }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun observeTodayDaytimeTasks(): Flow<List<TaskItem>> =
-        database.taskDao().observeTodayTasks(endOfTodayEpochMillis())
+        _endOfTodayMillis
+            .flatMapLatest { endOfToday ->
+                database.taskDao().observeTodayTasks(endOfToday)
+            }
             .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
             .catch { emit(emptyList()) }
 
@@ -87,8 +129,12 @@ class ThingsRepository @Inject constructor(
             .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
             .catch { emit(emptyList()) }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun observeUpcomingTasks(): Flow<List<TaskItem>> =
-        database.taskDao().observeUpcomingTasks(endOfTodayEpochMillis())
+        _endOfTodayMillis
+            .flatMapLatest { endOfToday ->
+                database.taskDao().observeUpcomingTasks(endOfToday)
+            }
             .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
             .catch { emit(emptyList()) }
 
@@ -141,6 +187,7 @@ class ThingsRepository @Inject constructor(
 
     suspend fun getTasksForWidgetView(viewName: String): List<TaskItem> {
         return runCatchingCancellable {
+            refreshCurrentDayAndRollover()
             when (viewName.trim().uppercase(Locale.ROOT)) {
                 "INBOX" -> observeInboxTasks().first()
                 "UPCOMING" -> observeUpcomingTasks().first()

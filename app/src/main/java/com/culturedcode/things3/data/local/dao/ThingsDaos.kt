@@ -414,6 +414,32 @@ interface TaskDao {
 
     @Query(
         """
+        UPDATE tasks
+        SET scheduleState = 'TODAY', updatedAt = :now, isDirty = 1
+        WHERE isDeleted = 0
+          AND status = 'OPEN'
+          AND scheduleState = 'UPCOMING'
+          AND whenDate IS NOT NULL
+          AND whenDate <= :endOfTodayMillis
+        """
+    )
+    suspend fun rolloverDueUpcomingTasksToToday(endOfTodayMillis: Long, now: Long): Int
+
+    @Query(
+        """
+        UPDATE tasks
+        SET scheduleState = 'TODAY', whenDate = :startOfTodayMillis, updatedAt = :now, isDirty = 1
+        WHERE isDeleted = 0
+          AND status = 'OPEN'
+          AND scheduleState = 'THIS_EVENING'
+          AND whenDate IS NOT NULL
+          AND whenDate < :startOfTodayMillis
+        """
+    )
+    suspend fun rolloverYesterdayEveningTasksToToday(startOfTodayMillis: Long, now: Long): Int
+
+    @Query(
+        """
         SELECT * FROM tasks
         WHERE isDeleted = 0
           AND status = 'OPEN'

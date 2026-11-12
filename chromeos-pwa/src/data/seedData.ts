@@ -1,0 +1,460 @@
+import {
+  addDaysLocal,
+  startOfDayEpoch,
+  type AreaRecord,
+  type ChecklistItemRecord,
+  type HeadingRecord,
+  type ProjectRecord,
+  type RecurrenceRule,
+  type SupportedLang,
+  type TagRecord,
+  type TaskRecord
+} from '../domain/types';
+
+export const SAMPLE_TASK_IDS = new Set([
+  'task-inbox-001',
+  'task-today-002',
+  'task-today-003',
+  'task-evening-004',
+  'task-upcoming-005',
+  'task-anytime-006',
+  'task-someday-007',
+  'task-completed-008'
+]);
+
+export const SAMPLE_PROJECT_IDS = new Set(['proj-vacation-001', 'proj-home-002']);
+export const SAMPLE_HEADING_IDS = new Set(['head-booking-001', 'head-packing-002', 'head-everyday-003']);
+export const SAMPLE_CHECKLIST_IDS = new Set(['chk-001', 'chk-002', 'chk-003']);
+export const SAMPLE_AREA_IDS = new Set(['area-work-001', 'area-home-002']);
+export const SAMPLE_TAG_IDS = new Set([
+  'tag-important-001',
+  'tag-home-002',
+  'tag-office-003',
+  'tag-errands-004',
+  'tag-quick-005'
+]);
+
+export interface SeedBundle {
+  tags: TagRecord[];
+  areas: AreaRecord[];
+  projects: ProjectRecord[];
+  headings: HeadingRecord[];
+  tasks: TaskRecord[];
+  checklistItems: ChecklistItemRecord[];
+}
+
+export function buildLocalizedSeedBundle(lang: SupportedLang): SeedBundle {
+  const now = Date.now();
+  const todayEpoch = startOfDayEpoch(new Date(now));
+  const tomorrowEpoch = addDaysLocal(todayEpoch, 1);
+  const inThreeDaysEpoch = addDaysLocal(todayEpoch, 3);
+  const inFiveDaysEpoch = addDaysLocal(todayEpoch, 5);
+  const todayReminder15h = todayEpoch + 15 * 3600_000;
+
+  const s = {
+    en: {
+      tagImportant: 'Important',
+      tagHome: 'Home',
+      tagOffice: 'Office',
+      tagErrands: 'Errands',
+      tagQuick: '5 min',
+      projVacationTitle: 'Summer Vacation & Travel Plan',
+      projVacationNotes: 'Hotel, train tickets, local sights, and packing checklist organized calmly.',
+      projHomeTitle: 'Quarterly Goals & Team Organization',
+      projHomeNotes: 'Key milestones, presentations, and weekly focus routines.',
+      headBooking: 'Bookings & Documents',
+      headPacking: 'Packing & Preparation',
+      headEveryday: 'Weekly Focus & Milestones',
+      taskInboxTitle: 'Book dental checkup appointment for next month',
+      taskInboxNotes: 'Pick a morning slot.',
+      taskToday1Title: 'Book seaside hotel & train tickets',
+      taskToday1Notes: 'Choose flexible rate with free cancellation.',
+      taskToday2Title: 'Prepare weekly planning & project status update',
+      taskToday2Notes: 'Align next steps and priorities.',
+      taskEveningTitle: 'Water indoor plants & 30-minute book reading',
+      taskEveningNotes: 'Repeats automatically 4 days after completion.',
+      taskUpcomingTitle: 'Check passport validity & travel kit',
+      taskUpcomingNotes: 'Review ahead of departure.',
+      taskAnytimeTitle: 'Pack camera, chargers & sunglasses',
+      taskAnytimeNotes: 'Charge power bank and clear SD card.',
+      taskSomedayTitle: 'Collect favorite local restaurants & scenic hiking trails',
+      taskSomedayNotes: 'Saved ideas for the trip.',
+      taskCompletedTitle: 'Tidy desk & set weekly focus priorities',
+      check1: 'Confirm travel dates in calendar',
+      check2: 'Reserve window seats on the train',
+      check3: 'Save booking confirmation offline'
+    },
+    de: {
+      tagImportant: 'Wichtig',
+      tagHome: 'Zuhause',
+      tagOffice: 'Büro',
+      tagErrands: 'Unterwegs',
+      tagQuick: '5 Min.',
+      projVacationTitle: 'Urlaub & Reiseplanung',
+      projVacationNotes: 'Unterkunft, Anreise, Ausflüge und Packliste entspannt im Voraus vorbereiten.',
+      projHomeTitle: 'Quartalsziele & Team-Organisation',
+      projHomeNotes: 'Wichtige Meilensteine, Präsentationen und wöchentliche Routinen im Blick behalten.',
+      headBooking: 'Buchung & Dokumente',
+      headPacking: 'Packliste & Vorbereitung',
+      headEveryday: 'Wochenfokus & Meilensteine',
+      taskInboxTitle: 'Zahnarzt-Vorsorgetermin für nächsten Monat vereinbaren',
+      taskInboxNotes: 'Kurz anrufen und Termin vormittags auswählen.',
+      taskToday1Title: 'Hotel am Meer & Zugverbindung buchen',
+      taskToday1Notes: 'Frühbucher-Option mit kostenloser Stornierung wählen.',
+      taskToday2Title: 'Wochenplanung & Projektstatus für das Team vorbereiten',
+      taskToday2Notes: 'Kurzpräsentation und nächste Schritte abstimmen.',
+      taskEveningTitle: 'Zimmerpflanzen gießen & 30 Min. Buch lesen',
+      taskEveningNotes: 'Wiederholt sich automatisch 4 Tage nach Erledigung.',
+      taskUpcomingTitle: 'Reisepass-Gültigkeit & Reiseapotheke prüfen',
+      taskUpcomingNotes: 'Rechtzeitig vor der Abreise kontrollieren.',
+      taskAnytimeTitle: 'Kamera, Ladegeräte & Sonnenbrille bereitlegen',
+      taskAnytimeNotes: 'SD-Karte leeren und Powerbank aufladen.',
+      taskSomedayTitle: 'Schönste Panorama-Wanderrouten & Restaurants vor Ort sammeln',
+      taskSomedayNotes: 'Empfehlungen von Freunden notieren.',
+      taskCompletedTitle: 'Schreibtisch aufgeräumt & Wochenfokus festgelegt',
+      check1: 'Reisedaten im Kalender bestätigen',
+      check2: 'Zugsitzplätze am Fenster reservieren',
+      check3: 'Buchungsbestätigung offline speichern'
+    },
+    fr: {
+      tagImportant: 'Important',
+      tagHome: 'Maison',
+      tagOffice: 'Bureau',
+      tagErrands: 'Courses',
+      tagQuick: '5 min',
+      projVacationTitle: 'Vacances & Planification de voyage',
+      projVacationNotes: 'Hébergement, billets de train, excursions et bagages en toute sérénité.',
+      projHomeTitle: 'Objectifs & Organisation Travail',
+      projHomeNotes: 'Étapes clés, présentations et routines hebdomadaires.',
+      headBooking: 'Réservations & Documents',
+      headPacking: 'Bagages & Préparatifs',
+      headEveryday: 'Focus de la Semaine',
+      taskInboxTitle: 'Prendre rendez-vous chez le dentiste pour le mois prochain',
+      taskInboxNotes: 'Privilégier un créneau le matin.',
+      taskToday1Title: "Réserver l'hôtel en bord de mer et les billets de train",
+      taskToday1Notes: 'Choisir le tarif avec annulation flexible.',
+      taskToday2Title: "Préparer le point hebdomadaire et les priorités d'équipe",
+      taskToday2Notes: 'Synthétiser les prochaines étapes.',
+      taskEveningTitle: 'Arroser les plantes & 30 minutes de lecture',
+      taskEveningNotes: 'Se répète automatiquement 4 jours après achèvement.',
+      taskUpcomingTitle: "Vérifier les pièces d'identité et la trousse de voyage",
+      taskUpcomingNotes: 'Contrôler avant le départ.',
+      taskAnytimeTitle: 'Préparer appareil photo, chargeurs et lunettes de soleil',
+      taskAnytimeNotes: 'Charger la batterie externe.',
+      taskSomedayTitle: 'Noter les bonnes adresses de restaurants et randonnées',
+      taskSomedayNotes: 'Inspirations pour les vacances.',
+      taskCompletedTitle: 'Bureau rangé et priorités de la semaine définies',
+      check1: 'Confirmer les dates dans le calendrier',
+      check2: 'Réserver les places côté fenêtre',
+      check3: 'Enregistrer la confirmation hors ligne'
+    },
+    it: {
+      tagImportant: 'Importante',
+      tagHome: 'Casa',
+      tagOffice: 'Ufficio',
+      tagErrands: 'Commissioni',
+      tagQuick: '5 min',
+      projVacationTitle: 'Vacanze e Viaggio',
+      projVacationNotes: 'Alloggio, treni, escursioni e valigia organizzati con calma.',
+      projHomeTitle: 'Obiettivi e Organizzazione Lavoro',
+      projHomeNotes: 'Traguardi principali, presentazioni e routine settimanali.',
+      headBooking: 'Prenotazioni e Documenti',
+      headPacking: 'Valigia e Preparativi',
+      headEveryday: 'Focus Settimanale',
+      taskInboxTitle: 'Prenotare visita di controllo dal dentista',
+      taskInboxNotes: 'Scegliere un orario al mattino.',
+      taskToday1Title: 'Prenotare hotel sul mare e biglietti del treno',
+      taskToday1Notes: "Verificare l'opzione di cancellazione gratuita.",
+      taskToday2Title: 'Preparare piano settimanale e aggiornamento progetti',
+      taskToday2Notes: 'Definire i prossimi passi con il team.',
+      taskEveningTitle: 'Annaffiare le piante e 30 minuti di lettura',
+      taskEveningNotes: 'Si ripete automaticamente 4 giorni dopo il completamento.',
+      taskUpcomingTitle: 'Controllare validità documenti e kit da viaggio',
+      taskUpcomingNotes: 'Da verificare prima della partenza.',
+      taskAnytimeTitle: 'Preparare fotocamera, caricabatterie e occhiali da sole',
+      taskAnytimeNotes: 'Ricaricare la powerbank.',
+      taskSomedayTitle: 'Raccogliere consigli su ristoranti e sentieri panoramici',
+      taskSomedayNotes: 'Idee per le prossime escursioni.',
+      taskCompletedTitle: 'Scrivania riordinata e priorità della settimana definite',
+      check1: 'Confermare le date nel calendario',
+      check2: 'Prenotare i posti sul treno',
+      check3: 'Salvare la conferma di prenotazione'
+    },
+    es: {
+      tagImportant: 'Importante',
+      tagHome: 'Casa',
+      tagOffice: 'Oficina',
+      tagErrands: 'Recados',
+      tagQuick: '5 min',
+      projVacationTitle: 'Vacaciones y Plan de Viaje',
+      projVacationNotes: 'Alojamiento, trenes, rutas y equipaje organizados con tranquilidad.',
+      projHomeTitle: 'Objetivos y Organización del Trabajo',
+      projHomeNotes: 'Hitos principales, presentaciones y rutinas semanales.',
+      headBooking: 'Reservas y Documentos',
+      headPacking: 'Equipaje y Preparativos',
+      headEveryday: 'Enfoque Semanal',
+      taskInboxTitle: 'Pedir cita de revisión con el dentista',
+      taskInboxNotes: 'Elegir horario por la mañana.',
+      taskToday1Title: 'Reservar hotel junto al mar y billetes de tren',
+      taskToday1Notes: 'Seleccionar tarifa con cancelación flexible.',
+      taskToday2Title: 'Preparar planificación semanal y estado del proyecto',
+      taskToday2Notes: 'Alinear próximos pasos con el equipo.',
+      taskEveningTitle: 'Regar las plantas y 30 minutos de lectura',
+      taskEveningNotes: 'Se repite automáticamente 4 días después de completarse.',
+      taskUpcomingTitle: 'Revisar pasaporte y botiquín de viaje',
+      taskUpcomingNotes: 'Comprobar con antelación.',
+      taskAnytimeTitle: 'Preparar cámara, cargadores y gafas de sol',
+      taskAnytimeNotes: 'Cargar la batería portátil.',
+      taskSomedayTitle: 'Guardar recomendaciones de restaurantes y miradores',
+      taskSomedayNotes: 'Ideas para próximas escapadas.',
+      taskCompletedTitle: 'Escritorio ordenado y objetivos semanales listos',
+      check1: 'Confirmar fechas en el calendario',
+      check2: 'Reservar asientos junto a la ventana',
+      check3: 'Guardar confirmación de reserva'
+    }
+  }[lang];
+
+  const weeklyRecurrence: RecurrenceRule = {
+    mode: 'FIXED_SCHEDULE',
+    interval: 1,
+    unit: 'WEEKS',
+    daysOfWeek: [1, 5]
+  };
+
+  const afterCompletionRecurrence: RecurrenceRule = {
+    mode: 'AFTER_COMPLETION',
+    interval: 4,
+    unit: 'DAYS',
+    daysOfWeek: []
+  };
+
+  return {
+    tags: [
+      { id: 'tag-important-001', title: s.tagImportant, parentTagId: null, shortcut: 'w', sortOrder: 100, createdAt: now, updatedAt: now, isDeleted: false, isDirty: false },
+      { id: 'tag-home-002', title: s.tagHome, parentTagId: null, shortcut: 'h', sortOrder: 200, createdAt: now, updatedAt: now, isDeleted: false, isDirty: false },
+      { id: 'tag-office-003', title: s.tagOffice, parentTagId: null, shortcut: 'b', sortOrder: 300, createdAt: now, updatedAt: now, isDeleted: false, isDirty: false },
+      { id: 'tag-errands-004', title: s.tagErrands, parentTagId: null, shortcut: 'u', sortOrder: 400, createdAt: now, updatedAt: now, isDeleted: false, isDirty: false },
+      { id: 'tag-quick-005', title: s.tagQuick, parentTagId: null, shortcut: '5', sortOrder: 500, createdAt: now, updatedAt: now, isDeleted: false, isDirty: false }
+    ],
+    areas: [
+      { id: 'area-work-001', title: 'Work', sortOrder: 1000, tagIds: ['tag-office-003'], createdAt: now, updatedAt: now, isDeleted: false, isDirty: false },
+      { id: 'area-home-002', title: 'Home', sortOrder: 2000, tagIds: ['tag-home-002'], createdAt: now, updatedAt: now, isDeleted: false, isDirty: false }
+    ],
+    projects: [
+      {
+        id: 'proj-home-002',
+        areaId: 'area-work-001',
+        title: s.projHomeTitle,
+        notes: s.projHomeNotes,
+        status: 'ACTIVE',
+        scheduleState: 'TODAY',
+        whenDate: todayEpoch,
+        deadline: inThreeDaysEpoch,
+        completedAt: null,
+        sortOrder: 1000,
+        tagIds: ['tag-office-003', 'tag-important-001'],
+        createdAt: now,
+        updatedAt: now,
+        isDeleted: false,
+        isDirty: false
+      },
+      {
+        id: 'proj-vacation-001',
+        areaId: 'area-home-002',
+        title: s.projVacationTitle,
+        notes: s.projVacationNotes,
+        status: 'ACTIVE',
+        scheduleState: 'TODAY',
+        whenDate: todayEpoch,
+        deadline: inFiveDaysEpoch,
+        completedAt: null,
+        sortOrder: 2000,
+        tagIds: ['tag-important-001', 'tag-home-002'],
+        createdAt: now,
+        updatedAt: now,
+        isDeleted: false,
+        isDirty: false
+      }
+    ],
+    headings: [
+      { id: 'head-everyday-003', projectId: 'proj-home-002', title: s.headEveryday, sortOrder: 1000, isArchived: false, createdAt: now, updatedAt: now, isDeleted: false, isDirty: false },
+      { id: 'head-booking-001', projectId: 'proj-vacation-001', title: s.headBooking, sortOrder: 1000, isArchived: false, createdAt: now, updatedAt: now, isDeleted: false, isDirty: false },
+      { id: 'head-packing-002', projectId: 'proj-vacation-001', title: s.headPacking, sortOrder: 2000, isArchived: false, createdAt: now, updatedAt: now, isDeleted: false, isDirty: false }
+    ],
+    tasks: [
+      {
+        id: 'task-inbox-001',
+        title: s.taskInboxTitle,
+        notes: s.taskInboxNotes,
+        status: 'OPEN',
+        scheduleState: 'INBOX',
+        whenDate: null,
+        deadline: null,
+        reminderTime: null,
+        completedAt: null,
+        projectId: null,
+        headingId: null,
+        areaId: null,
+        recurrenceRule: null,
+        sortOrder: 1000,
+        tagIds: ['tag-quick-005'],
+        createdAt: now,
+        updatedAt: now,
+        isDeleted: false,
+        isDirty: false
+      },
+      {
+        id: 'task-today-002',
+        title: s.taskToday1Title,
+        notes: s.taskToday1Notes,
+        status: 'OPEN',
+        scheduleState: 'TODAY',
+        whenDate: todayEpoch,
+        deadline: inThreeDaysEpoch,
+        reminderTime: todayReminder15h,
+        completedAt: null,
+        projectId: 'proj-vacation-001',
+        headingId: 'head-booking-001',
+        areaId: 'area-home-002',
+        recurrenceRule: null,
+        sortOrder: 1000,
+        tagIds: ['tag-important-001', 'tag-home-002'],
+        createdAt: now,
+        updatedAt: now,
+        isDeleted: false,
+        isDirty: false
+      },
+      {
+        id: 'task-today-003',
+        title: s.taskToday2Title,
+        notes: s.taskToday2Notes,
+        status: 'OPEN',
+        scheduleState: 'TODAY',
+        whenDate: todayEpoch,
+        deadline: null,
+        reminderTime: null,
+        completedAt: null,
+        projectId: 'proj-home-002',
+        headingId: 'head-everyday-003',
+        areaId: 'area-work-001',
+        recurrenceRule: weeklyRecurrence,
+        sortOrder: 2000,
+        tagIds: ['tag-office-003'],
+        createdAt: now,
+        updatedAt: now,
+        isDeleted: false,
+        isDirty: false
+      },
+      {
+        id: 'task-evening-004',
+        title: s.taskEveningTitle,
+        notes: s.taskEveningNotes,
+        status: 'OPEN',
+        scheduleState: 'THIS_EVENING',
+        whenDate: todayEpoch,
+        deadline: null,
+        reminderTime: null,
+        completedAt: null,
+        projectId: null,
+        headingId: null,
+        areaId: 'area-home-002',
+        recurrenceRule: afterCompletionRecurrence,
+        sortOrder: 3000,
+        tagIds: ['tag-home-002'],
+        createdAt: now,
+        updatedAt: now,
+        isDeleted: false,
+        isDirty: false
+      },
+      {
+        id: 'task-upcoming-005',
+        title: s.taskUpcomingTitle,
+        notes: s.taskUpcomingNotes,
+        status: 'OPEN',
+        scheduleState: 'UPCOMING',
+        whenDate: tomorrowEpoch,
+        deadline: inFiveDaysEpoch,
+        reminderTime: null,
+        completedAt: null,
+        projectId: 'proj-vacation-001',
+        headingId: 'head-booking-001',
+        areaId: 'area-home-002',
+        recurrenceRule: weeklyRecurrence,
+        sortOrder: 4000,
+        tagIds: ['tag-important-001'],
+        createdAt: now,
+        updatedAt: now,
+        isDeleted: false,
+        isDirty: false
+      },
+      {
+        id: 'task-anytime-006',
+        title: s.taskAnytimeTitle,
+        notes: s.taskAnytimeNotes,
+        status: 'OPEN',
+        scheduleState: 'ANYTIME',
+        whenDate: null,
+        deadline: null,
+        reminderTime: null,
+        completedAt: null,
+        projectId: 'proj-vacation-001',
+        headingId: 'head-packing-002',
+        areaId: 'area-home-002',
+        recurrenceRule: null,
+        sortOrder: 5000,
+        tagIds: ['tag-home-002'],
+        createdAt: now,
+        updatedAt: now,
+        isDeleted: false,
+        isDirty: false
+      },
+      {
+        id: 'task-someday-007',
+        title: s.taskSomedayTitle,
+        notes: s.taskSomedayNotes,
+        status: 'OPEN',
+        scheduleState: 'SOMEDAY',
+        whenDate: null,
+        deadline: null,
+        reminderTime: null,
+        completedAt: null,
+        projectId: 'proj-vacation-001',
+        headingId: 'head-packing-002',
+        areaId: 'area-home-002',
+        recurrenceRule: null,
+        sortOrder: 6000,
+        tagIds: ['tag-quick-005'],
+        createdAt: now,
+        updatedAt: now,
+        isDeleted: false,
+        isDirty: false
+      },
+      {
+        id: 'task-completed-008',
+        title: s.taskCompletedTitle,
+        notes: '',
+        status: 'COMPLETED',
+        scheduleState: 'TODAY',
+        whenDate: todayEpoch,
+        deadline: null,
+        reminderTime: null,
+        completedAt: now - 3600_000,
+        projectId: 'proj-home-002',
+        headingId: 'head-everyday-003',
+        areaId: 'area-work-001',
+        recurrenceRule: null,
+        sortOrder: 500,
+        tagIds: ['tag-office-003'],
+        createdAt: now - 7200_000,
+        updatedAt: now,
+        isDeleted: false,
+        isDirty: false
+      }
+    ],
+    checklistItems: [
+      { id: 'chk-001', taskId: 'task-today-002', title: s.check1, isCompleted: true, sortOrder: 100, createdAt: now, updatedAt: now, isDeleted: false, isDirty: false },
+      { id: 'chk-002', taskId: 'task-today-002', title: s.check2, isCompleted: false, sortOrder: 200, createdAt: now, updatedAt: now, isDeleted: false, isDirty: false },
+      { id: 'chk-003', taskId: 'task-today-002', title: s.check3, isCompleted: false, sortOrder: 300, createdAt: now, updatedAt: now, isDeleted: false, isDirty: false }
+    ]
+  };
+}

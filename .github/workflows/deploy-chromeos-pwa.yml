@@ -1,0 +1,49 @@
+name: Deploy ChromeOS PWA to Firebase Hosting
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'chromeos-pwa/**'
+      - 'firebase.json'
+      - '.firebaserc'
+      - '.github/workflows/deploy-chromeos-pwa.yml'
+  workflow_dispatch:
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: chromeos-pwa/package-lock.json
+
+      - name: Install dependencies & build ChromeOS PWA
+        working-directory: chromeos-pwa
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload ChromeOS PWA build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: thingsbook-chromeos-pwa-dist
+          path: chromeos-pwa/dist
+
+      - name: Deploy to Firebase Hosting (thingsbook-prod)
+        if: env.FIREBASE_SERVICE_ACCOUNT != ''
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_THINGSBOOK_PROD }}
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_THINGSBOOK_PROD }}
+          channelId: live
+          projectId: thingsbook-prod

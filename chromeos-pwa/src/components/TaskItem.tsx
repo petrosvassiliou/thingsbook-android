@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Archive,
   ArrowDown,
   ArrowUp,
   Bell,
@@ -11,6 +12,7 @@ import {
   Flag,
   FolderInput,
   GripVertical,
+  Layers,
   Moon,
   Plus,
   Repeat,
@@ -37,11 +39,136 @@ import { generateMagicChecklist } from '../data/geminiService';
 import { localDb } from '../data/localDb';
 import type { TranslationStrings } from '../i18n/translations';
 
+interface ChecklistSubtaskRowProps {
+  item: ChecklistItemRecord;
+  idx: number;
+  totalCount: number;
+  taskId: string;
+  registerRef: (el: HTMLInputElement | null) => void;
+  onFocusAddBottom: () => void;
+  onFocusNewSubtask: (newId: string) => void;
+  onSwapWith: (otherItemId: string) => void;
+}
+
+const ChecklistSubtaskRow: React.FC<ChecklistSubtaskRowProps> = ({
+  item,
+  idx,
+  totalCount,
+  taskId,
+  registerRef,
+  onFocusAddBottom,
+  onFocusNewSubtask,
+  onSwapWith
+}) => {
+  const [subTitle, setSubTitle] = useState(item.title);
+  const [prevItemTitle, setPrevItemTitle] = useState(item.title);
+  const [isFocused, setIsFocused] = useState(false);
+
+  if (prevItemTitle !== item.title) {
+    setPrevItemTitle(item.title);
+    if (!isFocused) {
+      setSubTitle(item.title);
+    }
+  }
+
+  return (
+    <div className="checklist-row">
+      <button
+        type="button"
+        className={`checklist-circle ${item.isCompleted ? 'done' : ''}`}
+        onClick={() =>
+          void localDb.updateChecklistItem(item.id, { isCompleted: !item.isCompleted })
+        }
+      >
+        {item.isCompleted && <Check size={10} strokeWidth={3} />}
+      </button>
+
+      <input
+        ref={registerRef}
+        type="text"
+        className={`checklist-input ${item.isCompleted ? 'done' : ''}`}
+        value={subTitle}
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => {
+          setIsFocused(false);
+          if (subTitle !== item.title) {
+            void localDb.updateChecklistItem(item.id, { title: subTitle });
+          }
+        }}
+        onChange={(e) => {
+          const next = e.target.value;
+          setSubTitle(next);
+          void localDb.updateChecklistItem(item.id, { title: next });
+        }}
+        onKeyDown={async (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            const inputEl = e.currentTarget;
+            const val = subTitle;
+            if (!val.trim()) {
+              await localDb.deleteChecklistItem(item.id);
+              onFocusAddBottom();
+              return;
+            }
+            const cursor = inputEl.selectionStart ?? val.length;
+            if (cursor < val.length) {
+              const leftPart = val.slice(0, cursor).trimEnd();
+              const rightPart = val.slice(cursor).trimStart();
+              setSubTitle(leftPart);
+              const newId = await localDb.insertChecklistItemAfter(
+                taskId,
+                item.id,
+                rightPart,
+                leftPart
+              );
+              onFocusNewSubtask(newId);
+            } else {
+              const newId = await localDb.insertChecklistItemAfter(taskId, item.id, '', val);
+              onFocusNewSubtask(newId);
+            }
+          }
+        }}
+      />
+
+      <div className="checklist-row-btns">
+        <button
+          type="button"
+          className="icon-btn"
+          style={{ height: 22, minWidth: 22, padding: 0 }}
+          disabled={idx === 0}
+          onClick={() => onSwapWith('up')}
+        >
+          <ArrowUp size={12.5} />
+        </button>
+        <button
+          type="button"
+          className="icon-btn"
+          style={{ height: 22, minWidth: 22, padding: 0 }}
+          disabled={idx === totalCount - 1}
+          onClick={() => onSwapWith('down')}
+        >
+          <ArrowDown size={12.5} />
+        </button>
+        <button
+          type="button"
+          className="icon-btn"
+          style={{ height: 22, minWidth: 22, padding: 0 }}
+          onClick={() => void localDb.deleteChecklistItem(item.id)}
+        >
+          <X size={13} />
+        </button>
+      </div>
+    </div>
+  );
+};
+
 interface TaskItemProps {
   task: TaskRecord;
   isExpanded: boolean;
   isSelected: boolean;
+  isMultiSelectMode: boolean;
   showContextSubtitle: boolean;
+  showScheduleBadgeInCollapsed: boolean;
   quickFindOpen: boolean;
   areasMap: Map<string, AreaRecord>;
   projectsMap: Map<string, ProjectRecord>;
@@ -53,11 +180,11 @@ interface TaskItemProps {
   onSelect: (multiToggle: boolean) => void;
   onExpand: () => void;
   onCollapse: () => void;
-  onOpenWhenModal: (task: TaskRecord) => void;
-  onOpenDeadlineModal: (task: TaskRecord) => void;
-  onOpenRepeatModal: (task: TaskRecord) => void;
-  onOpenMoveModal: (task: TaskRecord) => void;
-  onOpenTagsModal: (task: TaskRecord) => void;
+  onOpenWhenModal: (taskId: string) => void;
+  onOpenDeadlineModal: (taskId: string) => void;
+  onOpenRepeatModal: (taskId: string) => void;
+  onOpenMoveModal: (taskId: string) => void;
+  onOpenTagsModal: (taskId: string) => void;
   onDropReorder: (draggedTaskId: string, targetTaskId: string) => void;
   onToast: (msg: string) => void;
 }
@@ -66,7 +193,9 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   task,
   isExpanded,
   isSelected,
+  isMultiSelectMode,
   showContextSubtitle,
+  showScheduleBadgeInCollapsed,
   quickFindOpen,
   areasMap,
   projectsMap,
@@ -86,8 +215,13 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   onDropReorder,
   onToast
 }) => {
+  const [prevTaskId, setPrevTaskId] = useState(task.id);
+  const [prevServerTitle, setPrevServerTitle] = useState(task.title);
+  const [prevServerNotes, setPrevServerNotes] = useState(task.notes);
   const [titleDraft, setTitleDraft] = useState(task.title);
   const [notesDraft, setNotesDraft] = useState(task.notes);
+  const [isTitleFocused, setIsTitleFocused] = useState(false);
+  const [isNotesFocused, setIsNotesFocused] = useState(false);
   const [newSubtask, setNewSubtask] = useState('');
   const [animStage, setAnimStage] = useState<'idle' | 'strike' | 'glide'>('idle');
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
@@ -101,11 +235,25 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const subtaskRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const addSubtaskInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [prevSynced, setPrevSynced] = useState({ title: task.title, notes: task.notes });
-  if (prevSynced.title !== task.title || prevSynced.notes !== task.notes) {
-    setPrevSynced({ title: task.title, notes: task.notes });
+  if (prevTaskId !== task.id) {
+    setPrevTaskId(task.id);
+    setPrevServerTitle(task.title);
+    setPrevServerNotes(task.notes);
     setTitleDraft(task.title);
     setNotesDraft(task.notes);
+  } else {
+    if (prevServerTitle !== task.title) {
+      setPrevServerTitle(task.title);
+      if (!isTitleFocused) {
+        setTitleDraft(task.title);
+      }
+    }
+    if (prevServerNotes !== task.notes) {
+      setPrevServerNotes(task.notes);
+      if (!isNotesFocused) {
+        setNotesDraft(task.notes);
+      }
+    }
   }
 
   useEffect(() => {
@@ -135,11 +283,27 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     }
   };
 
+  const flushDraftsIfNeeded = () => {
+    if (!isExpanded) return;
+    const patch: { id: string; title?: string; notes?: string } = { id: task.id };
+    let changed = false;
+    if (titleDraft !== task.title) {
+      patch.title = titleDraft;
+      changed = true;
+    }
+    if (notesDraft !== task.notes) {
+      patch.notes = notesDraft;
+      changed = true;
+    }
+    if (changed) {
+      void localDb.upsertTask(patch);
+    }
+  };
+
   const commitStatus = async (nextStatus: TaskStatus) => {
+    flushDraftsIfNeeded();
     await localDb.upsertTask({
       id: task.id,
-      title: titleDraft.trim() || task.title || t.placeholderTodoTitle,
-      notes: notesDraft,
       status: nextStatus
     });
   };
@@ -180,24 +344,21 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     setStatusMenuOpen(true);
   };
 
-  const saveDrafts = async () => {
+  const handleDoneCollapse = () => {
     const cleanTitle = titleDraft.trim();
     if (cleanTitle !== task.title || notesDraft !== task.notes) {
-      await localDb.upsertTask({
+      void localDb.upsertTask({
         id: task.id,
-        title: cleanTitle || t.placeholderTodoTitle,
+        title: cleanTitle,
         notes: notesDraft
       });
     }
-  };
-
-  const handleDoneCollapse = async () => {
-    await saveDrafts();
     onCollapse();
   };
 
   const runMagicBreakdown = async () => {
     if (loadingAi) return;
+    flushDraftsIfNeeded();
     setLoadingAi(true);
     try {
       const steps = await generateMagicChecklist(
@@ -244,12 +405,14 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 
   const renderDeadlineMeta = (deadlineMs: number) => {
     const diff = daysBetweenToday(deadlineMs);
-    const label =
+    const shortDate = formatShortDate(deadlineMs);
+    const relative =
       diff === 0
         ? t.deadlineToday
         : diff > 0
           ? t.deadlineDaysLeft(diff)
           : t.deadlineDaysOverdue(Math.abs(diff));
+    const label = `${shortDate} · ${relative}`;
     const urgent = diff <= 2 && task.status === 'OPEN';
     return { label, urgent };
   };
@@ -352,7 +515,11 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             ? t.viewSomeday
             : task.whenDate != null
               ? formatShortDate(task.whenDate)
-              : t.actionWhen;
+              : task.scheduleState === 'ANYTIME'
+                ? t.viewAnytime
+                : t.actionWhen;
+
+    const dlMeta = task.deadline != null ? renderDeadlineMeta(task.deadline) : null;
 
     return (
       <div
@@ -361,7 +528,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
         onKeyDown={(e) => {
           if (e.key === 'Escape') {
             e.stopPropagation();
-            void handleDoneCollapse();
+            handleDoneCollapse();
           }
         }}
       >
@@ -372,12 +539,22 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             className="task-card-title-input"
             autoFocus
             value={titleDraft}
-            onChange={(e) => setTitleDraft(e.target.value)}
-            onBlur={() => void saveDrafts()}
+            onFocus={() => setIsTitleFocused(true)}
+            onBlur={() => {
+              setIsTitleFocused(false);
+              if (titleDraft !== task.title) {
+                void localDb.upsertTask({ id: task.id, title: titleDraft });
+              }
+            }}
+            onChange={(e) => {
+              const nextTitle = e.target.value;
+              setTitleDraft(nextTitle);
+              void localDb.upsertTask({ id: task.id, title: nextTitle });
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
-                void handleDoneCollapse();
+                handleDoneCollapse();
               }
             }}
             placeholder={t.placeholderTodoTitle}
@@ -387,13 +564,23 @@ export const TaskItem: React.FC<TaskItemProps> = ({
         <textarea
           className="task-card-notes"
           value={notesDraft}
-          onChange={(e) => setNotesDraft(e.target.value)}
-          onBlur={() => void saveDrafts()}
+          onFocus={() => setIsNotesFocused(true)}
+          onBlur={() => {
+            setIsNotesFocused(false);
+            if (notesDraft !== task.notes) {
+              void localDb.upsertTask({ id: task.id, notes: notesDraft });
+            }
+          }}
+          onChange={(e) => {
+            const nextNotes = e.target.value;
+            setNotesDraft(nextNotes);
+            void localDb.upsertTask({ id: task.id, notes: nextNotes });
+          }}
           placeholder={t.placeholderNotes}
           rows={Math.max(2, Math.min(8, notesDraft.split('\n').length))}
         />
 
-        {/* Checklist with Enter Cursor Split / Insert Below + Up/Down/Delete */}
+        {/* Checklist with Enter Cursor Split / Insert Below + Multiline Paste + Up/Down/Delete */}
         <div className="checklist-section">
           {activeChecklists.length > 0 && (
             <div className="checklist-header">
@@ -402,92 +589,24 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           )}
 
           {activeChecklists.map((item, idx) => (
-            <div key={item.id} className="checklist-row">
-              <button
-                type="button"
-                className={`checklist-circle ${item.isCompleted ? 'done' : ''}`}
-                onClick={() =>
-                  localDb.updateChecklistItem(item.id, { isCompleted: !item.isCompleted })
+            <ChecklistSubtaskRow
+              key={item.id}
+              item={item}
+              idx={idx}
+              totalCount={activeChecklists.length}
+              taskId={task.id}
+              registerRef={(el) => {
+                subtaskRefs.current[item.id] = el;
+              }}
+              onFocusAddBottom={() => addSubtaskInputRef.current?.focus()}
+              onFocusNewSubtask={(newId) => setFocusSubtaskId(newId)}
+              onSwapWith={(dir) => {
+                const other = dir === 'up' ? activeChecklists[idx - 1] : activeChecklists[idx + 1];
+                if (other) {
+                  void localDb.swapChecklistOrder(item.id, other.id);
                 }
-              >
-                {item.isCompleted && <Check size={10} strokeWidth={3} />}
-              </button>
-
-              <input
-                ref={(el) => {
-                  subtaskRefs.current[item.id] = el;
-                }}
-                type="text"
-                className={`checklist-input ${item.isCompleted ? 'done' : ''}`}
-                value={item.title}
-                onChange={(e) =>
-                  localDb.updateChecklistItem(item.id, { title: e.target.value })
-                }
-                onKeyDown={async (e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    const inputEl = e.currentTarget;
-                    const val = inputEl.value;
-                    if (!val.trim()) {
-                      // Blank subtask -> delete and focus bottom add input
-                      await localDb.deleteChecklistItem(item.id);
-                      addSubtaskInputRef.current?.focus();
-                      return;
-                    }
-                    const cursor = inputEl.selectionStart ?? val.length;
-                    if (cursor < val.length) {
-                      // Split subtask at cursor position
-                      const leftPart = val.slice(0, cursor).trimEnd();
-                      const rightPart = val.slice(cursor).trimStart();
-                      const newId = await localDb.insertChecklistItemAfter(
-                        task.id,
-                        item.id,
-                        rightPart,
-                        leftPart
-                      );
-                      setFocusSubtaskId(newId);
-                    } else {
-                      // Cursor at end -> insert empty subtask directly below
-                      const newId = await localDb.insertChecklistItemAfter(task.id, item.id, '');
-                      setFocusSubtaskId(newId);
-                    }
-                  }
-                }}
-              />
-
-              <div className="checklist-row-btns">
-                <button
-                  type="button"
-                  className="icon-btn"
-                  style={{ height: 22, minWidth: 22, padding: 0 }}
-                  disabled={idx === 0}
-                  onClick={() =>
-                    localDb.swapChecklistOrder(item.id, activeChecklists[idx - 1].id)
-                  }
-                >
-                  <ArrowUp size={12.5} />
-                </button>
-                <button
-                  type="button"
-                  className="icon-btn"
-                  style={{ height: 22, minWidth: 22, padding: 0 }}
-                  disabled={idx === activeChecklists.length - 1}
-                  onClick={() =>
-                    localDb.swapChecklistOrder(item.id, activeChecklists[idx + 1].id)
-                  }
-                >
-                  <ArrowDown size={12.5} />
-                </button>
-                <button
-                  type="button"
-                  className="icon-btn"
-                  style={{ height: 22, minWidth: 22, padding: 0 }}
-                  onClick={() => localDb.deleteChecklistItem(item.id)}
-                >
-                  <X size={13} />
-                </button>
-              </div>
-            </div>
+              }}
+            />
           ))}
 
           <div className="checklist-add-row">
@@ -498,6 +617,20 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               className="checklist-input"
               value={newSubtask}
               onChange={(e) => setNewSubtask(e.target.value)}
+              onPaste={(e) => {
+                const pasted = e.clipboardData.getData('text');
+                if (pasted && /\r?\n/.test(pasted)) {
+                  e.preventDefault();
+                  const lines = pasted
+                    .split(/\r?\n/)
+                    .map((line) => line.replace(/^[-*•[\]xX\s]+/, '').trim())
+                    .filter(Boolean);
+                  if (lines.length > 0) {
+                    setNewSubtask('');
+                    void localDb.addChecklistItems(task.id, lines);
+                  }
+                }
+              }}
               placeholder={t.placeholderAddChecklist}
               onKeyDown={async (e) => {
                 if (e.key === 'Enter' && newSubtask.trim()) {
@@ -524,8 +657,9 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           </div>
         </div>
 
-        {/* Interactive Metadata Chips Row */}
+        {/* Interactive Metadata Chips Row (Android ExpandableTaskCard.kt Parity: When, Reminder, Repeat, Deadline, Container, Tags) */}
         <div className="task-card-chips-row">
+          {/* 1. When Pill */}
           <button
             type="button"
             className={`chip-btn ${
@@ -535,74 +669,114 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 ? 'active'
                 : ''
             }`}
-            onClick={() => onOpenWhenModal(task)}
+            onClick={() => {
+              flushDraftsIfNeeded();
+              onOpenWhenModal(task.id);
+            }}
           >
             {task.scheduleState === 'TODAY' ? (
               <Star size={12} fill="var(--today-star)" style={{ color: 'var(--today-star)' }} />
             ) : task.scheduleState === 'THIS_EVENING' ? (
               <Moon size={12} />
+            ) : task.scheduleState === 'SOMEDAY' ? (
+              <Archive size={12} />
+            ) : task.scheduleState === 'ANYTIME' && task.whenDate == null ? (
+              <Layers size={12} />
             ) : (
               <Calendar size={12} />
             )}
             <span>{whenChipText}</span>
           </button>
 
+          {/* 2. Reminder Pill (when set) */}
           {task.reminderTime != null && (
             <button
               type="button"
               className="chip-btn active"
-              onClick={() => onOpenWhenModal(task)}
+              onClick={() => {
+                flushDraftsIfNeeded();
+                onOpenWhenModal(task.id);
+              }}
             >
               <Bell size={12} />
               <span>{formatReminderClock(task.reminderTime)}</span>
             </button>
           )}
 
-          {task.recurrenceRule != null && (
-            <button
-              type="button"
-              className="chip-btn active"
-              onClick={() => onOpenRepeatModal(task)}
-            >
-              <Repeat size={12} />
-              <span>{formatRecurrenceShort(task.recurrenceRule, lang)}</span>
-            </button>
-          )}
+          {/* 3. Repeat Pill (ALWAYS visible, matching Android ExpandableTaskCard) */}
+          <button
+            type="button"
+            className={`chip-btn ${task.recurrenceRule != null ? 'active' : ''}`}
+            onClick={() => {
+              flushDraftsIfNeeded();
+              onOpenRepeatModal(task.id);
+            }}
+          >
+            <Repeat size={12} />
+            <span>
+              {task.recurrenceRule != null
+                ? formatRecurrenceShort(task.recurrenceRule, lang)
+                : t.actionRepeat}
+            </span>
+          </button>
 
-          {task.deadline != null && (() => {
-            const dl = renderDeadlineMeta(task.deadline);
-            return (
-              <button
-                type="button"
-                className={`chip-btn ${dl.urgent ? 'urgent' : 'active'}`}
-                onClick={() => onOpenDeadlineModal(task)}
-              >
-                <Flag size={12} />
-                <span>{dl.label}</span>
-              </button>
-            );
-          })()}
+          {/* 4. Deadline / Due Date Pill (ALWAYS visible, matching Android ExpandableTaskCard) */}
+          <button
+            type="button"
+            className={`chip-btn ${
+              dlMeta ? (dlMeta.urgent ? 'urgent' : 'active') : ''
+            }`}
+            onClick={() => {
+              flushDraftsIfNeeded();
+              onOpenDeadlineModal(task.id);
+            }}
+          >
+            <Flag
+              size={12}
+              style={
+                dlMeta == null ? { color: 'var(--deadline-red)', opacity: 0.85 } : undefined
+              }
+            />
+            <span>{dlMeta ? dlMeta.label : t.actionDeadline}</span>
+          </button>
 
-          {containerLabel && (
-            <button type="button" className="chip-btn" onClick={() => onOpenMoveModal(task)}>
-              <FolderInput size={12} />
-              <span>{containerLabel}</span>
-            </button>
-          )}
+          {/* 5. Project / Area Container Pill (ALWAYS visible, matching Android ExpandableTaskCard) */}
+          <button
+            type="button"
+            className={`chip-btn ${containerLabel ? 'active' : ''}`}
+            onClick={() => {
+              flushDraftsIfNeeded();
+              onOpenMoveModal(task.id);
+            }}
+          >
+            <FolderInput size={12} />
+            <span>{containerLabel || `${t.entityProject} / ${t.entityArea}`}</span>
+          </button>
 
+          {/* 6. Assigned Tag Pills + "+ Tags" */}
           {taskTags.map((tg) => (
             <button
               key={tg.id}
               type="button"
               className="chip-btn active"
-              onClick={() => onOpenTagsModal(task)}
+              onClick={() => {
+                flushDraftsIfNeeded();
+                onOpenTagsModal(task.id);
+              }}
             >
               <Tag size={11.5} />
               <span>{tg.title}</span>
             </button>
           ))}
 
-          <button type="button" className="chip-btn" onClick={() => onOpenTagsModal(task)}>
+          <button
+            type="button"
+            className="chip-btn"
+            onClick={() => {
+              flushDraftsIfNeeded();
+              onOpenTagsModal(task.id);
+            }}
+          >
             <Plus size={11.5} />
             <span>{t.entityTags}</span>
           </button>
@@ -614,7 +788,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             type="button"
             className="chip-btn gemini"
             disabled={loadingAi}
-            onClick={runMagicBreakdown}
+            onClick={() => void runMagicBreakdown()}
           >
             <Sparkles size={13.5} />
             <span>{loadingAi ? t.geminiGenerating : t.geminiMagicBreakdown}</span>
@@ -625,7 +799,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               type="button"
               className="icon-btn"
               title={t.ctxWhenReminder}
-              onClick={() => onOpenWhenModal(task)}
+              onClick={() => {
+                flushDraftsIfNeeded();
+                onOpenWhenModal(task.id);
+              }}
             >
               <Calendar size={15.5} />
             </button>
@@ -633,7 +810,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               type="button"
               className="icon-btn"
               title={t.actionRepeat}
-              onClick={() => onOpenRepeatModal(task)}
+              onClick={() => {
+                flushDraftsIfNeeded();
+                onOpenRepeatModal(task.id);
+              }}
             >
               <Repeat size={15.5} />
             </button>
@@ -641,7 +821,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               type="button"
               className="icon-btn"
               title={t.ctxMoveContainer}
-              onClick={() => onOpenMoveModal(task)}
+              onClick={() => {
+                flushDraftsIfNeeded();
+                onOpenMoveModal(task.id);
+              }}
             >
               <FolderInput size={15.5} />
             </button>
@@ -649,7 +832,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               type="button"
               className="icon-btn"
               title={t.ctxAssignTags}
-              onClick={() => onOpenTagsModal(task)}
+              onClick={() => {
+                flushDraftsIfNeeded();
+                onOpenTagsModal(task.id);
+              }}
             >
               <Tag size={15.5} />
             </button>
@@ -657,7 +843,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               type="button"
               className="icon-btn"
               title={t.actionDeadline}
-              onClick={() => onOpenDeadlineModal(task)}
+              onClick={() => {
+                flushDraftsIfNeeded();
+                onOpenDeadlineModal(task.id);
+              }}
             >
               <Flag size={15.5} />
             </button>
@@ -666,7 +855,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               className="icon-btn"
               style={{ color: 'var(--deadline-red)' }}
               title={t.actionDelete}
-              onClick={() => localDb.softDeleteTasks([task.id])}
+              onClick={() => void localDb.softDeleteTasks([task.id])}
             >
               <Trash2 size={15.5} />
             </button>
@@ -674,7 +863,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               type="button"
               className="btn-primary"
               style={{ padding: '5px 11px', fontSize: 12.2 }}
-              onClick={() => void handleDoneCollapse()}
+              onClick={handleDoneCollapse}
             >
               <Check size={14} />
               <span>{t.actionDone}</span>
@@ -686,8 +875,17 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   }
 
   // ==================== Collapsed Row View ====================
+  const showCollapsedSchedulePill =
+    showScheduleBadgeInCollapsed &&
+    task.status === 'OPEN' &&
+    (task.scheduleState === 'TODAY' ||
+      task.scheduleState === 'SOMEDAY' ||
+      (task.scheduleState === 'UPCOMING' && task.whenDate != null) ||
+      (task.scheduleState !== 'THIS_EVENING' && task.whenDate != null));
+
   const hasSecondRowBadges =
     task.scheduleState === 'THIS_EVENING' ||
+    showCollapsedSchedulePill ||
     task.recurrenceRule != null ||
     task.reminderTime != null ||
     activeChecklists.length > 0 ||
@@ -722,17 +920,11 @@ export const TaskItem: React.FC<TaskItemProps> = ({
         }}
         onClick={(e) => {
           e.stopPropagation();
-          if (e.ctrlKey || e.metaKey || e.shiftKey) {
+          if (e.ctrlKey || e.metaKey || e.shiftKey || isMultiSelectMode) {
             onSelect(true);
-          } else if (isSelected) {
-            onExpand();
           } else {
-            onSelect(false);
+            onExpand();
           }
-        }}
-        onDoubleClick={(e) => {
-          e.stopPropagation();
-          onExpand();
         }}
         onContextMenu={(e) => {
           if (quickFindOpen) return;
@@ -768,16 +960,33 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             <div className="task-row-notes-preview">{task.notes.trim().split('\n')[0]}</div>
           )}
 
-          {/* Exact 6-item Ordered Second-Row Badges */}
+          {/* Ordered Second-Row Badges */}
           {hasSecondRowBadges && (
             <div className="task-row-badges-second">
-              {/* 1. This Evening (ONLY when THIS_EVENING) */}
-              {task.scheduleState === 'THIS_EVENING' && (
+              {/* 1. Schedule State Badge (This Evening everywhere; Today / Upcoming / Someday in Project & Area views) */}
+              {task.scheduleState === 'THIS_EVENING' ? (
                 <span className="meta-badge evening">
                   <Moon size={10.5} />
                   <span>{t.viewThisEvening}</span>
                 </span>
-              )}
+              ) : showCollapsedSchedulePill ? (
+                task.scheduleState === 'TODAY' ? (
+                  <span className="meta-badge today">
+                    <Star size={10.5} fill="var(--today-star)" style={{ color: 'var(--today-star)' }} />
+                    <span>{t.viewToday}</span>
+                  </span>
+                ) : task.scheduleState === 'SOMEDAY' ? (
+                  <span className="meta-badge">
+                    <Archive size={10.5} />
+                    <span>{t.viewSomeday}</span>
+                  </span>
+                ) : task.whenDate != null ? (
+                  <span className="meta-badge">
+                    <Calendar size={10.5} />
+                    <span>{formatShortDate(task.whenDate)}</span>
+                  </span>
+                ) : null
+              ) : null}
 
               {/* 2. Repeat */}
               {task.recurrenceRule != null && (
@@ -832,7 +1041,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
         </span>
       </div>
 
-      {/* Right-Click TaskContextDropdownMenu (Exact v1.6.16 10-Item Menu) */}
+      {/* Right-Click TaskContextDropdownMenu (Exact v1.6.18 10-Item Menu) */}
       {ctxMenu && !quickFindOpen && (
         <>
           <div
@@ -889,7 +1098,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               className="context-menu-item"
               onClick={() => {
                 setCtxMenu(null);
-                onOpenWhenModal(task);
+                onOpenWhenModal(task.id);
               }}
             >
               <Calendar size={14} />
@@ -902,7 +1111,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               className="context-menu-item"
               onClick={() => {
                 setCtxMenu(null);
-                onOpenDeadlineModal(task);
+                onOpenDeadlineModal(task.id);
               }}
             >
               <Flag size={14} />
@@ -915,7 +1124,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               className="context-menu-item"
               onClick={() => {
                 setCtxMenu(null);
-                onOpenRepeatModal(task);
+                onOpenRepeatModal(task.id);
               }}
             >
               <Repeat size={14} />
@@ -928,7 +1137,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               className="context-menu-item"
               onClick={() => {
                 setCtxMenu(null);
-                onOpenMoveModal(task);
+                onOpenMoveModal(task.id);
               }}
             >
               <FolderInput size={14} />
@@ -941,7 +1150,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               className="context-menu-item"
               onClick={() => {
                 setCtxMenu(null);
-                onOpenTagsModal(task);
+                onOpenTagsModal(task.id);
               }}
             >
               <Tag size={14} />

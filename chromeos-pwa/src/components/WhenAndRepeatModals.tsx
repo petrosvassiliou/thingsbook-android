@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Archive,
   Bell,
   Calendar,
   CalendarDays,
+  ChevronLeft,
+  ChevronRight,
   Flag,
   Inbox,
   Moon,
@@ -15,6 +17,7 @@ import {
 import { parseNaturalDate } from '../domain/naturalDateParser';
 import {
   addDaysLocal,
+  daysBetweenToday,
   endOfDayEpoch,
   formatRecurrenceShort,
   fromIsoDateInputValue,
@@ -33,6 +36,114 @@ import type { TranslationStrings } from '../i18n/translations';
 
 const REMINDER_PRESETS = ['08:00', '09:00', '12:00', '15:00', '18:00', '20:00'];
 
+interface InteractiveMonthCalendarProps {
+  selectedEpoch: number | null;
+  lang: SupportedLang;
+  accent?: 'blue' | 'deadline';
+  onSelectDay: (epochMidnight: number) => void;
+}
+
+const InteractiveMonthCalendar: React.FC<InteractiveMonthCalendarProps> = ({
+  selectedEpoch,
+  lang,
+  accent = 'blue',
+  onSelectDay
+}) => {
+  const todayEpoch = startOfDayEpoch();
+  const initialRefDate = useMemo(
+    () => (selectedEpoch != null ? new Date(selectedEpoch) : new Date(todayEpoch)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+  const [viewYear, setViewYear] = useState(initialRefDate.getFullYear());
+  const [viewMonth, setViewMonth] = useState(initialRefDate.getMonth()); // 0-indexed
+
+  const weekdayHeaders = useMemo(() => {
+    // 2024-01-01 was a Monday
+    const fmt = new Intl.DateTimeFormat(lang, { weekday: 'short' });
+    return Array.from({ length: 7 }, (_, i) => {
+      const raw = fmt.format(new Date(2024, 0, 1 + i)).replace(/\.$/, '');
+      return raw.slice(0, 2);
+    });
+  }, [lang]);
+
+  const monthTitle = useMemo(() => {
+    const raw = new Intl.DateTimeFormat(lang, { month: 'long', year: 'numeric' }).format(
+      new Date(viewYear, viewMonth, 1)
+    );
+    return raw.charAt(0).toUpperCase() + raw.slice(1);
+  }, [lang, viewYear, viewMonth]);
+
+  const firstOfMonth = new Date(viewYear, viewMonth, 1, 0, 0, 0, 0);
+  const leadingBlanks = isoDayOfWeek(firstOfMonth) - 1; // 0 for Monday .. 6 for Sunday
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const selectedDayMidnight = selectedEpoch != null ? startOfDayEpoch(new Date(selectedEpoch)) : null;
+
+  const shiftMonth = (delta: number) => {
+    const d = new Date(viewYear, viewMonth + delta, 1);
+    setViewYear(d.getFullYear());
+    setViewMonth(d.getMonth());
+  };
+
+  return (
+    <div className={`things-calendar ${accent === 'deadline' ? 'deadline-accent' : ''}`}>
+      <div className="things-calendar-header">
+        <button
+          type="button"
+          className="icon-btn"
+          style={{ height: 28, minWidth: 28, padding: 0 }}
+          onClick={() => shiftMonth(-1)}
+          aria-label="Previous month"
+        >
+          <ChevronLeft size={16} />
+        </button>
+        <span className="things-calendar-month-label">{monthTitle}</span>
+        <button
+          type="button"
+          className="icon-btn"
+          style={{ height: 28, minWidth: 28, padding: 0 }}
+          onClick={() => shiftMonth(1)}
+          aria-label="Next month"
+        >
+          <ChevronRight size={16} />
+        </button>
+      </div>
+
+      <div className="things-calendar-weekdays">
+        {weekdayHeaders.map((wd, i) => (
+          <span key={i} className="things-calendar-weekday">
+            {wd}
+          </span>
+        ))}
+      </div>
+
+      <div className="things-calendar-grid">
+        {Array.from({ length: leadingBlanks }, (_, idx) => (
+          <span key={`blank-${idx}`} />
+        ))}
+        {Array.from({ length: daysInMonth }, (_, idx) => {
+          const dayNum = idx + 1;
+          const cellEpoch = new Date(viewYear, viewMonth, dayNum, 0, 0, 0, 0).getTime();
+          const isSelected = selectedDayMidnight === cellEpoch;
+          const isToday = todayEpoch === cellEpoch;
+          return (
+            <button
+              key={dayNum}
+              type="button"
+              className={`things-calendar-day ${isSelected ? 'selected' : ''} ${
+                isToday && !isSelected ? 'today' : ''
+              }`}
+              onClick={() => onSelectDay(cellEpoch)}
+            >
+              {dayNum}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 interface WhenModalProps {
   task: TaskRecord;
   lang: SupportedLang;
@@ -42,10 +153,18 @@ interface WhenModalProps {
     whenDate: number | null;
     reminderTime: number | null;
   }) => void;
+  onOpenDeadline?: () => void;
   onClose: () => void;
 }
 
-export const WhenModal: React.FC<WhenModalProps> = ({ task, lang, t, onApply, onClose }) => {
+export const WhenModal: React.FC<WhenModalProps> = ({
+  task,
+  lang,
+  t,
+  onApply,
+  onOpenDeadline,
+  onClose
+}) => {
   const [nlpText, setNlpText] = useState('');
   const [dateVal, setDateVal] = useState(() => toIsoDateInputValue(task.whenDate));
   const [reminderClock, setReminderClock] = useState(() => {
@@ -98,6 +217,21 @@ export const WhenModal: React.FC<WhenModalProps> = ({ task, lang, t, onApply, on
     applyEpochDate(epoch);
   };
 
+  const deadlineSummary = useMemo(() => {
+    if (task.deadline == null) return null;
+    const shortDate = new Intl.DateTimeFormat(lang, { month: 'short', day: 'numeric' }).format(
+      new Date(task.deadline)
+    );
+    const diff = daysBetweenToday(task.deadline);
+    const rel =
+      diff === 0
+        ? t.deadlineToday
+        : diff > 0
+          ? t.deadlineDaysLeft(diff)
+          : t.deadlineDaysOverdue(Math.abs(diff));
+    return `${shortDate} · ${rel}`;
+  }, [task.deadline, lang, t]);
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
@@ -112,7 +246,7 @@ export const WhenModal: React.FC<WhenModalProps> = ({ task, lang, t, onApply, on
         </div>
 
         {/* Multilingual Natural Language Input */}
-        <form onSubmit={handleNlpEnter} style={{ marginBottom: 14 }}>
+        <form onSubmit={handleNlpEnter} style={{ marginBottom: 12 }}>
           <input
             type="text"
             className="text-field"
@@ -136,7 +270,7 @@ export const WhenModal: React.FC<WhenModalProps> = ({ task, lang, t, onApply, on
         </form>
 
         {/* Quick Schedule Presets */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
           <button
             type="button"
             className="btn-secondary"
@@ -195,35 +329,29 @@ export const WhenModal: React.FC<WhenModalProps> = ({ task, lang, t, onApply, on
           </button>
         </div>
 
-        {/* Specific Date Picker */}
-        <div
-          style={{
-            padding: 12,
-            borderRadius: 'var(--radius-sm)',
-            background: 'var(--bg-subtle)',
-            border: '1px solid var(--border-subtle)',
-            marginBottom: 12
-          }}
-        >
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
-            {t.viewUpcoming}
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              type="date"
-              className="text-field"
-              value={dateVal}
-              onChange={(e) => setDateVal(e.target.value)}
-            />
-            <button
-              type="button"
-              className="btn-primary"
-              disabled={!dateVal}
-              onClick={handleCalendarApply}
-            >
-              {t.actionSave}
-            </button>
-          </div>
+        {/* Interactive Monday-First Calendar Grid (1-Click Apply!) */}
+        <InteractiveMonthCalendar
+          selectedEpoch={task.whenDate}
+          lang={lang}
+          onSelectDay={(epoch) => applyEpochDate(epoch)}
+        />
+
+        {/* Manual Date Input Fallback for Distant Dates */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <input
+            type="date"
+            className="text-field"
+            value={dateVal}
+            onChange={(e) => setDateVal(e.target.value)}
+          />
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={!dateVal}
+            onClick={handleCalendarApply}
+          >
+            {t.actionSave}
+          </button>
         </div>
 
         {/* Reminder Time Presets + 24h Clock */}
@@ -304,6 +432,36 @@ export const WhenModal: React.FC<WhenModalProps> = ({ task, lang, t, onApply, on
             </button>
           </div>
         </div>
+
+        {/* Direct Jump to Deadline / Due Date Picker */}
+        {onOpenDeadline && (
+          <div
+            style={{
+              marginTop: 12,
+              paddingTop: 10,
+              borderTop: '1px solid var(--border-subtle)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8
+            }}
+          >
+            <span style={{ fontSize: 12.2, color: 'var(--text-secondary)', fontWeight: 550 }}>
+              {t.actionDeadline}
+            </span>
+            <button
+              type="button"
+              className={`chip-btn ${task.deadline != null ? 'urgent' : ''}`}
+              onClick={() => {
+                onClose();
+                onOpenDeadline();
+              }}
+            >
+              <Flag size={12.5} style={{ color: 'var(--deadline-red)' }} />
+              <span>{deadlineSummary || t.actionDeadline}</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -312,6 +470,7 @@ export const WhenModal: React.FC<WhenModalProps> = ({ task, lang, t, onApply, on
 interface DeadlineModalProps {
   titleLabel?: string;
   currentDeadline: number | null;
+  lang?: SupportedLang;
   t: TranslationStrings;
   onApply: (deadline: number | null) => void;
   onClose: () => void;
@@ -320,6 +479,7 @@ interface DeadlineModalProps {
 export const DeadlineModal: React.FC<DeadlineModalProps> = ({
   titleLabel,
   currentDeadline,
+  lang = 'en',
   t,
   onApply,
   onClose
@@ -345,7 +505,7 @@ export const DeadlineModal: React.FC<DeadlineModalProps> = ({
           </button>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
           <button type="button" className="btn-secondary" onClick={() => pick(today)}>
             {t.viewToday}
           </button>
@@ -371,6 +531,14 @@ export const DeadlineModal: React.FC<DeadlineModalProps> = ({
             {t.dateInTwoWeeks}
           </button>
         </div>
+
+        {/* Interactive Monday-First Calendar Grid (1-Click Due Date Selection!) */}
+        <InteractiveMonthCalendar
+          selectedEpoch={currentDeadline}
+          lang={lang}
+          accent="deadline"
+          onSelectDay={(epoch) => pick(epoch)}
+        />
 
         <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
           <input

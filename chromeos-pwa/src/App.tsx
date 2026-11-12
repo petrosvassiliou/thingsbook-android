@@ -117,14 +117,14 @@ export const App: React.FC = () => {
   const [quickFindOpen, setQuickFindOpen] = useState(false);
   const [magicFabOpen, setMagicFabOpen] = useState(false);
 
-  // Modals
-  const [whenModalTask, setWhenModalTask] = useState<TaskRecord | null>(null);
+  // Modals (store entity IDs so modals always read live snapshot records and never overwrite titles)
+  const [whenModalTaskId, setWhenModalTaskId] = useState<string | null>(null);
   const [deadlineModalTarget, setDeadlineModalTarget] = useState<
-    { kind: 'task'; task: TaskRecord } | { kind: 'project'; project: ProjectRecord } | null
+    { kind: 'task'; taskId: string } | { kind: 'project'; projectId: string } | null
   >(null);
-  const [repeatModalTask, setRepeatModalTask] = useState<TaskRecord | null>(null);
+  const [repeatModalTaskId, setRepeatModalTaskId] = useState<string | null>(null);
   const [moveModalTaskIds, setMoveModalTaskIds] = useState<string[] | null>(null);
-  const [tagPickerTask, setTagPickerTask] = useState<TaskRecord | null>(null);
+  const [tagPickerTaskId, setTagPickerTaskId] = useState<string | null>(null);
   const [areaManagerOpen, setAreaManagerOpen] = useState(false);
   const [quickCreateAreaOpen, setQuickCreateAreaOpen] = useState(false);
   const [projectModalState, setProjectModalState] = useState<{
@@ -196,13 +196,60 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  // Initialize DB, Cloud Sync, Auto Update Check, and PWA Install Listener
+  // Initialize DB, Cloud Sync, Launcher Shortcuts, Auto Update Check, and PWA Install Listener
   useEffect(() => {
     const unsubDb = localDb.subscribe(setSnapshot);
     const unsubSync = cloudSync.subscribe(setSyncState);
 
-    void localDb.initialize(prefs.language).then(() => {
+    void localDb.initialize(prefs.language).then(async (initialSnap) => {
       void cloudSync.initializeSession();
+
+      // Handle ChromeOS Launcher Manifest Shortcuts (?action=new-todo | ?action=quick-find | ?view=...)
+      const params = new URLSearchParams(window.location.search);
+      const viewParam = params.get('view')?.toUpperCase();
+      const actionParam = params.get('action')?.toLowerCase();
+      const validViews: SmartViewType[] = [
+        'INBOX',
+        'TODAY',
+        'UPCOMING',
+        'ANYTIME',
+        'SOMEDAY',
+        'LOGBOOK'
+      ];
+
+      if (viewParam && (validViews as string[]).includes(viewParam)) {
+        setActiveNav({ kind: 'smart', view: viewParam as SmartViewType });
+      }
+      if (actionParam === 'quick-find') {
+        setQuickFindOpen(true);
+      } else if (actionParam === 'new-todo') {
+        const inboxOpen = initialSnap.tasks.filter(
+          (tk) =>
+            !tk.isDeleted &&
+            tk.status === 'OPEN' &&
+            tk.scheduleState === 'INBOX' &&
+            tk.projectId == null &&
+            tk.areaId == null
+        );
+        const minOrder =
+          inboxOpen.length > 0
+            ? inboxOpen.reduce((m, tk) => Math.min(m, tk.sortOrder), Infinity)
+            : null;
+        const created = await localDb.upsertTask({
+          title: '',
+          scheduleState: 'INBOX',
+          sortOrder: computeMidpointSortOrder(
+            null,
+            minOrder != null && Number.isFinite(minOrder) ? minOrder : null
+          )
+        });
+        setActiveNav({ kind: 'smart', view: 'INBOX' });
+        setSelectedTaskIds([]);
+        setExpandedTaskId(created.id);
+      }
+      if (viewParam || actionParam) {
+        window.history.replaceState({}, '', window.location.pathname);
+      }
     });
 
     if (prefs.autoCheckUpdatesEnabled) {
@@ -233,8 +280,8 @@ export const App: React.FC = () => {
   useEffect(() => {
     const tick = () => {
       checkDueRemindersAndDigest(snapshot.tasks, prefs, (taskId) => {
+        setSelectedTaskIds([]);
         setExpandedTaskId(taskId);
-        setSelectedTaskIds([taskId]);
       });
     };
     tick();
@@ -542,7 +589,7 @@ export const App: React.FC = () => {
       if (isLogbookRedirect) {
         setActiveNav({ kind: 'smart', view: 'INBOX' });
       }
-      setSelectedTaskIds([created.id]);
+      setSelectedTaskIds([]);
       setExpandedTaskId(created.id);
       if (!explicitHeadingId) {
         workspaceScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
@@ -586,11 +633,11 @@ export const App: React.FC = () => {
           target.isContentEditable);
 
       if (e.key === 'Escape') {
-        if (whenModalTask) return setWhenModalTask(null);
+        if (whenModalTaskId) return setWhenModalTaskId(null);
         if (deadlineModalTarget) return setDeadlineModalTarget(null);
-        if (repeatModalTask) return setRepeatModalTask(null);
+        if (repeatModalTaskId) return setRepeatModalTaskId(null);
         if (moveModalTaskIds) return setMoveModalTaskIds(null);
-        if (tagPickerTask) return setTagPickerTask(null);
+        if (tagPickerTaskId) return setTagPickerTaskId(null);
         if (areaManagerOpen) return setAreaManagerOpen(false);
         if (quickCreateAreaOpen) return setQuickCreateAreaOpen(false);
         if (projectModalState.open) return setProjectModalState({ open: false });
@@ -695,7 +742,7 @@ export const App: React.FC = () => {
               const nextTags = tk.tagIds.includes(matchedTag.id)
                 ? tk.tagIds.filter((id) => id !== matchedTag.id)
                 : [...tk.tagIds, matchedTag.id];
-              void localDb.upsertTask({ id: tk.id, title: tk.title, tagIds: nextTags });
+              void localDb.upsertTask({ id: tk.id, tagIds: nextTags });
             }
           }
         }
@@ -705,11 +752,11 @@ export const App: React.FC = () => {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
-    whenModalTask,
+    whenModalTaskId,
     deadlineModalTarget,
-    repeatModalTask,
+    repeatModalTaskId,
     moveModalTaskIds,
-    tagPickerTask,
+    tagPickerTaskId,
     areaManagerOpen,
     quickCreateAreaOpen,
     projectModalState.open,
@@ -738,11 +785,10 @@ export const App: React.FC = () => {
     setMobileDrawerOpen(false);
     setEditingAreaHeader(false);
     setProjectAreaDropdownOpen(false);
+    setSelectedTaskIds([]);
     if (highlightTaskId) {
-      setSelectedTaskIds([highlightTaskId]);
       setExpandedTaskId(highlightTaskId);
     } else {
-      setSelectedTaskIds([]);
       setExpandedTaskId(null);
     }
   };
@@ -761,7 +807,6 @@ export const App: React.FC = () => {
     if (target.kind === 'area') {
       await localDb.upsertTask({
         id: tk.id,
-        title: tk.title,
         areaId: target.areaId,
         projectId: null,
         headingId: null
@@ -769,18 +814,16 @@ export const App: React.FC = () => {
     } else if (target.kind === 'project') {
       await localDb.upsertTask({
         id: tk.id,
-        title: tk.title,
         projectId: target.projectId,
         headingId: null,
         areaId: null
       });
     } else {
       if (target.view === 'LOGBOOK') {
-        await localDb.upsertTask({ id: tk.id, title: tk.title, status: 'COMPLETED' });
+        await localDb.upsertTask({ id: tk.id, status: 'COMPLETED' });
       } else if (target.view === 'INBOX') {
         await localDb.upsertTask({
           id: tk.id,
-          title: tk.title,
           scheduleState: 'INBOX',
           whenDate: null,
           projectId: null,
@@ -791,7 +834,6 @@ export const App: React.FC = () => {
         const resolved = resolveWhenPreset(target.view, '');
         await localDb.upsertTask({
           id: tk.id,
-          title: tk.title,
           scheduleState: resolved.scheduleState,
           whenDate: resolved.whenDate
         });
@@ -816,7 +858,6 @@ export const App: React.FC = () => {
 
     await localDb.upsertTask({
       id: dragged.id,
-      title: dragged.title,
       projectId: target.projectId,
       headingId: target.headingId,
       areaId: target.areaId,
@@ -847,7 +888,9 @@ export const App: React.FC = () => {
       task={tk}
       isExpanded={expandedTaskId === tk.id}
       isSelected={selectedTaskIds.includes(tk.id)}
+      isMultiSelectMode={selectedTaskIds.length > 0}
       showContextSubtitle={showContextSubtitle}
+      showScheduleBadgeInCollapsed={activeNav.kind === 'project' || activeNav.kind === 'area'}
       quickFindOpen={quickFindOpen}
       areasMap={areasMap}
       projectsMap={allNonDeletedProjectsMap}
@@ -866,15 +909,15 @@ export const App: React.FC = () => {
         }
       }}
       onExpand={() => {
-        setSelectedTaskIds([tk.id]);
+        setSelectedTaskIds([]);
         setExpandedTaskId(tk.id);
       }}
       onCollapse={() => setExpandedTaskId(null)}
-      onOpenWhenModal={setWhenModalTask}
-      onOpenDeadlineModal={(task) => setDeadlineModalTarget({ kind: 'task', task })}
-      onOpenRepeatModal={setRepeatModalTask}
-      onOpenMoveModal={(task) => setMoveModalTaskIds([task.id])}
-      onOpenTagsModal={setTagPickerTask}
+      onOpenWhenModal={(taskId) => setWhenModalTaskId(taskId)}
+      onOpenDeadlineModal={(taskId) => setDeadlineModalTarget({ kind: 'task', taskId })}
+      onOpenRepeatModal={(taskId) => setRepeatModalTaskId(taskId)}
+      onOpenMoveModal={(taskId) => setMoveModalTaskIds([taskId])}
+      onOpenTagsModal={(taskId) => setTagPickerTaskId(taskId)}
       onDropReorder={(draggedId, targetId) =>
         void handleDropReorderTask(draggedId, targetId, listContext)
       }
@@ -943,7 +986,16 @@ export const App: React.FC = () => {
     <div
       className="app-shell"
       onClick={() => {
-        if (selectedTaskIds.length > 0 && !expandedTaskId) {
+        if (
+          expandedTaskId &&
+          !whenModalTaskId &&
+          !deadlineModalTarget &&
+          !repeatModalTaskId &&
+          !moveModalTaskIds &&
+          !tagPickerTaskId
+        ) {
+          setExpandedTaskId(null);
+        } else if (selectedTaskIds.length > 0 && !expandedTaskId) {
           setSelectedTaskIds([]);
         }
       }}
@@ -1662,7 +1714,7 @@ export const App: React.FC = () => {
                                       : ''
                                 }`}
                                 onClick={() =>
-                                  setDeadlineModalTarget({ kind: 'project', project: proj })
+                                  setDeadlineModalTarget({ kind: 'project', projectId: proj.id })
                                 }
                               >
                                 <Flag size={11.5} />
@@ -1821,7 +1873,6 @@ export const App: React.FC = () => {
                           onClick={async () => {
                             await localDb.upsertProject({
                               id: project.id,
-                              title: project.title,
                               status: 'COMPLETED'
                             });
                             handleSelectNav({ kind: 'smart', view: 'LOGBOOK' });
@@ -1861,7 +1912,7 @@ export const App: React.FC = () => {
                               : ''
                         }`}
                         onClick={() =>
-                          setDeadlineModalTarget({ kind: 'project', project })
+                          setDeadlineModalTarget({ kind: 'project', projectId: project.id })
                         }
                       >
                         <Flag size={12.5} />
@@ -1906,7 +1957,6 @@ export const App: React.FC = () => {
                                 onClick={async () => {
                                   await localDb.upsertProject({
                                     id: project.id,
-                                    title: project.title,
                                     areaId: null
                                   });
                                   setProjectAreaDropdownOpen(false);
@@ -1923,7 +1973,6 @@ export const App: React.FC = () => {
                                   onClick={async () => {
                                     await localDb.upsertProject({
                                       id: project.id,
-                                      title: project.title,
                                       areaId: a.id
                                     });
                                     setProjectAreaDropdownOpen(false);
@@ -2058,7 +2107,6 @@ export const App: React.FC = () => {
                             if (tk) {
                               await localDb.upsertTask({
                                 id: tk.id,
-                                title: tk.title,
                                 projectId: project.id,
                                 headingId: hd.id,
                                 areaId: null
@@ -2308,67 +2356,88 @@ export const App: React.FC = () => {
       </main>
 
       {/* ==================== MODALS ==================== */}
-      {whenModalTask && (
-        <WhenModal
-          task={whenModalTask}
-          lang={lang}
-          t={t}
-          onApply={(patch) => {
-            void localDb.upsertTask({
-              id: whenModalTask.id,
-              title: whenModalTask.title,
-              ...patch
-            });
-          }}
-          onClose={() => setWhenModalTask(null)}
-        />
-      )}
-
-      {deadlineModalTarget && (
-        <DeadlineModal
-          titleLabel={
-            deadlineModalTarget.kind === 'project' ? t.targetDate : t.actionDeadline
-          }
-          currentDeadline={
-            deadlineModalTarget.kind === 'project'
-              ? deadlineModalTarget.project.deadline
-              : deadlineModalTarget.task.deadline
-          }
-          t={t}
-          onApply={(dl) => {
-            if (deadlineModalTarget.kind === 'project') {
-              void localDb.upsertProject({
-                id: deadlineModalTarget.project.id,
-                title: deadlineModalTarget.project.title,
-                deadline: dl
-              });
-            } else {
+      {whenModalTaskId && (() => {
+        const liveWhenTask = snapshot.tasks.find((x) => x.id === whenModalTaskId);
+        if (!liveWhenTask) return null;
+        return (
+          <WhenModal
+            task={liveWhenTask}
+            lang={lang}
+            t={t}
+            onApply={(patch) => {
               void localDb.upsertTask({
-                id: deadlineModalTarget.task.id,
-                title: deadlineModalTarget.task.title,
-                deadline: dl
+                id: liveWhenTask.id,
+                ...patch
               });
+            }}
+            onOpenDeadline={() =>
+              setDeadlineModalTarget({ kind: 'task', taskId: liveWhenTask.id })
             }
-          }}
-          onClose={() => setDeadlineModalTarget(null)}
-        />
-      )}
+            onClose={() => setWhenModalTaskId(null)}
+          />
+        );
+      })()}
 
-      {repeatModalTask && (
-        <RepeatModal
-          task={repeatModalTask}
-          lang={lang}
-          t={t}
-          onApply={(rule) => {
-            void localDb.upsertTask({
-              id: repeatModalTask.id,
-              title: repeatModalTask.title,
-              recurrenceRule: rule
-            });
-          }}
-          onClose={() => setRepeatModalTask(null)}
-        />
-      )}
+      {deadlineModalTarget && (() => {
+        const liveProject =
+          deadlineModalTarget.kind === 'project'
+            ? snapshot.projects.find((p) => p.id === deadlineModalTarget.projectId)
+            : undefined;
+        const liveTask =
+          deadlineModalTarget.kind === 'task'
+            ? snapshot.tasks.find((x) => x.id === deadlineModalTarget.taskId)
+            : undefined;
+        if (deadlineModalTarget.kind === 'project' && !liveProject) return null;
+        if (deadlineModalTarget.kind === 'task' && !liveTask) return null;
+
+        return (
+          <DeadlineModal
+            titleLabel={
+              deadlineModalTarget.kind === 'project' ? t.targetDate : t.actionDeadline
+            }
+            currentDeadline={
+              deadlineModalTarget.kind === 'project'
+                ? liveProject!.deadline
+                : liveTask!.deadline
+            }
+            lang={lang}
+            t={t}
+            onApply={(dl) => {
+              if (deadlineModalTarget.kind === 'project') {
+                void localDb.upsertProject({
+                  id: deadlineModalTarget.projectId,
+                  deadline: dl
+                });
+              } else {
+                void localDb.upsertTask({
+                  id: deadlineModalTarget.taskId,
+                  deadline: dl
+                });
+              }
+            }}
+            onClose={() => setDeadlineModalTarget(null)}
+          />
+        );
+      })()}
+
+      {repeatModalTaskId && (() => {
+        const liveRepeatTask = snapshot.tasks.find((x) => x.id === repeatModalTaskId);
+        if (!liveRepeatTask) return null;
+        return (
+          <RepeatModal
+            task={liveRepeatTask}
+            lang={lang}
+            t={t}
+            onApply={(rule) => {
+              void localDb.upsertTask({
+                id: liveRepeatTask.id,
+                recurrenceRule: rule
+              });
+            }}
+            onClose={() => setRepeatModalTaskId(null)}
+          />
+        );
+      })()}
 
       {moveModalTaskIds && (
         <MoveTaskModal
@@ -2382,9 +2451,9 @@ export const App: React.FC = () => {
         />
       )}
 
-      {tagPickerTask && (() => {
-        const liveTask =
-          snapshot.tasks.find((x) => x.id === tagPickerTask.id) || tagPickerTask;
+      {tagPickerTaskId && (() => {
+        const liveTask = snapshot.tasks.find((x) => x.id === tagPickerTaskId);
+        if (!liveTask) return null;
         return (
           <TaskTagPickerModal
             selectedTagIds={liveTask.tagIds}
@@ -2396,12 +2465,11 @@ export const App: React.FC = () => {
                 : [...liveTask.tagIds, tagId];
               void localDb.upsertTask({
                 id: liveTask.id,
-                title: liveTask.title,
                 tagIds: next
               });
             }}
             onOpenManageTags={() => setTagManagerOpen(true)}
-            onClose={() => setTagPickerTask(null)}
+            onClose={() => setTagPickerTaskId(null)}
           />
         );
       })()}

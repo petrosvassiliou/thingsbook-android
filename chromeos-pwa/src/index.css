@@ -1649,6 +1649,95 @@ kbd {
   letter-spacing: -0.015em;
 }
 
+/* Interactive Month Calendar (Android ThingsInteractiveMonthCalendar Parity) */
+.things-calendar {
+  padding: 10px 12px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  margin-bottom: 12px;
+}
+
+.things-calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.things-calendar-month-label {
+  font-size: 13.5px;
+  font-weight: 680;
+  color: var(--text-primary);
+}
+
+.things-calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  margin-bottom: 4px;
+}
+
+.things-calendar-weekday {
+  font-size: 11px;
+  font-weight: 620;
+  color: var(--text-muted);
+  padding: 2px 0;
+}
+
+.things-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  row-gap: 3px;
+  justify-items: center;
+}
+
+.things-calendar-day {
+  width: 33px;
+  height: 33px;
+  border-radius: 50%;
+  font-size: 12.8px;
+  font-weight: 500;
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease, transform 0.1s ease;
+}
+
+.things-calendar-day:hover {
+  background: var(--things-blue-soft);
+  color: var(--things-blue);
+}
+
+.things-calendar-day.today {
+  border: 1.5px solid var(--things-blue);
+  color: var(--things-blue);
+  font-weight: 700;
+}
+
+.things-calendar-day.selected {
+  background: var(--things-blue);
+  color: #fff;
+  font-weight: 700;
+  border: none;
+}
+
+.things-calendar.deadline-accent .things-calendar-day:hover {
+  background: var(--deadline-red-bg);
+  color: var(--deadline-red);
+}
+
+.things-calendar.deadline-accent .things-calendar-day.today {
+  border-color: var(--deadline-red);
+  color: var(--deadline-red);
+}
+
+.things-calendar.deadline-accent .things-calendar-day.selected {
+  background: var(--deadline-red);
+  color: #fff;
+}
+
 /* Circular Weekday Buttons & Stepper */
 .weekday-circle {
   width: 34px;

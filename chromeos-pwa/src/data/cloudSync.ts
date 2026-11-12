@@ -900,7 +900,8 @@ class ThingsCloudSyncService {
     sinceTimestamp: number
   ): Promise<void> {
     const res = await fetch(`https://ntfy.sh/${encodeURIComponent(channelTopic)}/json?poll=1&since=24h`, {
-      method: 'GET'
+      method: 'GET',
+      signal: AbortSignal.timeout(3500)
     });
     if (!res.ok) return;
     const text = await res.text();

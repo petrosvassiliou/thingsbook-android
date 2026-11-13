@@ -205,6 +205,8 @@ export interface TranslationStrings {
   settingsCalendarImportIcsBtn: string;
   calendarAllDay: string;
   calendarUntitledEvent: string;
+  authVerifyGoogleRestoreBtn: string;
+  authGoogleRestoreHint: string;
 }
 
 export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
@@ -423,7 +425,10 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     settingsCalendarGrantPermissionBtn: 'Grant Calendar Access',
     settingsCalendarImportIcsBtn: 'Import .ics',
     calendarAllDay: 'All-day',
-    calendarUntitledEvent: '(No title)'
+    calendarUntitledEvent: '(No title)',
+    authVerifyGoogleRestoreBtn: 'Verify with Google & Restore Password',
+    authGoogleRestoreHint:
+      'If you connected Google Calendar or Google Sign-In, verify once with Google below to sign in and re-link your password for all devices.'
   },
   de: {
     appName: 'Thingsbook',
@@ -641,7 +646,10 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     settingsCalendarGrantPermissionBtn: 'Kalenderzugriff erlauben',
     settingsCalendarImportIcsBtn: '.ics importieren',
     calendarAllDay: 'Ganztägig',
-    calendarUntitledEvent: '(Ohne Titel)'
+    calendarUntitledEvent: '(Ohne Titel)',
+    authVerifyGoogleRestoreBtn: 'Mit Google bestätigen & Passwort wiederherstellen',
+    authGoogleRestoreHint:
+      'Falls du Google Kalender oder Google-Login verbunden hast, bestätige einmalig unten mit Google, um dich anzumelden und dein Passwort für alle Geräte wieder zu verknüpfen.'
   },
   fr: {
     appName: 'Thingsbook',
@@ -856,7 +864,10 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     settingsCalendarGrantPermissionBtn: "Autoriser l'accès au calendrier",
     settingsCalendarImportIcsBtn: 'Importer .ics',
     calendarAllDay: 'Toute la journée',
-    calendarUntitledEvent: '(Sans titre)'
+    calendarUntitledEvent: '(Sans titre)',
+    authVerifyGoogleRestoreBtn: 'Vérifier avec Google et restaurer le mot de passe',
+    authGoogleRestoreHint:
+      'Si vous avez connecté Google Agenda ou Google Sign-In, vérifiez une fois avec Google ci-dessous pour vous connecter et réassocier votre mot de passe sur tous vos appareils.'
   },
   it: {
     appName: 'Thingsbook',
@@ -1071,7 +1082,10 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     settingsCalendarGrantPermissionBtn: 'Consenti accesso al calendario',
     settingsCalendarImportIcsBtn: 'Importa .ics',
     calendarAllDay: 'Tutto il giorno',
-    calendarUntitledEvent: '(Senza titolo)'
+    calendarUntitledEvent: '(Senza titolo)',
+    authVerifyGoogleRestoreBtn: 'Verifica con Google e ripristina password',
+    authGoogleRestoreHint:
+      'Se hai collegato Google Calendar o Google Sign-In, verifica una volta con Google qui sotto per accedere e ricollegare la password su tutti i dispositivi.'
   },
   es: {
     appName: 'Thingsbook',
@@ -1286,7 +1300,10 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     settingsCalendarGrantPermissionBtn: 'Permitir acceso al calendario',
     settingsCalendarImportIcsBtn: 'Importar .ics',
     calendarAllDay: 'Todo el día',
-    calendarUntitledEvent: '(Sin título)'
+    calendarUntitledEvent: '(Sin título)',
+    authVerifyGoogleRestoreBtn: 'Verificar con Google y restaurar contraseña',
+    authGoogleRestoreHint:
+      'Si conectaste Google Calendar o Google Sign-In, verifica una vez con Google abajo para iniciar sesión y volver a vincular tu contraseña en todos tus dispositivos.'
   }
 };
 

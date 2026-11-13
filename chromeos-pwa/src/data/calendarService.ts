@@ -1,6 +1,13 @@
-import { GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import type { FirebaseError } from 'firebase/app';
+import {
+  GoogleAuthProvider,
+  linkWithPopup,
+  signInWithCredential,
+  signInWithPopup,
+  signOut
+} from 'firebase/auth';
 import type { CalendarEventItem, DeviceCalendarInfo } from '../domain/types';
-import { getGoogleCalendarAuthInstance } from './firebaseClient';
+import { getFirebaseAuthInstance, getGoogleCalendarAuthInstance } from './firebaseClient';
 
 const GCAL_TOKENS_STORAGE_KEY = 'thingsbook_gcal_tokens_v1';
 const GCAL_CACHED_CALENDARS_KEY = 'thingsbook_gcal_cached_calendars_v1';
@@ -442,21 +449,109 @@ async function fetchGoogleCalendarListForToken(
   return calendars;
 }
 
+export function hasStoredGoogleCalendarAccountForEmail(email: string): boolean {
+  const target = email.trim().toLowerCase();
+  if (!target) return false;
+  if (loadStoredGcalAccounts().some((a) => a.email.trim().toLowerCase() === target)) {
+    return true;
+  }
+  return loadCachedGcalCalendars().some((c) => c.accountName.trim().toLowerCase() === target);
+}
+
 export async function connectGoogleCalendarPopup(): Promise<{
   email: string;
   calendars: DeviceCalendarInfo[];
 }> {
-  const auth = getGoogleCalendarAuthInstance();
+  const gcalAuth = getGoogleCalendarAuthInstance();
+  const primaryUser = getFirebaseAuthInstance().currentUser;
+
   const provider = new GoogleAuthProvider();
   provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
-  provider.setCustomParameters({
-    prompt: 'consent select_account',
+  const customParams: Record<string, string> = {
+    prompt: 'select_account consent',
     include_granted_scopes: 'true'
-  });
+  };
+  if (primaryUser?.email && !primaryUser.email.endsWith('@thingsbook.app')) {
+    customParams.login_hint = primaryUser.email;
+  }
+  provider.setCustomParameters(customParams);
 
-  const result = await signInWithPopup(auth, provider);
-  const credential = GoogleAuthProvider.credentialFromResult(result);
-  const accessToken = credential?.accessToken;
+  let accessToken: string | undefined;
+  let resolvedEmail = '';
+
+  const shouldLinkPrimaryAccount = Boolean(
+    primaryUser &&
+      !primaryUser.email?.endsWith('@thingsbook.app') &&
+      !primaryUser.providerData.some((p) => p.providerId === 'google.com')
+  );
+
+  if (shouldLinkPrimaryAccount && primaryUser) {
+    try {
+      // Link Google onto the active Email/Password user so Firebase Server preserves passwordHash
+      // and keeps Cloud Sync signed in without revoking refresh tokens.
+      const linkResult = await linkWithPopup(primaryUser, provider);
+      const cred = GoogleAuthProvider.credentialFromResult(linkResult);
+      accessToken = cred?.accessToken;
+      const googleProfile = linkResult.user.providerData.find(
+        (p) => p.providerId === 'google.com'
+      );
+      resolvedEmail = (
+        googleProfile?.email ||
+        linkResult.user.email ||
+        linkResult.user.displayName ||
+        'Google Account'
+      ).trim();
+      if (cred) {
+        void signInWithCredential(gcalAuth, cred).catch(() => {});
+      }
+    } catch (err: unknown) {
+      const errCode = (err as { code?: string })?.code || '';
+      if (
+        errCode === 'auth/credential-already-in-use' ||
+        errCode === 'auth/email-already-in-use'
+      ) {
+        // User selected a different Google account that already has its own Firebase UID.
+        const errCred = GoogleAuthProvider.credentialFromError(err as FirebaseError);
+        if (errCred?.accessToken) {
+          accessToken = errCred.accessToken;
+          try {
+            const gcalRes = await signInWithCredential(gcalAuth, errCred);
+            resolvedEmail = (
+              gcalRes.user.email ||
+              gcalRes.user.displayName ||
+              'Google Account'
+            ).trim();
+          } catch {
+            resolvedEmail = 'Google Account';
+          }
+        } else {
+          const fallbackRes = await signInWithPopup(gcalAuth, provider);
+          accessToken = GoogleAuthProvider.credentialFromResult(fallbackRes)?.accessToken;
+          resolvedEmail = (
+            fallbackRes.user.email ||
+            fallbackRes.user.displayName ||
+            'Google Account'
+          ).trim();
+        }
+      } else if (errCode === 'auth/provider-already-linked') {
+        const fallbackRes = await signInWithPopup(gcalAuth, provider);
+        accessToken = GoogleAuthProvider.credentialFromResult(fallbackRes)?.accessToken;
+        resolvedEmail = (
+          fallbackRes.user.email ||
+          fallbackRes.user.displayName ||
+          'Google Account'
+        ).trim();
+      } else {
+        throw err;
+      }
+    }
+  } else {
+    const result = await signInWithPopup(gcalAuth, provider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    accessToken = credential?.accessToken;
+    resolvedEmail = (result.user.email || result.user.displayName || 'Google Account').trim();
+  }
+
   if (!accessToken) {
     throw new Error('Google Calendar access token was not returned by Google Sign-In.');
   }
@@ -471,7 +566,7 @@ export async function connectGoogleCalendarPopup(): Promise<{
     );
   }
 
-  const email = (result.user.email || result.user.displayName || 'Google Account').trim();
+  const email = resolvedEmail || 'Google Account';
   const ttlMs = Math.max(60, tokenCheck.expiresInSec - 60) * 1000;
   const expiresAt = Date.now() + ttlMs;
 

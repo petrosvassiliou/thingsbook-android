@@ -8,6 +8,8 @@ import {
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
+  updatePassword,
+  type Auth,
   type Unsubscribe as AuthUnsubscribe
 } from 'firebase/auth';
 import {
@@ -35,8 +37,60 @@ import {
   normalizeTaskStatus,
   safeParseRecurrence
 } from './backupCodec';
-import { getFirebaseAuthInstance, getFirestoreInstance } from './firebaseClient';
+import { hasStoredGoogleCalendarAccountForEmail } from './calendarService';
+import {
+  getFirebaseAuthInstance,
+  getFirestoreInstance,
+  getGoogleCalendarAuthInstance
+} from './firebaseClient';
 import { loadPreferences, localDb } from './localDb';
+
+function extractAuthErrorCode(err: unknown): string {
+  const code = (err as { code?: unknown })?.code;
+  if (typeof code === 'string' && code.length > 0) return code;
+  const msg = err instanceof Error ? err.message : String(err);
+  const match = /\((auth\/[a-z0-9-]+)\)/i.exec(msg);
+  return match ? match[1].toLowerCase() : '';
+}
+
+function isInvalidPasswordOrUnlinkedError(err: unknown): boolean {
+  const code = extractAuthErrorCode(err);
+  return (
+    code === 'auth/invalid-credential' ||
+    code === 'auth/invalid-login-credentials' ||
+    code === 'auth/wrong-password'
+  );
+}
+
+export function isPasswordRecoveryCandidateError(err: unknown): boolean {
+  if (isInvalidPasswordOrUnlinkedError(err)) return true;
+  const code = extractAuthErrorCode(err);
+  return code === 'auth/popup-blocked' || code === 'auth/popup-closed-by-user';
+}
+
+export function formatAuthErrorMessage(err: unknown): string {
+  const code = extractAuthErrorCode(err);
+  if (
+    code === 'auth/invalid-credential' ||
+    code === 'auth/invalid-login-credentials' ||
+    code === 'auth/wrong-password'
+  ) {
+    return 'Incorrect password, or Google Sign-In / Google Calendar unlinked password login for this email. Click "Verify with Google & Restore Password" below to sign in and re-link your password.';
+  }
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    return 'Google verification window was closed before completing. Click "Verify with Google & Restore Password" to try again.';
+  }
+  if (code === 'auth/popup-blocked') {
+    return 'Popup window was blocked by the browser. Click "Verify with Google & Restore Password" below (or allow popups for this site).';
+  }
+  if (code === 'auth/too-many-requests') {
+    return 'Too many sign-in attempts. Please wait a moment or sign in with Google.';
+  }
+  if (code === 'auth/network-request-failed') {
+    return 'Network connection error. Please check your internet connection and try again.';
+  }
+  return err instanceof Error ? err.message : 'Authentication failed';
+}
 
 export interface CloudSyncSnapshot {
   status: CloudSyncStatus;
@@ -310,6 +364,7 @@ class ThingsCloudSyncService {
   private authUnsub: AuthUnsubscribe | null = null;
   private debounceTimer: number | null = null;
   private isSyncingPromise: Promise<void> | null = null;
+  private authFlowInProgress = false;
   private state: CloudSyncSnapshot = {
     status: 'OFFLINE',
     userEmailOrId: null,
@@ -393,6 +448,14 @@ class ThingsCloudSyncService {
     const auth = getFirebaseAuthInstance();
     this.authUnsub = onAuthStateChanged(auth, async (user) => {
       if (user && !user.email?.endsWith('@thingsbook.app')) {
+        if (this.authFlowInProgress) {
+          this.emit({
+            userId: user.uid,
+            userEmailOrId: user.email || user.uid,
+            errorMessage: null
+          });
+          return;
+        }
         const persisted = this.loadPersistedMeta();
         const lowerEmail = (user.email || '').trim().toLowerCase();
         const channelTopic =
@@ -423,6 +486,7 @@ class ThingsCloudSyncService {
           this.emit({ status: 'OFFLINE' });
         }
       } else {
+        if (this.authFlowInProgress) return;
         this.detachRealtimeListeners();
         this.emit({
           status: 'OFFLINE',
@@ -474,6 +538,72 @@ class ThingsCloudSyncService {
     }
   }
 
+  private async finalizeAuthenticatedSession(
+    uid: string,
+    emailOrId: string,
+    channelTopic: string,
+    mergeLocalTasks: boolean
+  ): Promise<void> {
+    await this.prepareLocalDataBeforeLogin(mergeLocalTasks);
+    this.savePersistedMeta({
+      userId: uid,
+      email: emailOrId,
+      channelTopic,
+      deviceId: this.getOrCreateDeviceId()
+    });
+    this.emit({
+      userId: uid,
+      userEmailOrId: emailOrId,
+      errorMessage: null
+    });
+    this.setLastSyncTs(uid, 0);
+    await this.syncBidirectionalDeltas(true);
+    this.attachRealtimeListeners(uid);
+  }
+
+  private async authenticateGoogleAndLinkPassword(
+    auth: Auth,
+    expectedEmail: string,
+    password: string
+  ): Promise<string> {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({
+      login_hint: expectedEmail,
+      prompt: 'select_account'
+    });
+    const googleCred = await signInWithPopup(auth, provider);
+    const signedInEmail = (googleCred.user.email || '').trim().toLowerCase();
+    if (signedInEmail && signedInEmail !== expectedEmail) {
+      await signOut(auth).catch(() => {});
+      throw new Error(
+        `Please select ${expectedEmail} in the Google sign-in window (signed in as ${signedInEmail}).`
+      );
+    }
+
+    const hasPasswordProvider = googleCred.user.providerData.some(
+      (p) => p.providerId === 'password'
+    );
+    if (!hasPasswordProvider) {
+      try {
+        await linkWithCredential(
+          googleCred.user,
+          EmailAuthProvider.credential(expectedEmail, password)
+        );
+      } catch (linkErr: unknown) {
+        const linkCode = extractAuthErrorCode(linkErr);
+        if (linkCode === 'auth/provider-already-linked') {
+          await updatePassword(googleCred.user, password);
+        } else {
+          throw linkErr;
+        }
+      }
+    } else {
+      await updatePassword(googleCred.user, password);
+    }
+
+    return googleCred.user.uid;
+  }
+
   async registerEmailAccount(
     rawEmail: string,
     password: string,
@@ -483,38 +613,37 @@ class ThingsCloudSyncService {
     if (!email.includes('@') || password.length < 6) {
       throw new Error('Please enter a valid email address and a password with at least 6 characters.');
     }
-    await this.prepareLocalDataBeforeLogin(mergeLocalTasks);
-    this.emit({ status: 'SYNCING', errorMessage: null });
 
     const auth = getFirebaseAuthInstance();
-    let uid: string;
+    this.authFlowInProgress = true;
+    this.emit({ status: 'SYNCING', errorMessage: null });
+
     try {
-      const cred = await createUserWithEmailAndPassword(auth, email, password);
-      uid = cred.user.uid;
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('email-already-in-use')) {
-        const signInCred = await signInWithEmailAndPassword(auth, email, password);
-        uid = signInCred.user.uid;
-      } else {
-        this.emit({ status: 'OFFLINE', errorMessage: msg });
+      let uid: string;
+      try {
+        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        uid = cred.user.uid;
+      } catch (err: unknown) {
+        const code = extractAuthErrorCode(err);
+        const msg = err instanceof Error ? err.message : String(err);
+        if (code === 'auth/email-already-in-use' || msg.includes('email-already-in-use')) {
+          this.authFlowInProgress = false;
+          return await this.signInEmailAccount(email, password, mergeLocalTasks);
+        }
         throw err;
       }
+
+      const pwVerifier = await sha256Hex(`thingsbook-pw-v1:${email}:${password}`);
+      const channelTopic = `tb_sync_${(await sha256Hex(`thingsbook-chan-v1:${email}:${pwVerifier}`)).slice(0, 28)}`;
+      await this.finalizeAuthenticatedSession(uid, email, channelTopic, mergeLocalTasks);
+      return email;
+    } catch (err: unknown) {
+      const formatted = formatAuthErrorMessage(err);
+      this.emit({ status: 'OFFLINE', errorMessage: formatted });
+      throw err;
+    } finally {
+      this.authFlowInProgress = false;
     }
-
-    const pwVerifier = await sha256Hex(`thingsbook-pw-v1:${email}:${password}`);
-    const channelTopic = `tb_sync_${(await sha256Hex(`thingsbook-chan-v1:${email}:${pwVerifier}`)).slice(0, 28)}`;
-
-    this.savePersistedMeta({
-      userId: uid,
-      email,
-      channelTopic,
-      deviceId: this.getOrCreateDeviceId()
-    });
-    this.setLastSyncTs(uid, 0);
-    await this.syncBidirectionalDeltas(true);
-    this.attachRealtimeListeners(uid);
-    return email;
   }
 
   async signInEmailAccount(
@@ -526,65 +655,135 @@ class ThingsCloudSyncService {
     if (!email.includes('@') || password.length < 6) {
       throw new Error('Please enter your email address and password (min. 6 characters).');
     }
-    await this.prepareLocalDataBeforeLogin(mergeLocalTasks);
-    this.emit({ status: 'SYNCING', errorMessage: null });
 
     const auth = getFirebaseAuthInstance();
-    const cred = await signInWithEmailAndPassword(auth, email, password);
-    const uid = cred.user.uid;
+    this.authFlowInProgress = true;
+    this.emit({ status: 'SYNCING', errorMessage: null });
 
-    const pwVerifier = await sha256Hex(`thingsbook-pw-v1:${email}:${password}`);
-    const channelTopic = `tb_sync_${(await sha256Hex(`thingsbook-chan-v1:${email}:${pwVerifier}`)).slice(0, 28)}`;
+    try {
+      let uid = '';
+      try {
+        const cred = await signInWithEmailAndPassword(auth, email, password);
+        uid = cred.user.uid;
+      } catch (signInErr: unknown) {
+        if (!isInvalidPasswordOrUnlinkedError(signInErr)) {
+          throw signInErr;
+        }
 
-    this.savePersistedMeta({
-      userId: uid,
-      email,
-      channelTopic,
-      deviceId: this.getOrCreateDeviceId()
-    });
-    this.setLastSyncTs(uid, 0);
-    await this.syncBidirectionalDeltas(true);
-    this.attachRealtimeListeners(uid);
-    return email;
+        // Recovery Layer 1: Silent zero-popup re-link if this device holds a Google session
+        // (e.g. from Google Calendar OAuth) whose password provider was unlinked by Firebase Server.
+        const gcalAuth = getGoogleCalendarAuthInstance();
+        await gcalAuth.authStateReady();
+        const existingGoogleUser = [gcalAuth.currentUser, auth.currentUser].find(
+          (u) => u && (u.email || '').trim().toLowerCase() === email
+        );
+
+        let googleUnlinkedDetected = hasStoredGoogleCalendarAccountForEmail(email);
+
+        if (existingGoogleUser) {
+          await existingGoogleUser.reload().catch(() => {});
+          const hasPassword = existingGoogleUser.providerData.some(
+            (p) => p.providerId === 'password'
+          );
+          if (!hasPassword) {
+            googleUnlinkedDetected = true;
+            try {
+              await linkWithCredential(
+                existingGoogleUser,
+                EmailAuthProvider.credential(email, password)
+              );
+              const retryCred = await signInWithEmailAndPassword(auth, email, password);
+              uid = retryCred.user.uid;
+            } catch {
+              // Fall through to Layer 2 (Google popup verification) if recent login is required
+            }
+          }
+        }
+
+        // Recovery Layer 2: Automatic Google verification popup + password re-link
+        if (!uid && googleUnlinkedDetected) {
+          uid = await this.authenticateGoogleAndLinkPassword(auth, email, password);
+        }
+
+        if (!uid) {
+          throw signInErr;
+        }
+      }
+
+      const pwVerifier = await sha256Hex(`thingsbook-pw-v1:${email}:${password}`);
+      const channelTopic = `tb_sync_${(await sha256Hex(`thingsbook-chan-v1:${email}:${pwVerifier}`)).slice(0, 28)}`;
+      await this.finalizeAuthenticatedSession(uid, email, channelTopic, mergeLocalTasks);
+      return email;
+    } catch (err: unknown) {
+      const formatted = formatAuthErrorMessage(err);
+      this.emit({ status: 'OFFLINE', errorMessage: formatted });
+      throw err;
+    } finally {
+      this.authFlowInProgress = false;
+    }
+  }
+
+  /**
+   * Direct 1-click user-activated Google verification + password re-linking.
+   * Opens the Google popup synchronously on the click gesture so browser popup blockers never fire,
+   * signs in as `rawEmail`, and permanently attaches `password` alongside `google.com`.
+   */
+  async verifyGoogleAndLinkPassword(
+    rawEmail: string,
+    password: string,
+    mergeLocalTasks = true
+  ): Promise<string> {
+    const email = rawEmail.trim().toLowerCase();
+    if (!email.includes('@') || password.length < 6) {
+      throw new Error('Please enter your email address and password (min. 6 characters).');
+    }
+
+    const auth = getFirebaseAuthInstance();
+    this.authFlowInProgress = true;
+    this.emit({ status: 'SYNCING', errorMessage: null });
+
+    try {
+      const uid = await this.authenticateGoogleAndLinkPassword(auth, email, password);
+      const pwVerifier = await sha256Hex(`thingsbook-pw-v1:${email}:${password}`);
+      const channelTopic = `tb_sync_${(await sha256Hex(`thingsbook-chan-v1:${email}:${pwVerifier}`)).slice(0, 28)}`;
+      await this.finalizeAuthenticatedSession(uid, email, channelTopic, mergeLocalTasks);
+      return email;
+    } catch (err: unknown) {
+      const formatted = formatAuthErrorMessage(err);
+      this.emit({ status: 'OFFLINE', errorMessage: formatted });
+      throw err;
+    } finally {
+      this.authFlowInProgress = false;
+    }
   }
 
   async signInWithGooglePopup(mergeLocalTasks = true): Promise<string> {
-    await this.prepareLocalDataBeforeLogin(mergeLocalTasks);
-    this.emit({ status: 'SYNCING', errorMessage: null });
-
     const auth = getFirebaseAuthInstance();
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
-    const cred = await signInWithPopup(auth, provider);
-    const user = cred.user;
-    const email = (user.email || '').trim().toLowerCase();
-    const uid = user.uid;
 
-    // Maintain compatibility with Android's Instant Cloud deterministic Email/Password sign-in
-    if (email && !user.providerData.some((p) => p.providerId === 'password')) {
-      try {
-        const instantHash = await sha256Hex(`tb-instant-v2:${email}`);
-        const derivedPassword = `TbCloud!${instantHash.slice(0, 14)}`;
-        await linkWithCredential(user, EmailAuthProvider.credential(email, derivedPassword));
-      } catch {
-        // Safe to ignore if already linked or disabled
-      }
+    this.authFlowInProgress = true;
+    this.emit({ status: 'SYNCING', errorMessage: null });
+
+    try {
+      const cred = await signInWithPopup(auth, provider);
+      const user = cred.user;
+      const email = (user.email || '').trim().toLowerCase();
+      const uid = user.uid;
+
+      const channelTopic = email
+        ? `tb_sync_${(await sha256Hex(`thingsbook-instant:${email}`)).slice(0, 28)}`
+        : `tb_sync_${(await sha256Hex(uid)).slice(0, 28)}`;
+
+      await this.finalizeAuthenticatedSession(uid, email || uid, channelTopic, mergeLocalTasks);
+      return email || uid;
+    } catch (err: unknown) {
+      const formatted = formatAuthErrorMessage(err);
+      this.emit({ status: 'OFFLINE', errorMessage: formatted });
+      throw err;
+    } finally {
+      this.authFlowInProgress = false;
     }
-
-    const channelTopic = email
-      ? `tb_sync_${(await sha256Hex(`thingsbook-instant:${email}`)).slice(0, 28)}`
-      : `tb_sync_${(await sha256Hex(uid)).slice(0, 28)}`;
-
-    this.savePersistedMeta({
-      userId: uid,
-      email: email || uid,
-      channelTopic,
-      deviceId: this.getOrCreateDeviceId()
-    });
-    this.setLastSyncTs(uid, 0);
-    await this.syncBidirectionalDeltas(true);
-    this.attachRealtimeListeners(uid);
-    return email || uid;
   }
 
   async signInInstantEmail(rawEmail: string, mergeLocalTasks = true): Promise<string> {
@@ -592,40 +791,40 @@ class ThingsCloudSyncService {
     if (!email.includes('@') || !email.includes('.') || email.endsWith('@thingsbook.app')) {
       throw new Error('Please enter a valid email address for Instant Cloud Sync.');
     }
-    await this.prepareLocalDataBeforeLogin(mergeLocalTasks);
-    this.emit({ status: 'SYNCING', errorMessage: null });
 
     const instantHash = await sha256Hex(`tb-instant-v2:${email}`);
     const derivedPassword = `TbCloud!${instantHash.slice(0, 14)}`;
     const auth = getFirebaseAuthInstance();
 
-    let uid: string;
-    try {
-      const cred = await signInWithEmailAndPassword(auth, email, derivedPassword);
-      uid = cred.user.uid;
-    } catch {
-      try {
-        const created = await createUserWithEmailAndPassword(auth, email, derivedPassword);
-        uid = created.user.uid;
-      } catch {
-        this.emit({ status: 'OFFLINE' });
-        throw new Error(
-          `A custom password is already set for ${email}. Please enter your password above and click "Sign In with Email" (or use Google Sign-In).`
-        );
-      }
-    }
+    this.authFlowInProgress = true;
+    this.emit({ status: 'SYNCING', errorMessage: null });
 
-    const channelTopic = `tb_sync_${(await sha256Hex(`thingsbook-instant:${email}`)).slice(0, 28)}`;
-    this.savePersistedMeta({
-      userId: uid,
-      email,
-      channelTopic,
-      deviceId: this.getOrCreateDeviceId()
-    });
-    this.setLastSyncTs(uid, 0);
-    await this.syncBidirectionalDeltas(true);
-    this.attachRealtimeListeners(uid);
-    return email;
+    try {
+      let uid: string;
+      try {
+        const cred = await signInWithEmailAndPassword(auth, email, derivedPassword);
+        uid = cred.user.uid;
+      } catch {
+        try {
+          const created = await createUserWithEmailAndPassword(auth, email, derivedPassword);
+          uid = created.user.uid;
+        } catch {
+          throw new Error(
+            `A custom password is already set for ${email} (or linked with Google). Enter your password above and click "Sign In with Email", or use "Continue with Google".`
+          );
+        }
+      }
+
+      const channelTopic = `tb_sync_${(await sha256Hex(`thingsbook-instant:${email}`)).slice(0, 28)}`;
+      await this.finalizeAuthenticatedSession(uid, email, channelTopic, mergeLocalTasks);
+      return email;
+    } catch (err: unknown) {
+      const formatted = formatAuthErrorMessage(err);
+      this.emit({ status: 'OFFLINE', errorMessage: formatted });
+      throw err;
+    } finally {
+      this.authFlowInProgress = false;
+    }
   }
 
   async sendResetEmail(rawEmail: string): Promise<void> {

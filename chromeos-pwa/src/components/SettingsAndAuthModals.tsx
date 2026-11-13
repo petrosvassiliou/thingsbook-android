@@ -31,7 +31,12 @@ import {
   type ThingsbookStatistics
 } from '../domain/types';
 import type { BackupInspection } from '../data/backupCodec';
-import { cloudSync, type CloudSyncSnapshot } from '../data/cloudSync';
+import {
+  cloudSync,
+  formatAuthErrorMessage,
+  isPasswordRecoveryCandidateError,
+  type CloudSyncSnapshot
+} from '../data/cloudSync';
 import { localDb, type DataSnapshot } from '../data/localDb';
 import {
   applyPendingSwUpdate,
@@ -1436,7 +1441,12 @@ interface AuthSyncModalProps {
   onClose: () => void;
 }
 
-type PendingAuthAction = 'register' | 'login' | 'google' | 'instant';
+type PendingAuthAction =
+  | 'register'
+  | 'login'
+  | 'google'
+  | 'instant'
+  | 'verify-google-password';
 
 export const AuthSyncModal: React.FC<AuthSyncModalProps> = ({
   syncState,
@@ -1450,7 +1460,9 @@ export const AuthSyncModal: React.FC<AuthSyncModalProps> = ({
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showGooglePasswordRecovery, setShowGooglePasswordRecovery] = useState(false);
   const [pendingMergeAction, setPendingMergeAction] = useState<PendingAuthAction | null>(null);
+  const [chosenMergePref, setChosenMergePref] = useState<boolean | null>(null);
 
   const executeAuth = async (action: PendingAuthAction, mergeLocalTasks: boolean) => {
     setBusy(true);
@@ -1462,25 +1474,38 @@ export const AuthSyncModal: React.FC<AuthSyncModalProps> = ({
         signedInAs = await cloudSync.registerEmailAccount(email, password, mergeLocalTasks);
       } else if (action === 'login') {
         signedInAs = await cloudSync.signInEmailAccount(email, password, mergeLocalTasks);
+      } else if (action === 'verify-google-password') {
+        signedInAs = await cloudSync.verifyGoogleAndLinkPassword(
+          email,
+          password,
+          mergeLocalTasks
+        );
       } else if (action === 'google') {
         signedInAs = await cloudSync.signInWithGooglePopup(mergeLocalTasks);
       } else {
         signedInAs = await cloudSync.signInInstantEmail(email, mergeLocalTasks);
       }
+      setShowGooglePasswordRecovery(false);
       onToast(`✓ ${signedInAs}`);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Authentication failed');
+      setError(formatAuthErrorMessage(err));
+      if (
+        (action === 'login' || action === 'register' || action === 'verify-google-password') &&
+        isPasswordRecoveryCandidateError(err)
+      ) {
+        setShowGooglePasswordRecovery(true);
+      }
     } finally {
       setBusy(false);
     }
   };
 
   const initiateAuth = (action: PendingAuthAction) => {
-    if (hasSampleTasks) {
+    if (hasSampleTasks && chosenMergePref === null) {
       setPendingMergeAction(action);
     } else {
-      void executeAuth(action, true);
+      void executeAuth(action, chosenMergePref ?? true);
     }
   };
 
@@ -1514,6 +1539,7 @@ export const AuthSyncModal: React.FC<AuthSyncModalProps> = ({
               disabled={busy}
               onClick={() => {
                 const act = pendingMergeAction;
+                setChosenMergePref(true);
                 setPendingMergeAction(null);
                 void executeAuth(act, true);
               }}
@@ -1526,6 +1552,7 @@ export const AuthSyncModal: React.FC<AuthSyncModalProps> = ({
               disabled={busy}
               onClick={() => {
                 const act = pendingMergeAction;
+                setChosenMergePref(false);
                 setPendingMergeAction(null);
                 void executeAuth(act, false);
               }}
@@ -1615,14 +1642,26 @@ export const AuthSyncModal: React.FC<AuthSyncModalProps> = ({
               type="email"
               className="text-field"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (error) setError(null);
+              }}
               placeholder={t.authEmailLabel}
             />
             <input
               type="password"
               className="text-field"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (error) setError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !busy && email.trim() && password.length >= 6) {
+                  e.preventDefault();
+                  initiateAuth('login');
+                }
+              }}
               placeholder={t.authPasswordLabel}
             />
 
@@ -1645,6 +1684,35 @@ export const AuthSyncModal: React.FC<AuthSyncModalProps> = ({
               </button>
             </div>
 
+            {showGooglePasswordRecovery && email.trim() && password.length >= 6 && (
+              <div
+                data-testid="auth-google-password-recovery-box"
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  background: 'var(--bg-subtle)',
+                  border: '1px solid var(--things-blue)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8
+                }}
+              >
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                  {t.authGoogleRestoreHint}
+                </div>
+                <button
+                  type="button"
+                  data-testid="auth-verify-google-restore-btn"
+                  className="btn-primary"
+                  disabled={busy}
+                  onClick={() => initiateAuth('verify-google-password')}
+                >
+                  <ShieldCheck size={14} />
+                  <span>{t.authVerifyGoogleRestoreBtn}</span>
+                </button>
+              </div>
+            )}
+
             <button
               type="button"
               className="btn-secondary"
@@ -1662,7 +1730,7 @@ export const AuthSyncModal: React.FC<AuthSyncModalProps> = ({
                   await cloudSync.sendResetEmail(email);
                   onToast('✓ Password reset email sent');
                 } catch (err) {
-                  setError(err instanceof Error ? err.message : 'Reset error');
+                  setError(formatAuthErrorMessage(err));
                 }
               }}
             >
@@ -1670,7 +1738,12 @@ export const AuthSyncModal: React.FC<AuthSyncModalProps> = ({
             </button>
 
             {error && (
-              <div style={{ fontSize: 12.5, color: 'var(--deadline-red)' }}>{error}</div>
+              <div
+                data-testid="auth-error-message"
+                style={{ fontSize: 12.5, color: 'var(--deadline-red)' }}
+              >
+                {error}
+              </div>
             )}
           </div>
         )}

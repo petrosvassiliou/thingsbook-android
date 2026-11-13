@@ -276,33 +276,187 @@ export const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Reactive Day Boundary & 00:00 Midnight Rollover Watcher (Android v1.6.19 parity)
+  // Reactive Day Boundary & Exact 00:00 Midnight Rollover Watcher (Android v1.6.19 parity)
   const [endOfToday, setEndOfToday] = useState<number>(() => endOfDayEpoch());
 
   useEffect(() => {
     let lastEndOfToday = endOfDayEpoch();
+    let midnightTimerId: number | null = null;
+
+    const scheduleExactMidnightCheck = () => {
+      if (midnightTimerId != null) {
+        window.clearTimeout(midnightTimerId);
+      }
+      const msUntilMidnight = Math.max(1_000, endOfDayEpoch() - Date.now() + 60);
+      midnightTimerId = window.setTimeout(() => {
+        checkDayBoundary();
+        scheduleExactMidnightCheck();
+      }, Math.min(msUntilMidnight, 2_147_483_647));
+    };
+
     const checkDayBoundary = () => {
       const latestEndOfToday = endOfDayEpoch();
       if (latestEndOfToday !== lastEndOfToday) {
         lastEndOfToday = latestEndOfToday;
         setEndOfToday(latestEndOfToday);
         void localDb.rolloverDueTasksForNewDay();
+        scheduleExactMidnightCheck();
       }
     };
+
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         checkDayBoundary();
       }
     };
+
+    scheduleExactMidnightCheck();
     const intervalId = window.setInterval(checkDayBoundary, 15_000);
     window.addEventListener('focus', checkDayBoundary);
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
+      if (midnightTimerId != null) window.clearTimeout(midnightTimerId);
       window.clearInterval(intervalId);
       window.removeEventListener('focus', checkDayBoundary);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
+
+  // Soft Keyboard & Expanded Bottom Task Visibility Engine (Android v1.6.20 parity)
+  const [softKeyboardInsetPx, setSoftKeyboardInsetPx] = useState(0);
+  const isSoftKeyboardOpen = softKeyboardInsetPx > 60;
+  const [focusScrollRequestTick, setFocusScrollRequestTick] = useState(0);
+  const preferBottomForExpandedTaskRef = useRef(false);
+
+  const handleRequestEnsureTaskVisible = useCallback((preferBottom: boolean) => {
+    preferBottomForExpandedTaskRef.current = preferBottom;
+    setFocusScrollRequestTick((n) => n + 1);
+  }, []);
+
+  const ensureExpandedTaskVisible = useCallback((targetId: string, animate: boolean) => {
+    const scroller = workspaceScrollRef.current;
+    if (!scroller) return;
+    const escapedId =
+      typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+        ? CSS.escape(targetId)
+        : targetId.replace(/"/g, '\\"');
+    const cardEl = scroller.querySelector<HTMLElement>(`[data-task-id="${escapedId}"]`);
+    if (!cardEl) return;
+
+    const topMarginPx = 12;
+    const bottomMarginPx = 24;
+    const scrollerRect = scroller.getBoundingClientRect();
+    const vv = window.visualViewport;
+    const visibleViewportBottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+
+    const safeTop = scrollerRect.top + topMarginPx;
+    const safeBottom = Math.max(
+      safeTop + 1,
+      Math.min(scrollerRect.bottom, visibleViewportBottom) - bottomMarginPx
+    );
+
+    const itemRect = cardEl.getBoundingClientRect();
+    let scrollDelta = 0;
+
+    if (itemRect.bottom > safeBottom) {
+      const neededDown = itemRect.bottom - safeBottom;
+      if (preferBottomForExpandedTaskRef.current) {
+        scrollDelta = neededDown;
+      } else {
+        const maxWithoutHidingTitle = Math.max(0, itemRect.top - safeTop);
+        scrollDelta = Math.min(neededDown, maxWithoutHidingTitle);
+      }
+    } else if (itemRect.top < safeTop) {
+      scrollDelta = itemRect.top - safeTop;
+    }
+
+    if (Math.abs(scrollDelta) > 1.5) {
+      scroller.scrollBy({
+        top: scrollDelta,
+        behavior: animate ? 'smooth' : 'auto'
+      });
+    }
+  }, []);
+
+  // Track ChromeOS / tablet virtual keyboard occlusion via window.visualViewport
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const syncVisualViewport = () => {
+      const nextInset = vv
+        ? Math.max(0, Math.round(window.innerHeight - (vv.height + vv.offsetTop)))
+        : 0;
+      setSoftKeyboardInsetPx((prev) => (prev === nextInset ? prev : nextInset));
+    };
+    syncVisualViewport();
+    vv?.addEventListener('resize', syncVisualViewport);
+    vv?.addEventListener('scroll', syncVisualViewport);
+    window.addEventListener('resize', syncVisualViewport);
+    return () => {
+      vv?.removeEventListener('resize', syncVisualViewport);
+      vv?.removeEventListener('scroll', syncVisualViewport);
+      window.removeEventListener('resize', syncVisualViewport);
+    };
+  }, []);
+
+  // Staggered smooth scroll when expanding a task or focusing title/notes/checklist (Android v1.6.20)
+  useEffect(() => {
+    if (!expandedTaskId) return;
+    const t1 = window.setTimeout(() => ensureExpandedTaskVisible(expandedTaskId, true), 16);
+    const t2 = window.setTimeout(() => ensureExpandedTaskVisible(expandedTaskId, true), 140);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [expandedTaskId, focusScrollRequestTick, ensureExpandedTaskVisible]);
+
+  // Keep expanded task visible when soft keyboard opens, viewport shrinks, or card height grows (subtasks/notes)
+  useEffect(() => {
+    if (!expandedTaskId) return;
+    const scroller = workspaceScrollRef.current;
+    if (!scroller) return;
+    const escapedId =
+      typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+        ? CSS.escape(expandedTaskId)
+        : expandedTaskId.replace(/"/g, '\\"');
+    const cardEl = scroller.querySelector<HTMLElement>(`[data-task-id="${escapedId}"]`);
+
+    let prevCardHeight = cardEl ? cardEl.getBoundingClientRect().height : 0;
+    let prevScrollerHeight = scroller.clientHeight;
+
+    const cardObserver =
+      cardEl && typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver((entries) => {
+            const h = entries[0]?.contentRect.height ?? 0;
+            if (h > prevCardHeight && prevCardHeight > 0) {
+              ensureExpandedTaskVisible(expandedTaskId, false);
+            }
+            if (h > 0) prevCardHeight = h;
+          })
+        : null;
+
+    const scrollerObserver =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => {
+            const curH = scroller.clientHeight;
+            if (curH > 0 && curH < prevScrollerHeight) {
+              ensureExpandedTaskVisible(expandedTaskId, false);
+            }
+            if (curH > 0) prevScrollerHeight = curH;
+          })
+        : null;
+
+    if (cardEl && cardObserver) cardObserver.observe(cardEl);
+    scrollerObserver?.observe(scroller);
+
+    if (softKeyboardInsetPx > 0) {
+      ensureExpandedTaskVisible(expandedTaskId, false);
+    }
+
+    return () => {
+      cardObserver?.disconnect();
+      scrollerObserver?.disconnect();
+    };
+  }, [expandedTaskId, softKeyboardInsetPx, ensureExpandedTaskVisible]);
 
   // Reminder & Daily Digest Ticker
   useEffect(() => {
@@ -441,7 +595,7 @@ export const App: React.FC = () => {
     [inboxTasks, todayDaytimeTasks, todayEveningTasks, upcomingTasks, anytimeTasks, somedayTasks]
   );
 
-  const statistics = useMemo(() => computeStatistics(snapshot), [snapshot, endOfToday]);
+  const statistics = useMemo(() => computeStatistics(snapshot, endOfToday), [snapshot, endOfToday]);
 
   // Raw tasks visible in the current view BEFORE tag filtering (for ViewTagFilterUtils parity)
   const currentViewBaseTasks = useMemo((): TaskRecord[] => {
@@ -919,6 +1073,7 @@ export const App: React.FC = () => {
       showContextSubtitle={showContextSubtitle}
       showScheduleBadgeInCollapsed={activeNav.kind === 'project' || activeNav.kind === 'area'}
       quickFindOpen={quickFindOpen}
+      currentDayMarker={endOfToday}
       areasMap={areasMap}
       projectsMap={allNonDeletedProjectsMap}
       tagsMap={tagsMap}
@@ -936,10 +1091,12 @@ export const App: React.FC = () => {
         }
       }}
       onExpand={() => {
+        preferBottomForExpandedTaskRef.current = false;
         setSelectedTaskIds([]);
         setExpandedTaskId(tk.id);
       }}
       onCollapse={() => setExpandedTaskId(null)}
+      onRequestEnsureVisible={handleRequestEnsureTaskVisible}
       onOpenWhenModal={(taskId) => setWhenModalTaskId(taskId)}
       onOpenDeadlineModal={(taskId) => setDeadlineModalTarget({ kind: 'task', taskId })}
       onOpenRepeatModal={(taskId) => setRepeatModalTaskId(taskId)}
@@ -994,8 +1151,9 @@ export const App: React.FC = () => {
     return { numPart, subPart };
   };
 
-  // Group Upcoming tasks by computeUpcomingTargetDate
+  // Group Upcoming tasks by computeUpcomingTargetDate (re-evaluated across 00:00 midnight via endOfToday)
   const upcomingGroups = useMemo(() => {
+    void endOfToday;
     const filtered = filterByTag(upcomingTasks);
     const map = new Map<number, TaskRecord[]>();
     for (const tk of filtered) {
@@ -1005,7 +1163,7 @@ export const App: React.FC = () => {
       map.set(targetDay, list);
     }
     return Array.from(map.entries()).sort((a, b) => a[0] - b[0]);
-  }, [upcomingTasks, filterByTag]);
+  }, [upcomingTasks, filterByTag, endOfToday]);
 
   const effectiveSidebarVisible = isWideScreen ? prefs.sidebarVisible : mobileDrawerOpen;
 
@@ -1241,6 +1399,7 @@ export const App: React.FC = () => {
             tasks={snapshot.tasks}
             counts={sidebarCounts}
             t={t}
+            isSoftKeyboardOpen={isSoftKeyboardOpen}
             onSelectNav={(nav) => handleSelectNav(nav)}
             onCreateProject={() =>
               setProjectModalState({
@@ -1269,7 +1428,15 @@ export const App: React.FC = () => {
         )}
 
         {/* Main Scrollable View Content */}
-        <div ref={workspaceScrollRef} className="workspace-scroll">
+        <div
+          ref={workspaceScrollRef}
+          className="workspace-scroll"
+          style={
+            isSoftKeyboardOpen
+              ? { paddingBottom: `${softKeyboardInsetPx + 28}px` }
+              : undefined
+          }
+        >
           <div className="workspace-container">
             {/* Welcome Setup Banner (only when sample tasks exist & not dismissed & not signed in) */}
             {snapshot.hasSampleTasks &&

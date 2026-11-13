@@ -48,6 +48,7 @@ interface ChecklistSubtaskRowProps {
   onFocusAddBottom: () => void;
   onFocusNewSubtask: (newId: string) => void;
   onSwapWith: (otherItemId: string) => void;
+  onRequestEnsureVisible?: (preferBottomVisible: boolean) => void;
 }
 
 const ChecklistSubtaskRow: React.FC<ChecklistSubtaskRowProps> = ({
@@ -58,7 +59,8 @@ const ChecklistSubtaskRow: React.FC<ChecklistSubtaskRowProps> = ({
   registerRef,
   onFocusAddBottom,
   onFocusNewSubtask,
-  onSwapWith
+  onSwapWith,
+  onRequestEnsureVisible
 }) => {
   const [subTitle, setSubTitle] = useState(item.title);
   const [prevItemTitle, setPrevItemTitle] = useState(item.title);
@@ -88,7 +90,11 @@ const ChecklistSubtaskRow: React.FC<ChecklistSubtaskRowProps> = ({
         type="text"
         className={`checklist-input ${item.isCompleted ? 'done' : ''}`}
         value={subTitle}
-        onFocus={() => setIsFocused(true)}
+        onPointerDown={() => onRequestEnsureVisible?.(true)}
+        onFocus={() => {
+          setIsFocused(true);
+          onRequestEnsureVisible?.(true);
+        }}
         onBlur={() => {
           setIsFocused(false);
           if (subTitle !== item.title) {
@@ -170,6 +176,7 @@ interface TaskItemProps {
   showContextSubtitle: boolean;
   showScheduleBadgeInCollapsed: boolean;
   quickFindOpen: boolean;
+  currentDayMarker?: number;
   areasMap: Map<string, AreaRecord>;
   projectsMap: Map<string, ProjectRecord>;
   tagsMap: Map<string, TagRecord>;
@@ -180,6 +187,7 @@ interface TaskItemProps {
   onSelect: (multiToggle: boolean) => void;
   onExpand: () => void;
   onCollapse: () => void;
+  onRequestEnsureVisible?: (preferBottomVisible: boolean) => void;
   onOpenWhenModal: (taskId: string) => void;
   onOpenDeadlineModal: (taskId: string) => void;
   onOpenRepeatModal: (taskId: string) => void;
@@ -207,6 +215,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   onSelect,
   onExpand,
   onCollapse,
+  onRequestEnsureVisible,
   onOpenWhenModal,
   onOpenDeadlineModal,
   onOpenRepeatModal,
@@ -524,6 +533,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     return (
       <div
         className="task-card-expanded"
+        data-task-id={task.id}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           if (e.key === 'Escape') {
@@ -539,7 +549,11 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             className="task-card-title-input"
             autoFocus
             value={titleDraft}
-            onFocus={() => setIsTitleFocused(true)}
+            onPointerDown={() => onRequestEnsureVisible?.(false)}
+            onFocus={() => {
+              setIsTitleFocused(true);
+              onRequestEnsureVisible?.(false);
+            }}
             onBlur={() => {
               setIsTitleFocused(false);
               if (titleDraft !== task.title) {
@@ -564,7 +578,11 @@ export const TaskItem: React.FC<TaskItemProps> = ({
         <textarea
           className="task-card-notes"
           value={notesDraft}
-          onFocus={() => setIsNotesFocused(true)}
+          onPointerDown={() => onRequestEnsureVisible?.(false)}
+          onFocus={() => {
+            setIsNotesFocused(true);
+            onRequestEnsureVisible?.(false);
+          }}
           onBlur={() => {
             setIsNotesFocused(false);
             if (notesDraft !== task.notes) {
@@ -600,6 +618,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               }}
               onFocusAddBottom={() => addSubtaskInputRef.current?.focus()}
               onFocusNewSubtask={(newId) => setFocusSubtaskId(newId)}
+              onRequestEnsureVisible={onRequestEnsureVisible}
               onSwapWith={(dir) => {
                 const other = dir === 'up' ? activeChecklists[idx - 1] : activeChecklists[idx + 1];
                 if (other) {
@@ -616,6 +635,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               type="text"
               className="checklist-input"
               value={newSubtask}
+              onPointerDown={() => onRequestEnsureVisible?.(true)}
+              onFocus={() => onRequestEnsureVisible?.(true)}
               onChange={(e) => setNewSubtask(e.target.value)}
               onPaste={(e) => {
                 const pasted = e.clipboardData.getData('text');
@@ -898,6 +919,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
         className={`task-row ${isSelected ? 'selected' : ''} ${
           animStage === 'glide' ? 'stage-glide' : ''
         } ${dragOver ? 'drag-over-row' : ''}`}
+        data-task-id={task.id}
         draggable
         onDragStart={(e) => {
           e.dataTransfer.setData('application/x-thingsbook-task', task.id);

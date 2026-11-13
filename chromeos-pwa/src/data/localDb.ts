@@ -60,8 +60,10 @@ export interface DataSnapshot {
   hasSampleTasks: boolean;
 }
 
-export function computeStatistics(snap: DataSnapshot): ThingsbookStatistics {
-  const todayEnd = endOfDayEpoch();
+export function computeStatistics(
+  snap: DataSnapshot,
+  todayEnd: number = endOfDayEpoch()
+): ThingsbookStatistics {
   const activeProjIds = new Set(
     snap.projects.filter((p) => !p.isDeleted && p.status === 'ACTIVE').map((p) => p.id)
   );
@@ -241,9 +243,79 @@ class ThingsLocalDb {
           }
           await tx.done;
         }
+
+        // Initial day rollover on startup (matching ThingsbookViewModel.init -> refreshCurrentDayAndRollover)
+        const promotedOnStartup = await this.rolloverDueTasksUnlocked(db);
+        if (promotedOnStartup > 0) {
+          this.triggerSync();
+        }
       }
 
       return this.refreshSnapshot();
+    });
+  }
+
+  /**
+   * Internal unlocked helper matching Android v1.6.19 TaskDao.rolloverDueUpcomingTasksToToday
+   * and TaskDao.rolloverYesterdayEveningTasksToToday.
+   */
+  private async rolloverDueTasksUnlocked(db: IDBPDatabase): Promise<number> {
+    const startOfToday = startOfDayEpoch();
+    const endOfToday = endOfDayEpoch();
+    const now = Date.now();
+    const allTasks = (await db.getAll('tasks')) as TaskRecord[];
+    const updates: TaskRecord[] = [];
+
+    for (const t of allTasks) {
+      if (t.isDeleted || t.status !== 'OPEN') continue;
+
+      if (t.scheduleState === 'UPCOMING' && t.whenDate != null && t.whenDate <= endOfToday) {
+        updates.push({
+          ...t,
+          scheduleState: 'TODAY',
+          updatedAt: now,
+          isDirty: true
+        });
+      } else if (
+        t.scheduleState === 'THIS_EVENING' &&
+        ((t.whenDate != null && t.whenDate < startOfToday) ||
+          (t.whenDate == null && t.updatedAt < startOfToday))
+      ) {
+        updates.push({
+          ...t,
+          scheduleState: 'TODAY',
+          whenDate: startOfToday,
+          updatedAt: now,
+          isDirty: true
+        });
+      }
+    }
+
+    if (updates.length > 0) {
+      const tx = db.transaction('tasks', 'readwrite');
+      for (const updated of updates) {
+        await tx.store.put(updated);
+      }
+      await tx.done;
+    }
+
+    return updates.length;
+  }
+
+  /**
+   * Re-evaluates local day boundaries (00:00 midnight, app resume/focus, or timezone change)
+   * and promotes due UPCOMING tasks and yesterday's THIS_EVENING tasks to TODAY (Android v1.6.19 parity).
+   */
+  async rolloverDueTasksForNewDay(): Promise<boolean> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const promotedCount = await this.rolloverDueTasksUnlocked(db);
+      if (promotedCount > 0) {
+        await this.refreshSnapshot();
+        this.triggerSync();
+        return true;
+      }
+      return false;
     });
   }
 

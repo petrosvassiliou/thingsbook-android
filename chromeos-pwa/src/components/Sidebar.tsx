@@ -385,6 +385,7 @@ interface SmartViewNavigationStripProps {
     someday: number;
   };
   t: TranslationStrings;
+  isSoftKeyboardOpen?: boolean;
   onSelectNav: (nav: ActiveNavigation) => void;
   onCreateProject: () => void;
   onOpenManageAreas: () => void;
@@ -397,6 +398,7 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
   tasks,
   counts,
   t,
+  isSoftKeyboardOpen = false,
   onSelectNav,
   onCreateProject,
   onOpenManageAreas
@@ -524,7 +526,9 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
           </span>
         </button>
       </div>
-      <div className="floating-version-pill">Thingsbook v{APP_VERSION}</div>
+      {!isSoftKeyboardOpen && (
+        <div className="floating-version-pill">Thingsbook v{APP_VERSION}</div>
+      )}
     </>
   );
 };

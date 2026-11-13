@@ -6,13 +6,13 @@
 
 **Native Android GTD Productivity App — with Companion Standalone App for ChromeOS**
 
-[![Version](https://img.shields.io/badge/version-1.6.19-248BFD?style=flat-square)](https://github.com/petrosvassiliou/thingsbook-android)
+[![Version](https://img.shields.io/badge/version-1.6.20-248BFD?style=flat-square)](https://github.com/petrosvassiliou/thingsbook-android)
 [![Android](https://img.shields.io/badge/Android-100%25%20Kotlin%20%2B%20Compose-3DDC84?style=flat-square&logo=android&logoColor=white)](#1-thingsbook-for-android-native-apk)
 [![ChromeOS](https://img.shields.io/badge/ChromeOS-Standalone%20Launcher%20App-4285F4?style=flat-square&logo=googlechrome&logoColor=white)](#2-thingsbook-for-chromeos-standalone-pwa)
 [![Languages](https://img.shields.io/badge/i18n-DE%20%7C%20EN%20%7C%20FR%20%7C%20IT%20%7C%20ES-6E56CF?style=flat-square)](#localization-5-languages)
 [![Encryption](https://img.shields.io/badge/backup-AES--256--GCM-16A34A?style=flat-square)](#offline-first-storage-backups--cloud-sync)
 
-[**📱 Download Android APK (v1.6.19)**](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.19-full.apk) · [**🤖 Android Overview & Screenshots**](#1-thingsbook-for-android-native-apk) · [**💻 ChromeOS Version & Screenshots**](#2-thingsbook-for-chromeos-standalone-pwa) · [**🇩🇪 Deutsch**](#-deutsche-dokumentation)
+[**📱 Download Android APK (v1.6.20)**](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.20-full.apk) · [**🤖 Android Overview & Screenshots**](#1-thingsbook-for-android-native-apk) · [**💻 ChromeOS Version & Screenshots**](#2-thingsbook-for-chromeos-standalone-pwa) · [**🇩🇪 Deutsch**](#-deutsche-dokumentation)
 
 </div>
 
@@ -30,8 +30,8 @@
 
 **Thingsbook for Android** (`app/`) is a 100% native GTD (*Getting Things Done*) productivity app built from scratch for **Android smartphones, tablets, and foldables** using **Kotlin**, **Jetpack Compose (Material 3)**, and an **offline-first Room + SQLite FTS5 (`unicode61`) database**.
 
-### 📥 Direct Android Download (`v1.6.19`, Build `36`)
-- **[Download `Thingsbook-v1.6.19-full.apk`](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.19-full.apk)**
+### 📥 Direct Android Download (`v1.6.20`, Build `37`)
+- **[Download `Thingsbook-v1.6.20-full.apk`](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.20-full.apk)**
 
 ---
 
@@ -90,7 +90,7 @@
 
 # 2. Thingsbook for ChromeOS (Standalone PWA)
 
-Alongside the native Android APK, this repository includes a completely separate **ChromeOS Standalone PWA** (`chromeos-pwa/`) at **100% feature, version, backup, and cloud-sync parity (`v1.6.19`, Build `36`)** — engineered specifically for Chromebooks without requiring the Linux container (Crostini) or Android VM (ARCVM).
+Alongside the native Android APK, this repository includes a completely separate **ChromeOS Standalone PWA** (`chromeos-pwa/`) at **100% feature, version, backup, and cloud-sync parity (`v1.6.20`, Build `37`)** — engineered specifically for Chromebooks without requiring the Linux container (Crostini) or Android VM (ARCVM).
 
 ### 🚀 Launch & Install on ChromeOS
 - **Live App URL:** **[https://thingsbook-prod.web.app](https://thingsbook-prod.web.app)** *(hosted on Firebase Hosting)*
@@ -145,12 +145,12 @@ cd ..
 
 ## 🇩🇪 Deutsche Dokumentation
 
-### 1. Thingsbook für Android (Native Android-App — `v1.6.19`)
+### 1. Thingsbook für Android (Native Android-App — `v1.6.20`)
 Eine eigenständige, native Android-Produktivitäts-App für **Android-Smartphones, Tablets & Foldables**, entwickelt mit **100 % Kotlin**, **Jetpack Compose**, **Offline-First Room Database (SQLite FTS5 `unicode61`)**, **AES-256-GCM `.tbbackup` Komplett-Backup**, optionalem **Firebase Firestore Delta-Sync**, **4 Gemini-KI-Funktionen** und **5 Sprachen (`DE`, `EN`, `FR`, `IT`, `ES`)**.
-- **📱 Direkt-Download Android-APK:** **[Thingsbook-v1.6.19-full.apk herunterladen](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.19-full.apk)**
+- **📱 Direkt-Download Android-APK:** **[Thingsbook-v1.6.20-full.apk herunterladen](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.20-full.apk)**
 
-### 2. Thingsbook für ChromeOS (Eigenständige Standalone-PWA — `v1.6.19`)
-Zusätzlich enthält `chromeos-pwa/` ein komplett separates **ChromeOS-Paket** auf exakt demselben Code- und Funktionsstand (`v1.6.19`, Build `36`) — gehostet auf **Firebase Hosting** und **ohne Linux-Entwicklungsumgebung (Crostini)** direkt im **ChromeOS-Startmenü (Launcher) & Shelf** installierbar:
+### 2. Thingsbook für ChromeOS (Eigenständige Standalone-PWA — `v1.6.20`)
+Zusätzlich enthält `chromeos-pwa/` ein komplett separates **ChromeOS-Paket** auf exakt demselben Code- und Funktionsstand (`v1.6.20`, Build `37`) — gehostet auf **Firebase Hosting** und **ohne Linux-Entwicklungsumgebung (Crostini)** direkt im **ChromeOS-Startmenü (Launcher) & Shelf** installierbar:
 - **💻 Live-App für Chromebooks:** **[https://thingsbook-prod.web.app](https://thingsbook-prod.web.app)** *(in Chrome öffnen → „Zum ChromeOS-Launcher hinzufügen“ klicken → startet im eigenen Fenster, 100 % offline-fähig via IndexedDB + Service Worker und synchronisiert nahtlos mit der Android-App).*
 
 ---

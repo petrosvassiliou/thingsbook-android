@@ -43,8 +43,14 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -53,6 +59,9 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.shadow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.MenuOpen
@@ -642,8 +651,9 @@ fun ThingsSmartViewScreen(
             }
         }
 
-        // App Version Badge at bottom-left when Sidebar is hidden or on phones
-        if (!showSidebar) {
+        // App Version Badge at bottom-left when Sidebar is hidden or on phones (hidden when soft keyboard is open)
+        val isKeyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+        if (!showSidebar && !isKeyboardOpen) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
@@ -1315,6 +1325,7 @@ private fun ThingsTaskRowItem(
     allVisibleTaskIds: List<String>,
     magicBreakdownTaskId: String?,
     activeLocale: Locale,
+    onRequestEnsureVisible: ((Boolean) -> Unit)? = null,
     dragHandle: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -1323,6 +1334,7 @@ private fun ThingsTaskRowItem(
         ExpandableTaskCard(
             modifier = modifier,
             collapsedTrailingContent = dragHandle,
+            onRequestEnsureVisible = onRequestEnsureVisible,
             task = task,
             allTags = allTags,
             allAreas = areas,
@@ -1367,6 +1379,11 @@ private fun ThingsTaskRowItem(
     }
 }
 
+private fun matchesTaskItemKey(key: Any?, taskId: String): Boolean {
+    val k = key?.toString() ?: return false
+    return k == taskId || k == "ungrouped_$taskId" || k.endsWith("_$taskId")
+}
+
 @Composable
 private fun ThingsMainTaskLazyList(
     viewModel: ThingsbookViewModel,
@@ -1392,6 +1409,10 @@ private fun ThingsMainTaskLazyList(
     modifier: Modifier = Modifier
 ) {
     val colors = ThingsTheme.colors
+    val density = LocalDensity.current
+    val imeInsets = WindowInsets.ime
+    val imeBottomPx = imeInsets.getBottom(density)
+    val isImeVisible = imeBottomPx > 0
     val currentEpochDay by viewModel.currentEpochDay.collectAsState()
     val collapsedHeadingIds by viewModel.collapsedHeadingIds.collectAsState()
     val allHeadings by viewModel.allHeadings.collectAsState()
@@ -1401,6 +1422,17 @@ private fun ThingsMainTaskLazyList(
     val geminiErrorMessage by viewModel.geminiErrorMessage.collectAsState()
 
     val listState = rememberLazyListState()
+    var focusScrollRequestTick by remember { mutableIntStateOf(0) }
+    var preferBottomForExpandedTask by remember(expandedTaskId) { mutableStateOf(false) }
+    val lastKnownTaskIndices = remember { HashMap<String, Int>() }
+    val lastKnownTaskBounds = remember { HashMap<String, Pair<Int, Int>>() }
+
+    val handleEnsureVisibleRequest: (Boolean) -> Unit = remember {
+        { preferBottom ->
+            preferBottomForExpandedTask = preferBottom
+            focusScrollRequestTick++
+        }
+    }
 
     // Project sections as displayed: tasks without (valid) heading first, then one section per heading
     val projectSections: Map<String?, List<TaskItem>> = remember(isProjectView, primaryTasks, projectHeadings) {
@@ -1416,7 +1448,18 @@ private fun ThingsMainTaskLazyList(
     }
 
     // Register list geometry semantics for position-based Drag & Drop (Magic Plus + task handles)
+    // and track latest visible task item indices/bounds for keyboard-aware auto-scrolling
     SideEffect {
+        listState.layoutInfo.visibleItemsInfo.forEach { info ->
+            val keyStr = info.key?.toString() ?: return@forEach
+            val resolvedId = when {
+                keyStr.startsWith("ungrouped_") -> keyStr.removePrefix("ungrouped_")
+                keyStr.startsWith("upcoming_") -> keyStr.substringAfter("_").substringAfter("_")
+                else -> keyStr
+            }
+            lastKnownTaskIndices[resolvedId] = info.index
+            lastKnownTaskBounds[resolvedId] = info.offset to (info.offset + info.size)
+        }
         projectDragController.isProjectListActive = isProjectView
         projectDragController.listState = listState
         projectDragController.headings = if (isProjectView) projectHeadings else emptyList()
@@ -1448,16 +1491,122 @@ private fun ThingsMainTaskLazyList(
     LaunchedEffect(isProjectView) {
         if (!isProjectView) projectDragController.cancel()
     }
-    LaunchedEffect(expandedTaskId, primaryTasks.size) {
-        val targetId = expandedTaskId ?: return@LaunchedEffect
-        val isAlreadyVisible = listState.layoutInfo.visibleItemsInfo.any { info ->
-            val k = info.key?.toString().orEmpty()
-            k == targetId || k == "ungrouped_$targetId"
+
+    suspend fun ensureExpandedTaskVisibleAboveKeyboard(targetId: String, animate: Boolean) {
+        val topMarginPx = with(density) { 12.dp.roundToPx() }
+        val bottomMarginPx = with(density) { 20.dp.roundToPx() }
+
+        var itemInfo = listState.layoutInfo.visibleItemsInfo.firstOrNull {
+            matchesTaskItemKey(it.key, targetId)
         }
-        if (!isAlreadyVisible && primaryTasks.firstOrNull()?.id == targetId) {
-            runCatching { listState.animateScrollToItem(0) }
+
+        if (itemInfo == null) {
+            val viewportEnd = listState.layoutInfo.viewportEndOffset
+            val safeBottom = (viewportEnd - bottomMarginPx).coerceAtLeast(topMarginPx + 1)
+            val lastBounds = lastKnownTaskBounds[targetId]
+            val knownIdx = lastKnownTaskIndices[targetId]
+            if (lastBounds != null && lastBounds.second > safeBottom) {
+                val scrollNeeded = (lastBounds.second - safeBottom).toFloat().coerceAtLeast(1f)
+                runCatching { listState.scrollBy(scrollNeeded) }
+            } else if (knownIdx != null) {
+                runCatching { listState.scrollToItem(knownIdx) }
+            } else if (primaryTasks.firstOrNull()?.id == targetId) {
+                runCatching { listState.scrollToItem(0) }
+            }
+            itemInfo = listState.layoutInfo.visibleItemsInfo.firstOrNull {
+                matchesTaskItemKey(it.key, targetId)
+            } ?: return
+        }
+
+        val viewportStart = listState.layoutInfo.viewportStartOffset
+        val viewportEnd = listState.layoutInfo.viewportEndOffset
+        val safeTop = viewportStart + topMarginPx
+        val safeBottom = (viewportEnd - bottomMarginPx).coerceAtLeast(safeTop + 1)
+        val itemTop = itemInfo.offset
+        val itemBottom = itemInfo.offset + itemInfo.size
+
+        val scrollDelta = when {
+            itemBottom > safeBottom -> {
+                val neededDown = (itemBottom - safeBottom).toFloat()
+                if (preferBottomForExpandedTask) {
+                    neededDown
+                } else {
+                    val maxWithoutHidingTitle = (itemTop - safeTop).toFloat().coerceAtLeast(0f)
+                    neededDown.coerceAtMost(maxWithoutHidingTitle)
+                }
+            }
+            itemTop < safeTop -> (itemTop - safeTop).toFloat()
+            else -> 0f
+        }
+
+        if (kotlin.math.abs(scrollDelta) > 1.5f) {
+            runCatching {
+                if (animate) {
+                    listState.animateScrollBy(
+                        value = scrollDelta,
+                        animationSpec = spring(dampingRatio = 0.88f, stiffness = 420f)
+                    )
+                } else {
+                    listState.scrollBy(scrollDelta)
+                }
+            }
         }
     }
+
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo }
+            .collect { visibleItems ->
+                visibleItems.forEach { info ->
+                    val keyStr = info.key?.toString() ?: return@forEach
+                    val resolvedId = when {
+                        keyStr.startsWith("ungrouped_") -> keyStr.removePrefix("ungrouped_")
+                        keyStr.startsWith("upcoming_") -> keyStr.substringAfter("_").substringAfter("_")
+                        else -> keyStr
+                    }
+                    lastKnownTaskIndices[resolvedId] = info.index
+                    lastKnownTaskBounds[resolvedId] = info.offset to (info.offset + info.size)
+                }
+            }
+    }
+
+    LaunchedEffect(expandedTaskId, focusScrollRequestTick, primaryTasks.size) {
+        val targetId = expandedTaskId ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(16)
+        ensureExpandedTaskVisibleAboveKeyboard(targetId, animate = true)
+        kotlinx.coroutines.delay(110)
+        ensureExpandedTaskVisibleAboveKeyboard(targetId, animate = true)
+        kotlinx.coroutines.delay(150)
+        ensureExpandedTaskVisibleAboveKeyboard(targetId, animate = true)
+        kotlinx.coroutines.delay(140)
+        ensureExpandedTaskVisibleAboveKeyboard(targetId, animate = true)
+    }
+
+    LaunchedEffect(expandedTaskId) {
+        val targetId = expandedTaskId ?: return@LaunchedEffect
+        var prevImeBottom = 0
+        var prevViewportEnd = Int.MAX_VALUE
+        var prevItemSize = 0
+        snapshotFlow {
+            val layoutInfo = listState.layoutInfo
+            val imePx = imeInsets.getBottom(density)
+            val viewportEnd = layoutInfo.viewportEndOffset
+            val curSize = layoutInfo.visibleItemsInfo
+                .firstOrNull { matchesTaskItemKey(it.key, targetId) }
+                ?.size ?: 0
+            Triple(imePx, viewportEnd, curSize)
+        }.collect { (imePx, viewportEnd, curSize) ->
+            val imeGrew = imePx > prevImeBottom
+            val viewportShrunk = viewportEnd in 1 until prevViewportEnd
+            val sizeGrew = curSize > prevItemSize && prevItemSize > 0
+            prevImeBottom = imePx
+            if (viewportEnd > 0) prevViewportEnd = viewportEnd
+            if (curSize > 0) prevItemSize = curSize
+            if ((imeGrew || viewportShrunk || sizeGrew) && !listState.isScrollInProgress) {
+                ensureExpandedTaskVisibleAboveKeyboard(targetId, animate = false)
+            }
+        }
+    }
+
     ProjectDragAutoScrollEffect(controller = projectDragController, listState = listState)
 
     val draggedTaskId = projectDragController.session?.draggedTaskId
@@ -1482,8 +1631,10 @@ private fun ThingsMainTaskLazyList(
     ) {
     LazyColumn(
         state = listState,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 110.dp)
+        modifier = Modifier
+            .fillMaxSize()
+            .imePadding(),
+        contentPadding = PaddingValues(bottom = if (isImeVisible) 28.dp else 110.dp)
     ) {
         // If viewing Logbook, show the Gemini Logbook Reflection Card at the top
         if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK)) {
@@ -1610,6 +1761,7 @@ private fun ThingsMainTaskLazyList(
                     allVisibleTaskIds = allVisibleTaskIds,
                     magicBreakdownTaskId = magicBreakdownTaskId,
                     activeLocale = activeLocale,
+                    onRequestEnsureVisible = handleEnsureVisibleRequest,
                     dragHandle = taskDragHandleFor(task),
                     modifier = Modifier.alpha(if (task.id == draggedTaskId) 0.35f else 1f)
                 )
@@ -1648,6 +1800,7 @@ private fun ThingsMainTaskLazyList(
                             allVisibleTaskIds = allVisibleTaskIds,
                             magicBreakdownTaskId = magicBreakdownTaskId,
                             activeLocale = activeLocale,
+                            onRequestEnsureVisible = handleEnsureVisibleRequest,
                             dragHandle = taskDragHandleFor(task),
                             modifier = Modifier.alpha(if (task.id == draggedTaskId) 0.35f else 1f)
                         )
@@ -1695,7 +1848,8 @@ private fun ThingsMainTaskLazyList(
                         selectedTaskIds = selectedTaskIds,
                         allVisibleTaskIds = allVisibleTaskIds,
                         magicBreakdownTaskId = magicBreakdownTaskId,
-                        activeLocale = activeLocale
+                        activeLocale = activeLocale,
+                        onRequestEnsureVisible = handleEnsureVisibleRequest
                     )
                 }
             }
@@ -1729,7 +1883,8 @@ private fun ThingsMainTaskLazyList(
                     selectedTaskIds = selectedTaskIds,
                     allVisibleTaskIds = allVisibleTaskIds,
                     magicBreakdownTaskId = magicBreakdownTaskId,
-                    activeLocale = activeLocale
+                    activeLocale = activeLocale,
+                    onRequestEnsureVisible = handleEnsureVisibleRequest
                 )
             }
 
@@ -1778,7 +1933,8 @@ private fun ThingsMainTaskLazyList(
                     selectedTaskIds = selectedTaskIds,
                     allVisibleTaskIds = allVisibleTaskIds,
                     magicBreakdownTaskId = magicBreakdownTaskId,
-                    activeLocale = activeLocale
+                    activeLocale = activeLocale,
+                    onRequestEnsureVisible = handleEnsureVisibleRequest
                 )
             }
         }

@@ -196,6 +196,7 @@ fun ExpandableTaskCard(
     onDeleteTask: () -> Unit,
     modifier: Modifier = Modifier,
     locale: Locale = Locale.getDefault(),
+    onRequestEnsureVisible: ((preferBottomVisible: Boolean) -> Unit)? = null,
     collapsedTrailingContent: (@Composable () -> Unit)? = null
 ) {
     val colors = ThingsTheme.colors
@@ -617,6 +618,16 @@ fun ExpandableTaskCard(
                             modifier = Modifier
                                 .weight(1f)
                                 .focusRequester(titleFocusRequester)
+                                .pointerInput(task.id) {
+                                    awaitPointerEventScope {
+                                        while (true) {
+                                            val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                            if (ev.type == PointerEventType.Press) {
+                                                onRequestEnsureVisible?.invoke(false)
+                                            }
+                                        }
+                                    }
+                                }
                                 .onFocusChanged { focusState ->
                                     isTitleFocused = focusState.isFocused
                                     if (focusState.isFocused) {
@@ -624,6 +635,7 @@ fun ExpandableTaskCard(
                                         editedTitleField = editedTitleField.copy(
                                             selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
                                         )
+                                        onRequestEnsureVisible?.invoke(false)
                                     }
                                 }
                         )
@@ -687,11 +699,19 @@ fun ExpandableTaskCard(
                                 onTitleNotesChange(editedTitleField.text, newVal.text)
                             }
                         },
-                        onNotesFocusChanged = { focused -> isNotesFocused = focused },
-                        onNewChecklistFocusChanged = { focused -> isNewChecklistFocused = focused },
+                        onNotesFocusChanged = { focused ->
+                            isNotesFocused = focused
+                            if (focused) onRequestEnsureVisible?.invoke(false)
+                        },
+                        onNewChecklistFocusChanged = { focused ->
+                            isNewChecklistFocused = focused
+                            if (focused) onRequestEnsureVisible?.invoke(true)
+                        },
                         onSubtaskFocusDelta = { delta ->
                             focusedSubtaskCount = (focusedSubtaskCount + delta).coerceAtLeast(0)
+                            if (delta > 0) onRequestEnsureVisible?.invoke(true)
                         },
+                        onRequestEnsureVisible = onRequestEnsureVisible,
                         isGeneratingMagicBreakdown = isGeneratingMagicBreakdown,
                         locale = locale,
                         onAddChecklistItem = onAddChecklistItem,
@@ -1001,6 +1021,7 @@ private fun ExpandedTaskCardBody(
     onNotesFocusChanged: (Boolean) -> Unit,
     onNewChecklistFocusChanged: (Boolean) -> Unit,
     onSubtaskFocusDelta: (Int) -> Unit,
+    onRequestEnsureVisible: ((Boolean) -> Unit)? = null,
     isGeneratingMagicBreakdown: Boolean,
     locale: Locale,
     onAddChecklistItem: (String) -> Unit,
@@ -1039,6 +1060,16 @@ private fun ExpandedTaskCardBody(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 4.dp)
+                .pointerInput(task.id) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val ev = awaitPointerEvent(PointerEventPass.Initial)
+                            if (ev.type == PointerEventType.Press) {
+                                onRequestEnsureVisible?.invoke(false)
+                            }
+                        }
+                    }
+                }
                 .onFocusChanged { focusState ->
                     onNotesFocusChanged(focusState.isFocused)
                     if (focusState.isFocused) {
@@ -1203,6 +1234,16 @@ private fun ExpandedTaskCardBody(
                     modifier = Modifier
                         .weight(1f)
                         .focusRequester(newChecklistFocusRequester)
+                        .pointerInput(task.id) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                    if (ev.type == PointerEventType.Press) {
+                                        onRequestEnsureVisible?.invoke(true)
+                                    }
+                                }
+                            }
+                        }
                         .onPreviewKeyEvent { keyEvent ->
                             if (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) {
                                 if (keyEvent.type == KeyEventType.KeyDown) {

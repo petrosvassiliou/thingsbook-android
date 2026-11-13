@@ -1643,9 +1643,11 @@ private fun ThingsMainTaskLazyList(
             .imePadding(),
         contentPadding = PaddingValues(bottom = if (isImeVisible) 28.dp else 110.dp)
     ) {
-        // If viewing Today and Google/Device Calendar Events are enabled, render today's events at the top (Things 3 style)
+        // If viewing Today and Google/Device Calendar Events are enabled, render today's events at the top only when Today has tasks
+        val hasTodayTasks = primaryTasks.isNotEmpty() || filteredEveningTasks.isNotEmpty()
         if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) &&
             calendarEventsEnabled &&
+            hasTodayTasks &&
             todayCalendarEvents.isNotEmpty()
         ) {
             item(key = "today_calendar_events_block") {
@@ -1829,25 +1831,20 @@ private fun ThingsMainTaskLazyList(
                 }
             }
         } else if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.UPCOMING)) {
-            // Upcoming Smart View ("Geplant"): Group tasks and optional calendar events chronologically by day
+            // Upcoming Smart View ("Geplant"): Group tasks chronologically by day and only show calendar events on dates that have tasks
             val zone = ZoneId.systemDefault()
             val todayDate = LocalDate.ofEpochDay(currentEpochDay)
             val groupedUpcoming = primaryTasks
                 .groupBy { task -> computeUpcomingTargetDate(task, todayDate, zone) }
-            val activeUpcomingEvents = if (calendarEventsEnabled) {
-                upcomingCalendarEventsByDate.filter { (d, evs) -> d.isAfter(todayDate) && evs.isNotEmpty() }
-            } else {
-                emptyMap()
-            }
-            val allUpcomingDates = TreeSet<LocalDate>().apply {
-                addAll(groupedUpcoming.keys)
-                addAll(activeUpcomingEvents.keys)
-            }.toList()
+                .toSortedMap()
 
             var cumulativeTaskOffset = 0
-            allUpcomingDates.forEachIndexed { groupIdx, targetDate ->
-                val dayTasks = groupedUpcoming[targetDate].orEmpty()
-                val dayEvents = activeUpcomingEvents[targetDate].orEmpty()
+            groupedUpcoming.entries.forEachIndexed { groupIdx, (targetDate, dayTasks) ->
+                val dayEvents = if (calendarEventsEnabled && dayTasks.isNotEmpty()) {
+                    upcomingCalendarEventsByDate[targetDate].orEmpty()
+                } else {
+                    emptyList()
+                }
                 val groupBaseIndex = cumulativeTaskOffset
                 cumulativeTaskOffset += dayTasks.size
                 item(key = "upcoming_day_header_${targetDate.toEpochDay()}") {

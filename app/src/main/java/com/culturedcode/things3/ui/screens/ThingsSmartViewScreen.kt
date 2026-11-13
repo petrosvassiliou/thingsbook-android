@@ -153,6 +153,7 @@ import com.culturedcode.things3.R
 import com.culturedcode.things3.data.repository.CloudSyncStatus
 import com.culturedcode.things3.data.repository.ThingsRepository
 import com.culturedcode.things3.domain.model.Area
+import com.culturedcode.things3.domain.model.CalendarEventItem
 import com.culturedcode.things3.domain.model.Heading
 import com.culturedcode.things3.domain.model.Project
 import com.culturedcode.things3.domain.model.RecurrenceMode
@@ -205,6 +206,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.TreeSet
 
 @Composable
 fun ThingsSmartViewScreen(
@@ -1420,6 +1422,9 @@ private fun ThingsMainTaskLazyList(
     val logbookAiReview by viewModel.logbookAiReview.collectAsState()
     val isGeminiBusy by viewModel.isGeminiBusy.collectAsState()
     val geminiErrorMessage by viewModel.geminiErrorMessage.collectAsState()
+    val calendarEventsEnabled by viewModel.calendarEventsEnabled.collectAsState()
+    val todayCalendarEvents by viewModel.todayCalendarEvents.collectAsState()
+    val upcomingCalendarEventsByDate by viewModel.upcomingCalendarEventsByDate.collectAsState()
 
     val listState = rememberLazyListState()
     var focusScrollRequestTick by remember { mutableIntStateOf(0) }
@@ -1452,6 +1457,7 @@ private fun ThingsMainTaskLazyList(
     SideEffect {
         listState.layoutInfo.visibleItemsInfo.forEach { info ->
             val keyStr = info.key?.toString() ?: return@forEach
+            if (keyStr.startsWith("today_calendar_") || keyStr.startsWith("upcoming_cal_events_")) return@forEach
             val resolvedId = when {
                 keyStr.startsWith("ungrouped_") -> keyStr.removePrefix("ungrouped_")
                 keyStr.startsWith("upcoming_") -> keyStr.substringAfter("_").substringAfter("_")
@@ -1558,6 +1564,7 @@ private fun ThingsMainTaskLazyList(
             .collect { visibleItems ->
                 visibleItems.forEach { info ->
                     val keyStr = info.key?.toString() ?: return@forEach
+                    if (keyStr.startsWith("today_calendar_") || keyStr.startsWith("upcoming_cal_events_")) return@forEach
                     val resolvedId = when {
                         keyStr.startsWith("ungrouped_") -> keyStr.removePrefix("ungrouped_")
                         keyStr.startsWith("upcoming_") -> keyStr.substringAfter("_").substringAfter("_")
@@ -1636,6 +1643,20 @@ private fun ThingsMainTaskLazyList(
             .imePadding(),
         contentPadding = PaddingValues(bottom = if (isImeVisible) 28.dp else 110.dp)
     ) {
+        // If viewing Today and Google/Device Calendar Events are enabled, render today's events at the top (Things 3 style)
+        if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) &&
+            calendarEventsEnabled &&
+            todayCalendarEvents.isNotEmpty()
+        ) {
+            item(key = "today_calendar_events_block") {
+                ThingsCalendarEventsBlock(
+                    events = todayCalendarEvents,
+                    locale = activeLocale,
+                    compactTopPadding = false
+                )
+            }
+        }
+
         // If viewing Logbook, show the Gemini Logbook Reflection Card at the top
         if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK)) {
             item(key = "gemini_logbook_card") {
@@ -1808,15 +1829,25 @@ private fun ThingsMainTaskLazyList(
                 }
             }
         } else if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.UPCOMING)) {
-            // Upcoming Smart View ("Geplant"): Group tasks chronologically by day ("Gruppierung pro Tag")
+            // Upcoming Smart View ("Geplant"): Group tasks and optional calendar events chronologically by day
             val zone = ZoneId.systemDefault()
             val todayDate = LocalDate.ofEpochDay(currentEpochDay)
             val groupedUpcoming = primaryTasks
                 .groupBy { task -> computeUpcomingTargetDate(task, todayDate, zone) }
-                .toSortedMap()
+            val activeUpcomingEvents = if (calendarEventsEnabled) {
+                upcomingCalendarEventsByDate.filter { (d, evs) -> d.isAfter(todayDate) && evs.isNotEmpty() }
+            } else {
+                emptyMap()
+            }
+            val allUpcomingDates = TreeSet<LocalDate>().apply {
+                addAll(groupedUpcoming.keys)
+                addAll(activeUpcomingEvents.keys)
+            }.toList()
 
             var cumulativeTaskOffset = 0
-            groupedUpcoming.entries.forEachIndexed { groupIdx, (targetDate, dayTasks) ->
+            allUpcomingDates.forEachIndexed { groupIdx, targetDate ->
+                val dayTasks = groupedUpcoming[targetDate].orEmpty()
+                val dayEvents = activeUpcomingEvents[targetDate].orEmpty()
                 val groupBaseIndex = cumulativeTaskOffset
                 cumulativeTaskOffset += dayTasks.size
                 item(key = "upcoming_day_header_${targetDate.toEpochDay()}") {
@@ -1826,6 +1857,15 @@ private fun ThingsMainTaskLazyList(
                         locale = activeLocale,
                         isFirstGroup = groupIdx == 0
                     )
+                }
+                if (dayEvents.isNotEmpty()) {
+                    item(key = "upcoming_cal_events_${targetDate.toEpochDay()}") {
+                        ThingsCalendarEventsBlock(
+                            events = dayEvents,
+                            locale = activeLocale,
+                            compactTopPadding = true
+                        )
+                    }
                 }
                 itemsIndexed(
                     items = dayTasks,
@@ -2003,10 +2043,14 @@ private fun ThingsModalsOverlay(
         )
     }
 
-    // Comprehensive Settings Modal (⚙️ top-right: Local DB vs Cloud Sync, Account, Language, App Updates, Statistics, Backup & Restore, CSV)
+    // Comprehensive Settings Modal (⚙️ top-right: Local DB vs Cloud Sync, Account, Language, Calendar Events, App Updates, Statistics, Backup & Restore, CSV)
     if (isSettingsModalOpen) {
         val isBackupBusy by viewModel.isBackupBusy.collectAsState()
         val backupStatusMessage by viewModel.backupStatusMessage.collectAsState()
+        val calendarEventsEnabled by viewModel.calendarEventsEnabled.collectAsState()
+        val hasCalendarPermission by viewModel.hasCalendarPermission.collectAsState()
+        val availableCalendars by viewModel.availableCalendars.collectAsState()
+        val selectedCalendarIds by viewModel.selectedCalendarIds.collectAsState()
         val autoCheckUpdatesEnabled by viewModel.autoCheckUpdatesEnabled.collectAsState()
         val appUpdateState by viewModel.appUpdateState.collectAsState()
         ThingsSettingsModal(
@@ -2018,6 +2062,15 @@ private fun ThingsModalsOverlay(
             isBackupBusy = isBackupBusy,
             backupStatusMessage = backupStatusMessage,
             hasSampleTasks = hasSampleTasks,
+            calendarEventsEnabled = calendarEventsEnabled,
+            hasCalendarPermission = hasCalendarPermission,
+            availableCalendars = availableCalendars,
+            selectedCalendarIds = selectedCalendarIds,
+            onSetCalendarEventsEnabled = { viewModel.setCalendarEventsEnabled(it) },
+            onCalendarPermissionResult = { viewModel.onCalendarPermissionResult(it) },
+            onToggleCalendarSelection = { viewModel.toggleCalendarSelection(it) },
+            onSetAllCalendarsSelected = { viewModel.setAllCalendarsSelected(it) },
+            onRefreshCalendars = { viewModel.refreshCalendarsAndEvents(selectDefaultIfFirstTime = false) },
             autoCheckUpdatesEnabled = autoCheckUpdatesEnabled,
             appUpdateState = appUpdateState,
             onSetAutoCheckUpdatesEnabled = { viewModel.setAutoCheckUpdatesEnabled(it) },
@@ -4409,4 +4462,142 @@ private fun UpcomingDayGroupHeader(
         HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
     }
 }
+
+@Composable
+private fun ThingsCalendarEventsBlock(
+    events: List<CalendarEventItem>,
+    locale: Locale,
+    compactTopPadding: Boolean = false
+) {
+    if (events.isEmpty()) return
+    val colors = ThingsTheme.colors
+    val allDayText = stringResource(R.string.calendar_all_day)
+    val untitledText = stringResource(R.string.calendar_untitled_event)
+    val zone = ZoneId.systemDefault()
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                start = 20.dp,
+                end = 20.dp,
+                top = if (compactTopPadding) 2.dp else 4.dp,
+                bottom = 8.dp
+            )
+            .border(
+                width = 0.75.dp,
+                color = colors.hairlineDivider.copy(alpha = 0.85f),
+                shape = RoundedCornerShape(11.dp)
+            ),
+        shape = RoundedCornerShape(11.dp),
+        color = colors.tagPillBg.copy(alpha = 0.52f)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 7.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            events.forEach { event ->
+                val calColor = Color(event.colorArgb)
+                val timeLabel = remember(event.startMillis, event.endMillis, event.isAllDay, locale, allDayText) {
+                    if (event.isAllDay) {
+                        allDayText
+                    } else {
+                        formatCalendarEventTimeRange(
+                            startMillis = event.startMillis,
+                            endMillis = event.endMillis,
+                            zone = zone,
+                            locale = locale
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Calendar Color Indicator Bar (Things 3 style)
+                    Box(
+                        modifier = Modifier
+                            .width(3.5.dp)
+                            .height(15.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(calColor)
+                    )
+
+                    // Time or All-Day Badge
+                    if (event.isAllDay) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(calColor.copy(alpha = 0.16f))
+                                .padding(horizontal = 6.dp, vertical = 1.5.dp)
+                        ) {
+                            Text(
+                                text = timeLabel,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                color = colors.secondaryText,
+                                maxLines = 1
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = timeLabel,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            color = colors.secondaryText,
+                            maxLines = 1
+                        )
+                    }
+
+                    // Event Title (read-only)
+                    Text(
+                        text = event.title.ifBlank { untitledText },
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontWeight = FontWeight.Medium
+                        ),
+                        color = colors.primaryText,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    if (event.calendarDisplayName.isNotBlank()) {
+                        Text(
+                            text = event.calendarDisplayName,
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            color = colors.tertiaryText,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 110.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun formatCalendarEventTimeRange(
+    startMillis: Long,
+    endMillis: Long,
+    zone: ZoneId,
+    locale: Locale
+): String = runCatching {
+    val formatter = DateTimeFormatter.ofPattern("HH:mm", locale)
+    val startText = Instant.ofEpochMilli(startMillis).atZone(zone).format(formatter)
+    if (endMillis > startMillis) {
+        val endText = Instant.ofEpochMilli(endMillis).atZone(zone).format(formatter)
+        if (endText != startText) "$startText–$endText" else startText
+    } else {
+        startText
+    }
+}.getOrDefault("")
+
 

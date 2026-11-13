@@ -20,6 +20,7 @@ import com.culturedcode.things3.data.backup.BackupInspectionResult
 import com.culturedcode.things3.data.backup.BackupPasswordRequiredException
 import com.culturedcode.things3.data.backup.BackupPreferencesDto
 import com.culturedcode.things3.data.backup.InvalidBackupPasswordException
+import com.culturedcode.things3.data.calendar.DeviceCalendarRepository
 import com.culturedcode.things3.data.local.ThingsDatabase
 import com.culturedcode.things3.data.notifications.DailyDigestConfig
 import com.culturedcode.things3.data.notifications.ReminderScheduler
@@ -31,6 +32,8 @@ import com.culturedcode.things3.data.update.AppUpdateManager
 import com.culturedcode.things3.data.update.AppUpdateParser
 import com.culturedcode.things3.data.update.AppUpdateUiState
 import com.culturedcode.things3.domain.model.Area
+import com.culturedcode.things3.domain.model.CalendarEventItem
+import com.culturedcode.things3.domain.model.DeviceCalendarInfo
 import com.culturedcode.things3.domain.model.Heading
 import com.culturedcode.things3.domain.model.Project
 import com.culturedcode.things3.domain.model.ProjectStatus
@@ -67,6 +70,7 @@ import java.io.BufferedReader
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStreamReader
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Locale
@@ -114,7 +118,8 @@ class ThingsbookViewModel @Inject constructor(
     private val syncRepository: SyncRepository,
     private val geminiService: ThingsbookGeminiService,
     private val reminderScheduler: ReminderScheduler,
-    private val appUpdateManager: AppUpdateManager
+    private val appUpdateManager: AppUpdateManager,
+    private val deviceCalendarRepository: DeviceCalendarRepository
 ) : ViewModel() {
 
     private fun getLocalizedString(@StringRes resId: Int, vararg args: Any): String {
@@ -1401,6 +1406,12 @@ class ThingsbookViewModel @Inject constructor(
 
     fun setSettingsModalOpen(open: Boolean) {
         _isSettingsModalOpen.value = open
+        if (open) {
+            _hasCalendarPermission.value = deviceCalendarRepository.hasCalendarPermission()
+            if (_calendarEventsEnabled.value && _hasCalendarPermission.value) {
+                refreshCalendarsAndEvents(selectDefaultIfFirstTime = false)
+            }
+        }
     }
 
     fun setMagicPlusMenuOpen(open: Boolean) {
@@ -1667,7 +1678,9 @@ class ThingsbookViewModel @Inject constructor(
             dailyDigestEnabled = digest?.enabled,
             dailyDigestHour = digest?.hour,
             dailyDigestMinute = digest?.minute,
-            languageTag = langTag
+            languageTag = langTag,
+            calendarEventsEnabled = _calendarEventsEnabled.value,
+            selectedCalendarIds = _selectedCalendarIds.value.sorted()
         )
     }
 
@@ -1871,6 +1884,12 @@ class ThingsbookViewModel @Inject constructor(
 
                     restoredPrefs.sidebarVisible?.let { setSidebarVisible(it) }
                     restoredPrefs.languageTag?.let { switchAppLanguage(it) }
+                    restoredPrefs.selectedCalendarIds?.let { ids ->
+                        setSelectedCalendarIds(ids.toSet())
+                    }
+                    restoredPrefs.calendarEventsEnabled?.let { enabled ->
+                        setCalendarEventsEnabled(enabled && deviceCalendarRepository.hasCalendarPermission())
+                    }
                     if (
                         restoredPrefs.dailyDigestEnabled != null &&
                         restoredPrefs.dailyDigestHour != null &&
@@ -2185,6 +2204,195 @@ class ThingsbookViewModel @Inject constructor(
         startUpdateDownloadAndInstall(ready.release)
     }
 
+    // =========================================================================
+    // v1.6.21: Optional Google / Device Calendar Integration (OFF by default)
+    // =========================================================================
+
+    private val _calendarEventsEnabled = MutableStateFlow(
+        coreSettingsPrefs.getBoolean(PREF_CALENDAR_EVENTS_ENABLED, false)
+    )
+    val calendarEventsEnabled: StateFlow<Boolean> = _calendarEventsEnabled.asStateFlow()
+
+    private val _hasCalendarPermission = MutableStateFlow(
+        deviceCalendarRepository.hasCalendarPermission()
+    )
+    val hasCalendarPermission: StateFlow<Boolean> = _hasCalendarPermission.asStateFlow()
+
+    private val _selectedCalendarIds = MutableStateFlow<Set<String>>(
+        coreSettingsPrefs.getStringSet(PREF_SELECTED_CALENDAR_IDS, emptySet())
+            ?.toSet()
+            .orEmpty()
+    )
+    val selectedCalendarIds: StateFlow<Set<String>> = _selectedCalendarIds.asStateFlow()
+
+    private val _availableCalendars = MutableStateFlow<List<DeviceCalendarInfo>>(emptyList())
+    val availableCalendars: StateFlow<List<DeviceCalendarInfo>> = _availableCalendars.asStateFlow()
+
+    private val _todayCalendarEvents = MutableStateFlow<List<CalendarEventItem>>(emptyList())
+    val todayCalendarEvents: StateFlow<List<CalendarEventItem>> = _todayCalendarEvents.asStateFlow()
+
+    private val _upcomingCalendarEventsByDate = MutableStateFlow<Map<LocalDate, List<CalendarEventItem>>>(emptyMap())
+    val upcomingCalendarEventsByDate: StateFlow<Map<LocalDate, List<CalendarEventItem>>> =
+        _upcomingCalendarEventsByDate.asStateFlow()
+
+    private var activeCalendarRefreshJob: Job? = null
+
+    fun hasReadCalendarPermission(): Boolean {
+        val granted = deviceCalendarRepository.hasCalendarPermission()
+        _hasCalendarPermission.value = granted
+        return granted
+    }
+
+    fun setCalendarEventsEnabled(enabled: Boolean) {
+        _calendarEventsEnabled.value = enabled
+        runCatching {
+            coreSettingsPrefs.edit().putBoolean(PREF_CALENDAR_EVENTS_ENABLED, enabled).apply()
+        }
+        val granted = deviceCalendarRepository.hasCalendarPermission()
+        _hasCalendarPermission.value = granted
+        if (!enabled || !granted) {
+            activeCalendarRefreshJob?.cancel()
+            _todayCalendarEvents.value = emptyList()
+            _upcomingCalendarEventsByDate.value = emptyMap()
+            return
+        }
+        refreshCalendarsAndEvents(selectDefaultIfFirstTime = true)
+    }
+
+    fun onCalendarPermissionResult(granted: Boolean) {
+        _hasCalendarPermission.value = granted
+        if (granted) {
+            _calendarEventsEnabled.value = true
+            runCatching {
+                coreSettingsPrefs.edit().putBoolean(PREF_CALENDAR_EVENTS_ENABLED, true).apply()
+            }
+            refreshCalendarsAndEvents(selectDefaultIfFirstTime = true)
+        } else {
+            _calendarEventsEnabled.value = false
+            runCatching {
+                coreSettingsPrefs.edit().putBoolean(PREF_CALENDAR_EVENTS_ENABLED, false).apply()
+            }
+            _todayCalendarEvents.value = emptyList()
+            _upcomingCalendarEventsByDate.value = emptyMap()
+        }
+    }
+
+    fun toggleCalendarSelection(calendarId: String) {
+        val current = _selectedCalendarIds.value
+        val next = if (calendarId in current) current - calendarId else current + calendarId
+        setSelectedCalendarIds(next)
+    }
+
+    fun setAllCalendarsSelected(selectAll: Boolean) {
+        val next = if (selectAll) {
+            _availableCalendars.value.mapTo(LinkedHashSet()) { it.id }
+        } else {
+            emptySet()
+        }
+        setSelectedCalendarIds(next)
+    }
+
+    fun setSelectedCalendarIds(ids: Set<String>) {
+        val copy = ids.toSet()
+        _selectedCalendarIds.value = copy
+        runCatching {
+            coreSettingsPrefs.edit()
+                .putStringSet(PREF_SELECTED_CALENDAR_IDS, HashSet(copy))
+                .putBoolean(PREF_CALENDAR_IDS_INITIALIZED, true)
+                .apply()
+        }
+        if (_calendarEventsEnabled.value && deviceCalendarRepository.hasCalendarPermission()) {
+            refreshCalendarEventsOnly()
+        } else {
+            _todayCalendarEvents.value = emptyList()
+            _upcomingCalendarEventsByDate.value = emptyMap()
+        }
+    }
+
+    fun refreshCalendarsAndEvents(selectDefaultIfFirstTime: Boolean = false) {
+        val granted = deviceCalendarRepository.hasCalendarPermission()
+        _hasCalendarPermission.value = granted
+        if (!_calendarEventsEnabled.value || !granted) {
+            _todayCalendarEvents.value = emptyList()
+            _upcomingCalendarEventsByDate.value = emptyMap()
+            return
+        }
+        activeCalendarRefreshJob?.cancel()
+        activeCalendarRefreshJob = safeVmScope.launch {
+            val calendars = runCatchingCancellable {
+                deviceCalendarRepository.queryAvailableCalendars()
+            }.getOrDefault(emptyList())
+            _availableCalendars.value = calendars
+
+            val wasInitialized = coreSettingsPrefs.getBoolean(PREF_CALENDAR_IDS_INITIALIZED, false)
+            if (selectDefaultIfFirstTime && !wasInitialized && _selectedCalendarIds.value.isEmpty() && calendars.isNotEmpty()) {
+                val primaryIds = calendars.filter { it.isPrimary }.mapTo(LinkedHashSet()) { it.id }
+                val initialIds = if (primaryIds.isNotEmpty()) {
+                    primaryIds
+                } else {
+                    calendars.mapTo(LinkedHashSet()) { it.id }
+                }
+                _selectedCalendarIds.value = initialIds
+                runCatching {
+                    coreSettingsPrefs.edit()
+                        .putStringSet(PREF_SELECTED_CALENDAR_IDS, HashSet(initialIds))
+                        .putBoolean(PREF_CALENDAR_IDS_INITIALIZED, true)
+                        .apply()
+                }
+            }
+
+            queryAndPublishCalendarEvents()
+        }
+    }
+
+    fun refreshCalendarEventsOnly() {
+        val granted = deviceCalendarRepository.hasCalendarPermission()
+        _hasCalendarPermission.value = granted
+        if (!_calendarEventsEnabled.value || !granted) {
+            _todayCalendarEvents.value = emptyList()
+            _upcomingCalendarEventsByDate.value = emptyMap()
+            return
+        }
+        activeCalendarRefreshJob?.cancel()
+        activeCalendarRefreshJob = safeVmScope.launch {
+            queryAndPublishCalendarEvents()
+        }
+    }
+
+    private suspend fun queryAndPublishCalendarEvents() {
+        val selectedIds = _selectedCalendarIds.value
+        if (!_calendarEventsEnabled.value || selectedIds.isEmpty() || !deviceCalendarRepository.hasCalendarPermission()) {
+            _todayCalendarEvents.value = emptyList()
+            _upcomingCalendarEventsByDate.value = emptyMap()
+            return
+        }
+        val zone = ZoneId.systemDefault()
+        val today = LocalDate.now(zone)
+        val maxUpcomingTaskDate = upcomingTasks.value.mapNotNull { t ->
+            (t.whenDate ?: t.deadline)?.let { millis ->
+                runCatching { Instant.ofEpochMilli(millis).atZone(zone).toLocalDate() }.getOrNull()
+            }
+        }.maxOrNull()
+        val defaultEndDate = today.plusDays(UPCOMING_CALENDAR_HORIZON_DAYS)
+        val endDateInclusive = if (maxUpcomingTaskDate != null && maxUpcomingTaskDate.isAfter(defaultEndDate)) {
+            maxUpcomingTaskDate.coerceAtMost(today.plusDays(180))
+        } else {
+            defaultEndDate
+        }
+
+        val eventsByDate = runCatchingCancellable {
+            deviceCalendarRepository.queryEventsForDateRange(
+                selectedCalendarIds = selectedIds,
+                startDate = today,
+                endDateInclusive = endDateInclusive,
+                zone = zone
+            )
+        }.getOrDefault(emptyMap())
+
+        _todayCalendarEvents.value = eventsByDate[today].orEmpty()
+        _upcomingCalendarEventsByDate.value = eventsByDate.filterKeys { it.isAfter(today) }
+    }
+
     fun onAppResumed() {
         safeVmScope.launch {
             val changed = runCatchingCancellable {
@@ -2194,6 +2402,13 @@ class ThingsbookViewModel @Inject constructor(
                 runCatching {
                     com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.refreshAllWidgets(appContext)
                 }
+            }
+            _hasCalendarPermission.value = deviceCalendarRepository.hasCalendarPermission()
+            if (_calendarEventsEnabled.value && _hasCalendarPermission.value) {
+                refreshCalendarsAndEvents(selectDefaultIfFirstTime = false)
+            } else {
+                _todayCalendarEvents.value = emptyList()
+                _upcomingCalendarEventsByDate.value = emptyMap()
             }
         }
     }
@@ -2238,6 +2453,9 @@ class ThingsbookViewModel @Inject constructor(
             }.onFailure { err ->
                 Log.w(TAG, "Failed rescheduling open task reminders", err)
             }
+            if (_calendarEventsEnabled.value && deviceCalendarRepository.hasCalendarPermission()) {
+                refreshCalendarsAndEvents(selectDefaultIfFirstTime = false)
+            }
         }
         // Automatic 00:00 Midnight Rollover Watcher while the app is running
         safeVmScope.launch {
@@ -2257,6 +2475,9 @@ class ThingsbookViewModel @Inject constructor(
                 if (changed) {
                     runCatching {
                         com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.refreshAllWidgets(appContext)
+                    }
+                    if (_calendarEventsEnabled.value && deviceCalendarRepository.hasCalendarPermission()) {
+                        refreshCalendarEventsOnly()
                     }
                 }
             }
@@ -2292,6 +2513,10 @@ class ThingsbookViewModel @Inject constructor(
         private const val TAG = "ThingsbookVM"
         private const val MAX_CSV_IMPORT_CHARS = 10 * 1024 * 1024
         private const val MAX_BACKUP_FILE_BYTES = 30 * 1024 * 1024
+        private const val PREF_CALENDAR_EVENTS_ENABLED = "calendar_events_enabled"
+        private const val PREF_SELECTED_CALENDAR_IDS = "selected_calendar_ids"
+        private const val PREF_CALENDAR_IDS_INITIALIZED = "calendar_ids_initialized"
+        private const val UPCOMING_CALENDAR_HORIZON_DAYS = 30L
     }
 }
 

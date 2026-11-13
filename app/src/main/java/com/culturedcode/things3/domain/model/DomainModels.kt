@@ -87,3 +87,26 @@ data class TaskItem(
     val updatedAt: Long,
     val isDeleted: Boolean = false
 )
+
+data class DeviceCalendarInfo(
+    val id: String,
+    val displayName: String,
+    val accountName: String,
+    val accountType: String,
+    val colorArgb: Int,
+    val isPrimary: Boolean = false
+)
+
+data class CalendarEventItem(
+    val id: String,
+    val eventId: Long,
+    val calendarId: String,
+    val calendarDisplayName: String,
+    val title: String,
+    val startMillis: Long,
+    val endMillis: Long,
+    val isAllDay: Boolean,
+    val colorArgb: Int,
+    val startDateEpochDay: Long,
+    val endDateInclusiveEpochDay: Long
+)

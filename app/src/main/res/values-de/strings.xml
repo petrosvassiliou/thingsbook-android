@@ -333,4 +333,15 @@
     <string name="repeat_off_btn">Aus</string>
     <string name="sidebar_show">Seitenleiste einblenden</string>
     <string name="sidebar_hide">Seitenleiste ausblenden</string>
+    <string name="settings_calendar_section">Google Kalender &amp; Termine</string>
+    <string name="settings_calendar_enable_title">Kalendertermine anzeigen</string>
+    <string name="settings_calendar_enable_desc">Termine aus ausgewählten Google- und Gerätekalendern in „Heute“ und „Geplant“ einblenden (standardmäßig deaktiviert).</string>
+    <string name="settings_calendar_select_hint">Kalender zur Anzeige auswählen (%1$d/%2$d):</string>
+    <string name="settings_calendar_select_all">Alle</string>
+    <string name="settings_calendar_select_none">Keine</string>
+    <string name="settings_calendar_none_found">Keine Google- oder Gerätekalender auf diesem Gerät gefunden.</string>
+    <string name="settings_calendar_permission_denied">Kalenderberechtigung ist erforderlich, um Kalender aufzulisten und anzuzeigen.</string>
+    <string name="settings_calendar_grant_permission_btn">Kalenderzugriff erlauben</string>
+    <string name="calendar_all_day">Ganztägig</string>
+    <string name="calendar_untitled_event">(Ohne Titel)</string>
 </resources>

@@ -333,4 +333,15 @@
     <string name="repeat_off_btn">Off</string>
     <string name="sidebar_show">Show sidebar</string>
     <string name="sidebar_hide">Hide sidebar</string>
+    <string name="settings_calendar_section">Google Calendar &amp; Calendar Events</string>
+    <string name="settings_calendar_enable_title">Show Calendar Events</string>
+    <string name="settings_calendar_enable_desc">Display read-only events from selected Google &amp; device calendars in Today and Upcoming (off by default).</string>
+    <string name="settings_calendar_select_hint">Select calendars to display (%1$d/%2$d):</string>
+    <string name="settings_calendar_select_all">All</string>
+    <string name="settings_calendar_select_none">None</string>
+    <string name="settings_calendar_none_found">No Google or device calendars found on this device.</string>
+    <string name="settings_calendar_permission_denied">Calendar permission is required to list and display your calendars.</string>
+    <string name="settings_calendar_grant_permission_btn">Grant Calendar Access</string>
+    <string name="calendar_all_day">All-day</string>
+    <string name="calendar_untitled_event">(No title)</string>
 </resources>

@@ -333,4 +333,15 @@
     <string name="repeat_off_btn">Desact.</string>
     <string name="sidebar_show">Mostrar barra lateral</string>
     <string name="sidebar_hide">Ocultar barra lateral</string>
+    <string name="settings_calendar_section">Google Calendar y Eventos</string>
+    <string name="settings_calendar_enable_title">Mostrar eventos del calendario</string>
+    <string name="settings_calendar_enable_desc">Mostrar eventos de los calendarios de Google y del dispositivo seleccionados en Hoy y Programado (desactivado por defecto).</string>
+    <string name="settings_calendar_select_hint">Seleccionar calendarios para mostrar (%1$d/%2$d):</string>
+    <string name="settings_calendar_select_all">Todos</string>
+    <string name="settings_calendar_select_none">Ninguno</string>
+    <string name="settings_calendar_none_found">No se encontraron calendarios de Google ni del dispositivo.</string>
+    <string name="settings_calendar_permission_denied">Se requiere permiso de calendario para listar y mostrar tus calendarios.</string>
+    <string name="settings_calendar_grant_permission_btn">Permitir acceso al calendario</string>
+    <string name="calendar_all_day">Todo el día</string>
+    <string name="calendar_untitled_event">(Sin título)</string>
 </resources>

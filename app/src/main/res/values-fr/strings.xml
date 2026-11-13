@@ -333,4 +333,15 @@
     <string name="repeat_off_btn">Off</string>
     <string name="sidebar_show">Afficher la barre latérale</string>
     <string name="sidebar_hide">Masquer la barre latérale</string>
+    <string name="settings_calendar_section">Google Agenda &amp; Événements</string>
+    <string name="settings_calendar_enable_title">Afficher les événements du calendrier</string>
+    <string name="settings_calendar_enable_desc">Afficher les événements des agendas Google et de l\'appareil sélectionnés dans Aujourd\'hui et Planifié (désactivé par défaut).</string>
+    <string name="settings_calendar_select_hint">Sélectionner les agendas à afficher (%1$d/%2$d) :</string>
+    <string name="settings_calendar_select_all">Tous</string>
+    <string name="settings_calendar_select_none">Aucun</string>
+    <string name="settings_calendar_none_found">Aucun agenda Google ou de l\'appareil trouvé sur cet appareil.</string>
+    <string name="settings_calendar_permission_denied">L\'autorisation d\'accès au calendrier est requise pour afficher vos agendas.</string>
+    <string name="settings_calendar_grant_permission_btn">Autoriser l\'accès au calendrier</string>
+    <string name="calendar_all_day">Toute la journée</string>
+    <string name="calendar_untitled_event">(Sans titre)</string>
 </resources>

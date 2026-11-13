@@ -1,5 +1,6 @@
 package com.culturedcode.things3.ui.components
 
+import android.Manifest
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -22,12 +23,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.Analytics
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloudDone
@@ -76,6 +79,7 @@ import com.culturedcode.things3.data.repository.CloudSyncStatus
 import com.culturedcode.things3.data.repository.ThingsRepository
 import com.culturedcode.things3.data.update.AppReleaseInfo
 import com.culturedcode.things3.data.update.AppUpdateUiState
+import com.culturedcode.things3.domain.model.DeviceCalendarInfo
 import com.culturedcode.things3.ui.theme.ThingsTheme
 import com.culturedcode.things3.ui.viewmodel.ThingsbookStatistics
 import java.time.LocalDate
@@ -86,11 +90,12 @@ import java.util.Locale
  * 1. Database Mode: Local Room DB (Offline-Only) vs. Cloud Sync (Firebase Firestore) + Sample Tasks Cleanup
  * 2. Account Management: Full email address display, Sync Now, Login/Switch Account, Sign Out
  * 3. App Language Selection & Daily Notification Settings
- * 4. App Auto-Update & Manual "Search for Updates" (GitHub Releases + One-Click APK Download & Install)
- * 5. Live Task & Productivity Statistics: Open, Today, Upcoming, Anytime, Inbox, Someday, Recurring, Completed, Canceled, Deleted, Projects, Areas (X/8), Tags
- * 6. Full Backup & Restore (`.tbbackup` with optional AES-256-GCM password protection)
- * 7. CSV Import & Export: Export all tasks to `.csv` file or share via Intent; Import tasks from `.csv` file
- * 8. App Version Info
+ * 4. Optional Google Calendar & Device Calendar Integration (OFF by default; multi-calendar selection)
+ * 5. App Auto-Update & Manual "Search for Updates" (GitHub Releases + One-Click APK Download & Install)
+ * 6. Live Task & Productivity Statistics: Open, Today, Upcoming, Anytime, Inbox, Someday, Recurring, Completed, Canceled, Deleted, Projects, Areas (X/8), Tags
+ * 7. Full Backup & Restore (`.tbbackup` with optional AES-256-GCM password protection)
+ * 8. CSV Import & Export: Export all tasks to `.csv` file or share via Intent; Import tasks from `.csv` file
+ * 9. App Version Info
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -103,6 +108,15 @@ fun ThingsSettingsModal(
     isBackupBusy: Boolean = false,
     backupStatusMessage: String? = null,
     hasSampleTasks: Boolean = false,
+    calendarEventsEnabled: Boolean = false,
+    hasCalendarPermission: Boolean = false,
+    availableCalendars: List<DeviceCalendarInfo> = emptyList(),
+    selectedCalendarIds: Set<String> = emptySet(),
+    onSetCalendarEventsEnabled: (Boolean) -> Unit = {},
+    onCalendarPermissionResult: (Boolean) -> Unit = {},
+    onToggleCalendarSelection: (String) -> Unit = {},
+    onSetAllCalendarsSelected: (Boolean) -> Unit = {},
+    onRefreshCalendars: () -> Unit = {},
     autoCheckUpdatesEnabled: Boolean = true,
     appUpdateState: AppUpdateUiState = AppUpdateUiState.Idle,
     onSetAutoCheckUpdatesEnabled: (Boolean) -> Unit = {},
@@ -129,6 +143,13 @@ fun ThingsSettingsModal(
 ) {
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
+
+    // Runtime permission launcher for READ_CALENDAR (only requested when user explicitly enables Calendar Events)
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        onCalendarPermissionResult(granted)
+    }
 
     // Android Storage Access Framework Launcher for saving CSV file (I/O runs on Dispatchers.IO in ViewModel)
     val createCsvDocumentLauncher = rememberLauncherForActivityResult(
@@ -595,6 +616,37 @@ fun ThingsSettingsModal(
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(color = colors.hairlineDivider)
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // =============================================================
+                // Google Calendar & Device Calendar Events (OFF by default)
+                // =============================================================
+                CalendarIntegrationSettingsSection(
+                    calendarEventsEnabled = calendarEventsEnabled,
+                    hasCalendarPermission = hasCalendarPermission,
+                    availableCalendars = availableCalendars,
+                    selectedCalendarIds = selectedCalendarIds,
+                    onToggleMasterEnabled = { targetEnabled ->
+                        if (targetEnabled && !hasCalendarPermission) {
+                            runCatching {
+                                calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
+                            }
+                        } else {
+                            onSetCalendarEventsEnabled(targetEnabled)
+                        }
+                    },
+                    onRequestCalendarPermission = {
+                        runCatching {
+                            calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
+                        }
+                    },
+                    onToggleCalendarSelection = onToggleCalendarSelection,
+                    onSetAllCalendarsSelected = onSetAllCalendarsSelected,
+                    onRefreshCalendars = onRefreshCalendars
+                )
 
                 Spacer(modifier = Modifier.height(16.dp))
                 HorizontalDivider(color = colors.hairlineDivider)
@@ -1373,3 +1425,277 @@ private fun formatDownloadBytes(downloaded: Long, total: Long?): String {
         String.format(Locale.US, "%.1f MB", dlMb)
     }
 }
+
+@Composable
+private fun CalendarIntegrationSettingsSection(
+    calendarEventsEnabled: Boolean,
+    hasCalendarPermission: Boolean,
+    availableCalendars: List<DeviceCalendarInfo>,
+    selectedCalendarIds: Set<String>,
+    onToggleMasterEnabled: (Boolean) -> Unit,
+    onRequestCalendarPermission: () -> Unit,
+    onToggleCalendarSelection: (String) -> Unit,
+    onSetAllCalendarsSelected: (Boolean) -> Unit,
+    onRefreshCalendars: () -> Unit
+) {
+    val colors = ThingsTheme.colors
+    val haptics = LocalHapticFeedback.current
+
+    SettingsSectionHeader(
+        icon = Icons.Outlined.CalendarMonth,
+        title = stringResource(R.string.settings_calendar_section)
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+
+    // Master Enable/Disable Switch Row (OFF by default)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(11.dp))
+            .background(colors.tagPillBg.copy(alpha = 0.6f))
+            .clickable {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onToggleMasterEnabled(!calendarEventsEnabled)
+            }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.settings_calendar_enable_title),
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                color = colors.primaryText
+            )
+            Text(
+                text = stringResource(R.string.settings_calendar_enable_desc),
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
+                color = colors.secondaryText
+            )
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Switch(
+            checked = calendarEventsEnabled,
+            onCheckedChange = { enabled ->
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onToggleMasterEnabled(enabled)
+            },
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = colors.thingsBlue,
+                uncheckedThumbColor = colors.secondaryText,
+                uncheckedTrackColor = colors.hairlineDivider
+            )
+        )
+    }
+
+    if (calendarEventsEnabled && !hasCalendarPermission) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = colors.deadlineUrgentRed.copy(alpha = 0.1f),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    text = stringResource(R.string.settings_calendar_permission_denied),
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                    color = colors.deadlineUrgentRed
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onRequestCalendarPermission()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.thingsBlue),
+                    shape = RoundedCornerShape(9.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.settings_calendar_grant_permission_btn),
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = Color.White
+                    )
+                }
+            }
+        }
+    } else if (calendarEventsEnabled && hasCalendarPermission) {
+        Spacer(modifier = Modifier.height(10.dp))
+        val selectedVisibleCount = availableCalendars.count { it.id in selectedCalendarIds }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = stringResource(
+                    R.string.settings_calendar_select_hint,
+                    selectedVisibleCount,
+                    availableCalendars.size
+                ),
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = colors.secondaryText,
+                modifier = Modifier.weight(1f)
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (availableCalendars.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(colors.thingsBlueSoft)
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSetAllCalendarsSelected(true)
+                            }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.settings_calendar_select_all),
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.thingsBlue
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(colors.tagPillBg)
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSetAllCalendarsSelected(false)
+                            }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.settings_calendar_select_none),
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                            color = colors.secondaryText
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onRefreshCalendars()
+                    },
+                    modifier = Modifier.size(26.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Refresh,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        if (availableCalendars.isEmpty()) {
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = colors.tagPillBg.copy(alpha = 0.55f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_calendar_none_found),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.secondaryText,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+        } else {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = colors.tagPillBg.copy(alpha = 0.5f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                ) {
+                    availableCalendars.forEachIndexed { idx, cal ->
+                        val isSelected = cal.id in selectedCalendarIds
+                        val calColor = Color(cal.colorArgb)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onToggleCalendarSelection(cal.id)
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            // Selection Checkbox Pill
+                            Box(
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .clip(RoundedCornerShape(5.dp))
+                                    .background(if (isSelected) colors.thingsBlue else Color.Transparent)
+                                    .border(
+                                        width = 1.5.dp,
+                                        color = if (isSelected) colors.thingsBlue else colors.secondaryText.copy(alpha = 0.5f),
+                                        shape = RoundedCornerShape(5.dp)
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Check,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
+                            }
+
+                            // Calendar Color Dot
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(calColor)
+                            )
+
+                            // Calendar Title & Account Name
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = cal.displayName,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                                    ),
+                                    color = colors.primaryText,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (cal.accountName.isNotBlank() && !cal.accountName.equals(cal.displayName, ignoreCase = true)) {
+                                    Text(
+                                        text = cal.accountName,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                        color = colors.secondaryText,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                        if (idx < availableCalendars.lastIndex) {
+                            HorizontalDivider(
+                                color = colors.hairlineDivider.copy(alpha = 0.6f),
+                                modifier = Modifier.padding(horizontal = 12.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

@@ -158,7 +158,9 @@ data class BackupPreferencesDto(
     val dailyDigestEnabled: Boolean? = null,
     val dailyDigestHour: Int? = null,
     val dailyDigestMinute: Int? = null,
-    val languageTag: String? = null
+    val languageTag: String? = null,
+    val calendarEventsEnabled: Boolean? = null,
+    val selectedCalendarIds: List<String>? = null
 )
 
 data class BackupSummary(

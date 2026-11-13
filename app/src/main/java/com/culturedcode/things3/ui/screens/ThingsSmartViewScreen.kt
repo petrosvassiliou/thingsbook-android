@@ -4468,6 +4468,8 @@ private fun ThingsCalendarEventsBlock(
 ) {
     if (events.isEmpty()) return
     val colors = ThingsTheme.colors
+    val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
     val allDayText = stringResource(R.string.calendar_all_day)
     val untitledText = stringResource(R.string.calendar_untitled_event)
     val zone = ZoneId.systemDefault()
@@ -4492,8 +4494,8 @@ private fun ThingsCalendarEventsBlock(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 7.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp)
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             events.forEach { event ->
                 val calColor = Color(event.colorArgb)
@@ -4510,7 +4512,14 @@ private fun ThingsCalendarEventsBlock(
                     }
                 }
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(7.dp))
+                        .clickable {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            openCalendarEventInDefaultApp(context, event)
+                        }
+                        .padding(horizontal = 6.dp, vertical = 3.5.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -4553,7 +4562,7 @@ private fun ThingsCalendarEventsBlock(
                         )
                     }
 
-                    // Event Title (read-only)
+                    // Event Title (tapping opens in default Calendar app)
                     Text(
                         text = event.title.ifBlank { untitledText },
                         style = MaterialTheme.typography.bodySmall.copy(
@@ -4581,6 +4590,43 @@ private fun ThingsCalendarEventsBlock(
     }
 }
 
+private fun openCalendarEventInDefaultApp(
+    context: android.content.Context,
+    event: CalendarEventItem
+) {
+    val openedSpecificEvent = if (event.eventId > 0L) {
+        runCatching {
+            val uri = android.content.ContentUris.withAppendedId(
+                android.provider.CalendarContract.Events.CONTENT_URI,
+                event.eventId
+            )
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                data = uri
+                putExtra(android.provider.CalendarContract.EXTRA_EVENT_BEGIN_TIME, event.startMillis)
+                putExtra(android.provider.CalendarContract.EXTRA_EVENT_END_TIME, event.endMillis)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            true
+        }.getOrDefault(false)
+    } else {
+        false
+    }
+
+    if (!openedSpecificEvent) {
+        runCatching {
+            val builder = android.provider.CalendarContract.CONTENT_URI.buildUpon()
+                .appendPath("time")
+            android.content.ContentUris.appendId(builder, event.startMillis)
+            val fallbackIntent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                data = builder.build()
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(fallbackIntent)
+        }
+    }
+}
+
 private fun formatCalendarEventTimeRange(
     startMillis: Long,
     endMillis: Long,
@@ -4596,5 +4642,6 @@ private fun formatCalendarEventTimeRange(
         startText
     }
 }.getOrDefault("")
+
 
 

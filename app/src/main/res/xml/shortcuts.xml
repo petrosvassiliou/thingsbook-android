@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <shortcut
+        android:shortcutId="shortcut_new_todo"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher_round"
+        android:shortcutShortLabel="@string/shortcut_new_todo_short"
+        android:shortcutLongLabel="@string/shortcut_new_todo_short">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.culturedcode.things3"
+            android:targetClass="com.culturedcode.things3.MainActivity">
+            <extra android:name="extra_widget_smart_view" android:value="TODAY" />
+            <extra android:name="extra_widget_quick_add" android:value="true" />
+        </intent>
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="shortcut_today"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher_round"
+        android:shortcutShortLabel="@string/shortcut_today_short"
+        android:shortcutLongLabel="@string/shortcut_today_short">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.culturedcode.things3"
+            android:targetClass="com.culturedcode.things3.MainActivity">
+            <extra android:name="extra_widget_smart_view" android:value="TODAY" />
+        </intent>
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="shortcut_inbox"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher_round"
+        android:shortcutShortLabel="@string/shortcut_inbox_short"
+        android:shortcutLongLabel="@string/shortcut_inbox_short">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.culturedcode.things3"
+            android:targetClass="com.culturedcode.things3.MainActivity">
+            <extra android:name="extra_widget_smart_view" android:value="INBOX" />
+        </intent>
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="shortcut_quick_find"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher_round"
+        android:shortcutShortLabel="@string/shortcut_quick_find_short"
+        android:shortcutLongLabel="@string/shortcut_quick_find_short">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.culturedcode.things3"
+            android:targetClass="com.culturedcode.things3.MainActivity">
+            <extra android:name="extra_shortcut_action" android:value="QUICK_FIND" />
+        </intent>
+    </shortcut>
+
+</shortcuts>

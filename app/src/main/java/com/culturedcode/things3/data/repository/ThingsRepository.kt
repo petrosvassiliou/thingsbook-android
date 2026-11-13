@@ -153,6 +153,37 @@ class ThingsRepository @Inject constructor(
             .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
             .catch { emit(emptyList()) }
 
+    fun observeDeletedTasks(): Flow<List<TaskItem>> =
+        database.taskDao().observeDeletedTasks()
+            .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
+            .catch { emit(emptyList()) }
+
+    fun observeDeletedProjects(): Flow<List<Project>> =
+        database.projectDao().observeDeletedProjects()
+            .map { list ->
+                list.mapNotNull { entity ->
+                    runCatching {
+                        Project(
+                            id = entity.id,
+                            areaId = entity.areaId,
+                            title = entity.title,
+                            notes = entity.notes,
+                            status = entity.status,
+                            scheduleState = entity.scheduleState,
+                            whenDate = entity.whenDate,
+                            deadline = entity.deadline,
+                            completedAt = entity.completedAt,
+                            sortOrder = entity.sortOrder,
+                            tagIds = decodeStringList(entity.tagIdsJson),
+                            createdAt = entity.createdAt,
+                            updatedAt = entity.updatedAt,
+                            isDeleted = entity.isDeleted
+                        )
+                    }.getOrNull()
+                }.distinctBy { it.id }
+            }
+            .catch { emit(emptyList()) }
+
     fun observeTasksForProject(projectId: String): Flow<List<TaskItem>> =
         database.taskDao().observeTasksForProject(projectId)
             .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
@@ -596,6 +627,50 @@ class ThingsRepository @Inject constructor(
                 isDirty = true
             )
         )
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun snoozeTaskReminder(taskId: String, minutes: Int = 60) {
+        val existing = database.taskDao().getById(taskId) ?: return
+        if (existing.isDeleted || existing.status != TaskStatus.OPEN) return
+        val now = System.currentTimeMillis()
+        val safeMinutes = minutes.coerceIn(5, 1440)
+        val snoozedMillis = now + safeMinutes * 60_000L
+        val updated = existing.copy(
+            reminderTime = snoozedMillis,
+            updatedAt = now,
+            isDirty = true
+        )
+        database.taskDao().upsert(updated)
+        reminderScheduler.scheduleExactReminder(taskId, updated.title, snoozedMillis)
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun deferTaskToTomorrow(taskId: String) {
+        val existing = database.taskDao().getById(taskId) ?: return
+        val now = System.currentTimeMillis()
+        val zone = ZoneId.systemDefault()
+        val tomorrowDate = LocalDate.now(zone).plusDays(1)
+        val tomorrowEpoch = tomorrowDate.atStartOfDay(zone).toInstant().toEpochMilli()
+        val nextReminder = existing.reminderTime?.let { prevReminder ->
+            runCatching {
+                val prevTime = Instant.ofEpochMilli(prevReminder).atZone(zone).toLocalTime()
+                LocalDateTime.of(tomorrowDate, prevTime).atZone(zone).toInstant().toEpochMilli()
+            }.getOrNull()
+        }
+        val updated = existing.copy(
+            scheduleState = ScheduleState.UPCOMING,
+            whenDate = tomorrowEpoch,
+            reminderTime = nextReminder,
+            updatedAt = now,
+            isDirty = true
+        )
+        database.taskDao().upsert(updated)
+        if (updated.status == TaskStatus.OPEN && nextReminder != null && nextReminder > now) {
+            reminderScheduler.scheduleExactReminder(taskId, updated.title, nextReminder)
+        } else {
+            reminderScheduler.cancelReminder(taskId)
+        }
         syncRepository.triggerBackgroundSync()
     }
 
@@ -1215,6 +1290,228 @@ class ThingsRepository @Inject constructor(
             )
         )
         syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun restoreDeletedTask(taskId: String) {
+        val existing = database.taskDao().getById(taskId) ?: return
+        val now = System.currentTimeMillis()
+        val activeProject = existing.projectId?.let { pId ->
+            database.projectDao().getById(pId)?.takeIf { !it.isDeleted }
+        }
+        val activeArea = existing.areaId?.let { aId ->
+            database.areaDao().getById(aId)?.takeIf { !it.isDeleted }
+        }
+        val activeHeading = existing.headingId?.let { hId ->
+            if (activeProject != null) {
+                database.headingDao().getById(hId)?.takeIf { !it.isDeleted && it.projectId == activeProject.id }
+            } else null
+        }
+        val restored = existing.copy(
+            projectId = activeProject?.id,
+            headingId = activeHeading?.id,
+            areaId = activeArea?.id,
+            isDeleted = false,
+            updatedAt = now,
+            isDirty = true
+        )
+        database.taskDao().upsert(restored)
+        if (restored.status == TaskStatus.OPEN && restored.reminderTime != null && restored.reminderTime > now) {
+            reminderScheduler.scheduleExactReminder(taskId, restored.title, restored.reminderTime)
+        }
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun restoreDeletedProject(projectId: String) {
+        val existing = database.projectDao().getById(projectId) ?: return
+        val now = System.currentTimeMillis()
+        val activeArea = existing.areaId?.let { aId ->
+            database.areaDao().getById(aId)?.takeIf { !it.isDeleted }
+        }
+        database.withTransaction {
+            database.headingDao().restoreHeadingsForProject(projectId, now)
+            database.projectDao().upsert(
+                existing.copy(
+                    areaId = activeArea?.id,
+                    isDeleted = false,
+                    updatedAt = now,
+                    isDirty = true
+                )
+            )
+        }
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun permanentlyDeleteTask(taskId: String) {
+        reminderScheduler.cancelReminder(taskId)
+        database.withTransaction {
+            database.checklistDao().hardDeleteByTaskIds(listOf(taskId))
+            database.taskDao().hardDeleteTaskTagsByTaskIds(listOf(taskId))
+            database.taskDao().hardDeleteByIds(listOf(taskId))
+        }
+    }
+
+    suspend fun permanentlyDeleteProject(projectId: String) {
+        val now = System.currentTimeMillis()
+        database.withTransaction {
+            database.taskDao().clearProjectFromTasks(projectId, now)
+            database.headingDao().hardDeleteHeadingsForProjects(listOf(projectId))
+            database.projectDao().hardDeleteProjectTagsByIds(listOf(projectId))
+            database.projectDao().hardDeleteByIds(listOf(projectId))
+        }
+    }
+
+    suspend fun emptyTrash() {
+        val now = System.currentTimeMillis()
+        database.withTransaction {
+            val deletedTasks = database.taskDao().getDeletedTasksList()
+            if (deletedTasks.isNotEmpty()) {
+                val taskIds = deletedTasks.map { it.id }
+                taskIds.forEach { reminderScheduler.cancelReminder(it) }
+                database.checklistDao().hardDeleteByTaskIds(taskIds)
+                database.taskDao().hardDeleteTaskTagsByTaskIds(taskIds)
+                database.taskDao().hardDeleteByIds(taskIds)
+            }
+            val deletedProjects = database.projectDao().getDeletedProjectsList()
+            if (deletedProjects.isNotEmpty()) {
+                val projIds = deletedProjects.map { it.id }
+                projIds.forEach { pId -> database.taskDao().clearProjectFromTasks(pId, now) }
+                database.headingDao().hardDeleteHeadingsForProjects(projIds)
+                database.projectDao().hardDeleteProjectTagsByIds(projIds)
+                database.projectDao().hardDeleteByIds(projIds)
+            }
+        }
+    }
+
+    suspend fun duplicateTask(taskId: String, copySuffix: String = "Copy"): String? {
+        val existing = database.taskDao().getById(taskId) ?: return null
+        if (existing.isDeleted) return null
+        val now = System.currentTimeMillis()
+        val newTaskId = UUID.randomUUID().toString()
+        val tagIds = decodeStringList(existing.tagIdsJson)
+        val trimmedTitle = existing.title.trim()
+        val newTitle = if (trimmedTitle.isNotEmpty()) "$trimmedTitle ($copySuffix)" else existing.title
+        val clonedTask = existing.copy(
+            id = newTaskId,
+            title = newTitle,
+            status = TaskStatus.OPEN,
+            completedAt = null,
+            reminderTime = existing.reminderTime?.takeIf { it > now },
+            sortOrder = existing.sortOrder + 10.0,
+            createdAt = now,
+            updatedAt = now,
+            isDeleted = false,
+            isDirty = true
+        )
+
+        database.withTransaction {
+            database.taskDao().upsertTaskWithTags(clonedTask, tagIds)
+            val subtasks = database.checklistDao().getForTaskSync(taskId)
+            if (subtasks.isNotEmpty()) {
+                val clonedSubtasks = subtasks.map { sub ->
+                    sub.copy(
+                        id = UUID.randomUUID().toString(),
+                        taskId = newTaskId,
+                        isCompleted = false,
+                        createdAt = now,
+                        updatedAt = now,
+                        isDeleted = false,
+                        isDirty = true
+                    )
+                }
+                database.checklistDao().upsertAll(clonedSubtasks)
+            }
+        }
+
+        if (clonedTask.reminderTime != null && clonedTask.reminderTime > now) {
+            reminderScheduler.scheduleExactReminder(newTaskId, clonedTask.title, clonedTask.reminderTime)
+        }
+        syncRepository.triggerBackgroundSync()
+        return newTaskId
+    }
+
+    suspend fun duplicateProject(projectId: String, copySuffix: String = "Copy"): String? {
+        val existingProject = database.projectDao().getById(projectId) ?: return null
+        if (existingProject.isDeleted) return null
+        val now = System.currentTimeMillis()
+        val newProjectId = UUID.randomUUID().toString()
+        val projectTagIds = decodeStringList(existingProject.tagIdsJson)
+        val trimmedTitle = existingProject.title.trim()
+        val newTitle = if (trimmedTitle.isNotEmpty()) "$trimmedTitle ($copySuffix)" else existingProject.title
+
+        database.withTransaction {
+            val clonedProject = existingProject.copy(
+                id = newProjectId,
+                title = newTitle,
+                status = ProjectStatus.ACTIVE,
+                completedAt = null,
+                sortOrder = existingProject.sortOrder + 100.0,
+                createdAt = now,
+                updatedAt = now,
+                isDeleted = false,
+                isDirty = true
+            )
+            database.projectDao().upsertProjectWithTags(clonedProject, projectTagIds)
+
+            val existingHeadings = database.headingDao().getHeadingsForProjectList(projectId)
+            val headingIdMap = mutableMapOf<String, String>()
+            if (existingHeadings.isNotEmpty()) {
+                val clonedHeadings = existingHeadings.map { h ->
+                    val newHeadingId = UUID.randomUUID().toString()
+                    headingIdMap[h.id] = newHeadingId
+                    h.copy(
+                        id = newHeadingId,
+                        projectId = newProjectId,
+                        createdAt = now,
+                        updatedAt = now,
+                        isDeleted = false,
+                        isDirty = true
+                    )
+                }
+                database.headingDao().upsertAll(clonedHeadings)
+            }
+
+            val existingTasks = database.taskDao().getAllNonDeletedTasksList()
+                .filter { it.projectId == projectId && it.status == TaskStatus.OPEN }
+                .sortedBy { it.sortOrder }
+
+            for (task in existingTasks) {
+                val newTaskId = UUID.randomUUID().toString()
+                val taskTagIds = decodeStringList(task.tagIdsJson)
+                val mappedHeadingId = task.headingId?.let { headingIdMap[it] }
+                val clonedTask = task.copy(
+                    id = newTaskId,
+                    projectId = newProjectId,
+                    headingId = mappedHeadingId,
+                    status = TaskStatus.OPEN,
+                    completedAt = null,
+                    reminderTime = null,
+                    createdAt = now,
+                    updatedAt = now,
+                    isDeleted = false,
+                    isDirty = true
+                )
+                database.taskDao().upsertTaskWithTags(clonedTask, taskTagIds)
+
+                val subtasks = database.checklistDao().getForTaskSync(task.id)
+                if (subtasks.isNotEmpty()) {
+                    val clonedSubtasks = subtasks.map { sub ->
+                        sub.copy(
+                            id = UUID.randomUUID().toString(),
+                            taskId = newTaskId,
+                            isCompleted = false,
+                            createdAt = now,
+                            updatedAt = now,
+                            isDeleted = false,
+                            isDirty = true
+                        )
+                    }
+                    database.checklistDao().upsertAll(clonedSubtasks)
+                }
+            }
+        }
+
+        syncRepository.triggerBackgroundSync()
+        return newProjectId
     }
 
     suspend fun createOrUpdateTag(

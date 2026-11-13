@@ -43,6 +43,8 @@ import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
 import com.culturedcode.things3.domain.util.runCatchingCancellable
+import com.culturedcode.things3.ui.components.FocusTimerUiState
+import com.culturedcode.things3.ui.components.QuickShareDraft
 import com.culturedcode.things3.ui.components.SmartViewType
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -254,6 +256,14 @@ class ThingsbookViewModel @Inject constructor(
         .catch { emit(emptyList()) }
         .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val deletedTasks: StateFlow<List<TaskItem>> = repository.observeDeletedTasks()
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val deletedProjects: StateFlow<List<Project>> = repository.observeDeletedProjects()
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val activeProjects: StateFlow<List<Project>> = repository.observeActiveProjectsWithProgress()
         .catch { emit(emptyList()) }
         .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -451,6 +461,7 @@ class ThingsbookViewModel @Inject constructor(
 
     fun updateTaskStatus(taskId: String, status: TaskStatus) {
         safeVmScope.launch {
+            val prevEntity = repository.getTaskEntityById(taskId)
             repository.updateTaskStatus(taskId, status)
             if (status != TaskStatus.OPEN) {
                 if (_expandedTaskId.value == taskId) {
@@ -458,6 +469,17 @@ class ThingsbookViewModel @Inject constructor(
                 }
                 if (taskId in _selectedTaskIds.value) {
                     _selectedTaskIds.value = _selectedTaskIds.value - taskId
+                }
+                if (_focusTimerState.value?.taskId == taskId) {
+                    stopFocusTimer()
+                }
+                if (prevEntity != null && prevEntity.status == TaskStatus.OPEN && status == TaskStatus.COMPLETED) {
+                    val label = prevEntity.title.ifBlank { getLocalizedString(R.string.entity_todo) }
+                    registerUndoAction(
+                        message = getLocalizedString(R.string.undo_task_completed, label)
+                    ) {
+                        repository.updateTaskStatus(taskId, TaskStatus.OPEN)
+                    }
                 }
             }
         }
@@ -557,13 +579,25 @@ class ThingsbookViewModel @Inject constructor(
 
     fun deleteTask(taskId: String) {
         safeVmScope.launch {
+            val prevEntity = repository.getTaskEntityById(taskId)
             if (_expandedTaskId.value == taskId) {
                 _expandedTaskId.value = null
             }
             if (taskId in _selectedTaskIds.value) {
                 _selectedTaskIds.value = _selectedTaskIds.value - taskId
             }
+            if (_focusTimerState.value?.taskId == taskId) {
+                stopFocusTimer()
+            }
             repository.softDeleteTask(taskId)
+            if (prevEntity != null) {
+                val label = prevEntity.title.ifBlank { getLocalizedString(R.string.entity_todo) }
+                registerUndoAction(
+                    message = getLocalizedString(R.string.undo_task_deleted, label)
+                ) {
+                    repository.restoreDeletedTask(taskId)
+                }
+            }
         }
     }
 
@@ -600,7 +634,7 @@ class ThingsbookViewModel @Inject constructor(
                     }
                     SmartViewType.ANYTIME -> Triple(ScheduleState.ANYTIME, null, null)
                     SmartViewType.SOMEDAY -> Triple(ScheduleState.SOMEDAY, null, null)
-                    SmartViewType.LOGBOOK -> Triple(ScheduleState.INBOX, null, null)
+                    SmartViewType.LOGBOOK, SmartViewType.TRASH -> Triple(ScheduleState.INBOX, null, null)
                 }
                 is ActiveNavigationTarget.ProjectDetail -> Triple(ScheduleState.ANYTIME, null, target.projectId)
                 is ActiveNavigationTarget.AreaDetail -> Triple(ScheduleState.ANYTIME, null, null)
@@ -634,7 +668,10 @@ class ThingsbookViewModel @Inject constructor(
                 sortOrder = midpointOrder
             )
 
-            if (target == ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK)) {
+            if (
+                target == ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK) ||
+                target == ActiveNavigationTarget.SmartView(SmartViewType.TRASH)
+            ) {
                 _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.INBOX)
             }
 
@@ -862,11 +899,18 @@ class ThingsbookViewModel @Inject constructor(
 
     fun deleteProject(projectId: String) {
         safeVmScope.launch {
+            val prevTitle = activeProjects.value.find { it.id == projectId }?.title
             val currentTarget = _navigationTarget.value
             if (currentTarget is ActiveNavigationTarget.ProjectDetail && currentTarget.projectId == projectId) {
                 _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
             }
             repository.softDeleteProject(projectId)
+            val label = prevTitle?.ifBlank { null } ?: getLocalizedString(R.string.entity_project)
+            registerUndoAction(
+                message = getLocalizedString(R.string.undo_project_deleted, label)
+            ) {
+                repository.restoreDeletedProject(projectId)
+            }
         }
     }
 
@@ -1680,7 +1724,8 @@ class ThingsbookViewModel @Inject constructor(
             dailyDigestMinute = digest?.minute,
             languageTag = langTag,
             calendarEventsEnabled = _calendarEventsEnabled.value,
-            selectedCalendarIds = _selectedCalendarIds.value.sorted()
+            selectedCalendarIds = _selectedCalendarIds.value.sorted(),
+            groupTodayByProjectOrArea = _groupTodayByProjectOrArea.value
         )
     }
 
@@ -1890,6 +1935,9 @@ class ThingsbookViewModel @Inject constructor(
                     restoredPrefs.calendarEventsEnabled?.let { enabled ->
                         setCalendarEventsEnabled(enabled && deviceCalendarRepository.hasCalendarPermission())
                     }
+                    restoredPrefs.groupTodayByProjectOrArea?.let { grouped ->
+                        setGroupTodayByProjectOrArea(grouped)
+                    }
                     if (
                         restoredPrefs.dailyDigestEnabled != null &&
                         restoredPrefs.dailyDigestHour != null &&
@@ -2047,6 +2095,10 @@ class ThingsbookViewModel @Inject constructor(
         return when {
             _uiErrorMessage.value != null -> {
                 _uiErrorMessage.value = null
+                true
+            }
+            _quickShareDraft.value != null -> {
+                _quickShareDraft.value = null
                 true
             }
             _pendingRestoreSession.value != null && !_isBackupBusy.value -> {
@@ -2393,6 +2445,309 @@ class ThingsbookViewModel @Inject constructor(
         _upcomingCalendarEventsByDate.value = eventsByDate.filterKeys { it.isAfter(today) }
     }
 
+    // =========================================================================
+    // v1.7.0 Power Features: Trash, Undo, Duplicate, Focus Timer, Quick Share,
+    // Group Today by Project/Area & Biometric App Lock
+    // =========================================================================
+
+    private val _undoSnackbarMessage = MutableStateFlow<String?>(null)
+    val undoSnackbarMessage: StateFlow<String?> = _undoSnackbarMessage.asStateFlow()
+
+    private var pendingUndoSuspendBlock: (suspend () -> Unit)? = null
+    private var activeUndoDismissJob: Job? = null
+
+    private fun registerUndoAction(message: String, block: suspend () -> Unit) {
+        activeUndoDismissJob?.cancel()
+        pendingUndoSuspendBlock = block
+        _undoSnackbarMessage.value = message
+        activeUndoDismissJob = safeVmScope.launch {
+            delay(5_000L)
+            _undoSnackbarMessage.value = null
+            pendingUndoSuspendBlock = null
+        }
+    }
+
+    fun performUndo() {
+        val block = pendingUndoSuspendBlock ?: return
+        activeUndoDismissJob?.cancel()
+        pendingUndoSuspendBlock = null
+        _undoSnackbarMessage.value = null
+        safeVmScope.launch {
+            runCatchingCancellable { block() }
+        }
+    }
+
+    fun dismissUndoSnackbar() {
+        activeUndoDismissJob?.cancel()
+        pendingUndoSuspendBlock = null
+        _undoSnackbarMessage.value = null
+    }
+
+    fun restoreDeletedTask(taskId: String) {
+        safeVmScope.launch {
+            repository.restoreDeletedTask(taskId)
+        }
+    }
+
+    fun restoreDeletedProject(projectId: String) {
+        safeVmScope.launch {
+            repository.restoreDeletedProject(projectId)
+        }
+    }
+
+    fun permanentlyDeleteTask(taskId: String) {
+        safeVmScope.launch {
+            repository.permanentlyDeleteTask(taskId)
+        }
+    }
+
+    fun permanentlyDeleteProject(projectId: String) {
+        safeVmScope.launch {
+            repository.permanentlyDeleteProject(projectId)
+        }
+    }
+
+    fun emptyTrash() {
+        safeVmScope.launch {
+            repository.emptyTrash()
+        }
+    }
+
+    fun duplicateTask(taskId: String) {
+        safeVmScope.launch {
+            val clonedId = repository.duplicateTask(taskId)
+            if (clonedId != null) {
+                _expandedTaskId.value = clonedId
+            }
+        }
+    }
+
+    fun duplicateProject(projectId: String) {
+        safeVmScope.launch {
+            val clonedId = repository.duplicateProject(projectId)
+            if (clonedId != null) {
+                _expandedTaskId.value = null
+                _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(clonedId)
+            }
+        }
+    }
+
+    // Focus / Pomodoro Timer (25m)
+    private val _focusTimerState = MutableStateFlow<FocusTimerUiState?>(null)
+    val focusTimerState: StateFlow<FocusTimerUiState?> = _focusTimerState.asStateFlow()
+    private var focusTimerJob: Job? = null
+
+    fun startFocusTimer(taskId: String, taskTitle: String, durationMinutes: Int = 25) {
+        focusTimerJob?.cancel()
+        val totalSecs = (durationMinutes.coerceIn(1, 180)) * 60
+        val initial = FocusTimerUiState(
+            taskId = taskId,
+            taskTitle = taskTitle,
+            totalSeconds = totalSecs,
+            remainingSeconds = totalSecs,
+            isPaused = false
+        )
+        _focusTimerState.value = initial
+        reminderScheduler.showOrUpdateFocusTimerNotification(taskId, taskTitle, totalSecs, false)
+        startFocusTimerTicker()
+    }
+
+    private fun startFocusTimerTicker() {
+        focusTimerJob?.cancel()
+        focusTimerJob = safeVmScope.launch {
+            while (true) {
+                delay(1_000L)
+                val current = _focusTimerState.value ?: break
+                if (current.isPaused) continue
+                val nextRemaining = current.remainingSeconds - 1
+                if (nextRemaining <= 0) {
+                    _focusTimerState.value = null
+                    reminderScheduler.showFocusTimerFinishedNotification(current.taskId, current.taskTitle)
+                    break
+                } else {
+                    val updated = current.copy(remainingSeconds = nextRemaining)
+                    _focusTimerState.value = updated
+                    if (nextRemaining % 5 == 0 || nextRemaining <= 10) {
+                        reminderScheduler.showOrUpdateFocusTimerNotification(
+                            updated.taskId,
+                            updated.taskTitle,
+                            updated.remainingSeconds,
+                            updated.isPaused
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun toggleFocusTimerPause() {
+        val current = _focusTimerState.value ?: return
+        val next = current.copy(isPaused = !current.isPaused)
+        _focusTimerState.value = next
+        reminderScheduler.showOrUpdateFocusTimerNotification(
+            next.taskId,
+            next.taskTitle,
+            next.remainingSeconds,
+            next.isPaused
+        )
+    }
+
+    fun addFiveMinutesToFocusTimer() {
+        val current = _focusTimerState.value ?: return
+        val next = current.copy(
+            totalSeconds = current.totalSeconds + 300,
+            remainingSeconds = current.remainingSeconds + 300
+        )
+        _focusTimerState.value = next
+        reminderScheduler.showOrUpdateFocusTimerNotification(
+            next.taskId,
+            next.taskTitle,
+            next.remainingSeconds,
+            next.isPaused
+        )
+    }
+
+    fun completeFocusTimerTask() {
+        val current = _focusTimerState.value ?: return
+        stopFocusTimer()
+        updateTaskStatus(current.taskId, TaskStatus.COMPLETED)
+    }
+
+    fun stopFocusTimer() {
+        focusTimerJob?.cancel()
+        focusTimerJob = null
+        _focusTimerState.value = null
+        reminderScheduler.cancelFocusTimerNotification()
+    }
+
+    // Quick Share ("Share to Thingsbook" Intent Receiver)
+    private val _quickShareDraft = MutableStateFlow<QuickShareDraft?>(null)
+    val quickShareDraft: StateFlow<QuickShareDraft?> = _quickShareDraft.asStateFlow()
+
+    fun openQuickShareDraft(rawSubject: String?, rawText: String?) {
+        val cleanSubject = rawSubject?.trim().orEmpty()
+        val cleanText = rawText?.trim().orEmpty()
+        if (cleanSubject.isEmpty() && cleanText.isEmpty()) return
+
+        val (initialTitle, initialNotes) = when {
+            cleanSubject.isNotEmpty() && cleanText.isNotEmpty() && cleanSubject != cleanText -> {
+                cleanSubject to cleanText
+            }
+            cleanText.contains("\n") -> {
+                val firstLine = cleanText.lineSequence().first().trim().take(120)
+                val rest = cleanText.substringAfter("\n").trim()
+                firstLine to rest
+            }
+            cleanText.startsWith("http://", ignoreCase = true) || cleanText.startsWith("https://", ignoreCase = true) -> {
+                val hostLabel = cleanText
+                    .removePrefix("https://")
+                    .removePrefix("http://")
+                    .removePrefix("www.")
+                    .substringBefore("/")
+                    .ifBlank { cleanText.take(60) }
+                hostLabel to cleanText
+            }
+            else -> {
+                cleanText.ifEmpty { cleanSubject }.take(120) to ""
+            }
+        }
+        _quickShareDraft.value = QuickShareDraft(
+            initialTitle = initialTitle,
+            initialNotes = initialNotes
+        )
+    }
+
+    fun dismissQuickShareDraft() {
+        _quickShareDraft.value = null
+    }
+
+    fun saveQuickShareTask(
+        title: String,
+        notes: String,
+        scheduleState: ScheduleState,
+        projectId: String?,
+        areaId: String?
+    ) {
+        val cleanTitle = title.trim()
+        if (cleanTitle.isEmpty()) return
+        _quickShareDraft.value = null
+        safeVmScope.launch {
+            val zone = ZoneId.systemDefault()
+            val todayEpoch = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
+            val whenDate = if (scheduleState == ScheduleState.TODAY || scheduleState == ScheduleState.THIS_EVENING) {
+                todayEpoch
+            } else null
+            val createdId = repository.createOrUpdateTask(
+                title = cleanTitle,
+                notes = notes,
+                status = TaskStatus.OPEN,
+                scheduleState = scheduleState,
+                whenDate = whenDate,
+                projectId = projectId,
+                areaId = areaId,
+                sortOrder = 500.0
+            )
+            when {
+                projectId != null -> _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(projectId)
+                areaId != null -> _navigationTarget.value = ActiveNavigationTarget.AreaDetail(areaId)
+                scheduleState == ScheduleState.INBOX -> _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.INBOX)
+                scheduleState == ScheduleState.TODAY || scheduleState == ScheduleState.THIS_EVENING ->
+                    _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
+                scheduleState == ScheduleState.ANYTIME -> _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.ANYTIME)
+                scheduleState == ScheduleState.SOMEDAY -> _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.SOMEDAY)
+                else -> Unit
+            }
+            _expandedTaskId.value = createdId
+        }
+    }
+
+    // Group Today by Project / Area
+    private val _groupTodayByProjectOrArea = MutableStateFlow(
+        coreSettingsPrefs.getBoolean(PREF_GROUP_TODAY_BY_PROJECT_OR_AREA, false)
+    )
+    val groupTodayByProjectOrArea: StateFlow<Boolean> = _groupTodayByProjectOrArea.asStateFlow()
+
+    fun setGroupTodayByProjectOrArea(enabled: Boolean) {
+        _groupTodayByProjectOrArea.value = enabled
+        runCatching {
+            coreSettingsPrefs.edit().putBoolean(PREF_GROUP_TODAY_BY_PROJECT_OR_AREA, enabled).apply()
+        }
+    }
+
+    // Biometric / PIN App Lock
+    private val _biometricAppLockEnabled = MutableStateFlow(
+        coreSettingsPrefs.getBoolean(PREF_BIOMETRIC_APP_LOCK_ENABLED, false)
+    )
+    val biometricAppLockEnabled: StateFlow<Boolean> = _biometricAppLockEnabled.asStateFlow()
+
+    private val _isAppUnlocked = MutableStateFlow(
+        !coreSettingsPrefs.getBoolean(PREF_BIOMETRIC_APP_LOCK_ENABLED, false)
+    )
+    val isAppUnlocked: StateFlow<Boolean> = _isAppUnlocked.asStateFlow()
+
+    fun setBiometricAppLockEnabled(enabled: Boolean) {
+        _biometricAppLockEnabled.value = enabled
+        if (enabled) {
+            // User just toggled it on while inside Settings -> keep current session unlocked until next stop/launch
+            _isAppUnlocked.value = true
+        } else {
+            _isAppUnlocked.value = true
+        }
+        runCatching {
+            coreSettingsPrefs.edit().putBoolean(PREF_BIOMETRIC_APP_LOCK_ENABLED, enabled).apply()
+        }
+    }
+
+    fun markAppUnlocked() {
+        _isAppUnlocked.value = true
+    }
+
+    fun onAppStopped() {
+        if (_biometricAppLockEnabled.value) {
+            _isAppUnlocked.value = false
+        }
+    }
+
     fun onAppResumed() {
         safeVmScope.launch {
             val changed = runCatchingCancellable {
@@ -2516,6 +2871,8 @@ class ThingsbookViewModel @Inject constructor(
         private const val PREF_CALENDAR_EVENTS_ENABLED = "calendar_events_enabled"
         private const val PREF_SELECTED_CALENDAR_IDS = "selected_calendar_ids"
         private const val PREF_CALENDAR_IDS_INITIALIZED = "calendar_ids_initialized"
+        private const val PREF_GROUP_TODAY_BY_PROJECT_OR_AREA = "group_today_by_project_or_area"
+        private const val PREF_BIOMETRIC_APP_LOCK_ENABLED = "biometric_app_lock_enabled"
         private const val UPCOMING_CALENDAR_HORIZON_DAYS = 30L
     }
 }

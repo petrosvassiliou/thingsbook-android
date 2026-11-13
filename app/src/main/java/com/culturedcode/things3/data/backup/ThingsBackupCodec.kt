@@ -160,7 +160,8 @@ data class BackupPreferencesDto(
     val dailyDigestMinute: Int? = null,
     val languageTag: String? = null,
     val calendarEventsEnabled: Boolean? = null,
-    val selectedCalendarIds: List<String>? = null
+    val selectedCalendarIds: List<String>? = null,
+    val groupTodayByProjectOrArea: Boolean? = null
 )
 
 data class BackupSummary(

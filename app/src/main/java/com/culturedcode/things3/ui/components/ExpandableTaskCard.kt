@@ -47,12 +47,14 @@ import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.LocalOffer
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Repeat
+import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -194,6 +196,10 @@ fun ExpandableTaskCard(
     onDeleteChecklistItem: ((String) -> Unit)? = null,
     onTriggerGeminiMagicBreakdown: () -> Unit,
     onDeleteTask: () -> Unit,
+    onDuplicateTask: (() -> Unit)? = null,
+    onStartFocusTimer: (() -> Unit)? = null,
+    externalDialogTriggerToken: Int = 0,
+    externalDialogTriggerType: String? = null,
     modifier: Modifier = Modifier,
     locale: Locale = Locale.getDefault(),
     onRequestEnsureVisible: ((preferBottomVisible: Boolean) -> Unit)? = null,
@@ -259,6 +265,16 @@ fun ExpandableTaskCard(
     var showTagPickerDialog by remember(task.id) { mutableStateOf(false) }
     var showContextMenu by remember(task.id) { mutableStateOf(false) }
     var contextMenuOffsetDp by remember(task.id) { mutableStateOf(DpOffset(24.dp, 0.dp)) }
+
+    LaunchedEffect(externalDialogTriggerToken, isExpanded) {
+        if (isExpanded && externalDialogTriggerToken > 0) {
+            when (externalDialogTriggerType) {
+                "WHEN" -> showWhenDialog = true
+                "DEADLINE" -> showDeadlineDialog = true
+                "MOVE" -> showMoveDialog = true
+            }
+        }
+    }
 
     LaunchedEffect(suppressCustomContextMenu) {
         if (suppressCustomContextMenu && showContextMenu) {
@@ -726,6 +742,8 @@ fun ExpandableTaskCard(
                         onOpenRepeatDialog = { showRepeatDialog = true },
                         onOpenMoveDialog = { showMoveDialog = true },
                         onOpenTagPickerDialog = { showTagPickerDialog = true },
+                        onDuplicateTask = onDuplicateTask,
+                        onStartFocusTimer = onStartFocusTimer,
                         onDeleteTask = onDeleteTask,
                         onDoneCollapse = onExpandToggle
                     )
@@ -746,6 +764,8 @@ fun ExpandableTaskCard(
                 onOpenMoveDialog = { showMoveDialog = true },
                 onOpenTagPickerDialog = { showTagPickerDialog = true },
                 onTriggerGeminiMagicBreakdown = onTriggerGeminiMagicBreakdown,
+                onStartFocusTimer = onStartFocusTimer,
+                onDuplicateTask = onDuplicateTask,
                 onDeleteTask = onDeleteTask,
                 onDismiss = { showContextMenu = false }
             )
@@ -1036,6 +1056,8 @@ private fun ExpandedTaskCardBody(
     onOpenRepeatDialog: () -> Unit,
     onOpenMoveDialog: () -> Unit,
     onOpenTagPickerDialog: () -> Unit,
+    onDuplicateTask: (() -> Unit)? = null,
+    onStartFocusTimer: (() -> Unit)? = null,
     onDeleteTask: () -> Unit,
     onDoneCollapse: () -> Unit
 ) {
@@ -1056,6 +1078,7 @@ private fun ExpandedTaskCardBody(
             textStyle = MaterialTheme.typography.bodyMedium.copy(
                 color = colors.secondaryText
             ),
+            visualTransformation = rememberThingsMarkdownVisualTransformation(),
             cursorBrush = SolidColor(colors.thingsBlue),
             modifier = Modifier
                 .fillMaxWidth()
@@ -1094,6 +1117,8 @@ private fun ExpandedTaskCardBody(
                 }
             }
         )
+
+        DetectedNotesLinksRow(notes = editedNotesField.text)
 
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -1496,6 +1521,44 @@ private fun ExpandedTaskCardBody(
                     }
                 }
 
+                if (onStartFocusTimer != null) {
+                    ThingsHoverTooltip(text = stringResource(R.string.action_focus_timer)) {
+                        IconButton(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onStartFocusTimer()
+                            },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Timer,
+                                contentDescription = stringResource(R.string.action_focus_timer),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+
+                if (onDuplicateTask != null) {
+                    ThingsHoverTooltip(text = stringResource(R.string.action_duplicate_todo)) {
+                        IconButton(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onDuplicateTask()
+                            },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.ContentCopy,
+                                contentDescription = stringResource(R.string.action_duplicate_todo),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
+                }
+
                 ThingsHoverTooltip(text = stringResource(R.string.action_delete)) {
                     IconButton(
                         onClick = {
@@ -1547,6 +1610,8 @@ private fun TaskContextDropdownMenu(
     onOpenMoveDialog: () -> Unit,
     onOpenTagPickerDialog: () -> Unit,
     onTriggerGeminiMagicBreakdown: () -> Unit,
+    onStartFocusTimer: (() -> Unit)? = null,
+    onDuplicateTask: (() -> Unit)? = null,
     onDeleteTask: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -1734,6 +1799,52 @@ private fun TaskContextDropdownMenu(
                 onOpenTagPickerDialog()
             }
         )
+        if (onStartFocusTimer != null) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = stringResource(R.string.action_focus_timer),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.primaryText
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.Timer,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    onDismiss()
+                    onStartFocusTimer()
+                }
+            )
+        }
+        if (onDuplicateTask != null) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = stringResource(R.string.action_duplicate_todo),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.primaryText
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.ContentCopy,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    onDismiss()
+                    onDuplicateTask()
+                }
+            )
+        }
         DropdownMenuItem(
             text = {
                 Text(

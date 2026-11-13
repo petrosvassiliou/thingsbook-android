@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.culturedcode.things3.ui.components.SmartViewType
 import com.culturedcode.things3.ui.components.ThingsTooltipHostBox
 import com.culturedcode.things3.ui.screens.ThingsSmartViewScreen
 import com.culturedcode.things3.ui.theme.Things3Theme
@@ -98,6 +99,30 @@ class MainActivity : AppCompatActivity() {
                     LaunchedEffect(currentIntent) {
                         if (currentIntent != null) {
                             runCatching {
+                                if (currentIntent.action == Intent.ACTION_SEND &&
+                                    currentIntent.type?.startsWith("text/") == true
+                                ) {
+                                    val sharedSubject = currentIntent.getStringExtra(Intent.EXTRA_SUBJECT)
+                                    val sharedText = currentIntent.getStringExtra(Intent.EXTRA_TEXT)
+                                    if (!sharedSubject.isNullOrBlank() || !sharedText.isNullOrBlank()) {
+                                        viewModel.openQuickShareDraft(sharedSubject, sharedText)
+                                    }
+                                    currentIntent.action = Intent.ACTION_MAIN
+                                    currentIntent.removeExtra(Intent.EXTRA_SUBJECT)
+                                    currentIntent.removeExtra(Intent.EXTRA_TEXT)
+                                }
+
+                                val shortcutAction = currentIntent.getStringExtra("extra_shortcut_action")
+                                if (!shortcutAction.isNullOrBlank()) {
+                                    when (shortcutAction) {
+                                        "NEW_TODO" -> viewModel.handleWidgetLaunchIntent("INBOX", null, true)
+                                        "TODAY" -> viewModel.selectSmartView(SmartViewType.TODAY)
+                                        "INBOX" -> viewModel.selectSmartView(SmartViewType.INBOX)
+                                        "QUICK_FIND" -> viewModel.setQuickFindOpen(true)
+                                    }
+                                    currentIntent.removeExtra("extra_shortcut_action")
+                                }
+
                                 val widgetView = currentIntent.getStringExtra(
                                     ThingsbookWidgetProvider.EXTRA_WIDGET_SMART_VIEW
                                 )

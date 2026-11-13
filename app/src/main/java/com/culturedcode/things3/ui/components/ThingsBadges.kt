@@ -13,6 +13,7 @@ import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CheckCircleOutline
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Layers
@@ -50,7 +51,8 @@ enum class SmartViewType(
     UPCOMING(R.string.view_upcoming, Icons.Outlined.CalendarMonth),
     ANYTIME(R.string.view_anytime, Icons.Outlined.Layers),
     SOMEDAY(R.string.view_someday, Icons.Outlined.Archive),
-    LOGBOOK(R.string.view_logbook, Icons.Outlined.CheckCircleOutline)
+    LOGBOOK(R.string.view_logbook, Icons.Outlined.CheckCircleOutline),
+    TRASH(R.string.view_trash, Icons.Outlined.DeleteOutline)
 }
 
 @Composable
@@ -66,6 +68,7 @@ fun SmartViewIcon(
         SmartViewType.ANYTIME -> colors.anytimeTeal
         SmartViewType.SOMEDAY -> colors.somedayWarmAmber
         SmartViewType.LOGBOOK -> colors.logbookGreen
+        SmartViewType.TRASH -> colors.secondaryText
     }
 
     Icon(

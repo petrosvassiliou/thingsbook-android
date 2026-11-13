@@ -117,6 +117,10 @@ fun ThingsSettingsModal(
     onToggleCalendarSelection: (String) -> Unit = {},
     onSetAllCalendarsSelected: (Boolean) -> Unit = {},
     onRefreshCalendars: () -> Unit = {},
+    groupTodayByProjectOrArea: Boolean = false,
+    onSetGroupTodayByProjectOrArea: (Boolean) -> Unit = {},
+    biometricAppLockEnabled: Boolean = false,
+    onSetBiometricAppLockEnabled: (Boolean) -> Unit = {},
     autoCheckUpdatesEnabled: Boolean = true,
     appUpdateState: AppUpdateUiState = AppUpdateUiState.Idle,
     onSetAutoCheckUpdatesEnabled: (Boolean) -> Unit = {},
@@ -613,6 +617,96 @@ fun ThingsSettingsModal(
                                     color = colors.deadlineUrgentRed
                                 )
                             }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(color = colors.hairlineDivider)
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // =============================================================
+                // Workflow & Security (Group Today by Project/Area + Biometric Lock)
+                // =============================================================
+                SettingsSectionHeader(
+                    icon = Icons.Outlined.Settings,
+                    title = stringResource(R.string.settings_workflow_security_section)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = colors.tagPillBg.copy(alpha = 0.65f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = stringResource(R.string.settings_group_today_title),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = colors.primaryText
+                                )
+                                Text(
+                                    text = stringResource(R.string.settings_group_today_desc),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
+                                    color = colors.secondaryText
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Switch(
+                                checked = groupTodayByProjectOrArea,
+                                onCheckedChange = { enabled ->
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onSetGroupTodayByProjectOrArea(enabled)
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = colors.thingsBlue
+                                )
+                            )
+                        }
+
+                        HorizontalDivider(color = colors.hairlineDivider)
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = stringResource(R.string.settings_biometric_lock_title),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = colors.primaryText
+                                )
+                                Text(
+                                    text = stringResource(R.string.settings_biometric_lock_desc),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
+                                    color = colors.secondaryText
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Switch(
+                                checked = biometricAppLockEnabled,
+                                onCheckedChange = { enabled ->
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onSetBiometricAppLockEnabled(enabled)
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = colors.thingsBlue
+                                )
+                            )
                         }
                     }
                 }

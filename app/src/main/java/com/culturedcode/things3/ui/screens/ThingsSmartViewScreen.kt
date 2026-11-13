@@ -76,6 +76,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.CloudSync
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ErrorOutline
@@ -164,6 +165,7 @@ import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
 import com.culturedcode.things3.ui.components.CreateOrEditProjectDialog
 import com.culturedcode.things3.ui.components.DeadlineDatePickerDialog
+import com.culturedcode.things3.ui.components.DetectedNotesLinksRow
 import com.culturedcode.things3.ui.components.ExpandableTaskCard
 import com.culturedcode.things3.ui.components.GeminiAssistantModal
 import com.culturedcode.things3.ui.components.GeminiLogbookReflectionCard
@@ -182,18 +184,25 @@ import com.culturedcode.things3.ui.components.ThingsAreaManagerModal
 import com.culturedcode.things3.ui.components.ThingsAuthAndSyncModal
 import com.culturedcode.things3.ui.components.ThingsBackupCreateDialog
 import com.culturedcode.things3.ui.components.ThingsBackupRestoreDialog
+import com.culturedcode.things3.ui.components.ThingsBiometricLockOverlay
 import com.culturedcode.things3.ui.components.ThingsDeadlineBadge
+import com.culturedcode.things3.ui.components.ThingsEmptyTrashConfirmDialog
+import com.culturedcode.things3.ui.components.ThingsFocusTimerBanner
 import com.culturedcode.things3.ui.components.ThingsHoverTooltip
 import com.culturedcode.things3.ui.components.ThingsInitialSetupBanner
 import com.culturedcode.things3.ui.components.ThingsNotificationSettingsModal
+import com.culturedcode.things3.ui.components.ThingsQuickShareModal
 import com.culturedcode.things3.ui.components.ThingsReminderBadge
 import com.culturedcode.things3.ui.components.ThingsRepeatBadge
 import com.culturedcode.things3.ui.components.ThingsSettingsModal
 import com.culturedcode.things3.ui.components.ThingsTagManagerModal
 import com.culturedcode.things3.ui.components.ThingsTagPill
+import com.culturedcode.things3.ui.components.ThingsTrashItemCard
+import com.culturedcode.things3.ui.components.ThingsUndoSnackbarBanner
 import com.culturedcode.things3.ui.components.ThingsWhenBadge
 import com.culturedcode.things3.ui.components.ThingsbookBrandSymbol
 import com.culturedcode.things3.ui.components.ThisEveningHeaderBadge
+import com.culturedcode.things3.ui.components.rememberThingsMarkdownVisualTransformation
 import com.culturedcode.things3.ui.theme.ThingsTheme
 import com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget
 import com.culturedcode.things3.ui.viewmodel.ThingsbookStatistics
@@ -224,6 +233,10 @@ fun ThingsSmartViewScreen(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.onAppResumed()
+            } else if (event == Lifecycle.Event.ON_STOP) {
+                if ((appCtx as? android.app.Activity)?.isChangingConfigurations != true) {
+                    viewModel.onAppStopped()
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -268,6 +281,12 @@ fun ThingsSmartViewScreen(
     val anytimeTasks by viewModel.anytimeTasks.collectAsState()
     val somedayTasks by viewModel.somedayTasks.collectAsState()
     val logbookTasks by viewModel.logbookTasks.collectAsState()
+    val deletedTasks by viewModel.deletedTasks.collectAsState()
+    val deletedProjects by viewModel.deletedProjects.collectAsState()
+    val undoSnackbarMessage by viewModel.undoSnackbarMessage.collectAsState()
+    val focusTimerState by viewModel.focusTimerState.collectAsState()
+    val biometricAppLockEnabled by viewModel.biometricAppLockEnabled.collectAsState()
+    val isAppUnlocked by viewModel.isAppUnlocked.collectAsState()
 
     val areas by viewModel.areas.collectAsState()
     val activeProjects by viewModel.activeProjects.collectAsState()
@@ -282,6 +301,9 @@ fun ThingsSmartViewScreen(
     var projectDialogPreselectedAreaId by remember { mutableStateOf<String?>(null) }
     var editingProject by remember { mutableStateOf<Project?>(null) }
     var showBatchMoveDialog by remember { mutableStateOf(false) }
+    var showEmptyTrashConfirmDialog by remember { mutableStateOf(false) }
+    var externalDialogTriggerToken by remember { mutableIntStateOf(0) }
+    var externalDialogTriggerType by remember { mutableStateOf<String?>(null) }
 
     // Determine primary task list for current view, filtered by selected tag if active
     val rawPrimaryTasks: List<TaskItem> = when (val target = navTarget) {
@@ -292,6 +314,7 @@ fun ThingsSmartViewScreen(
             SmartViewType.ANYTIME -> anytimeTasks
             SmartViewType.SOMEDAY -> somedayTasks
             SmartViewType.LOGBOOK -> logbookTasks
+            SmartViewType.TRASH -> deletedTasks
         }
         is ActiveNavigationTarget.ProjectDetail -> projectTasks
         is ActiveNavigationTarget.AreaDetail -> areaTasks
@@ -350,7 +373,8 @@ fun ThingsSmartViewScreen(
         SmartViewType.UPCOMING to upcomingTasks.size,
         SmartViewType.ANYTIME to anytimeTasks.size,
         SmartViewType.SOMEDAY to somedayTasks.size,
-        SmartViewType.LOGBOOK to logbookTasks.size
+        SmartViewType.LOGBOOK to logbookTasks.size,
+        SmartViewType.TRASH to (deletedTasks.size + deletedProjects.size)
     )
 
     val triggerCreateTaskShortcut by rememberUpdatedState {
@@ -390,6 +414,59 @@ fun ThingsSmartViewScreen(
             ctrlOrMeta && !nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_G -> {
                 viewModel.setGeminiModalOpen(true)
                 true
+            }
+            ctrlOrMeta && !nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_Z -> {
+                viewModel.performUndo()
+                true
+            }
+            ctrlOrMeta && !nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_D -> {
+                when {
+                    expandedTaskId != null -> {
+                        viewModel.duplicateTask(expandedTaskId!!)
+                        true
+                    }
+                    currentProject != null -> {
+                        viewModel.duplicateProject(currentProject.id)
+                        true
+                    }
+                    else -> false
+                }
+            }
+            ctrlOrMeta && !nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_S -> {
+                if (expandedTaskId != null) {
+                    externalDialogTriggerType = "WHEN"
+                    externalDialogTriggerToken++
+                    true
+                } else {
+                    false
+                }
+            }
+            ctrlOrMeta && nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_D -> {
+                if (expandedTaskId != null) {
+                    externalDialogTriggerType = "DEADLINE"
+                    externalDialogTriggerToken++
+                    true
+                } else {
+                    false
+                }
+            }
+            ctrlOrMeta && nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_M -> {
+                if (expandedTaskId != null) {
+                    externalDialogTriggerType = "MOVE"
+                    externalDialogTriggerToken++
+                    true
+                } else {
+                    false
+                }
+            }
+            ctrlOrMeta && (nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_DEL ||
+                nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_FORWARD_DEL) -> {
+                if (expandedTaskId != null) {
+                    viewModel.deleteTask(expandedTaskId!!)
+                    true
+                } else {
+                    false
+                }
             }
             ctrlOrMeta && !nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_A &&
                 expandedTaskId == null && !showCreateProjectDialog && !showBatchMoveDialog -> {
@@ -446,6 +523,58 @@ fun ThingsSmartViewScreen(
                         ctrlOrMeta && !event.isShiftPressed && event.key == Key.F -> {
                             viewModel.setQuickFindOpen(!isQuickFindOpen)
                             true
+                        }
+                        ctrlOrMeta && !event.isShiftPressed && event.key == Key.Z -> {
+                            viewModel.performUndo()
+                            true
+                        }
+                        ctrlOrMeta && !event.isShiftPressed && event.key == Key.D -> {
+                            when {
+                                expandedTaskId != null -> {
+                                    viewModel.duplicateTask(expandedTaskId!!)
+                                    true
+                                }
+                                currentProject != null -> {
+                                    viewModel.duplicateProject(currentProject.id)
+                                    true
+                                }
+                                else -> false
+                            }
+                        }
+                        ctrlOrMeta && !event.isShiftPressed && event.key == Key.S -> {
+                            if (expandedTaskId != null) {
+                                externalDialogTriggerType = "WHEN"
+                                externalDialogTriggerToken++
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        ctrlOrMeta && event.isShiftPressed && event.key == Key.D -> {
+                            if (expandedTaskId != null) {
+                                externalDialogTriggerType = "DEADLINE"
+                                externalDialogTriggerToken++
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        ctrlOrMeta && event.isShiftPressed && event.key == Key.M -> {
+                            if (expandedTaskId != null) {
+                                externalDialogTriggerType = "MOVE"
+                                externalDialogTriggerToken++
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        ctrlOrMeta && (event.key == Key.Backspace || event.key == Key.Delete) -> {
+                            if (expandedTaskId != null) {
+                                viewModel.deleteTask(expandedTaskId!!)
+                                true
+                            } else {
+                                false
+                            }
                         }
                         ctrlOrMeta && !event.isShiftPressed && event.key == Key.A && expandedTaskId == null -> {
                             viewModel.selectAllTasks(allVisibleTaskIds)
@@ -561,6 +690,17 @@ fun ThingsSmartViewScreen(
                         activeLocale = activeLocale
                     )
 
+                    focusTimerState?.let { timerState ->
+                        ThingsFocusTimerBanner(
+                            timerState = timerState,
+                            onTogglePause = { viewModel.toggleFocusTimerPause() },
+                            onAddFiveMinutes = { viewModel.addFiveMinutesToFocusTimer() },
+                            onCompleteTask = { viewModel.completeFocusTimerTask() },
+                            onStopTimer = { viewModel.stopFocusTimer() },
+                            onClickTask = { viewModel.toggleTaskExpansion(timerState.taskId) }
+                        )
+                    }
+
                     // On Foldables & Googlebook (>= 700dp), show horizontal strip when the permanent sidebar is collapsed
                     if (isWideScreen && !showSidebar) {
                         SmartViewNavigationStrip(
@@ -587,15 +727,18 @@ fun ThingsSmartViewScreen(
                         areas = areas,
                         projects = activeProjects,
                         locale = activeLocale,
+                        trashItemCount = deletedTasks.size + deletedProjects.size,
                         onUpdateProjectDeadline = { pId, dl -> viewModel.updateProjectDeadline(pId, dl) },
                         onUpdateProjectArea = { pId, aId -> viewModel.updateProjectArea(pId, aId) },
                         onEditProject = { proj ->
                             editingProject = proj
                             showCreateProjectDialog = true
                         },
+                        onDuplicateProject = { pId -> viewModel.duplicateProject(pId) },
                         onCompleteProject = { pId -> viewModel.completeProject(pId) },
                         onMoveProject = { pId, up -> viewModel.moveProject(pId, up) },
                         onDeleteProject = { pId -> viewModel.deleteProject(pId) },
+                        onRequestEmptyTrash = { showEmptyTrashConfirmDialog = true },
                         onAddTaskInCurrentView = {
                             viewModel.createTaskAtPosition(primaryTasks, 0, "")
                         },
@@ -636,6 +779,8 @@ fun ThingsSmartViewScreen(
                         magicDragState = magicDragState,
                         projectDragController = projectDragController,
                         activeLocale = activeLocale,
+                        externalDialogTriggerToken = externalDialogTriggerToken,
+                        externalDialogTriggerType = externalDialogTriggerType,
                         onRequestCreateProjectInArea = { areaId ->
                             projectDialogPreselectedAreaId = areaId
                             editingProject = null
@@ -705,6 +850,16 @@ fun ThingsSmartViewScreen(
                     .padding(horizontal = 16.dp, vertical = 22.dp)
             )
         }
+
+        // 5-Second Undo Snackbar Banner (also triggered by Ctrl+Z)
+        ThingsUndoSnackbarBanner(
+            message = undoSnackbarMessage,
+            onUndo = { viewModel.performUndo() },
+            onDismiss = { viewModel.dismissUndoSnackbar() },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = if (selectedTaskIds.isNotEmpty()) 76.dp else 18.dp)
+        )
 
         // Expandable Context-Sensitive "Magic Plus" Menu + Drag & Drop FAB (bottom-right)
         MagicPlusOverlaySection(
@@ -809,8 +964,16 @@ fun ThingsSmartViewScreen(
             onDismissCreateProjectDialog = {
                 showCreateProjectDialog = false
                 editingProject = null
-            }
+            },
+            showEmptyTrashConfirmDialog = showEmptyTrashConfirmDialog,
+            onDismissEmptyTrashConfirmDialog = { showEmptyTrashConfirmDialog = false }
         )
+
+        if (biometricAppLockEnabled && !isAppUnlocked) {
+            ThingsBiometricLockOverlay(
+                onUnlocked = { viewModel.markAppUnlocked() }
+            )
+        }
     }
 }
 
@@ -866,7 +1029,7 @@ private fun MagicPlusOverlaySection(
         is ActiveNavigationTarget.ProjectDetail -> MagicPlusContextMode.PROJECT_DETAIL
         is ActiveNavigationTarget.AreaDetail -> MagicPlusContextMode.AREA_DETAIL
         is ActiveNavigationTarget.SmartView -> {
-            if (navTarget.type == SmartViewType.LOGBOOK) {
+            if (navTarget.type == SmartViewType.LOGBOOK || navTarget.type == SmartViewType.TRASH) {
                 MagicPlusContextMode.LOGBOOK
             } else {
                 MagicPlusContextMode.SMART_VIEW
@@ -1327,6 +1490,8 @@ private fun ThingsTaskRowItem(
     allVisibleTaskIds: List<String>,
     magicBreakdownTaskId: String?,
     activeLocale: Locale,
+    externalDialogTriggerToken: Int = 0,
+    externalDialogTriggerType: String? = null,
     onRequestEnsureVisible: ((Boolean) -> Unit)? = null,
     dragHandle: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -1375,6 +1540,10 @@ private fun ThingsTaskRowItem(
             onTriggerGeminiMagicBreakdown = {
                 viewModel.triggerGeminiMagicBreakdown(task, activeLocale)
             },
+            onDuplicateTask = { viewModel.duplicateTask(task.id) },
+            onStartFocusTimer = { viewModel.startFocusTimer(task.id, task.title) },
+            externalDialogTriggerToken = if (expandedTaskId == task.id) externalDialogTriggerToken else 0,
+            externalDialogTriggerType = if (expandedTaskId == task.id) externalDialogTriggerType else null,
             onDeleteTask = { viewModel.deleteTask(task.id) },
             locale = activeLocale
         )
@@ -1406,6 +1575,8 @@ private fun ThingsMainTaskLazyList(
     magicDragState: MagicPlusDragState,
     projectDragController: ProjectDragDropController,
     activeLocale: Locale,
+    externalDialogTriggerToken: Int = 0,
+    externalDialogTriggerType: String? = null,
     onRequestCreateProjectInArea: (String) -> Unit,
     onRequestEditProject: (Project) -> Unit,
     modifier: Modifier = Modifier
@@ -1425,6 +1596,9 @@ private fun ThingsMainTaskLazyList(
     val calendarEventsEnabled by viewModel.calendarEventsEnabled.collectAsState()
     val todayCalendarEvents by viewModel.todayCalendarEvents.collectAsState()
     val upcomingCalendarEventsByDate by viewModel.upcomingCalendarEventsByDate.collectAsState()
+    val deletedTasks by viewModel.deletedTasks.collectAsState()
+    val deletedProjects by viewModel.deletedProjects.collectAsState()
+    val groupTodayByProjectOrArea by viewModel.groupTodayByProjectOrArea.collectAsState()
 
     val listState = rememberLazyListState()
     var focusScrollRequestTick by remember { mutableIntStateOf(0) }
@@ -1763,9 +1937,52 @@ private fun ThingsMainTaskLazyList(
             }
         }
 
-        // If viewing a Project, render tasks without heading first, then collapsible Headings
-        // (Drag & Drop of the Magic Plus and of tasks is resolved by position via ProjectDragDropController)
-        if (isProjectView) {
+        // If viewing Trash (Papierkorb), render soft-deleted projects and tasks with Restore / Delete Forever actions
+        if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TRASH)) {
+            if (deletedProjects.isEmpty() && primaryTasks.isEmpty()) {
+                item(key = "trash_empty_placeholder") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 48.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = stringResource(R.string.trash_empty_state),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.secondaryText
+                        )
+                    }
+                }
+            } else {
+                items(
+                    items = deletedProjects,
+                    key = { proj -> "trash_proj_${proj.id}" }
+                ) { proj ->
+                    ThingsTrashItemCard(
+                        title = proj.title,
+                        subtitle = stringResource(R.string.entity_project),
+                        isProject = true,
+                        onRestore = { viewModel.restoreDeletedProject(proj.id) },
+                        onDeleteForever = { viewModel.permanentlyDeleteProject(proj.id) },
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    )
+                }
+                items(
+                    items = primaryTasks,
+                    key = { task -> "trash_task_${task.id}" }
+                ) { task ->
+                    ThingsTrashItemCard(
+                        title = task.title,
+                        subtitle = task.notes.lineSequence().firstOrNull()?.takeIf { it.isNotBlank() },
+                        isProject = false,
+                        onRestore = { viewModel.restoreDeletedTask(task.id) },
+                        onDeleteForever = { viewModel.permanentlyDeleteTask(task.id) },
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        } else if (isProjectView) {
             val ungroupedTasks = projectSections[null].orEmpty()
             items(
                 items = ungroupedTasks,
@@ -1784,6 +2001,8 @@ private fun ThingsMainTaskLazyList(
                     allVisibleTaskIds = allVisibleTaskIds,
                     magicBreakdownTaskId = magicBreakdownTaskId,
                     activeLocale = activeLocale,
+                    externalDialogTriggerToken = externalDialogTriggerToken,
+                    externalDialogTriggerType = externalDialogTriggerType,
                     onRequestEnsureVisible = handleEnsureVisibleRequest,
                     dragHandle = taskDragHandleFor(task),
                     modifier = Modifier.alpha(if (task.id == draggedTaskId) 0.35f else 1f)
@@ -1823,6 +2042,8 @@ private fun ThingsMainTaskLazyList(
                             allVisibleTaskIds = allVisibleTaskIds,
                             magicBreakdownTaskId = magicBreakdownTaskId,
                             activeLocale = activeLocale,
+                            externalDialogTriggerToken = externalDialogTriggerToken,
+                            externalDialogTriggerType = externalDialogTriggerType,
                             onRequestEnsureVisible = handleEnsureVisibleRequest,
                             dragHandle = taskDragHandleFor(task),
                             modifier = Modifier.alpha(if (task.id == draggedTaskId) 0.35f else 1f)
@@ -1886,12 +2107,160 @@ private fun ThingsMainTaskLazyList(
                         allVisibleTaskIds = allVisibleTaskIds,
                         magicBreakdownTaskId = magicBreakdownTaskId,
                         activeLocale = activeLocale,
+                        externalDialogTriggerToken = externalDialogTriggerToken,
+                        externalDialogTriggerType = externalDialogTriggerType,
                         onRequestEnsureVisible = handleEnsureVisibleRequest
                     )
                 }
             }
 
             // Trailing Magic Plus drop slot at the end of the list
+            item(key = "trailing_magic_plus_gap") {
+                MagicPlusInsertionGap(
+                    visible = magicDragState.isDragging && magicDragState.dropIndex >= primaryTasks.size,
+                    dropMode = magicDragState.dropMode
+                )
+            }
+        } else if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) && groupTodayByProjectOrArea) {
+            // Optional Things 3 "Group Today by Project or Area" mode
+            val projectMap = activeProjects.associateBy { it.id }
+            val areaMap = areas.associateBy { it.id }
+            val unassignedTodayTasks = primaryTasks.filter {
+                (it.projectId == null || it.projectId !in projectMap) &&
+                    (it.areaId == null || it.areaId !in areaMap)
+            }
+            itemsIndexed(
+                items = unassignedTodayTasks,
+                key = { _, task -> task.id }
+            ) { index, task ->
+                MagicPlusInsertionGap(
+                    visible = magicDragState.isDragging && magicDragState.dropIndex == index,
+                    dropMode = magicDragState.dropMode
+                )
+                ThingsTaskRowItem(
+                    task = task,
+                    viewModel = viewModel,
+                    allTags = allTags,
+                    areas = areas,
+                    activeProjects = activeProjects,
+                    allHeadings = allHeadings,
+                    expandedTaskId = expandedTaskId,
+                    isQuickFindOpen = isQuickFindOpen,
+                    selectedTaskIds = selectedTaskIds,
+                    allVisibleTaskIds = allVisibleTaskIds,
+                    magicBreakdownTaskId = magicBreakdownTaskId,
+                    activeLocale = activeLocale,
+                    externalDialogTriggerToken = externalDialogTriggerToken,
+                    externalDialogTriggerType = externalDialogTriggerType,
+                    onRequestEnsureVisible = handleEnsureVisibleRequest
+                )
+            }
+
+            activeProjects.forEach { proj ->
+                val projTodayTasks = primaryTasks.filter { it.projectId == proj.id }
+                if (projTodayTasks.isNotEmpty()) {
+                    item(key = "today_group_proj_${proj.id}") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 4.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { viewModel.selectProject(proj.id) }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            ProjectProgressRing(progress = proj.progress, size = 16.dp)
+                            Text(
+                                text = proj.title,
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    color = colors.thingsBlue,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
+                    }
+                    items(
+                        items = projTodayTasks,
+                        key = { task -> task.id }
+                    ) { task ->
+                        ThingsTaskRowItem(
+                            task = task,
+                            viewModel = viewModel,
+                            allTags = allTags,
+                            areas = areas,
+                            activeProjects = activeProjects,
+                            allHeadings = allHeadings,
+                            expandedTaskId = expandedTaskId,
+                            isQuickFindOpen = isQuickFindOpen,
+                            selectedTaskIds = selectedTaskIds,
+                            allVisibleTaskIds = allVisibleTaskIds,
+                            magicBreakdownTaskId = magicBreakdownTaskId,
+                            activeLocale = activeLocale,
+                            externalDialogTriggerToken = externalDialogTriggerToken,
+                            externalDialogTriggerType = externalDialogTriggerType,
+                            onRequestEnsureVisible = handleEnsureVisibleRequest
+                        )
+                    }
+                }
+            }
+
+            areas.forEach { area ->
+                val areaTodayTasks = primaryTasks.filter {
+                    (it.projectId == null || it.projectId !in projectMap) && it.areaId == area.id
+                }
+                if (areaTodayTasks.isNotEmpty()) {
+                    item(key = "today_group_area_${area.id}") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 4.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { viewModel.selectArea(area.id) }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Inventory2,
+                                contentDescription = area.title,
+                                tint = colors.anytimeTeal,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = area.title,
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    color = colors.anytimeTeal,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
+                    }
+                    items(
+                        items = areaTodayTasks,
+                        key = { task -> task.id }
+                    ) { task ->
+                        ThingsTaskRowItem(
+                            task = task,
+                            viewModel = viewModel,
+                            allTags = allTags,
+                            areas = areas,
+                            activeProjects = activeProjects,
+                            allHeadings = allHeadings,
+                            expandedTaskId = expandedTaskId,
+                            isQuickFindOpen = isQuickFindOpen,
+                            selectedTaskIds = selectedTaskIds,
+                            allVisibleTaskIds = allVisibleTaskIds,
+                            magicBreakdownTaskId = magicBreakdownTaskId,
+                            activeLocale = activeLocale,
+                            externalDialogTriggerToken = externalDialogTriggerToken,
+                            externalDialogTriggerType = externalDialogTriggerType,
+                            onRequestEnsureVisible = handleEnsureVisibleRequest
+                        )
+                    }
+                }
+            }
+
             item(key = "trailing_magic_plus_gap") {
                 MagicPlusInsertionGap(
                     visible = magicDragState.isDragging && magicDragState.dropIndex >= primaryTasks.size,
@@ -1921,6 +2290,8 @@ private fun ThingsMainTaskLazyList(
                     allVisibleTaskIds = allVisibleTaskIds,
                     magicBreakdownTaskId = magicBreakdownTaskId,
                     activeLocale = activeLocale,
+                    externalDialogTriggerToken = externalDialogTriggerToken,
+                    externalDialogTriggerType = externalDialogTriggerType,
                     onRequestEnsureVisible = handleEnsureVisibleRequest
                 )
             }
@@ -1971,6 +2342,8 @@ private fun ThingsMainTaskLazyList(
                     allVisibleTaskIds = allVisibleTaskIds,
                     magicBreakdownTaskId = magicBreakdownTaskId,
                     activeLocale = activeLocale,
+                    externalDialogTriggerToken = externalDialogTriggerToken,
+                    externalDialogTriggerType = externalDialogTriggerType,
                     onRequestEnsureVisible = handleEnsureVisibleRequest
                 )
             }
@@ -1995,7 +2368,9 @@ private fun ThingsModalsOverlay(
     showCreateProjectDialog: Boolean,
     editingProject: Project?,
     projectDialogPreselectedAreaId: String?,
-    onDismissCreateProjectDialog: () -> Unit
+    onDismissCreateProjectDialog: () -> Unit,
+    showEmptyTrashConfirmDialog: Boolean = false,
+    onDismissEmptyTrashConfirmDialog: () -> Unit = {}
 ) {
     val allHeadings by viewModel.allHeadings.collectAsState()
     val isSettingsModalOpen by viewModel.isSettingsModalOpen.collectAsState()
@@ -2008,6 +2383,7 @@ private fun ThingsModalsOverlay(
     val pendingMergeAuthRequest by viewModel.pendingMergeAuthRequest.collectAsState()
     val pendingMergeNonSampleCount by viewModel.pendingMergeNonSampleCount.collectAsState()
     val isQuickCreateAreaDialogOpen by viewModel.isQuickCreateAreaDialogOpen.collectAsState()
+    val quickShareDraft by viewModel.quickShareDraft.collectAsState()
 
     val isGeminiModalOpen by viewModel.isGeminiModalOpen.collectAsState()
     val isGeminiBusy by viewModel.isGeminiBusy.collectAsState()
@@ -2050,6 +2426,8 @@ private fun ThingsModalsOverlay(
         val selectedCalendarIds by viewModel.selectedCalendarIds.collectAsState()
         val autoCheckUpdatesEnabled by viewModel.autoCheckUpdatesEnabled.collectAsState()
         val appUpdateState by viewModel.appUpdateState.collectAsState()
+        val groupTodayByProjectOrArea by viewModel.groupTodayByProjectOrArea.collectAsState()
+        val biometricAppLockEnabled by viewModel.biometricAppLockEnabled.collectAsState()
         ThingsSettingsModal(
             isLocalOnlyDbMode = isLocalOnlyDbMode,
             syncStatus = syncStatus,
@@ -2077,6 +2455,10 @@ private fun ThingsModalsOverlay(
             onCancelUpdateDownload = { viewModel.cancelUpdateDownload() },
             onOpenUpdateReleasePage = { url -> viewModel.openUpdateReleasePage(url) },
             onDeleteSampleTasksNow = { viewModel.deleteSampleTasksForLocalSetup() },
+            groupTodayByProjectOrArea = groupTodayByProjectOrArea,
+            onSetGroupTodayByProjectOrArea = { viewModel.setGroupTodayByProjectOrArea(it) },
+            biometricAppLockEnabled = biometricAppLockEnabled,
+            onSetBiometricAppLockEnabled = { viewModel.setBiometricAppLockEnabled(it) },
             onSetLocalOnlyDbMode = { viewModel.setLocalOnlyDbMode(it) },
             onOpenAuthAndSyncModal = {
                 viewModel.setSettingsModalOpen(false)
@@ -2222,6 +2604,27 @@ private fun ThingsModalsOverlay(
             },
             onSendTestNotificationNow = { viewModel.sendTestDailyDigestNotificationNow() },
             onDismiss = { viewModel.setNotificationSettingsOpen(false) }
+        )
+    }
+
+    // Quick Share to Thingsbook Modal (ACTION_SEND receiver)
+    quickShareDraft?.let { draft ->
+        ThingsQuickShareModal(
+            draft = draft,
+            projects = activeProjects,
+            areas = areas,
+            onDismiss = { viewModel.dismissQuickShareDraft() },
+            onSave = { title, notes, schedule, projId, areaId ->
+                viewModel.saveQuickShareTask(title, notes, schedule, projId, areaId)
+            }
+        )
+    }
+
+    // Empty Trash Confirmation Dialog
+    if (showEmptyTrashConfirmDialog) {
+        ThingsEmptyTrashConfirmDialog(
+            onDismiss = onDismissEmptyTrashConfirmDialog,
+            onConfirmEmptyTrash = { viewModel.emptyTrash() }
         )
     }
 }
@@ -3066,12 +3469,15 @@ private fun ViewTitleHeader(
     areas: List<Area>,
     projects: List<Project>,
     locale: Locale,
+    trashItemCount: Int = 0,
     onUpdateProjectDeadline: (String, Long?) -> Unit,
     onUpdateProjectArea: (String, String?) -> Unit,
     onEditProject: (Project) -> Unit,
+    onDuplicateProject: (String) -> Unit = {},
     onCompleteProject: (String) -> Unit,
     onMoveProject: (String, Boolean) -> Unit,
     onDeleteProject: (String) -> Unit,
+    onRequestEmptyTrash: () -> Unit = {},
     onAddTaskInCurrentView: () -> Unit,
     onAddHeadingInProject: () -> Unit,
     onRenameArea: (String, String) -> Unit,
@@ -3196,8 +3602,30 @@ private fun ViewTitleHeader(
                 }
             }
 
-            // Quick Actions for Project or Area in Header
-            if (currentProject != null) {
+            // Quick Actions for Project, Area, or Trash in Header
+            if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TRASH) && trashItemCount > 0) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(colors.deadlineSoftBg)
+                        .clickable(onClick = onRequestEmptyTrash)
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.DeleteOutline,
+                        contentDescription = stringResource(R.string.trash_empty_btn),
+                        tint = colors.deadlineUrgentRed,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.trash_empty_btn),
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = colors.deadlineUrgentRed
+                    )
+                }
+            } else if (currentProject != null) {
                 val projIdx = projects.indexOfFirst { it.id == currentProject.id }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -3231,6 +3659,19 @@ private fun ViewTitleHeader(
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
+                        }
+                    }
+                    ThingsHoverTooltip(text = "${stringResource(R.string.action_duplicate_project)} (Ctrl+D)") {
+                        IconButton(
+                            onClick = { onDuplicateProject(currentProject.id) },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.ContentCopy,
+                                contentDescription = stringResource(R.string.action_duplicate_project),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(16.dp)
+                            )
                         }
                     }
                     ThingsHoverTooltip(text = stringResource(R.string.project_edit_title)) {
@@ -3354,6 +3795,7 @@ private fun ViewTitleHeader(
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.secondaryText
                 )
+                DetectedNotesLinksRow(notes = currentProject.notes)
             }
 
             Spacer(modifier = Modifier.height(8.dp))

@@ -186,12 +186,134 @@ class ReminderScheduler @Inject constructor(
         }
     }
 
+    private fun canPostNotifications(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) return false
+        }
+        return NotificationManagerCompat.from(context).areNotificationsEnabled()
+    }
+
+    fun showOrUpdateFocusTimerNotification(
+        taskId: String,
+        taskTitle: String,
+        remainingSeconds: Int,
+        isPaused: Boolean
+    ) = runCatching {
+        if (!canPostNotifications()) return@runCatching
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return@runCatching
+        val channel = NotificationChannel(
+            FOCUS_CHANNEL_ID,
+            context.getString(R.string.focus_timer_active_label),
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            setSound(null, null)
+            enableVibration(false)
+        }
+        nm.createNotificationChannel(channel)
+
+        val mins = (remainingSeconds.coerceAtLeast(0)) / 60
+        val secs = (remainingSeconds.coerceAtLeast(0)) % 60
+        val formattedTime = String.format(java.util.Locale.US, "%02d:%02d", mins, secs)
+        val statusText = if (isPaused) {
+            "$formattedTime • ${context.getString(R.string.focus_timer_pause)}"
+        } else {
+            "$formattedTime • ${context.getString(R.string.focus_timer_active_label)}"
+        }
+
+        val openAppIntent = PendingIntent.getActivity(
+            context,
+            FOCUS_NOTIFICATION_ID,
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                data = Uri.parse("thingsbook://open_task/$taskId")
+                putExtra(com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.EXTRA_TASK_ID, taskId)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, FOCUS_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification_thingsbook)
+            .setContentTitle(taskTitle.ifBlank { context.getString(R.string.entity_todo) })
+            .setContentText(statusText)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(openAppIntent)
+            .build()
+
+        nm.notify(FOCUS_NOTIFICATION_ID, notification)
+    }
+
+    fun showFocusTimerFinishedNotification(taskId: String, taskTitle: String) = runCatching {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return@runCatching
+        nm.cancel(FOCUS_NOTIFICATION_ID)
+        if (!canPostNotifications()) return@runCatching
+
+        val exactChannel = NotificationChannel(
+            ReminderReceiver.CHANNEL_ID,
+            context.getString(R.string.action_reminder),
+            NotificationManager.IMPORTANCE_HIGH
+        )
+        nm.createNotificationChannel(exactChannel)
+
+        val openAppIntent = PendingIntent.getActivity(
+            context,
+            FOCUS_FINISHED_NOTIFICATION_ID,
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                data = Uri.parse("thingsbook://open_task/$taskId")
+                putExtra(com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.EXTRA_TASK_ID, taskId)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val completeIntent = PendingIntent.getBroadcast(
+            context,
+            (taskId + "_focus_complete").hashCode(),
+            Intent(context, ReminderReceiver::class.java).apply {
+                action = ReminderReceiver.ACTION_COMPLETE_TASK
+                data = Uri.parse("thingsbook://complete/$taskId")
+                putExtra(ReminderReceiver.EXTRA_TASK_ID, taskId)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, ReminderReceiver.CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification_thingsbook)
+            .setContentTitle(context.getString(R.string.focus_timer_finished_title))
+            .setContentText(taskTitle.ifBlank { context.getString(R.string.entity_todo) })
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(openAppIntent)
+            .addAction(
+                android.R.drawable.checkbox_on_background,
+                context.getString(R.string.action_complete),
+                completeIntent
+            )
+            .build()
+
+        nm.notify(FOCUS_FINISHED_NOTIFICATION_ID, notification)
+    }
+
+    fun cancelFocusTimerNotification() = runCatching {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return@runCatching
+        nm.cancel(FOCUS_NOTIFICATION_ID)
+    }
+
     companion object {
         private const val PREFS_NAME = "thingsbook_notification_prefs"
         private const val KEY_DAILY_ENABLED = "daily_digest_enabled"
         private const val KEY_DAILY_HOUR = "daily_digest_hour"
         private const val KEY_DAILY_MINUTE = "daily_digest_minute"
         private const val DAILY_DIGEST_REQUEST_CODE = 777001
+        private const val FOCUS_CHANNEL_ID = "thingsbook_focus_timer"
+        private const val FOCUS_NOTIFICATION_ID = 888002
+        private const val FOCUS_FINISHED_NOTIFICATION_ID = 888003
     }
 }
 
@@ -345,12 +467,23 @@ class ReminderReceiver : BroadcastReceiver() {
                             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                         )
 
-                        val eveningIntent = PendingIntent.getBroadcast(
+                        val snooze1hIntent = PendingIntent.getBroadcast(
                             context,
-                            (taskId + "_evening").hashCode(),
+                            (taskId + "_snooze1h").hashCode(),
                             Intent(context, ReminderReceiver::class.java).apply {
-                                action = ACTION_DEFER_THIS_EVENING
-                                data = Uri.parse("thingsbook://evening/$taskId")
+                                action = ACTION_SNOOZE_1H
+                                data = Uri.parse("thingsbook://snooze1h/$taskId")
+                                putExtra(EXTRA_TASK_ID, taskId)
+                            },
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                        )
+
+                        val tomorrowIntent = PendingIntent.getBroadcast(
+                            context,
+                            (taskId + "_tomorrow").hashCode(),
+                            Intent(context, ReminderReceiver::class.java).apply {
+                                action = ACTION_DEFER_TOMORROW
+                                data = Uri.parse("thingsbook://tomorrow/$taskId")
                                 putExtra(EXTRA_TASK_ID, taskId)
                             },
                             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -370,8 +503,13 @@ class ReminderReceiver : BroadcastReceiver() {
                             )
                             .addAction(
                                 android.R.drawable.ic_menu_recent_history,
-                                context.getString(R.string.view_this_evening),
-                                eveningIntent
+                                context.getString(R.string.notification_snooze_1h),
+                                snooze1hIntent
+                            )
+                            .addAction(
+                                android.R.drawable.ic_menu_my_calendar,
+                                context.getString(R.string.date_tomorrow),
+                                tomorrowIntent
                             )
                             .build()
 
@@ -386,12 +524,45 @@ class ReminderReceiver : BroadcastReceiver() {
 
             ACTION_COMPLETE_TASK -> {
                 val taskId = intent.getStringExtra(EXTRA_TASK_ID)?.takeIf { it.isNotBlank() } ?: return
-                runCatching { notificationManager.cancel(taskId.hashCode()) }
+                runCatching {
+                    notificationManager.cancel(taskId.hashCode())
+                    notificationManager.cancel(888003)
+                }
                 val pendingResult = goAsync()
                 scope.launch {
                     try {
                         runCatchingCancellable {
                             repository.updateTaskStatus(taskId, TaskStatus.COMPLETED)
+                        }
+                    } finally {
+                        pendingResult.finish()
+                    }
+                }
+            }
+
+            ACTION_SNOOZE_1H -> {
+                val taskId = intent.getStringExtra(EXTRA_TASK_ID)?.takeIf { it.isNotBlank() } ?: return
+                runCatching { notificationManager.cancel(taskId.hashCode()) }
+                val pendingResult = goAsync()
+                scope.launch {
+                    try {
+                        runCatchingCancellable {
+                            repository.snoozeTaskReminder(taskId, 60)
+                        }
+                    } finally {
+                        pendingResult.finish()
+                    }
+                }
+            }
+
+            ACTION_DEFER_TOMORROW -> {
+                val taskId = intent.getStringExtra(EXTRA_TASK_ID)?.takeIf { it.isNotBlank() } ?: return
+                runCatching { notificationManager.cancel(taskId.hashCode()) }
+                val pendingResult = goAsync()
+                scope.launch {
+                    try {
+                        runCatchingCancellable {
+                            repository.deferTaskToTomorrow(taskId)
                         }
                     } finally {
                         pendingResult.finish()
@@ -438,6 +609,8 @@ class ReminderReceiver : BroadcastReceiver() {
         const val ACTION_SHOW_REMINDER = "com.culturedcode.things3.ACTION_SHOW_REMINDER"
         const val ACTION_SHOW_DAILY_DIGEST = "com.culturedcode.things3.ACTION_SHOW_DAILY_DIGEST"
         const val ACTION_COMPLETE_TASK = "com.culturedcode.things3.ACTION_COMPLETE_TASK"
+        const val ACTION_SNOOZE_1H = "com.culturedcode.things3.ACTION_SNOOZE_1H"
+        const val ACTION_DEFER_TOMORROW = "com.culturedcode.things3.ACTION_DEFER_TOMORROW"
         const val ACTION_DEFER_THIS_EVENING = "com.culturedcode.things3.ACTION_DEFER_THIS_EVENING"
         const val EXTRA_TASK_ID = "extra_task_id"
         const val EXTRA_TASK_TITLE = "extra_task_title"

@@ -157,6 +157,12 @@ interface ProjectDao {
 
     @Query("UPDATE projects SET isDirty = 1 WHERE isDeleted = 0")
     suspend fun markAllActiveDirty()
+
+    @Query("SELECT * FROM projects WHERE isDeleted = 1 ORDER BY updatedAt DESC")
+    fun observeDeletedProjects(): Flow<List<ProjectEntity>>
+
+    @Query("SELECT * FROM projects WHERE isDeleted = 1 ORDER BY updatedAt DESC")
+    suspend fun getDeletedProjectsList(): List<ProjectEntity>
 }
 
 @Dao
@@ -196,6 +202,12 @@ interface HeadingDao {
 
     @Query("UPDATE headings SET isDeleted = 1, updatedAt = :now, isDirty = 1 WHERE projectId = :projectId AND isDeleted = 0")
     suspend fun softDeleteHeadingsForProject(projectId: String, now: Long)
+
+    @Query("UPDATE headings SET isDeleted = 0, updatedAt = :now, isDirty = 1 WHERE projectId = :projectId AND isDeleted = 1")
+    suspend fun restoreHeadingsForProject(projectId: String, now: Long)
+
+    @Query("DELETE FROM headings WHERE projectId IN (:projectIds)")
+    suspend fun hardDeleteHeadingsForProjects(projectIds: List<String>)
 
     @Query("SELECT COUNT(*) FROM tasks WHERE headingId = :headingId AND isDeleted = 0")
     suspend fun countActiveTasksInHeading(headingId: String): Int
@@ -512,6 +524,13 @@ interface TaskDao {
 
     @Query("UPDATE tasks SET isDirty = 1 WHERE isDeleted = 0")
     suspend fun markAllActiveDirty()
+
+    @Transaction
+    @Query("SELECT * FROM tasks WHERE isDeleted = 1 ORDER BY updatedAt DESC")
+    fun observeDeletedTasks(): Flow<List<TaskWithDetails>>
+
+    @Query("SELECT * FROM tasks WHERE isDeleted = 1 ORDER BY updatedAt DESC")
+    suspend fun getDeletedTasksList(): List<TaskEntity>
 }
 
 @Dao
@@ -548,6 +567,9 @@ interface ChecklistDao {
 
     @Query("DELETE FROM checklist_items WHERE taskId IN (:taskIds) OR id IN (:itemIds)")
     suspend fun hardDeleteForSampleTasks(taskIds: List<String>, itemIds: List<String>)
+
+    @Query("DELETE FROM checklist_items WHERE taskId IN (:taskIds)")
+    suspend fun hardDeleteByTaskIds(taskIds: List<String>)
 
     @Query("DELETE FROM checklist_items")
     suspend fun hardDeleteAll()

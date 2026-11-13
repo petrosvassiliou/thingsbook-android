@@ -45,6 +45,8 @@ export interface BackupPreferencesDto {
   dailyDigestHour?: number | null;
   dailyDigestMinute?: number | null;
   languageTag?: string | null;
+  calendarEventsEnabled?: boolean | null;
+  selectedCalendarIds?: string[] | null;
 }
 
 export interface ThingsbookBackupPayload {
@@ -368,8 +370,8 @@ export function buildBackupPayloadFromEntities(params: {
 export async function encodeThingsBackup(
   payload: ThingsbookBackupPayload,
   password: string | null,
-  appVersionName = '1.6.20-chromeos',
-  appVersionCode = 37
+  appVersionName = '1.6.23-chromeos',
+  appVersionCode = 40
 ): Promise<Uint8Array> {
   const jsonBytes = new TextEncoder().encode(JSON.stringify(payload));
   const compressed = await gzipCompress(jsonBytes);

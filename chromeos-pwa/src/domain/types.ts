@@ -144,6 +144,31 @@ export interface AppPreferences {
   dailyDigestMinute: number;
   autoCheckUpdatesEnabled: boolean;
   geminiApiKey: string;
+  calendarEventsEnabled: boolean;
+  selectedCalendarIds: string[];
+  calendarIdsInitialized: boolean;
+}
+
+export interface DeviceCalendarInfo {
+  id: string;
+  displayName: string;
+  accountName: string;
+  colorCss: string;
+  isPrimary: boolean;
+  source: 'gcal' | 'ics';
+}
+
+export interface CalendarEventItem {
+  eventId: string;
+  calendarId: string;
+  calendarName: string;
+  calendarColorCss: string;
+  title: string;
+  startMillis: number;
+  endMillis: number;
+  isAllDay: boolean;
+  location: string | null;
+  htmlLink: string | null;
 }
 
 export interface ThingsbookStatistics {

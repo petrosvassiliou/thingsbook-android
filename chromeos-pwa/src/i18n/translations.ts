@@ -193,6 +193,18 @@ export interface TranslationStrings {
   repeatEndsLabel: string;
   sidebarShow: string;
   sidebarHide: string;
+  settingsCalendarSection: string;
+  settingsCalendarEnableTitle: string;
+  settingsCalendarEnableDesc: string;
+  settingsCalendarSelectHint: (selected: number, total: number) => string;
+  settingsCalendarSelectAll: string;
+  settingsCalendarSelectNone: string;
+  settingsCalendarNoneFound: string;
+  settingsCalendarPermissionDenied: string;
+  settingsCalendarGrantPermissionBtn: string;
+  settingsCalendarImportIcsBtn: string;
+  calendarAllDay: string;
+  calendarUntitledEvent: string;
 }
 
 export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
@@ -397,7 +409,21 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     repeatMonthDayLabel: 'Day of month:',
     repeatEndsLabel: 'Ends:',
     sidebarShow: 'Show sidebar',
-    sidebarHide: 'Hide sidebar'
+    sidebarHide: 'Hide sidebar',
+    settingsCalendarSection: 'Google Calendar & Calendar Events',
+    settingsCalendarEnableTitle: 'Show Calendar Events',
+    settingsCalendarEnableDesc:
+      'Display read-only events from selected Google & device calendars in Today and Upcoming (off by default).',
+    settingsCalendarSelectHint: (sel, total) => `Select calendars to display (${sel}/${total}):`,
+    settingsCalendarSelectAll: 'All',
+    settingsCalendarSelectNone: 'None',
+    settingsCalendarNoneFound: 'No Google or device calendars found on this device.',
+    settingsCalendarPermissionDenied:
+      'Calendar permission is required to list and display your calendars.',
+    settingsCalendarGrantPermissionBtn: 'Grant Calendar Access',
+    settingsCalendarImportIcsBtn: 'Import .ics',
+    calendarAllDay: 'All-day',
+    calendarUntitledEvent: '(No title)'
   },
   de: {
     appName: 'Thingsbook',
@@ -600,7 +626,22 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     repeatMonthDayLabel: 'Tag des Monats:',
     repeatEndsLabel: 'Endet:',
     sidebarShow: 'Seitenleiste einblenden',
-    sidebarHide: 'Seitenleiste ausblenden'
+    sidebarHide: 'Seitenleiste ausblenden',
+    settingsCalendarSection: 'Google Kalender & Termine',
+    settingsCalendarEnableTitle: 'Kalendertermine anzeigen',
+    settingsCalendarEnableDesc:
+      'Termine aus ausgewählten Google- und Gerätekalendern in „Heute“ und „Geplant“ einblenden (standardmäßig deaktiviert).',
+    settingsCalendarSelectHint: (sel, total) =>
+      `Kalender zur Anzeige auswählen (${sel}/${total}):`,
+    settingsCalendarSelectAll: 'Alle',
+    settingsCalendarSelectNone: 'Keine',
+    settingsCalendarNoneFound: 'Keine Google- oder Gerätekalender auf diesem Gerät gefunden.',
+    settingsCalendarPermissionDenied:
+      'Kalenderberechtigung ist erforderlich, um Kalender aufzulisten und anzuzeigen.',
+    settingsCalendarGrantPermissionBtn: 'Kalenderzugriff erlauben',
+    settingsCalendarImportIcsBtn: '.ics importieren',
+    calendarAllDay: 'Ganztägig',
+    calendarUntitledEvent: '(Ohne Titel)'
   },
   fr: {
     appName: 'Thingsbook',
@@ -800,7 +841,22 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     repeatMonthDayLabel: 'Jour du mois :',
     repeatEndsLabel: 'Fin :',
     sidebarShow: 'Afficher la barre latérale',
-    sidebarHide: 'Masquer la barre latérale'
+    sidebarHide: 'Masquer la barre latérale',
+    settingsCalendarSection: 'Google Agenda & Événements',
+    settingsCalendarEnableTitle: 'Afficher les événements du calendrier',
+    settingsCalendarEnableDesc:
+      "Afficher les événements des agendas Google et de l'appareil sélectionnés dans Aujourd'hui et Planifié (désactivé par défaut).",
+    settingsCalendarSelectHint: (sel, total) =>
+      `Sélectionner les agendas à afficher (${sel}/${total}) :`,
+    settingsCalendarSelectAll: 'Tous',
+    settingsCalendarSelectNone: 'Aucun',
+    settingsCalendarNoneFound: 'Aucun agenda Google ou de l’appareil trouvé sur cet appareil.',
+    settingsCalendarPermissionDenied:
+      "L'autorisation d'accès au calendrier est requise pour afficher vos agendas.",
+    settingsCalendarGrantPermissionBtn: "Autoriser l'accès au calendrier",
+    settingsCalendarImportIcsBtn: 'Importer .ics',
+    calendarAllDay: 'Toute la journée',
+    calendarUntitledEvent: '(Sans titre)'
   },
   it: {
     appName: 'Thingsbook',
@@ -1000,7 +1056,22 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     repeatMonthDayLabel: 'Giorno del mese:',
     repeatEndsLabel: 'Termina:',
     sidebarShow: 'Mostra barra laterale',
-    sidebarHide: 'Nascondi barra laterale'
+    sidebarHide: 'Nascondi barra laterale',
+    settingsCalendarSection: 'Google Calendar & Eventi',
+    settingsCalendarEnableTitle: 'Mostra eventi del calendario',
+    settingsCalendarEnableDesc:
+      'Mostra gli eventi dei calendari Google e del dispositivo selezionati in Oggi e Pianificati (disattivato per impostazione predefinita).',
+    settingsCalendarSelectHint: (sel, total) =>
+      `Seleziona i calendari da mostrare (${sel}/${total}):`,
+    settingsCalendarSelectAll: 'Tutti',
+    settingsCalendarSelectNone: 'Nessuno',
+    settingsCalendarNoneFound: 'Nessun calendario Google o del dispositivo trovato su questo dispositivo.',
+    settingsCalendarPermissionDenied:
+      "È necessaria l'autorizzazione al calendario per mostrare i tuoi calendari.",
+    settingsCalendarGrantPermissionBtn: 'Consenti accesso al calendario',
+    settingsCalendarImportIcsBtn: 'Importa .ics',
+    calendarAllDay: 'Tutto il giorno',
+    calendarUntitledEvent: '(Senza titolo)'
   },
   es: {
     appName: 'Thingsbook',
@@ -1200,7 +1271,22 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     repeatMonthDayLabel: 'Día del mes:',
     repeatEndsLabel: 'Termina:',
     sidebarShow: 'Mostrar barra lateral',
-    sidebarHide: 'Ocultar barra lateral'
+    sidebarHide: 'Ocultar barra lateral',
+    settingsCalendarSection: 'Google Calendar y Eventos',
+    settingsCalendarEnableTitle: 'Mostrar eventos del calendario',
+    settingsCalendarEnableDesc:
+      'Mostrar eventos de los calendarios de Google y del dispositivo seleccionados en Hoy y Programado (desactivado por defecto).',
+    settingsCalendarSelectHint: (sel, total) =>
+      `Seleccionar calendarios para mostrar (${sel}/${total}):`,
+    settingsCalendarSelectAll: 'Todos',
+    settingsCalendarSelectNone: 'Ninguno',
+    settingsCalendarNoneFound: 'No se encontraron calendarios de Google ni del dispositivo.',
+    settingsCalendarPermissionDenied:
+      'Se requiere permiso de calendario para listar y mostrar tus calendarios.',
+    settingsCalendarGrantPermissionBtn: 'Permitir acceso al calendario',
+    settingsCalendarImportIcsBtn: 'Importar .ics',
+    calendarAllDay: 'Todo el día',
+    calendarUntitledEvent: '(Sin título)'
   }
 };
 

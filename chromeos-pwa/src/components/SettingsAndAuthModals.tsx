@@ -2,6 +2,8 @@ import React, { useRef, useState } from 'react';
 import {
   AlertTriangle,
   Bell,
+  Calendar,
+  Check,
   Cloud,
   Database,
   Download,
@@ -23,6 +25,7 @@ import {
   APP_BUILD_CODE,
   APP_VERSION,
   type AppPreferences,
+  type DeviceCalendarInfo,
   type SupportedLang,
   type ThemeMode,
   type ThingsbookStatistics
@@ -270,7 +273,7 @@ const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
         syncAfter
       );
 
-      // Apply restored preferences (exact Android v1.6.16 parity)
+      // Apply restored preferences (exact Android v1.6.21 parity)
       if (result.preferences) {
         const p = result.preferences;
         const nextLang = p.languageTag?.trim().slice(0, 2).toLowerCase();
@@ -282,13 +285,23 @@ const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
           nextLang === 'es'
             ? (nextLang as SupportedLang)
             : 'system';
-        onRestoredPrefs({
+        const restoredPatch: Partial<AppPreferences> = {
           sidebarVisible: p.sidebarVisible ?? undefined,
           dailyDigestEnabled: p.dailyDigestEnabled ?? undefined,
           dailyDigestHour: p.dailyDigestHour ?? undefined,
           dailyDigestMinute: p.dailyDigestMinute ?? undefined,
           language: validLang
-        });
+        };
+        if (p.calendarEventsEnabled != null) {
+          restoredPatch.calendarEventsEnabled = Boolean(p.calendarEventsEnabled);
+        }
+        if (Array.isArray(p.selectedCalendarIds)) {
+          restoredPatch.selectedCalendarIds = p.selectedCalendarIds.filter(
+            (id): id is string => typeof id === 'string' && id.trim().length > 0
+          );
+          restoredPatch.calendarIdsInitialized = true;
+        }
+        onRestoredPrefs(restoredPatch);
       }
 
       onToast(`✓ Restored ${result.summary.tasksCount} ${t.entityTodos}`);
@@ -429,8 +442,17 @@ interface SettingsModalProps {
   snapshot: DataSnapshot;
   stats: ThingsbookStatistics;
   syncState: CloudSyncSnapshot;
+  hasCalendarPermission: boolean;
+  availableCalendars: DeviceCalendarInfo[];
   t: TranslationStrings;
   onUpdatePrefs: (patch: Partial<AppPreferences>) => void;
+  onToggleCalendarEventsEnabled: (enabled: boolean) => void;
+  onRequestCalendarAccess: () => Promise<void>;
+  onImportIcsFile: (icsText: string, fileName: string) => Promise<void>;
+  onRemoveImportedCalendar: (calendarId: string) => void;
+  onToggleSelectedCalendarId: (calendarId: string) => void;
+  onSelectAllCalendars: (selectAll: boolean) => void;
+  onRefreshCalendars: () => Promise<void>;
   onOpenAuthModal: () => void;
   onOpenNotificationsModal: () => void;
   onToast: (msg: string) => void;
@@ -442,8 +464,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   snapshot,
   stats,
   syncState,
+  hasCalendarPermission,
+  availableCalendars,
   t,
   onUpdatePrefs,
+  onToggleCalendarEventsEnabled,
+  onRequestCalendarAccess,
+  onImportIcsFile,
+  onRemoveImportedCalendar,
+  onToggleSelectedCalendarId,
+  onSelectAllCalendars,
+  onRefreshCalendars,
   onOpenAuthModal,
   onOpenNotificationsModal,
   onToast,
@@ -457,9 +488,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   } | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
+  const [connectingGcal, setConnectingGcal] = useState(false);
 
   const backupInputRef = useRef<HTMLInputElement | null>(null);
   const csvInputRef = useRef<HTMLInputElement | null>(null);
+  const icsInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handlePickIcsFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      await onImportIcsFile(text, file.name);
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Invalid .ics calendar file');
+    }
+  };
 
   const handlePickBackupFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -708,6 +753,321 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <span>{t.notificationsTitle}</span>
               </button>
             </div>
+          </div>
+
+          {/* 3b. Google Calendar & Calendar Events Section (Android v1.6.21–v1.6.23 Parity) */}
+          <div
+            data-testid="settings-calendar-section"
+            style={{
+              padding: '12px 14px',
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--bg-subtle)',
+              border: '1px solid var(--border-subtle)',
+              marginBottom: 16
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 12.5,
+                fontWeight: 700,
+                marginBottom: 8
+              }}
+            >
+              <Calendar size={15} style={{ color: 'var(--things-blue)' }} />
+              <span>{t.settingsCalendarSection}</span>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.3, fontWeight: 600 }}>
+                  {t.settingsCalendarEnableTitle}
+                </div>
+                <div style={{ fontSize: 11.8, color: 'var(--text-secondary)', marginTop: 2 }}>
+                  {t.settingsCalendarEnableDesc}
+                </div>
+              </div>
+              <button
+                type="button"
+                data-testid="settings-calendar-toggle"
+                aria-label={t.settingsCalendarEnableTitle}
+                className={`toggle-switch ${prefs.calendarEventsEnabled ? 'on' : ''}`}
+                onClick={() => onToggleCalendarEventsEnabled(!prefs.calendarEventsEnabled)}
+              >
+                <span className="toggle-switch-knob" />
+              </button>
+            </div>
+
+            {prefs.calendarEventsEnabled && (() => {
+              const selectedSet = new Set(prefs.selectedCalendarIds);
+              const selectedCount = availableCalendars.filter((c) => selectedSet.has(c.id)).length;
+
+              return (
+                <div
+                  style={{
+                    marginTop: 11,
+                    paddingTop: 11,
+                    borderTop: '1px solid var(--border-subtle)'
+                  }}
+                >
+                  <input
+                    ref={icsInputRef}
+                    data-testid="settings-calendar-ics-input"
+                    type="file"
+                    accept=".ics,text/calendar"
+                    style={{ display: 'none' }}
+                    onChange={handlePickIcsFile}
+                  />
+
+                  {!hasCalendarPermission ? (
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: 'var(--text-secondary)',
+                          marginBottom: 9
+                        }}
+                      >
+                        {t.settingsCalendarPermissionDenied}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          disabled={connectingGcal}
+                          onClick={async () => {
+                            setConnectingGcal(true);
+                            try {
+                              await onRequestCalendarAccess();
+                            } finally {
+                              setConnectingGcal(false);
+                            }
+                          }}
+                        >
+                          <Calendar size={14} />
+                          <span>{t.settingsCalendarGrantPermissionBtn}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          onClick={() => icsInputRef.current?.click()}
+                        >
+                          <Upload size={14} />
+                          <span>{t.settingsCalendarImportIcsBtn}</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : availableCalendars.length === 0 ? (
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: 8
+                      }}
+                    >
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                        {t.settingsCalendarNoneFound}
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          className="chip-btn"
+                          onClick={() => void onRefreshCalendars()}
+                        >
+                          <RefreshCw size={12.5} />
+                        </button>
+                        <button
+                          type="button"
+                          className="chip-btn"
+                          disabled={connectingGcal}
+                          onClick={async () => {
+                            setConnectingGcal(true);
+                            try {
+                              await onRequestCalendarAccess();
+                            } finally {
+                              setConnectingGcal(false);
+                            }
+                          }}
+                        >
+                          <Calendar size={12.5} />
+                          <span>Google</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="chip-btn"
+                          onClick={() => icsInputRef.current?.click()}
+                        >
+                          <Upload size={12.5} />
+                          <span>{t.settingsCalendarImportIcsBtn}</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          flexWrap: 'wrap',
+                          gap: 8,
+                          marginBottom: 8
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: 'var(--text-secondary)'
+                          }}
+                        >
+                          {t.settingsCalendarSelectHint(selectedCount, availableCalendars.length)}
+                        </span>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            className="chip-btn"
+                            onClick={() => onSelectAllCalendars(true)}
+                          >
+                            {t.settingsCalendarSelectAll}
+                          </button>
+                          <button
+                            type="button"
+                            className="chip-btn"
+                            onClick={() => onSelectAllCalendars(false)}
+                          >
+                            {t.settingsCalendarSelectNone}
+                          </button>
+                          <button
+                            type="button"
+                            className="chip-btn"
+                            title="Refresh"
+                            onClick={() => void onRefreshCalendars()}
+                          >
+                            <RefreshCw size={12.5} />
+                          </button>
+                          <button
+                            type="button"
+                            className="chip-btn"
+                            disabled={connectingGcal}
+                            onClick={async () => {
+                              setConnectingGcal(true);
+                              try {
+                                await onRequestCalendarAccess();
+                              } finally {
+                                setConnectingGcal(false);
+                              }
+                            }}
+                          >
+                            <Calendar size={12} />
+                            <span>+ Google</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="chip-btn"
+                            onClick={() => icsInputRef.current?.click()}
+                          >
+                            <Upload size={12} />
+                            <span>{t.settingsCalendarImportIcsBtn}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                        {availableCalendars.map((cal) => {
+                          const isChecked = selectedSet.has(cal.id);
+                          return (
+                            <div
+                              key={cal.id}
+                              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                            >
+                              <button
+                                type="button"
+                                className={`settings-calendar-row ${isChecked ? 'selected' : ''}`}
+                                onClick={() => onToggleSelectedCalendarId(cal.id)}
+                              >
+                                <span
+                                  className="settings-calendar-dot"
+                                  style={{ backgroundColor: cal.colorCss }}
+                                />
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div
+                                    style={{
+                                      fontSize: 13,
+                                      fontWeight: isChecked ? 650 : 500,
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap'
+                                    }}
+                                  >
+                                    {cal.displayName}
+                                  </div>
+                                  {cal.accountName && (
+                                    <div
+                                      style={{
+                                        fontSize: 11,
+                                        color: 'var(--text-muted)',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap'
+                                      }}
+                                    >
+                                      {cal.accountName}
+                                    </div>
+                                  )}
+                                </div>
+                                <span
+                                  style={{
+                                    width: 18,
+                                    height: 18,
+                                    borderRadius: 5,
+                                    border: `1.5px solid ${
+                                      isChecked ? 'var(--things-blue)' : 'var(--checkbox-border)'
+                                    }`,
+                                    background: isChecked ? 'var(--things-blue)' : 'transparent',
+                                    color: '#fff',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    flexShrink: 0
+                                  }}
+                                >
+                                  {isChecked && <Check size={12} strokeWidth={3} />}
+                                </span>
+                              </button>
+
+                              {cal.source === 'ics' && (
+                                <button
+                                  type="button"
+                                  className="icon-btn"
+                                  title={t.actionDelete}
+                                  style={{ color: 'var(--deadline-red)', flexShrink: 0 }}
+                                  onClick={() => onRemoveImportedCalendar(cal.id)}
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {/* 4. Sample Tasks Cleanup Card (when hasSampleTasks) */}

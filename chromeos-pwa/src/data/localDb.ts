@@ -123,7 +123,10 @@ const DEFAULT_PREFS: AppPreferences = {
   dailyDigestHour: 8,
   dailyDigestMinute: 30,
   autoCheckUpdatesEnabled: true,
-  geminiApiKey: ''
+  geminiApiKey: '',
+  calendarEventsEnabled: false,
+  selectedCalendarIds: [],
+  calendarIdsInitialized: false
 };
 
 export function loadPreferences(): AppPreferences {
@@ -1473,9 +1476,11 @@ class ThingsLocalDb {
         dailyDigestEnabled: prefs.dailyDigestEnabled,
         dailyDigestHour: prefs.dailyDigestHour,
         dailyDigestMinute: prefs.dailyDigestMinute,
-        languageTag: prefs.language === 'system' ? '' : prefs.language
+        languageTag: prefs.language === 'system' ? '' : prefs.language,
+        calendarEventsEnabled: prefs.calendarEventsEnabled,
+        selectedCalendarIds: prefs.selectedCalendarIds
       },
-      appVersionName: '1.6.20-chromeos'
+      appVersionName: '1.6.23-chromeos'
     });
     const bytes = await encodeThingsBackup(payload, password);
     return {

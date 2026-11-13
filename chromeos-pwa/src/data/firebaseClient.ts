@@ -37,12 +37,14 @@ export function getActiveFirebaseOptions(): FirebaseOptions {
 let cachedApp: FirebaseApp | null = null;
 let cachedAuth: Auth | null = null;
 let cachedDb: Firestore | null = null;
+let cachedGcalApp: FirebaseApp | null = null;
+let cachedGcalAuth: Auth | null = null;
 
 export function getFirebaseAppInstance(): FirebaseApp {
   if (cachedApp) return cachedApp;
-  const existing = getApps();
-  if (existing.length > 0) {
-    cachedApp = existing[0];
+  const existingDefault = getApps().find((a) => a.name === '[DEFAULT]');
+  if (existingDefault) {
+    cachedApp = existingDefault;
     return cachedApp;
   }
   cachedApp = initializeApp(getActiveFirebaseOptions());
@@ -61,4 +63,15 @@ export function getFirestoreInstance(): Firestore {
     cachedDb = getFirestore(getFirebaseAppInstance());
   }
   return cachedDb;
+}
+
+export function getGoogleCalendarAuthInstance(): Auth {
+  if (cachedGcalAuth) return cachedGcalAuth;
+  // Ensure primary [DEFAULT] app exists first
+  getFirebaseAppInstance();
+  const appName = 'thingsbook-gcal-oauth';
+  const existing = getApps().find((a) => a.name === appName);
+  cachedGcalApp = existing ?? initializeApp(getActiveFirebaseOptions(), appName);
+  cachedGcalAuth = getAuth(cachedGcalApp);
+  return cachedGcalAuth;
 }

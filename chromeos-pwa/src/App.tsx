@@ -42,12 +42,23 @@ import {
   startOfDayEpoch,
   type ActiveNavigation,
   type AppPreferences,
+  type CalendarEventItem,
+  type DeviceCalendarInfo,
   type ProjectRecord,
   type SmartViewType,
   type SupportedLang,
   type TagRecord,
   type TaskRecord
 } from './domain/types';
+import {
+  connectGoogleCalendarPopup,
+  hasCalendarAccess,
+  importIcsCalendarText,
+  localEpochDayFromMs,
+  queryAvailableCalendars,
+  queryEventsForDateRange,
+  removeImportedIcsCalendar
+} from './data/calendarService';
 import { cloudSync, type CloudSyncSnapshot } from './data/cloudSync';
 import { generateLogbookReflection, type LogbookReviewResponse } from './data/geminiService';
 import {
@@ -60,6 +71,7 @@ import {
 import { checkForSwAndReleaseUpdates } from './data/pwaUpdater';
 import { checkDueRemindersAndDigest } from './data/reminderRuntime';
 import { TRANSLATIONS, resolveLanguage } from './i18n/translations';
+import { CalendarEventsBlock } from './components/CalendarEventsBlock';
 import {
   AreaManagerModal,
   CreateOrEditProjectModal,
@@ -596,6 +608,212 @@ export const App: React.FC = () => {
   );
 
   const statistics = useMemo(() => computeStatistics(snapshot, endOfToday), [snapshot, endOfToday]);
+
+  // ==================== Calendar Integration State & Refresh (Android v1.6.21–v1.6.23 Parity) ====================
+  const [hasCalendarPermission, setHasCalendarPermission] = useState<boolean>(() =>
+    hasCalendarAccess()
+  );
+  const [availableCalendars, setAvailableCalendars] = useState<DeviceCalendarInfo[]>([]);
+  const [todayCalendarEvents, setTodayCalendarEvents] = useState<CalendarEventItem[]>([]);
+  const [upcomingCalendarEventsByEpochDay, setUpcomingCalendarEventsByEpochDay] = useState<
+    Map<number, CalendarEventItem[]>
+  >(() => new Map());
+  const [calendarRefreshTick, setCalendarRefreshTick] = useState(0);
+
+  const maxUpcomingHorizonEpochDay = useMemo(() => {
+    const todayEpochDay = localEpochDayFromMs(endOfToday);
+    let maxTaskDay = todayEpochDay + 1;
+    for (const tk of upcomingTasks) {
+      const targetDay = localEpochDayFromMs(computeUpcomingTargetDate(tk));
+      if (targetDay > maxTaskDay) {
+        maxTaskDay = targetDay;
+      }
+    }
+    return Math.max(todayEpochDay + 30, Math.min(maxTaskDay, todayEpochDay + 180));
+  }, [upcomingTasks, endOfToday]);
+
+  useEffect(() => {
+    if (!prefs.calendarEventsEnabled) return;
+    const onFocusRefresh = () => setCalendarRefreshTick((n) => n + 1);
+    const onVisibilityRefresh = () => {
+      if (document.visibilityState === 'visible') {
+        setCalendarRefreshTick((n) => n + 1);
+      }
+    };
+    window.addEventListener('focus', onFocusRefresh);
+    document.addEventListener('visibilitychange', onVisibilityRefresh);
+    return () => {
+      window.removeEventListener('focus', onFocusRefresh);
+      document.removeEventListener('visibilitychange', onVisibilityRefresh);
+    };
+  }, [prefs.calendarEventsEnabled]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const runCalendarSync = async () => {
+      const permitted = hasCalendarAccess();
+      if (cancelled) return;
+      setHasCalendarPermission(permitted);
+
+      if (!permitted) {
+        setAvailableCalendars([]);
+        setTodayCalendarEvents([]);
+        setUpcomingCalendarEventsByEpochDay(new Map());
+        return;
+      }
+
+      if (!prefs.calendarEventsEnabled && !settingsModalOpen) {
+        setTodayCalendarEvents([]);
+        setUpcomingCalendarEventsByEpochDay(new Map());
+        return;
+      }
+
+      const calendars = await queryAvailableCalendars();
+      if (cancelled) return;
+
+      const stillPermitted = hasCalendarAccess();
+      setHasCalendarPermission(stillPermitted);
+      setAvailableCalendars(calendars);
+
+      let effectiveSelectedIds = prefs.selectedCalendarIds;
+      if (!prefs.calendarIdsInitialized && calendars.length > 0) {
+        const primaries = calendars.filter((c) => c.isPrimary).map((c) => c.id);
+        effectiveSelectedIds =
+          primaries.length > 0 ? primaries : calendars.map((c) => c.id);
+        updatePrefs({
+          selectedCalendarIds: effectiveSelectedIds,
+          calendarIdsInitialized: true
+        });
+      }
+
+      if (!prefs.calendarEventsEnabled || !stillPermitted || effectiveSelectedIds.length === 0) {
+        setTodayCalendarEvents([]);
+        setUpcomingCalendarEventsByEpochDay(new Map());
+        return;
+      }
+
+      const todayEpochDay = localEpochDayFromMs(endOfToday);
+      const eventsByDay = await queryEventsForDateRange(
+        todayEpochDay,
+        maxUpcomingHorizonEpochDay,
+        effectiveSelectedIds,
+        calendars
+      );
+      if (cancelled) return;
+
+      setTodayCalendarEvents(eventsByDay.get(todayEpochDay) ?? []);
+      const upcomingMap = new Map<number, CalendarEventItem[]>();
+      for (const [day, list] of eventsByDay.entries()) {
+        if (day >= todayEpochDay + 1 && list.length > 0) {
+          upcomingMap.set(day, list);
+        }
+      }
+      setUpcomingCalendarEventsByEpochDay(upcomingMap);
+    };
+
+    void runCalendarSync();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    prefs.calendarEventsEnabled,
+    prefs.selectedCalendarIds,
+    prefs.calendarIdsInitialized,
+    settingsModalOpen,
+    maxUpcomingHorizonEpochDay,
+    endOfToday,
+    calendarRefreshTick,
+    updatePrefs
+  ]);
+
+  const handleToggleCalendarEventsEnabled = useCallback(
+    (enabled: boolean) => {
+      updatePrefs({ calendarEventsEnabled: enabled });
+    },
+    [updatePrefs]
+  );
+
+  const handleRequestCalendarAccess = useCallback(async () => {
+    try {
+      const email = await connectGoogleCalendarPopup();
+      setHasCalendarPermission(hasCalendarAccess());
+      setCalendarRefreshTick((n) => n + 1);
+      showToast(`✓ ${email}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes('popup-closed-by-user') && !msg.includes('cancelled-popup-request')) {
+        showToast(msg);
+      }
+    }
+  }, [showToast]);
+
+  const handleImportIcsFile = useCallback(
+    async (icsText: string, fileName: string) => {
+      const imported = importIcsCalendarText(icsText, fileName);
+      setPrefs((prev) => {
+        const nextIds = prev.selectedCalendarIds.includes(imported.id)
+          ? prev.selectedCalendarIds
+          : [...prev.selectedCalendarIds, imported.id];
+        const next = {
+          ...prev,
+          selectedCalendarIds: nextIds,
+          calendarIdsInitialized: true
+        };
+        savePreferences(next);
+        return next;
+      });
+      setHasCalendarPermission(true);
+      setCalendarRefreshTick((n) => n + 1);
+      showToast(`✓ ${imported.displayName}`);
+    },
+    [showToast]
+  );
+
+  const handleRemoveImportedCalendar = useCallback((calendarId: string) => {
+    removeImportedIcsCalendar(calendarId);
+    setPrefs((prev) => {
+      const next = {
+        ...prev,
+        selectedCalendarIds: prev.selectedCalendarIds.filter((id) => id !== calendarId)
+      };
+      savePreferences(next);
+      return next;
+    });
+    setHasCalendarPermission(hasCalendarAccess());
+    setCalendarRefreshTick((n) => n + 1);
+  }, []);
+
+  const handleToggleSelectedCalendarId = useCallback((calendarId: string) => {
+    setPrefs((prev) => {
+      const exists = prev.selectedCalendarIds.includes(calendarId);
+      const nextIds = exists
+        ? prev.selectedCalendarIds.filter((id) => id !== calendarId)
+        : [...prev.selectedCalendarIds, calendarId];
+      const next = {
+        ...prev,
+        selectedCalendarIds: nextIds,
+        calendarIdsInitialized: true
+      };
+      savePreferences(next);
+      return next;
+    });
+  }, []);
+
+  const handleSelectAllCalendars = useCallback(
+    (selectAll: boolean) => {
+      const nextIds = selectAll ? availableCalendars.map((c) => c.id) : [];
+      updatePrefs({
+        selectedCalendarIds: nextIds,
+        calendarIdsInitialized: true
+      });
+    },
+    [availableCalendars, updatePrefs]
+  );
+
+  const handleRefreshCalendars = useCallback(async () => {
+    setCalendarRefreshTick((n) => n + 1);
+  }, []);
 
   // Raw tasks visible in the current view BEFORE tag filtering (for ViewTagFilterUtils parity)
   const currentViewBaseTasks = useMemo((): TaskRecord[] => {
@@ -1643,6 +1861,9 @@ export const App: React.FC = () => {
                   }
                   return (
                     <>
+                      {prefs.calendarEventsEnabled && todayCalendarEvents.length > 0 && (
+                        <CalendarEventsBlock events={todayCalendarEvents} t={t} />
+                      )}
                       {dayFiltered.length > 0 && (
                         <div className="group-section">
                           <div className="task-list">
@@ -1667,7 +1888,7 @@ export const App: React.FC = () => {
                   );
                 })()}
 
-                {/* UPCOMING View (Day-by-Day Groups) */}
+                {/* UPCOMING View (Day-by-Day Groups — v1.6.22: only dates with tasks display calendar events) */}
                 {activeNav.view === 'UPCOMING' && (
                   <>
                     {upcomingGroups.length === 0 ? (
@@ -1675,12 +1896,20 @@ export const App: React.FC = () => {
                     ) : (
                       upcomingGroups.map(([dayEpoch, groupTasks]) => {
                         const hdr = formatUpcomingHeader(dayEpoch);
+                        const dayEvents = prefs.calendarEventsEnabled
+                          ? upcomingCalendarEventsByEpochDay.get(
+                              localEpochDayFromMs(dayEpoch)
+                            ) ?? []
+                          : [];
                         return (
                           <div key={dayEpoch} className="group-section">
                             <div className="upcoming-day-header">
                               <span className="upcoming-day-num">{hdr.numPart}</span>
                               <span className="upcoming-day-sub">{hdr.subPart}</span>
                             </div>
+                            {groupTasks.length > 0 && dayEvents.length > 0 && (
+                              <CalendarEventsBlock events={dayEvents} t={t} compactTop />
+                            )}
                             <div className="task-list">
                               {groupTasks.map((tk) => renderTaskRow(tk, groupTasks, true))}
                             </div>
@@ -2734,8 +2963,17 @@ export const App: React.FC = () => {
           snapshot={snapshot}
           stats={statistics}
           syncState={syncState}
+          hasCalendarPermission={hasCalendarPermission}
+          availableCalendars={availableCalendars}
           t={t}
           onUpdatePrefs={updatePrefs}
+          onToggleCalendarEventsEnabled={handleToggleCalendarEventsEnabled}
+          onRequestCalendarAccess={handleRequestCalendarAccess}
+          onImportIcsFile={handleImportIcsFile}
+          onRemoveImportedCalendar={handleRemoveImportedCalendar}
+          onToggleSelectedCalendarId={handleToggleSelectedCalendarId}
+          onSelectAllCalendars={handleSelectAllCalendars}
+          onRefreshCalendars={handleRefreshCalendars}
           onOpenAuthModal={() => setAuthModalOpen(true)}
           onOpenNotificationsModal={() => setNotificationsModalOpen(true)}
           onToast={showToast}

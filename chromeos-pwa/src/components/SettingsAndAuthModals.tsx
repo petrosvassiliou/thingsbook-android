@@ -444,6 +444,7 @@ interface SettingsModalProps {
   syncState: CloudSyncSnapshot;
   hasCalendarPermission: boolean;
   availableCalendars: DeviceCalendarInfo[];
+  calendarError: string | null;
   t: TranslationStrings;
   onUpdatePrefs: (patch: Partial<AppPreferences>) => void;
   onToggleCalendarEventsEnabled: (enabled: boolean) => void;
@@ -466,6 +467,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   syncState,
   hasCalendarPermission,
   availableCalendars,
+  calendarError,
   t,
   onUpdatePrefs,
   onToggleCalendarEventsEnabled,
@@ -827,6 +829,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     style={{ display: 'none' }}
                     onChange={handlePickIcsFile}
                   />
+
+                  {calendarError && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 8,
+                        padding: '8px 10px',
+                        borderRadius: 'var(--radius-xs)',
+                        background: 'var(--deadline-red-bg)',
+                        color: 'var(--deadline-red)',
+                        fontSize: 11.8,
+                        marginBottom: 9
+                      }}
+                    >
+                      <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                      <span>{calendarError}</span>
+                    </div>
+                  )}
 
                   {!hasCalendarPermission ? (
                     <div>

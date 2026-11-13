@@ -51,7 +51,9 @@ import {
   type TaskRecord
 } from './domain/types';
 import {
+  clearLastCalendarError,
   connectGoogleCalendarPopup,
+  getLastCalendarError,
   hasCalendarAccess,
   importIcsCalendarText,
   localEpochDayFromMs,
@@ -614,6 +616,7 @@ export const App: React.FC = () => {
     hasCalendarAccess()
   );
   const [availableCalendars, setAvailableCalendars] = useState<DeviceCalendarInfo[]>([]);
+  const [calendarError, setCalendarError] = useState<string | null>(null);
   const [todayCalendarEvents, setTodayCalendarEvents] = useState<CalendarEventItem[]>([]);
   const [upcomingCalendarEventsByEpochDay, setUpcomingCalendarEventsByEpochDay] = useState<
     Map<number, CalendarEventItem[]>
@@ -675,9 +678,16 @@ export const App: React.FC = () => {
       const stillPermitted = hasCalendarAccess();
       setHasCalendarPermission(stillPermitted);
       setAvailableCalendars(calendars);
+      setCalendarError(getLastCalendarError());
 
       let effectiveSelectedIds = prefs.selectedCalendarIds;
-      if (!prefs.calendarIdsInitialized && calendars.length > 0) {
+      const availableIdSet = new Set(calendars.map((c) => c.id));
+      const hasAnyMatchingSelected = effectiveSelectedIds.some((id) => availableIdSet.has(id));
+      if (
+        calendars.length > 0 &&
+        (!prefs.calendarIdsInitialized ||
+          (!hasAnyMatchingSelected && effectiveSelectedIds.length > 0))
+      ) {
         const primaries = calendars.filter((c) => c.isPrimary).map((c) => c.id);
         effectiveSelectedIds =
           primaries.length > 0 ? primaries : calendars.map((c) => c.id);
@@ -735,14 +745,39 @@ export const App: React.FC = () => {
   );
 
   const handleRequestCalendarAccess = useCallback(async () => {
+    clearLastCalendarError();
+    setCalendarError(null);
     try {
-      const email = await connectGoogleCalendarPopup();
-      setHasCalendarPermission(hasCalendarAccess());
+      const { email, calendars } = await connectGoogleCalendarPopup();
+      setHasCalendarPermission(true);
+      setAvailableCalendars(calendars);
+
+      // Ensure newly connected primary calendar(s) are selected if no available calendar is selected yet
+      setPrefs((prev) => {
+        const availableSet = new Set(calendars.map((c) => c.id));
+        const hasAnyMatchingSelected = prev.selectedCalendarIds.some((id) =>
+          availableSet.has(id)
+        );
+        if (hasAnyMatchingSelected && prev.calendarIdsInitialized) {
+          return prev;
+        }
+        const primaries = calendars.filter((c) => c.isPrimary).map((c) => c.id);
+        const defaults = primaries.length > 0 ? primaries : calendars.map((c) => c.id);
+        const next = {
+          ...prev,
+          selectedCalendarIds: defaults,
+          calendarIdsInitialized: true
+        };
+        savePreferences(next);
+        return next;
+      });
+
       setCalendarRefreshTick((n) => n + 1);
-      showToast(`✓ ${email}`);
+      showToast(`✓ ${email} (${calendars.length})`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (!msg.includes('popup-closed-by-user') && !msg.includes('cancelled-popup-request')) {
+        setCalendarError(msg);
         showToast(msg);
       }
     }
@@ -2965,6 +3000,7 @@ export const App: React.FC = () => {
           syncState={syncState}
           hasCalendarPermission={hasCalendarPermission}
           availableCalendars={availableCalendars}
+          calendarError={calendarError}
           t={t}
           onUpdatePrefs={updatePrefs}
           onToggleCalendarEventsEnabled={handleToggleCalendarEventsEnabled}

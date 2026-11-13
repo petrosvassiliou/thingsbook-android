@@ -3,6 +3,7 @@ import type { CalendarEventItem, DeviceCalendarInfo } from '../domain/types';
 import { getGoogleCalendarAuthInstance } from './firebaseClient';
 
 const GCAL_TOKENS_STORAGE_KEY = 'thingsbook_gcal_tokens_v1';
+const GCAL_CACHED_CALENDARS_KEY = 'thingsbook_gcal_cached_calendars_v1';
 const ICS_CALENDARS_STORAGE_KEY = 'thingsbook_ics_calendars_v1';
 const DAY_MS = 86_400_000;
 const DEFAULT_CALENDAR_COLOR = '#1A73E8';
@@ -11,6 +12,7 @@ interface StoredGcalAccount {
   email: string;
   accessToken: string;
   expiresAt: number;
+  scopeInvalid?: boolean;
 }
 
 interface StoredIcsEvent {
@@ -60,6 +62,25 @@ interface GoogleCalendarEventDto {
     self?: boolean;
     responseStatus?: string;
   }>;
+}
+
+interface GoogleApiErrorPayload {
+  error?: {
+    code?: number;
+    message?: string;
+    status?: string;
+    errors?: Array<{ reason?: string; message?: string }>;
+  };
+}
+
+let lastCalendarApiError: string | null = null;
+
+export function getLastCalendarError(): string | null {
+  return lastCalendarApiError;
+}
+
+export function clearLastCalendarError(): void {
+  lastCalendarApiError = null;
 }
 
 // ==================== Epoch Day & Time Helpers (Exact Android Parity) ====================
@@ -251,6 +272,34 @@ function saveStoredGcalAccounts(accounts: StoredGcalAccount[]): void {
   }
 }
 
+function loadCachedGcalCalendars(): DeviceCalendarInfo[] {
+  try {
+    const raw = localStorage.getItem(GCAL_CACHED_CALENDARS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (c): c is DeviceCalendarInfo =>
+        typeof c?.id === 'string' &&
+        typeof c?.displayName === 'string' &&
+        c?.source === 'gcal'
+    );
+  } catch {
+    return [];
+  }
+}
+
+function saveCachedGcalCalendars(calendars: DeviceCalendarInfo[]): void {
+  try {
+    localStorage.setItem(
+      GCAL_CACHED_CALENDARS_KEY,
+      JSON.stringify(calendars.filter((c) => c.source === 'gcal'))
+    );
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
 function loadStoredIcsCalendars(): StoredIcsCalendar[] {
   try {
     const raw = localStorage.getItem(ICS_CALENDARS_STORAGE_KEY);
@@ -289,43 +338,169 @@ function sanitizeColorCss(color: string | undefined | null): string {
 
 export function hasCalendarAccess(): boolean {
   const now = Date.now();
-  const validGcal = loadStoredGcalAccounts().some(
-    (a) => a.accessToken.length > 0 && a.expiresAt > now
+  const accounts = loadStoredGcalAccounts();
+  // Also allow probing a recently stored token whose expiresAt was reset to 0 before Calendar API was enabled
+  const usableGcal = accounts.some(
+    (a) => a.accessToken.length > 0 && !a.scopeInvalid && (a.expiresAt > now || a.expiresAt === 0)
   );
-  if (validGcal) return true;
+  if (usableGcal) return true;
   return loadStoredIcsCalendars().length > 0;
 }
 
 export function hasValidGoogleCalendarToken(): boolean {
   const now = Date.now();
-  return loadStoredGcalAccounts().some((a) => a.accessToken.length > 0 && a.expiresAt > now);
+  return loadStoredGcalAccounts().some(
+    (a) => a.accessToken.length > 0 && !a.scopeInvalid && a.expiresAt > now
+  );
 }
 
-export async function connectGoogleCalendarPopup(): Promise<string> {
+async function verifyTokenHasCalendarScope(
+  accessToken: string
+): Promise<{ valid: boolean; expiresInSec: number; hasCalendarScope: boolean }> {
+  try {
+    const resp = await fetch(
+      `https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(accessToken)}`
+    );
+    if (!resp.ok) {
+      return { valid: false, expiresInSec: 0, hasCalendarScope: false };
+    }
+    const info = (await resp.json()) as { scope?: string; expires_in?: string | number };
+    const scopes = (info.scope || '').split(/\s+/);
+    const hasCal = scopes.some(
+      (s) =>
+        s === 'https://www.googleapis.com/auth/calendar.readonly' ||
+        s === 'https://www.googleapis.com/auth/calendar'
+    );
+    const expSec = Number(info.expires_in) || 3300;
+    return { valid: true, expiresInSec: expSec, hasCalendarScope: hasCal };
+  } catch {
+    // If tokeninfo endpoint is unreachable, let calendarList call decide
+    return { valid: true, expiresInSec: 3300, hasCalendarScope: true };
+  }
+}
+
+async function fetchGoogleCalendarListForToken(
+  email: string,
+  accessToken: string
+): Promise<DeviceCalendarInfo[]> {
+  const resp = await fetch(
+    'https://www.googleapis.com/calendar/v3/users/me/calendarList?showHidden=false&maxResults=250',
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      }
+    }
+  );
+
+  if (!resp.ok) {
+    let errPayload: GoogleApiErrorPayload | null = null;
+    try {
+      errPayload = (await resp.json()) as GoogleApiErrorPayload;
+    } catch {
+      // ignore JSON parse failure
+    }
+    const reasons = (errPayload?.error?.errors ?? []).map((e) => e.reason || '');
+    const statusStr = errPayload?.error?.status || '';
+    const apiMessage =
+      errPayload?.error?.message || `Google Calendar API HTTP ${resp.status}`;
+
+    if (resp.status === 401) {
+      markGcalAccountInvalid(email, true);
+      throw new Error(
+        `Google Calendar session expired for ${email}. Please click "Grant Calendar Access" to reconnect.`
+      );
+    }
+
+    if (
+      resp.status === 403 &&
+      (reasons.includes('insufficientPermissions') ||
+        statusStr === 'PERMISSION_DENIED' && /insufficient authentication scopes/i.test(apiMessage))
+    ) {
+      markGcalAccountInvalid(email, true);
+      throw new Error(
+        'Google Calendar permission was not checked in the sign-in window. Please click "Grant Calendar Access" and tick the Google Calendar checkbox.'
+      );
+    }
+
+    throw new Error(apiMessage);
+  }
+
+  const data = (await resp.json()) as { items?: GoogleCalendarListEntry[] };
+  const calendars: DeviceCalendarInfo[] = [];
+  for (const item of data.items ?? []) {
+    if (!item.id || item.deleted || item.hidden) continue;
+    const displayName = (item.summaryOverride || item.summary || item.id).trim();
+    calendars.push({
+      id: `gcal:${email}:${item.id}`,
+      displayName,
+      accountName: email,
+      colorCss: sanitizeColorCss(item.backgroundColor),
+      isPrimary: Boolean(item.primary),
+      source: 'gcal'
+    });
+  }
+  return calendars;
+}
+
+export async function connectGoogleCalendarPopup(): Promise<{
+  email: string;
+  calendars: DeviceCalendarInfo[];
+}> {
   const auth = getGoogleCalendarAuthInstance();
   const provider = new GoogleAuthProvider();
   provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
-  provider.setCustomParameters({ prompt: 'select_account' });
+  provider.setCustomParameters({
+    prompt: 'consent select_account',
+    include_granted_scopes: 'true'
+  });
 
   const result = await signInWithPopup(auth, provider);
   const credential = GoogleAuthProvider.credentialFromResult(result);
   const accessToken = credential?.accessToken;
   if (!accessToken) {
-    throw new Error('Google Calendar access token was not granted.');
+    throw new Error('Google Calendar access token was not returned by Google Sign-In.');
   }
+
+  const tokenCheck = await verifyTokenHasCalendarScope(accessToken);
+  if (!tokenCheck.valid) {
+    throw new Error('Google Sign-In returned an invalid OAuth token. Please try again.');
+  }
+  if (!tokenCheck.hasCalendarScope) {
+    throw new Error(
+      'Google Calendar read permission was not checked in the sign-in window. Please click "Grant Calendar Access" again and tick the Google Calendar checkbox.'
+    );
+  }
+
   const email = (result.user.email || result.user.displayName || 'Google Account').trim();
-  const expiresAt = Date.now() + 55 * 60 * 1000;
+  const ttlMs = Math.max(60, tokenCheck.expiresInSec - 60) * 1000;
+  const expiresAt = Date.now() + ttlMs;
+
+  // Immediately verify and load the calendar list before returning!
+  const gcalCalendars = await fetchGoogleCalendarListForToken(email, accessToken);
 
   const existing = loadStoredGcalAccounts().filter(
     (a) => a.email.toLowerCase() !== email.toLowerCase()
   );
-  existing.push({ email, accessToken, expiresAt });
+  existing.push({ email, accessToken, expiresAt, scopeInvalid: false });
   saveStoredGcalAccounts(existing);
-  return email;
+
+  const mergedCache = [
+    ...loadCachedGcalCalendars().filter(
+      (c) => c.accountName.toLowerCase() !== email.toLowerCase()
+    ),
+    ...gcalCalendars
+  ];
+  saveCachedGcalCalendars(mergedCache);
+  lastCalendarApiError = null;
+
+  const allCalendars = sortCalendarList([...mergedCache, ...getIcsCalendarInfos(mergedCache.length === 0)]);
+  return { email, calendars: allCalendars };
 }
 
 export async function disconnectGoogleCalendars(): Promise<void> {
   saveStoredGcalAccounts([]);
+  saveCachedGcalCalendars([]);
+  lastCalendarApiError = null;
   try {
     await signOut(getGoogleCalendarAuthInstance());
   } catch {
@@ -333,9 +508,11 @@ export async function disconnectGoogleCalendars(): Promise<void> {
   }
 }
 
-function markGcalAccountExpired(email: string): void {
+function markGcalAccountInvalid(email: string, scopeInvalid: boolean): void {
   const updated = loadStoredGcalAccounts().map((a) =>
-    a.email.toLowerCase() === email.toLowerCase() ? { ...a, expiresAt: 0 } : a
+    a.email.toLowerCase() === email.toLowerCase()
+      ? { ...a, expiresAt: -1, scopeInvalid }
+      : a
   );
   saveStoredGcalAccounts(updated);
 }
@@ -429,7 +606,7 @@ function parseIcsDateTimeValue(
         const offsetMs = tzAsUtc - approxUtc;
         return { ms: approxUtc - offsetMs, isAllDay: false };
       } catch {
-        // Fallback to local time if TZID is non-standard (e.g. Windows timezone name)
+        // Fallback to local time if TZID is non-standard
       }
     }
 
@@ -544,7 +721,6 @@ export function importIcsCalendarText(
           /PARTSTAT=DECLINED/i.test(paramsPart) &&
           (/X-NUM-GUESTS/i.test(paramsPart) || /ROLE=REQ-PARTICIPANT/i.test(paramsPart))
         ) {
-          // Only mark declined when explicit self-decline marker is present
           if (/SELF=TRUE/i.test(paramsPart)) {
             declinedSelf = true;
           }
@@ -592,66 +768,92 @@ export function removeImportedIcsCalendar(calendarId: string): void {
 
 // ==================== Unified Calendar & Event Queries ====================
 
-export async function queryAvailableCalendars(): Promise<DeviceCalendarInfo[]> {
-  const results: DeviceCalendarInfo[] = [];
-  const now = Date.now();
-  const gcalAccounts = loadStoredGcalAccounts().filter(
-    (a) => a.accessToken.length > 0 && a.expiresAt > now
-  );
+function getIcsCalendarInfos(makeFirstPrimary: boolean): DeviceCalendarInfo[] {
+  return loadStoredIcsCalendars().map((cal, idx) => ({
+    id: cal.id,
+    displayName: cal.displayName,
+    accountName: cal.accountName,
+    colorCss: sanitizeColorCss(cal.colorCss),
+    isPrimary: makeFirstPrimary && idx === 0,
+    source: 'ics'
+  }));
+}
 
-  for (const account of gcalAccounts) {
-    try {
-      const resp = await fetch(
-        'https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=reader&showHidden=false',
-        {
-          headers: {
-            Authorization: `Bearer ${account.accessToken}`
-          }
-        }
-      );
-      if (resp.status === 401 || resp.status === 403) {
-        markGcalAccountExpired(account.email);
-        continue;
-      }
-      if (!resp.ok) continue;
-      const data = (await resp.json()) as { items?: GoogleCalendarListEntry[] };
-      for (const item of data.items ?? []) {
-        if (!item.id || item.deleted || item.hidden) continue;
-        const displayName = (item.summaryOverride || item.summary || item.id).trim();
-        results.push({
-          id: `gcal:${account.email}:${item.id}`,
-          displayName,
-          accountName: account.email,
-          colorCss: sanitizeColorCss(item.backgroundColor),
-          isPrimary: Boolean(item.primary),
-          source: 'gcal'
-        });
-      }
-    } catch {
-      // Offline or network error: skip gracefully
-    }
-  }
-
-  const icsCalendars = loadStoredIcsCalendars();
-  icsCalendars.forEach((cal, idx) => {
-    results.push({
-      id: cal.id,
-      displayName: cal.displayName,
-      accountName: cal.accountName,
-      colorCss: sanitizeColorCss(cal.colorCss),
-      isPrimary: results.length === 0 && idx === 0,
-      source: 'ics'
-    });
-  });
-
-  results.sort((a, b) => {
+function sortCalendarList(list: DeviceCalendarInfo[]): DeviceCalendarInfo[] {
+  return [...list].sort((a, b) => {
     if (a.isPrimary !== b.isPrimary) return a.isPrimary ? -1 : 1;
     const accCmp = a.accountName.localeCompare(b.accountName, undefined, { sensitivity: 'base' });
     if (accCmp !== 0) return accCmp;
     return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });
   });
+}
 
-  return results;
+async function resolveUsableGcalAccounts(): Promise<StoredGcalAccount[]> {
+  const now = Date.now();
+  const stored = loadStoredGcalAccounts();
+  let mutated = false;
+  const usable: StoredGcalAccount[] = [];
+
+  for (const acc of stored) {
+    if (!acc.accessToken || acc.scopeInvalid) continue;
+    if (acc.expiresAt > now) {
+      usable.push(acc);
+      continue;
+    }
+    // Recover any token whose expiresAt was set to 0 before Calendar API was enabled
+    if (acc.expiresAt === 0) {
+      const check = await verifyTokenHasCalendarScope(acc.accessToken);
+      if (check.valid && check.hasCalendarScope) {
+        const recovered: StoredGcalAccount = {
+          ...acc,
+          expiresAt: Date.now() + Math.max(60, check.expiresInSec - 60) * 1000,
+          scopeInvalid: false
+        };
+        acc.expiresAt = recovered.expiresAt;
+        acc.scopeInvalid = false;
+        mutated = true;
+        usable.push(recovered);
+      } else {
+        acc.expiresAt = -1;
+        acc.scopeInvalid = !check.hasCalendarScope;
+        mutated = true;
+      }
+    }
+  }
+
+  if (mutated) {
+    saveStoredGcalAccounts(stored);
+  }
+  return usable;
+}
+
+export async function queryAvailableCalendars(): Promise<DeviceCalendarInfo[]> {
+  const gcalResults: DeviceCalendarInfo[] = [];
+  const gcalAccounts = await resolveUsableGcalAccounts();
+
+  for (const account of gcalAccounts) {
+    try {
+      const list = await fetchGoogleCalendarListForToken(account.email, account.accessToken);
+      gcalResults.push(...list);
+      lastCalendarApiError = null;
+    } catch (err) {
+      lastCalendarApiError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  if (gcalResults.length > 0) {
+    saveCachedGcalCalendars(gcalResults);
+  }
+
+  const effectiveGcal =
+    gcalResults.length > 0
+      ? gcalResults
+      : gcalAccounts.length > 0
+        ? loadCachedGcalCalendars()
+        : [];
+
+  const icsInfos = getIcsCalendarInfos(effectiveGcal.length === 0);
+  return sortCalendarList([...effectiveGcal, ...icsInfos]);
 }
 
 export async function queryEventsForDateRange(
@@ -678,12 +880,9 @@ export async function queryEventsForDateRange(
   }
 
   // 1. Fetch Google Calendar REST API v3 events for selected `gcal:` calendars
-  const now = Date.now();
   const validAccounts = new Map<string, string>();
-  for (const acc of loadStoredGcalAccounts()) {
-    if (acc.accessToken.length > 0 && acc.expiresAt > now) {
-      validAccounts.set(acc.email.toLowerCase(), acc.accessToken);
-    }
+  for (const acc of await resolveUsableGcalAccounts()) {
+    validAccounts.set(acc.email.toLowerCase(), acc.accessToken);
   }
 
   const gcalIds = selectedCalendarIds.filter((id) => id.startsWith('gcal:'));
@@ -712,8 +911,8 @@ export async function queryEventsForDateRange(
         const resp = await fetch(url, {
           headers: { Authorization: `Bearer ${token}` }
         });
-        if (resp.status === 401 || resp.status === 403) {
-          markGcalAccountExpired(accountEmail);
+        if (resp.status === 401) {
+          markGcalAccountInvalid(accountEmail, false);
           return;
         }
         if (!resp.ok) return;

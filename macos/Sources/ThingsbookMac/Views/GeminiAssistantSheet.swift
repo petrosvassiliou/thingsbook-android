@@ -11,12 +11,14 @@ public struct GeminiAssistantSheet: View {
 
     // Brain Dump state
     @State private var brainDumpText = ""
+    @State private var brainDumpAreaId: String? = nil
     @State private var brainDumpDrafts: [BrainDumpTaskDraft] = []
     @State private var isWorking = false
     @State private var errorMessage: String?
 
     // Project Architect state
     @State private var architectGoal = ""
+    @State private var architectAreaId: String? = nil
     @State private var blueprint: ProjectBlueprintResponse? = nil
 
     // Logbook Reflection state
@@ -31,11 +33,11 @@ public struct GeminiAssistantSheet: View {
             HStack {
                 Image(systemName: "sparkles")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                    .foregroundStyle(ThingsMacPalette.geminiPurple)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(store.tr("gemini_sheet_title"))
+                    Text(store.tr("gemini_hub_title"))
                         .font(.system(size: 16, weight: .semibold))
-                    Text(store.tr("gemini_sheet_subtitle"))
+                    Text(store.tr("macos_gemini_subtitle"))
                         .font(.system(size: 11.5))
                         .foregroundStyle(.secondary)
                 }
@@ -43,7 +45,7 @@ public struct GeminiAssistantSheet: View {
                 Button {
                     showApiKeyField.toggle()
                 } label: {
-                    Label("API Key", systemImage: "key.fill")
+                    Label(store.tr("macos_gemini_api_key_btn"), systemImage: "key.fill")
                         .font(.system(size: 11.5))
                 }
                 .buttonStyle(.bordered)
@@ -60,27 +62,43 @@ public struct GeminiAssistantSheet: View {
             }
 
             if showApiKeyField {
-                HStack(spacing: 8) {
-                    SecureField("Gemini 2.5 Flash API Key (optional — stored in macOS Keychain)", text: $apiKeyInput)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 12))
-                    Button(store.tr("action_save")) {
-                        ThingsbookGeminiService.saveApiKey(apiKeyInput)
-                        showApiKeyField = false
-                        store.showToast("Gemini API Key saved in Keychain")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(store.tr("gemini_api_key_label"))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        SecureField(store.tr("gemini_api_key_placeholder"), text: $apiKeyInput)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12))
+                        Button(store.tr("action_save")) {
+                            ThingsbookGeminiService.saveApiKey(apiKeyInput)
+                            showApiKeyField = false
+                            store.showToast(store.tr("macos_gemini_key_saved"))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
                 }
+                .padding(10)
+                .thingsCardSurface(cornerRadius: 9)
             }
 
             Picker("", selection: $selectedTab) {
-                Text(store.tr("gemini_tab_braindump")).tag(GeminiSheetTab.brainDump)
-                Text(store.tr("gemini_tab_architect")).tag(GeminiSheetTab.projectArchitect)
-                Text(store.tr("gemini_tab_review")).tag(GeminiSheetTab.logbookReview)
+                Text(store.tr("gemini_brain_dump_title")).tag(GeminiSheetTab.brainDump)
+                Text(store.tr("gemini_project_architect_title")).tag(GeminiSheetTab.projectArchitect)
+                Text(store.tr("gemini_logbook_review_title")).tag(GeminiSheetTab.logbookReview)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+
+            if isWorking {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(store.tr("gemini_generating"))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+            }
 
             if let errorMessage {
                 Text(errorMessage)
@@ -98,10 +116,15 @@ public struct GeminiAssistantSheet: View {
             }
         }
         .padding(20)
-        .frame(width: 580, height: 480)
+        .frame(width: 600, height: 500)
+        .background(ThingsMacPalette.canvasBackground)
         .onAppear {
             selectedTab = store.geminiInitialTab
             apiKeyInput = ThingsbookGeminiService.storedApiKey()
+            if case .area(let aid) = store.selectedDestination {
+                brainDumpAreaId = aid
+                architectAreaId = aid
+            }
         }
     }
 
@@ -109,24 +132,34 @@ public struct GeminiAssistantSheet: View {
 
     private var brainDumpTab: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(store.tr("gemini_braindump_hint"))
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+            ZStack(alignment: .topLeading) {
+                if brainDumpText.isEmpty {
+                    Text(store.tr("gemini_brain_dump_placeholder"))
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.tertiary)
+                        .padding(8)
+                        .allowsHitTesting(false)
+                }
+                TextEditor(text: $brainDumpText)
+                    .font(.system(size: 13))
+                    .frame(height: 110)
+                    .padding(4)
+                    .background(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.14)))
+            }
 
-            TextEditor(text: $brainDumpText)
-                .font(.system(size: 13))
-                .frame(height: 110)
-                .padding(4)
-                .background(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.14)))
+            HStack(spacing: 10) {
+                Picker(store.tr("entity_area"), selection: $brainDumpAreaId) {
+                    Text(store.tr("areas_none")).tag(String?.none)
+                    ForEach(store.areas) { area in
+                        Text(area.title).tag(Optional(area.id))
+                    }
+                }
+                .frame(maxWidth: 190)
 
-            HStack {
                 Button {
                     runBrainDump()
                 } label: {
-                    HStack(spacing: 6) {
-                        if isWorking { ProgressView().controlSize(.small) }
-                        Text(store.tr("gemini_braindump_extract_btn"))
-                    }
+                    Label(store.tr("gemini_brain_dump_action"), systemImage: "sparkles")
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(brainDumpText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isWorking)
@@ -134,7 +167,7 @@ public struct GeminiAssistantSheet: View {
                 Spacer()
 
                 if !brainDumpDrafts.isEmpty {
-                    Button(store.trf("gemini_import_count_btn", brainDumpDrafts.count)) {
+                    Button(store.trf("macos_gemini_import_count", brainDumpDrafts.count)) {
                         importBrainDumpDrafts()
                     }
                     .buttonStyle(.borderedProminent)
@@ -150,7 +183,7 @@ public struct GeminiAssistantSheet: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(draft.title)
                                     .font(.system(size: 13, weight: .medium))
-                                Text(draft.scheduleState.rawValue)
+                                Text(localizedScheduleLabel(draft.scheduleState))
                                     .font(.system(size: 10.5))
                                     .foregroundStyle(.secondary)
                             }
@@ -169,18 +202,23 @@ public struct GeminiAssistantSheet: View {
     private var projectArchitectTab: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                TextField(store.tr("gemini_architect_hint"), text: $architectGoal)
+                TextField(store.tr("gemini_project_architect_placeholder"), text: $architectGoal)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(runArchitect)
+
+                Picker("", selection: $architectAreaId) {
+                    Text(store.tr("areas_none")).tag(String?.none)
+                    ForEach(store.areas) { area in
+                        Text(area.title).tag(Optional(area.id))
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 120)
 
                 Button {
                     runArchitect()
                 } label: {
-                    if isWorking {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Text(store.tr("gemini_architect_generate_btn"))
-                    }
+                    Text(store.tr("gemini_project_architect_action"))
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(architectGoal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isWorking)
@@ -206,7 +244,7 @@ public struct GeminiAssistantSheet: View {
                                         .font(.system(size: 12.5))
                                 }
                             }
-                            .padding(8)
+                            .padding(10)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .thingsCardSurface(cornerRadius: 8)
                         }
@@ -215,7 +253,7 @@ public struct GeminiAssistantSheet: View {
 
                 HStack {
                     Spacer()
-                    Button(store.tr("gemini_architect_create_project_btn")) {
+                    Button(store.tr("macos_gemini_create_project")) {
                         createProjectFromBlueprint(bp)
                     }
                     .buttonStyle(.borderedProminent)
@@ -233,48 +271,59 @@ public struct GeminiAssistantSheet: View {
             Button {
                 runLogbookReflection()
             } label: {
-                HStack(spacing: 6) {
-                    if isWorking { ProgressView().controlSize(.small) }
-                    Text(store.tr("gemini_logbook_review_btn"))
-                }
+                Label(store.tr("gemini_logbook_review_action"), systemImage: "sparkles")
             }
             .buttonStyle(.borderedProminent)
             .disabled(isWorking)
 
             if let ref = reflection {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(ref.summaryParagraph)
-                        .font(.system(size: 13.5))
-                        .padding(12)
-                        .thingsCardSurface(cornerRadius: 10)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(ref.summaryParagraph)
+                            .font(.system(size: 13.5))
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .thingsCardSurface(cornerRadius: 10)
 
-                    Text("Suggested Today Focus:")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        Text(store.tr("macos_gemini_suggested_focus"))
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundStyle(.secondary)
 
-                    ForEach(ref.suggestedFocusTasks, id: \.self) { suggestion in
-                        HStack {
-                            Text(suggestion)
-                                .font(.system(size: 13))
-                            Spacer()
-                            Button("+ Today") {
-                                let todayEpoch = DateEpochConverter.startOfDayMillis(for: Date())
-                                _ = try? store.database.createTask(
-                                    title: suggestion,
-                                    scheduleState: .today,
-                                    whenDate: todayEpoch
-                                )
-                                store.showToast("Added to Today")
+                        ForEach(ref.suggestedFocusTasks, id: \.self) { suggestion in
+                            HStack {
+                                Text(suggestion)
+                                    .font(.system(size: 13))
+                                Spacer()
+                                Button("+ \(store.tr("view_today"))") {
+                                    let todayEpoch = DateEpochConverter.startOfDayMillis(for: Date())
+                                    _ = try? store.database.createTask(
+                                        title: suggestion,
+                                        scheduleState: .today,
+                                        whenDate: todayEpoch
+                                    )
+                                    store.showToast(store.tr("macos_gemini_added_today"))
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
                             }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
+                            .padding(8)
+                            .thingsCardSurface(cornerRadius: 8)
                         }
-                        .padding(8)
-                        .thingsCardSurface(cornerRadius: 8)
                     }
                 }
             }
             Spacer()
+        }
+    }
+
+    private func localizedScheduleLabel(_ state: ScheduleState) -> String {
+        switch state {
+        case .inbox: return store.tr("view_inbox")
+        case .today: return store.tr("view_today")
+        case .thisEvening: return store.tr("view_this_evening")
+        case .upcoming: return store.tr("view_upcoming")
+        case .anytime: return store.tr("view_anytime")
+        case .someday: return store.tr("view_someday")
         }
     }
 
@@ -313,16 +362,24 @@ public struct GeminiAssistantSheet: View {
                 guard let dt = Calendar.current.date(byAdding: .day, value: offset, to: sodToday) else { return nil }
                 return DateEpochConverter.startOfDayMillis(for: dt)
             }
+            let resolvedSchedule: ScheduleState = (brainDumpAreaId != nil && d.scheduleState == .inbox)
+                ? .anytime
+                : d.scheduleState
             _ = try? store.database.createTask(
                 title: d.title,
                 notes: d.notes,
-                scheduleState: d.scheduleState,
+                scheduleState: resolvedSchedule,
                 whenDate: whenMillis,
                 deadline: deadMillis,
+                areaId: brainDumpAreaId,
                 checklistTitles: d.checklist
             )
         }
-        store.selectedDestination = .smartView(.today)
+        if let aid = brainDumpAreaId {
+            store.selectedDestination = .area(aid)
+        } else {
+            store.selectedDestination = .smartView(.today)
+        }
         dismiss()
     }
 
@@ -352,6 +409,7 @@ public struct GeminiAssistantSheet: View {
         guard let proj = try? store.database.createProject(
             title: bp.projectTitle,
             notes: bp.projectNotes,
+            areaId: architectAreaId,
             scheduleState: .today,
             whenDate: DateEpochConverter.startOfDayMillis(for: Date())
         ) else { return }
@@ -363,7 +421,8 @@ public struct GeminiAssistantSheet: View {
                     title: t,
                     scheduleState: .anytime,
                     projectId: proj.id,
-                    headingId: createdH?.id
+                    headingId: createdH?.id,
+                    areaId: architectAreaId
                 )
             }
         }

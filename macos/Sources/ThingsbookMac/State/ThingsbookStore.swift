@@ -80,6 +80,7 @@ public final class ThingsbookStore: ObservableObject {
     @Published public var editingProject: Project? = nil
     @Published public var isNewAreaSheetPresented = false
     @Published public var editingArea: Area? = nil
+    @Published public var isAreaManagerPresented = false
     @Published public var isTagManagerPresented = false
 
     // MARK: - Undo, Focus Timer, Sync, Calendar, Lock & Updates
@@ -221,11 +222,11 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func projectsForArea(_ areaId: String) -> [Project] {
-        projects.filter { $0.areaId == areaId && $0.status == .active }
+        projects.filter { $0.areaId == areaId && $0.status == .active }.sorted { $0.sortOrder < $1.sortOrder }
     }
 
     public var standaloneActiveProjects: [Project] {
-        projects.filter { $0.areaId == nil && $0.status == .active }
+        projects.filter { $0.areaId == nil && $0.status == .active }.sorted { $0.sortOrder < $1.sortOrder }
     }
 
     public func project(byId id: String?) -> Project? {
@@ -353,11 +354,11 @@ public final class ThingsbookStore: ObservableObject {
             tagIds: tagIds
         ) {
             NotificationReminderService.shared.syncTaskReminder(task, lang: preferences.language)
-            showToast(tr("quick_share_saved"))
+            showToast(tr("macos_quick_share_saved"))
         }
     }
 
-    // MARK: - Task Actions & Undo
+    // MARK: - Task, Checklist, Project & Area Reordering / Actions
 
     public func toggleTaskCompletion(_ task: TaskItem) {
         let nextStatus: TaskStatus = (task.status == .completed) ? .open : .completed
@@ -366,11 +367,12 @@ public final class ThingsbookStore: ObservableObject {
             if focusTimer?.taskId == task.id {
                 stopFocusTimer()
             }
+            let displayTitle = task.title.isEmpty ? tr("macos_untitled_todo") : task.title
             presentUndo(
-                message: tr("snack_todo_completed"),
+                message: trf("undo_task_completed", displayTitle),
                 action: .taskCompleted(
                     taskId: task.id,
-                    title: task.title.isEmpty ? tr("todo_untitled") : task.title,
+                    title: displayTitle,
                     spawnedRecurringTaskId: spawnedId
                 )
             )
@@ -390,13 +392,54 @@ public final class ThingsbookStore: ObservableObject {
         }
     }
 
+    public func moveChecklistItem(_ item: ChecklistItem, in items: [ChecklistItem], direction: Int) {
+        guard let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
+        let targetIdx = idx + direction
+        guard items.indices.contains(targetIdx) else { return }
+        var a = items[idx]
+        var b = items[targetIdx]
+        let tmp = a.sortOrder
+        a.sortOrder = (a.sortOrder == b.sortOrder) ? (b.sortOrder + Double(direction)) : b.sortOrder
+        b.sortOrder = tmp
+        try? database.updateChecklistItem(a)
+        try? database.updateChecklistItem(b)
+    }
+
+    public func moveProjectOrder(_ project: Project, direction: Int) {
+        let peers = project.areaId != nil ? projectsForArea(project.areaId!) : standaloneActiveProjects
+        guard let idx = peers.firstIndex(where: { $0.id == project.id }) else { return }
+        let targetIdx = idx + direction
+        guard peers.indices.contains(targetIdx) else { return }
+        var a = peers[idx]
+        var b = peers[targetIdx]
+        let tmp = a.sortOrder
+        a.sortOrder = (a.sortOrder == b.sortOrder) ? (b.sortOrder + Double(direction)) : b.sortOrder
+        b.sortOrder = tmp
+        try? database.updateProject(a)
+        try? database.updateProject(b)
+    }
+
+    public func moveAreaOrder(_ area: Area, direction: Int) {
+        guard let idx = areas.firstIndex(where: { $0.id == area.id }) else { return }
+        let targetIdx = idx + direction
+        guard areas.indices.contains(targetIdx) else { return }
+        var a = areas[idx]
+        var b = areas[targetIdx]
+        let tmp = a.sortOrder
+        a.sortOrder = (a.sortOrder == b.sortOrder) ? (b.sortOrder + Double(direction)) : b.sortOrder
+        b.sortOrder = tmp
+        try? database.updateArea(a)
+        try? database.updateArea(b)
+    }
+
     public func deleteTask(_ task: TaskItem) {
         try? database.softDeleteTask(task.id)
         if expandedTaskId == task.id { expandedTaskId = nil }
         selectedTaskIds.remove(task.id)
+        let displayTitle = task.title.isEmpty ? tr("macos_untitled_todo") : task.title
         presentUndo(
-            message: tr("snack_moved_to_trash"),
-            action: .taskDeleted(taskId: task.id, title: task.title)
+            message: trf("undo_task_deleted", displayTitle),
+            action: .taskDeleted(taskId: task.id, title: displayTitle)
         )
     }
 
@@ -418,9 +461,10 @@ public final class ThingsbookStore: ObservableObject {
         selectedTaskIds.removeAll()
         expandedTaskId = nil
         if let lastDeleted {
+            let displayTitle = lastDeleted.title.isEmpty ? tr("macos_untitled_todo") : lastDeleted.title
             presentUndo(
-                message: tr("snack_moved_to_trash"),
-                action: .taskDeleted(taskId: lastDeleted.id, title: lastDeleted.title)
+                message: trf("undo_task_deleted", displayTitle),
+                action: .taskDeleted(taskId: lastDeleted.id, title: displayTitle)
             )
         }
     }
@@ -457,7 +501,7 @@ public final class ThingsbookStore: ObservableObject {
             selectedDestination = .smartView(.today)
         }
         presentUndo(
-            message: trf("snack_project_deleted", project.title),
+            message: trf("undo_project_deleted", project.title),
             action: .projectDeleted(projectId: project.id, title: project.title, previousTaskProjects: detached)
         )
     }
@@ -497,7 +541,7 @@ public final class ThingsbookStore: ObservableObject {
 
     public func startFocusTimer(for task: TaskItem) {
         focusTimerCancellable?.invalidate()
-        let title = task.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? tr("todo_untitled") : task.title
+        let title = task.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? tr("macos_untitled_todo") : task.title
         focusTimer = FocusTimerState(taskId: task.id, taskTitle: title)
         focusTimerCancellable = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
@@ -518,6 +562,13 @@ public final class ThingsbookStore: ObservableObject {
     public func toggleFocusTimerPause() {
         guard var ft = focusTimer else { return }
         ft.isPaused.toggle()
+        focusTimer = ft
+    }
+
+    public func addFiveMinutesToFocusTimer() {
+        guard var ft = focusTimer else { return }
+        ft.remainingSeconds += 5 * 60
+        ft.totalSeconds += 5 * 60
         focusTimer = ft
     }
 
@@ -577,7 +628,7 @@ public final class ThingsbookStore: ObservableObject {
 
     public func exportBackupInteractively(password: String?) {
         let panel = NSSavePanel()
-        panel.title = tr("backup_export_btn")
+        panel.title = tr("backup_create_button")
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd"
         panel.nameFieldStringValue = "Thingsbook-Backup-\(df.string(from: Date())).tbbackup"
@@ -588,16 +639,26 @@ public final class ThingsbookStore: ObservableObject {
                 let payload = try database.buildBackupPayload(preferences: preferences)
                 let encoded = try ThingsBackupCodec.encodeBackup(payload: payload, password: password)
                 try encoded.write(to: url, options: .atomic)
-                showToast(tr("backup_export_success"))
+                let modeLabel = (password != nil && !(password?.isEmpty ?? true))
+                    ? tr("backup_badge_encrypted")
+                    : tr("backup_badge_unencrypted")
+                showToast(trf(
+                    "backup_status_saved",
+                    modeLabel,
+                    payload.tasks.count,
+                    payload.projects.count,
+                    payload.areas.count,
+                    payload.tags.count
+                ))
             } catch {
-                showToast(error.localizedDescription)
+                showToast(trf("backup_status_failed", error.localizedDescription))
             }
         }
     }
 
     public func importBackupInteractively() {
         let panel = NSOpenPanel()
-        panel.title = tr("backup_import_btn")
+        panel.title = tr("backup_restore_button")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -620,7 +681,7 @@ public final class ThingsbookStore: ObservableObject {
                 applyRestoredBackupPayload(payload)
             }
         } catch {
-            showToast(error.localizedDescription)
+            showToast(trf("backup_status_restore_failed", error.localizedDescription))
         }
     }
 
@@ -646,33 +707,39 @@ public final class ThingsbookStore: ObservableObject {
             }
             self.preferences = prefs
             reloadSnapshot()
-            showToast(tr("backup_restore_success"))
+            showToast(trf(
+                "backup_status_restored",
+                payload.tasks.count,
+                payload.projects.count,
+                payload.areas.count,
+                payload.tags.count
+            ))
         } catch {
-            showToast(error.localizedDescription)
+            showToast(trf("backup_status_restore_failed", error.localizedDescription))
         }
     }
 
     public func exportCsvInteractively() {
         let panel = NSSavePanel()
-        panel.title = tr("settings_csv_export_btn")
+        panel.title = tr("settings_csv_export")
         panel.nameFieldStringValue = "Thingsbook-Tasks.csv"
         panel.allowedContentTypes = [.commaSeparatedText]
         if panel.runModal() == .OK, let url = panel.url {
             if let csv = try? database.exportCsv() {
                 try? Data(csv.utf8).write(to: url, options: .atomic)
-                showToast(tr("settings_csv_export_btn") + " ✓")
+                showToast(trf("csv_status_exported", allOpenTasks.count + logbookTasks.count))
             }
         }
     }
 
     public func importCsvInteractively() {
         let panel = NSOpenPanel()
-        panel.title = tr("settings_csv_import_btn")
+        panel.title = tr("settings_csv_import")
         panel.allowedContentTypes = [.commaSeparatedText, .plainText]
         if panel.runModal() == .OK, let url = panel.url,
            let raw = try? String(contentsOf: url, encoding: .utf8) {
             let count = (try? database.importCsv(raw)) ?? 0
-            showToast(trf("settings_csv_import_success", count))
+            showToast(trf("csv_status_imported", count))
         }
     }
 
@@ -680,7 +747,7 @@ public final class ThingsbookStore: ObservableObject {
 
     public func unlockWithBiometrics() {
         Task {
-            let ok = await BiometricLockService.authenticate(reason: tr("biometric_prompt_subtitle"))
+            let ok = await BiometricLockService.authenticate(reason: tr("macos_app_lock_subtitle"))
             if ok {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
                     self.isLocked = false

@@ -10,12 +10,33 @@ final class ThingsbookCoreTests: XCTestCase {
         let langs = Set(strings.availableLanguages)
         XCTAssertEqual(langs, ["de", "en", "es", "fr", "it"])
 
+        let enKeys = strings.keys(for: "en")
+        XCTAssertGreaterThanOrEqual(enKeys.count, 405, "Expected >=405 Android + macOS string keys")
+
+        let criticalKeys = [
+            "view_inbox", "view_today", "view_this_evening", "view_upcoming",
+            "view_anytime", "view_someday", "view_logbook", "view_trash",
+            "tags_filter_all", "quick_find_title", "settings_language",
+            "areas_manage_title", "tags_manage_title", "focus_timer_active_label",
+            "macos_tab_general", "macos_tab_sync", "macos_touch_id_title"
+        ]
+
         for lang in ["en", "de", "fr", "it", "es"] {
-            XCTAssertGreaterThanOrEqual(strings.keys(for: lang).count, 350, "Expected >=350 Android string keys in \(lang)")
+            XCTAssertEqual(strings.keys(for: lang), enKeys, "All 5 languages must share the exact key set")
+            let appLang = AppLanguage(rawValue: lang) ?? .en
+            for k in criticalKeys {
+                let resolved = strings.text(k, lang: appLang)
+                XCTAssertNotEqual(resolved, k, "Key \(k) leaked raw identifier in \(lang)")
+                XCTAssertFalse(resolved.isEmpty)
+            }
         }
 
         let formatted = ThingsStrings.formatPositional("Project \"%1$s\" has %2$d tasks (100%% parity)", args: ["macOS Port", 42])
         XCTAssertEqual(formatted, "Project \"macOS Port\" has 42 tasks (100% parity)")
+
+        let timer = FocusTimerState(taskId: "t1", taskTitle: "Deep Work", remainingSeconds: 750, totalSeconds: 1500)
+        XCTAssertEqual(timer.formattedCountdown, "12:30")
+        XCTAssertEqual(timer.progress, 0.5, accuracy: 0.001)
     }
 
     // MARK: - 2. 5-Language Natural Language Date Parser

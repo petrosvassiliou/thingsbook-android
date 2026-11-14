@@ -10,12 +10,12 @@ public struct ThingsCommandMenus: Commands {
 
     public var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button(store.tr("fab_new_todo")) {
+            Button(store.tr("entity_new_todo")) {
                 store.createNewTaskInCurrentContext()
             }
             .keyboardShortcut("n", modifiers: [.command])
 
-            Button(store.tr("quick_share_sheet_title")) {
+            Button(store.tr("macos_menubar_quick_entry")) {
                 store.quickEntryPrefillTitle = ""
                 store.quickEntryPrefillNotes = ""
                 store.isQuickEntryPresented = true
@@ -24,25 +24,25 @@ public struct ThingsCommandMenus: Commands {
 
             Divider()
 
-            Button(store.tr("sidebar_new_project")) {
+            Button(store.tr("entity_new_project")) {
                 store.newProjectDefaultAreaId = nil
                 store.isNewProjectSheetPresented = true
             }
             .keyboardShortcut("n", modifiers: [.command, .option])
 
-            Button(store.tr("sidebar_new_area")) {
+            Button(store.tr("entity_new_area")) {
                 store.isNewAreaSheetPresented = true
             }
             .keyboardShortcut("n", modifiers: [.command, .control])
 
             Divider()
 
-            Button(store.tr("backup_export_btn")) {
+            Button(store.tr("backup_create_button")) {
                 store.exportBackupInteractively(password: nil)
             }
             .keyboardShortcut("e", modifiers: [.command, .shift])
 
-            Button(store.tr("backup_import_btn")) {
+            Button(store.tr("backup_restore_button")) {
                 store.importBackupInteractively()
             }
             .keyboardShortcut("i", modifiers: [.command, .shift])
@@ -56,7 +56,7 @@ public struct ThingsCommandMenus: Commands {
             .disabled(store.undoBanner == nil)
         }
 
-        CommandMenu("To-Do") {
+        CommandMenu(store.tr("macos_todo_menu")) {
             Button(store.tr("action_complete")) {
                 if let id = store.expandedTaskId ?? store.selectedTaskIds.first,
                    let task = (store.allOpenTasks + store.logbookTasks).first(where: { $0.id == id }) {
@@ -65,12 +65,12 @@ public struct ThingsCommandMenus: Commands {
             }
             .keyboardShortcut("k", modifiers: [.command])
 
-            Button(store.tr("menu_duplicate")) {
+            Button(store.tr("action_duplicate_todo")) {
                 store.duplicateSelectedOrExpandedTask()
             }
             .keyboardShortcut("d", modifiers: [.command])
 
-            Button(store.tr("menu_start_focus")) {
+            Button(store.tr("action_focus_timer")) {
                 if let id = store.expandedTaskId ?? store.selectedTaskIds.first,
                    let task = store.allOpenTasks.first(where: { $0.id == id }) {
                     store.startFocusTimer(for: task)
@@ -80,17 +80,17 @@ public struct ThingsCommandMenus: Commands {
 
             Divider()
 
-            Button(store.tr("when_today")) {
+            Button(store.tr("view_today")) {
                 scheduleSelected(.today)
             }
             .keyboardShortcut("t", modifiers: [.command])
 
-            Button(store.tr("when_this_evening")) {
+            Button(store.tr("view_this_evening")) {
                 scheduleSelected(.thisEvening)
             }
             .keyboardShortcut("e", modifiers: [.command])
 
-            Button(store.tr("when_someday")) {
+            Button(store.tr("view_someday")) {
                 scheduleSelected(.someday)
             }
             .keyboardShortcut("o", modifiers: [.command])
@@ -103,8 +103,8 @@ public struct ThingsCommandMenus: Commands {
             .keyboardShortcut(.delete, modifiers: [.command])
         }
 
-        CommandMenu("Go") {
-            Button(store.tr("sidebar_quick_find")) {
+        CommandMenu(store.tr("macos_go_menu")) {
+            Button(store.tr("quick_find_title")) {
                 store.isQuickFindPresented = true
             }
             .keyboardShortcut("f", modifiers: [.command])
@@ -148,13 +148,23 @@ public struct ThingsCommandMenus: Commands {
 
             Divider()
 
-            Button("Thingsbook Intelligence (Gemini)") {
+            Button(store.tr("areas_manage_title")) {
+                store.isAreaManagerPresented = true
+            }
+
+            Button(store.tr("tags_manage_title")) {
+                store.isTagManagerPresented = true
+            }
+
+            Divider()
+
+            Button(store.tr("gemini_hub_title")) {
                 store.geminiInitialTab = .brainDump
                 store.isGeminiSheetPresented = true
             }
             .keyboardShortcut("g", modifiers: [.command])
 
-            Button(store.tr("sync_btn_sync_now")) {
+            Button(store.tr("sync_action_now")) {
                 store.syncNow()
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])

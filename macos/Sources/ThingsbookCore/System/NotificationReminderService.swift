@@ -29,17 +29,17 @@ public final class NotificationReminderService: NSObject, UNUserNotificationCent
         let strings = ThingsStrings.shared
         let completeAction = UNNotificationAction(
             identifier: NotificationActionIdentifier.complete,
-            title: strings.text("notif_action_complete", lang: lang),
+            title: strings.text("action_complete", lang: lang),
             options: []
         )
         let snoozeAction = UNNotificationAction(
             identifier: NotificationActionIdentifier.snoozeOneHour,
-            title: strings.text("notif_action_snooze_1h", lang: lang),
+            title: strings.text("notification_snooze_1h", lang: lang),
             options: []
         )
         let tomorrowAction = UNNotificationAction(
             identifier: NotificationActionIdentifier.moveToTomorrow,
-            title: strings.text("notif_action_tomorrow", lang: lang),
+            title: strings.text("date_tomorrow", lang: lang),
             options: []
         )
 
@@ -80,7 +80,7 @@ public final class NotificationReminderService: NSObject, UNUserNotificationCent
         if !task.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             content.body = String(task.notes.prefix(160))
         } else {
-            content.body = ThingsStrings.shared.text("notif_channel_reminders_name", lang: lang)
+            content.body = ThingsStrings.shared.text("notifications_title", lang: lang)
         }
         content.sound = .default
         content.categoryIdentifier = NotificationActionIdentifier.categoryTaskReminder
@@ -101,8 +101,12 @@ public final class NotificationReminderService: NSObject, UNUserNotificationCent
         guard preferences.dailyDigestEnabled else { return }
 
         let content = UNMutableNotificationContent()
-        content.title = ThingsStrings.shared.text("notif_digest_title", lang: preferences.language)
-        content.body = ThingsStrings.shared.format("notif_digest_body", lang: preferences.language, max(1, todayTaskCount))
+        content.title = ThingsStrings.shared.text("notifications_daily_digest_channel", lang: preferences.language)
+        if todayTaskCount > 0 {
+            content.body = ThingsStrings.shared.format("notifications_daily_digest_header", lang: preferences.language, todayTaskCount)
+        } else {
+            content.body = ThingsStrings.shared.text("notifications_daily_digest_empty", lang: preferences.language)
+        }
         content.sound = .default
 
         var comps = DateComponents()
@@ -116,10 +120,20 @@ public final class NotificationReminderService: NSObject, UNUserNotificationCent
     public func postFocusTimerCompleted(taskTitle: String, lang: AppLanguage) {
         guard isAppBundleAvailable else { return }
         let content = UNMutableNotificationContent()
-        content.title = ThingsStrings.shared.text("focus_session_done", lang: lang)
+        content.title = ThingsStrings.shared.text("focus_timer_finished_title", lang: lang)
         content.body = taskTitle
         content.sound = .default
         let req = UNNotificationRequest(identifier: "tb_focus_done_\(UUID().uuidString)", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req)
+    }
+
+    public func postTestNotification(lang: AppLanguage) {
+        guard isAppBundleAvailable else { return }
+        let content = UNMutableNotificationContent()
+        content.title = ThingsStrings.shared.text("macos_test_notif_title", lang: lang)
+        content.body = ThingsStrings.shared.text("macos_test_notif_body", lang: lang)
+        content.sound = .default
+        let req = UNNotificationRequest(identifier: "tb_test_\(UUID().uuidString)", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req)
     }
 

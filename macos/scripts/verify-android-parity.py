@@ -2,10 +2,10 @@
 """
 Verifies that the macOS port (`macos/`) strictly matches the Android `main` branch (`app/`):
 1. Version parity (`versionName` & `versionCode` in `app/build.gradle.kts` vs `macos/PARITY_MANIFEST.json` & `Info.plist`)
-2. Localization parity (every `<string>` in `app/src/main/res/values*/strings.xml` across EN, DE, FR, IT, ES exists in `macos/Resources/Localization/strings.json`)
-3. Backup format parity (`THINGSBOOK_BACKUP_V1` & `FORMAT_VERSION = 1` in `ThingsBackupCodec.kt` vs `ThingsBackupCodec.swift`)
-4. Firestore collection parity (`tags`, `areas`, `projects`, `headings`, `tasks`, `checklist_items`)
-5. Core Swift architectural modules exist and are non-empty.
+2. Localization parity (every `<string>` in `app/src/main/res/values*/strings.xml` across EN, DE, FR, IT, ES exists in both `strings.json` bundles)
+3. Zero-missing-key Swift UI audit (every `tr(...)`, `trf(...)`, `text(...)`, `format(...)`, and `titleKey` in `macos/Sources/**/*.swift` exists in all 5 languages AND matches format placeholder arity)
+4. Backup format parity (`THINGSBOOK_BACKUP_V1` & `FORMAT_VERSION = 1` in `ThingsBackupCodec.kt` vs `ThingsBackupCodec.swift`)
+5. Required Swift architectural modules exist and are non-empty.
 """
 
 import json
@@ -21,12 +21,75 @@ BACKUP_KT = REPO_ROOT / "app" / "src" / "main" / "java" / "com" / "culturedcode"
 MANIFEST_FILE = REPO_ROOT / "macos" / "PARITY_MANIFEST.json"
 INFO_PLIST = REPO_ROOT / "macos" / "Resources" / "Info.plist"
 STRINGS_JSON = REPO_ROOT / "macos" / "Resources" / "Localization" / "strings.json"
+CORE_STRINGS_JSON = REPO_ROOT / "macos" / "Sources" / "ThingsbookCore" / "Resources" / "strings.json"
 BACKUP_SWIFT = REPO_ROOT / "macos" / "Sources" / "ThingsbookCore" / "Backup" / "ThingsBackupCodec.swift"
+SWIFT_SOURCES_DIR = REPO_ROOT / "macos" / "Sources"
 
 
 def fail(msg: str) -> None:
     print(f"❌ PARITY CHECK FAILED: {msg}", file=sys.stderr)
     sys.exit(1)
+
+
+def count_placeholders(template: str) -> int:
+    indexed = {int(m.group(1)) for m in re.finditer(r"%(\d+)\$[sd@f]", template)}
+    if indexed:
+        return max(indexed)
+    unindexed = re.findall(r"(?<!%)%[sd@]", template)
+    return len(unindexed)
+
+
+def audit_swift_localization_references(mac_strings: dict[str, dict[str, str]]) -> int:
+    langs = ["en", "de", "fr", "it", "es"]
+    referenced_plain: list[tuple[str, str]] = []
+    referenced_formatted: list[tuple[str, str]] = []
+
+    direct_plain_re = re.compile(r'\b(?:tr|text)\(\s*"([a-z0-9_]+)"')
+    ternary_plain_re = re.compile(r'\b(?:tr|text)\([^)\n]*\?\s*"([a-z0-9_]+)"\s*:\s*"([a-z0-9_]+)"')
+    direct_fmt_re = re.compile(r'\b(?:trf|format)\(\s*"([a-z0-9_]+)"')
+    title_key_re = re.compile(r'case\s+\.[a-zA-Z0-9_]+\s*:\s*return\s*"([a-z0-9_]+)"')
+
+    for swift_file in sorted(SWIFT_SOURCES_DIR.rglob("*.swift")):
+        rel = str(swift_file.relative_to(REPO_ROOT))
+        content = swift_file.read_text(encoding="utf-8")
+
+        for m in direct_plain_re.finditer(content):
+            referenced_plain.append((rel, m.group(1)))
+        for m in ternary_plain_re.finditer(content):
+            referenced_plain.append((rel, m.group(1)))
+            referenced_plain.append((rel, m.group(2)))
+        for m in direct_fmt_re.finditer(content):
+            referenced_formatted.append((rel, m.group(1)))
+        if swift_file.name == "ThingsEnums.swift":
+            for m in title_key_re.finditer(content):
+                if m.group(1).startswith("view_"):
+                    referenced_plain.append((rel, m.group(1)))
+
+    missing_errors: list[str] = []
+    arity_errors: list[str] = []
+
+    for rel, key in referenced_plain + referenced_formatted:
+        for lang in langs:
+            if key not in mac_strings.get(lang, {}):
+                missing_errors.append(f"{rel} -> '{key}' missing in [{lang}]")
+
+    for rel, key in referenced_plain:
+        tmpl = mac_strings["en"].get(key, "")
+        if count_placeholders(tmpl) > 0:
+            arity_errors.append(f"{rel} -> plain tr('{key}') used on format string '{tmpl}'")
+
+    for rel, key in referenced_formatted:
+        tmpl = mac_strings["en"].get(key, "")
+        if count_placeholders(tmpl) == 0:
+            arity_errors.append(f"{rel} -> formatted trf('{key}') used on non-format string '{tmpl}'")
+
+    if missing_errors:
+        fail(f"Found {len(missing_errors)} missing localization key reference(s) in Swift:\n  " + "\n  ".join(missing_errors[:25]))
+    if arity_errors:
+        fail(f"Found {len(arity_errors)} localization format placeholder mismatch(es):\n  " + "\n  ".join(arity_errors[:25]))
+
+    unique_keys = {k for _, k in referenced_plain + referenced_formatted}
+    return len(unique_keys)
 
 
 def main() -> int:
@@ -66,10 +129,15 @@ def main() -> int:
                 f"Info.plist CFBundleVersion ({plist.get('CFBundleVersion')}) != Android ({android_version_code})"
             )
 
-    if not STRINGS_JSON.is_file():
-        fail(f"Missing {STRINGS_JSON} — run python3 macos/scripts/sync-strings-from-android.py")
+    if not STRINGS_JSON.is_file() or not CORE_STRINGS_JSON.is_file():
+        fail("Missing strings.json — run python3 macos/scripts/sync-strings-from-android.py")
 
-    mac_strings = json.loads(STRINGS_JSON.read_text(encoding="utf-8"))
+    raw_app_json = STRINGS_JSON.read_text(encoding="utf-8")
+    raw_core_json = CORE_STRINGS_JSON.read_text(encoding="utf-8")
+    if raw_app_json != raw_core_json:
+        fail("macos/Resources/Localization/strings.json and ThingsbookCore/Resources/strings.json are out of sync!")
+
+    mac_strings = json.loads(raw_app_json)
     for lang, folder in [
         ("en", "values"),
         ("de", "values-de"),
@@ -84,6 +152,8 @@ def main() -> int:
         missing = sorted(android_keys - mac_lang_keys)
         if missing:
             fail(f"macOS strings.json [{lang}] is missing {len(missing)} Android string keys: {missing[:10]}")
+
+    audited_swift_keys = audit_swift_localization_references(mac_strings)
 
     if BACKUP_KT.is_file() and BACKUP_SWIFT.is_file():
         kt_text = BACKUP_KT.read_text(encoding="utf-8")
@@ -107,6 +177,8 @@ def main() -> int:
         "Sources/ThingsbookCore/System/NotificationReminderService.swift",
         "Sources/ThingsbookMac/ThingsbookMacApp.swift",
         "Sources/ThingsbookMac/Views/MainWorkspaceView.swift",
+        "Sources/ThingsbookMac/Views/SchedulingPopovers.swift",
+        "Sources/ThingsbookMac/Views/SettingsWindowView.swift",
     ]
     for rel in required_swift_files:
         p = REPO_ROOT / "macos" / rel
@@ -115,7 +187,8 @@ def main() -> int:
 
     print(
         f"✅ Android ↔ macOS Parity Verified: v{android_version_name} (Build {android_version_code}), "
-        f"5 languages ({len(mac_strings['en'])} keys/lang), .tbbackup v1, and all GTD features present."
+        f"5 languages ({len(mac_strings['en'])} keys/lang, {audited_swift_keys} Swift UI keys verified with 0 missing), "
+        ".tbbackup v1, and all GTD features present."
     )
     return 0
 

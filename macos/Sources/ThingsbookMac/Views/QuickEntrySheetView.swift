@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import ThingsbookCore
 
 public struct QuickEntrySheetView: View {
@@ -25,17 +26,17 @@ public struct QuickEntrySheetView: View {
             HStack {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(ThingsMacPalette.accentBlue)
-                Text(store.tr("quick_share_sheet_title"))
+                Text(store.tr("quick_share_title"))
                     .font(.system(size: 14.5, weight: .semibold))
                 Spacer()
                 if isMenuBarPopover {
-                    Text("\(store.todayTotalBadgeCount) Today")
+                    Text("\(store.todayTotalBadgeCount) · \(store.tr("view_today"))")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
                 }
             }
 
-            TextField(store.tr("quick_share_title_hint"), text: $title)
+            TextField(store.tr("placeholder_todo_title"), text: $title)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 13.5, weight: .medium))
                 .focused($titleFocused)
@@ -43,7 +44,7 @@ public struct QuickEntrySheetView: View {
 
             ZStack(alignment: .topLeading) {
                 if notes.isEmpty {
-                    Text(store.tr("quick_share_notes_hint"))
+                    Text(store.tr("placeholder_notes"))
                         .font(.system(size: 12.5))
                         .foregroundStyle(.tertiary)
                         .padding(.top, 6)
@@ -61,7 +62,7 @@ public struct QuickEntrySheetView: View {
                 Picker(store.tr("quick_share_destination_label"), selection: $selectedDestKey) {
                     Text(store.tr("view_inbox")).tag("inbox")
                     Text(store.tr("view_today")).tag("today")
-                    Text(store.tr("section_this_evening")).tag("evening")
+                    Text(store.tr("view_this_evening")).tag("evening")
                     Text(store.tr("view_anytime")).tag("anytime")
                     Text(store.tr("view_someday")).tag("someday")
                     if !store.areas.isEmpty {
@@ -78,14 +79,15 @@ public struct QuickEntrySheetView: View {
                     }
                 }
                 .labelsHidden()
-                .frame(maxWidth: 200)
+                .frame(maxWidth: 195)
 
-                Toggle(store.tr("deadline_title"), isOn: $hasDeadline)
+                Toggle(store.tr("action_deadline"), isOn: $hasDeadline)
                     .toggleStyle(.checkbox)
                     .font(.system(size: 12))
 
                 if hasDeadline {
                     DatePicker("", selection: $deadlineDate, displayedComponents: [.date])
+                        .environment(\.locale, store.preferences.language.locale)
                         .labelsHidden()
                         .frame(width: 105)
                 }
@@ -93,22 +95,27 @@ public struct QuickEntrySheetView: View {
 
             if isMenuBarPopover && !store.todayDaytimeTasks.isEmpty {
                 Divider()
-                Text(store.tr("view_today"))
+                Text(store.tr("macos_menubar_today_header"))
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                 ForEach(store.todayDaytimeTasks.prefix(4)) { task in
                     HStack(spacing: 8) {
                         ThingsCheckboxButton(
                             status: task.status,
+                            helpText: store.tr("macos_checkbox_help"),
                             onToggleComplete: { store.toggleTaskCompletion(task) },
                             onCancelTask: { store.cancelTask(task) }
                         )
-                        Text(task.title.isEmpty ? store.tr("todo_untitled") : task.title)
+                        Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
                             .font(.system(size: 12.5))
                             .lineLimit(1)
                         Spacer()
                     }
                 }
+            } else if !isMenuBarPopover {
+                Text(store.tr("macos_quick_entry_shortcut_hint"))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             }
 
             Divider()
@@ -119,15 +126,21 @@ public struct QuickEntrySheetView: View {
                         dismiss()
                     }
                 } else {
-                    Button("Open Thingsbook") {
+                    Button(store.tr("macos_menubar_open_app")) {
                         NSApplication.shared.activate(ignoringOtherApps: true)
                     }
                     .font(.system(size: 12))
+
+                    Button(store.tr("macos_menubar_quit")) {
+                        NSApplication.shared.terminate(nil)
+                    }
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
                 }
 
                 Spacer()
 
-                Button(store.tr("quick_share_save_action")) {
+                Button(store.tr("action_save")) {
                     saveQuickTask()
                 }
                 .buttonStyle(.borderedProminent)
@@ -135,7 +148,7 @@ public struct QuickEntrySheetView: View {
             }
         }
         .padding(16)
-        .frame(width: isMenuBarPopover ? 350 : 440)
+        .frame(width: isMenuBarPopover ? 360 : 450)
         .onAppear {
             if !isMenuBarPopover {
                 title = store.quickEntryPrefillTitle

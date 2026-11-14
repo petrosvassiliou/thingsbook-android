@@ -1383,15 +1383,17 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             if id == nil, let match = existingTags.first(where: { $0.title.caseInsensitiveCompare(cleanTitle) == .orderedSame }) {
                 return match
             }
+            let existingById = id.flatMap { targetId in existingTags.first(where: { $0.id == targetId }) }
             let now = nowMillis()
             let maxOrd = existingTags.map(\.sortOrder).max() ?? 0.0
+            let cleanShortcut = shortcut?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().first.map(String.init)
             let t = Tag(
                 id: id ?? UUID().uuidString,
                 title: cleanTitle,
-                parentTagId: parentTagId,
-                shortcut: shortcut?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().first.map(String.init),
-                sortOrder: maxOrd + 100.0,
-                createdAt: now,
+                parentTagId: parentTagId ?? existingById?.parentTagId,
+                shortcut: cleanShortcut,
+                sortOrder: existingById?.sortOrder ?? (maxOrd + 100.0),
+                createdAt: existingById?.createdAt ?? now,
                 updatedAt: now
             )
             try upsertTagLocked(t, isDirty: true)

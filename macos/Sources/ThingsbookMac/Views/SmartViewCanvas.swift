@@ -6,6 +6,8 @@ public struct SmartViewCanvas: View {
 
     @State private var newHeadingTitle = ""
     @State private var isAddingHeading = false
+    @State private var renamingHeadingId: String? = nil
+    @State private var renameHeadingText = ""
     @State private var showProjectLoggedItems = false
 
     public init(store: ThingsbookStore) {
@@ -15,7 +17,7 @@ public struct SmartViewCanvas: View {
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                // App Update Banner (if newer GitHub Release exists)
+                // App Update Banner
                 if let update = store.availableUpdate {
                     updateAvailableBanner(update)
                 }
@@ -32,23 +34,23 @@ public struct SmartViewCanvas: View {
                     if let project = store.project(byId: projId) {
                         projectCanvas(project)
                     } else {
-                        emptyPlaceholder(icon: "circle.dashed", text: store.tr("empty_project"))
+                        emptyPlaceholder(icon: "circle.dashed", text: store.tr("empty_view"))
                     }
                 case .area(let areaId):
                     if let area = store.area(byId: areaId) {
                         areaCanvas(area)
                     } else {
-                        emptyPlaceholder(icon: "cube", text: store.tr("empty_area"))
+                        emptyPlaceholder(icon: "cube", text: store.tr("empty_view"))
                     }
                 }
             }
-            .padding(.horizontal, 38)
-            .padding(.top, 24)
-            .padding(.bottom, 90)
-            .frame(maxWidth: 860, alignment: .leading)
+            .padding(.horizontal, 40)
+            .padding(.top, 26)
+            .padding(.bottom, 96)
+            .frame(maxWidth: 880, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(ThingsMacPalette.canvasBackground)
     }
 
     // MARK: - Smart Views
@@ -58,27 +60,37 @@ public struct SmartViewCanvas: View {
         // Header
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: view.sfSymbol)
-                .font(.system(size: 24, weight: .bold))
+                .font(.system(size: 25, weight: .bold))
                 .foregroundStyle(ThingsMacPalette.color(for: view))
 
             Text(store.tr(view.titleKey))
-                .font(.system(size: 26, weight: .bold, design: .default))
+                .font(.system(size: 28, weight: .bold))
 
             Spacer()
 
             if view == .today {
+                let grouped = store.preferences.groupTodayByProjectOrArea
                 Button {
-                    store.preferences.groupTodayByProjectOrArea.toggle()
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.86)) {
+                        store.preferences.groupTodayByProjectOrArea.toggle()
+                    }
                 } label: {
-                    Label(
-                        store.preferences.groupTodayByProjectOrArea ? "Grouped" : "List",
-                        systemImage: store.preferences.groupTodayByProjectOrArea ? "rectangle.3.group" : "list.bullet"
+                    HStack(spacing: 6) {
+                        Image(systemName: grouped ? "rectangle.3.group.fill" : "list.bullet")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(grouped ? store.tr("macos_today_grouped_badge") : store.tr("macos_today_list_badge"))
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .foregroundStyle(grouped ? ThingsMacPalette.accentBlue : .secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(grouped ? ThingsMacPalette.accentBlue.opacity(0.13) : Color.primary.opacity(0.055))
                     )
-                    .font(.system(size: 12, weight: .medium))
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help(store.tr("settings_today_group_title"))
+                .buttonStyle(.plain)
+                .help(store.tr("settings_group_today_title"))
             }
 
             if view == .logbook && !store.logbookTasks.isEmpty {
@@ -86,18 +98,24 @@ public struct SmartViewCanvas: View {
                     store.geminiInitialTab = .logbookReview
                     store.isGeminiSheetPresented = true
                 } label: {
-                    Label(store.tr("gemini_logbook_review_btn"), systemImage: "sparkles")
-                        .font(.system(size: 12, weight: .medium))
+                    HStack(spacing: 5) {
+                        Image(systemName: "sparkles")
+                        Text(store.tr("gemini_logbook_review_title"))
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.geminiPurple)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(ThingsMacPalette.geminiPurple.opacity(0.12)))
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.plain)
             }
 
             if view == .trash && !store.trashedTasks.isEmpty {
                 Button(role: .destructive) {
                     try? store.database.emptyTrash()
                 } label: {
-                    Label(store.tr("trash_empty_action"), systemImage: "trash.slash")
+                    Label(store.tr("trash_empty_btn"), systemImage: "trash.slash")
                         .font(.system(size: 12, weight: .medium))
                 }
                 .buttonStyle(.bordered)
@@ -127,7 +145,7 @@ public struct SmartViewCanvas: View {
         case .anytime:
             let list = store.filterTasksByActiveTag(store.anytimeTasks)
             if list.isEmpty {
-                emptyPlaceholder(icon: "square.stack.3d.up", text: store.tr("empty_anytime"))
+                emptyPlaceholder(icon: "square.stack.3d.up", text: store.tr("empty_view"))
             } else {
                 groupedByContainerStack(list)
             }
@@ -135,7 +153,7 @@ public struct SmartViewCanvas: View {
         case .someday:
             let list = store.filterTasksByActiveTag(store.somedayTasks)
             if list.isEmpty {
-                emptyPlaceholder(icon: "archivebox", text: store.tr("empty_someday"))
+                emptyPlaceholder(icon: "archivebox", text: store.tr("empty_view"))
             } else {
                 reorderableTaskStack(list)
             }
@@ -174,25 +192,31 @@ public struct SmartViewCanvas: View {
             }
 
             if !evening.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 7) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
                         Image(systemName: "moon.stars.fill")
-                            .font(.system(size: 14))
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(ThingsMacPalette.eveningPurple)
-                        Text(store.tr("section_this_evening"))
-                            .font(.system(size: 15, weight: .semibold))
+                        Text(store.tr("view_this_evening"))
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.primary)
                         Spacer()
                         Button {
                             store.createNewTaskInCurrentContext(evening: true)
                         } label: {
                             Image(systemName: "plus")
-                                .font(.system(size: 11.5, weight: .semibold))
+                                .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(.secondary)
+                                .frame(width: 22, height: 22)
                         }
                         .buttonStyle(.plain)
+                        .help(store.tr("entity_new_todo"))
                     }
-                    .padding(.top, 12)
+                    .padding(.top, 14)
+
                     Divider()
+                        .opacity(0.65)
+
                     reorderableTaskStack(evening)
                 }
             }
@@ -205,7 +229,7 @@ public struct SmartViewCanvas: View {
     private var upcomingCanvas: some View {
         let filtered = store.filterTasksByActiveTag(store.upcomingTasks)
         if filtered.isEmpty {
-            emptyPlaceholder(icon: "calendar", text: store.tr("empty_upcoming"))
+            emptyPlaceholder(icon: "calendar", text: store.tr("empty_view"))
         } else {
             let grouped = Dictionary(grouping: filtered) { task -> Int in
                 guard let w = task.whenDate else { return Int.max }
@@ -213,7 +237,7 @@ public struct SmartViewCanvas: View {
             }
             let sortedDays = grouped.keys.sorted()
 
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 22) {
                 ForEach(sortedDays, id: \.self) { epochDay in
                     let dayTasks = grouped[epochDay] ?? []
                     let sampleMillis = dayTasks.first?.whenDate
@@ -225,7 +249,7 @@ public struct SmartViewCanvas: View {
                             calendarEventsCard(events)
                         }
 
-                        VStack(spacing: 2) {
+                        VStack(spacing: 3) {
                             ForEach(dayTasks) { task in
                                 TaskRowCardView(store: store, task: task)
                             }
@@ -241,9 +265,9 @@ public struct SmartViewCanvas: View {
         let dayNum = Calendar.current.component(.day, from: date)
         let df = DateFormatter()
         df.locale = store.preferences.language.locale
-        df.dateFormat = "EEEE, MMMM"
+        df.dateFormat = "EEEE, d. MMMM"
 
-        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+        return HStack(alignment: .firstTextBaseline, spacing: 9) {
             Text("\(dayNum)")
                 .font(.system(size: 22, weight: .bold, design: .rounded))
             Text(df.string(from: date))
@@ -251,90 +275,212 @@ public struct SmartViewCanvas: View {
                 .foregroundStyle(.secondary)
             Spacer()
         }
+        .padding(.bottom, 4)
         .overlay(alignment: .bottom) {
-            Divider().offset(y: 4)
+            Divider().opacity(0.65)
         }
     }
 
-    // MARK: - Project View (Progress Ring, Markdown Notes, Headings, Drag & Drop)
+    // MARK: - Project View (Progress Ring, Markdown Notes, Action Pills, Headings, Drag & Drop)
 
     @ViewBuilder
     private func projectCanvas(_ project: Project) -> some View {
         VStack(alignment: .leading, spacing: 14) {
+            // Top Header
             HStack(alignment: .center, spacing: 12) {
                 ProjectProgressRing(
                     progress: project.progress,
-                    size: 24,
+                    size: 26,
                     tint: ThingsMacPalette.accentBlue,
                     isCompleted: project.status == .completed
                 )
 
                 Text(project.title)
-                    .font(.system(size: 25, weight: .bold))
+                    .font(.system(size: 27, weight: .bold))
 
                 Spacer()
 
-                if let dl = project.deadline {
-                    let df: DateFormatter = {
-                        let f = DateFormatter()
-                        f.dateStyle = .medium
-                        return f
-                    }()
-                    Label(df.string(from: DateEpochConverter.date(fromMillis: dl)), systemImage: "flag.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(ThingsMacPalette.deadlineCrimson)
-                }
+                HStack(spacing: 6) {
+                    Button {
+                        store.moveProjectOrder(project, direction: -1)
+                    } label: {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 12.5, weight: .medium))
+                    }
+                    .buttonStyle(.borderless)
 
-                Button {
-                    isAddingHeading = true
-                } label: {
-                    Label(store.tr("project_new_heading_btn"), systemImage: "text.insert")
-                        .font(.system(size: 12))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                    Button {
+                        store.moveProjectOrder(project, direction: 1)
+                    } label: {
+                        Image(systemName: "arrow.down")
+                            .font(.system(size: 12.5, weight: .medium))
+                    }
+                    .buttonStyle(.borderless)
 
-                Menu {
-                    Button(store.tr("project_menu_edit")) {
+                    Button {
                         store.editingProject = project
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 13))
                     }
-                    Button(store.tr("project_menu_duplicate")) {
-                        if let copy = try? store.database.duplicateProject(project.id, copySuffix: store.tr("project_copy_suffix")) {
-                            store.selectedDestination = .project(copy.id)
-                        }
+                    .buttonStyle(.borderless)
+                    .help(store.tr("project_edit_title"))
+
+                    Button {
+                        let next: ProjectStatus = project.status == .completed ? .active : .completed
+                        try? store.database.setProjectStatus(projectId: project.id, status: next)
+                    } label: {
+                        Image(systemName: "checkmark.circle")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(ThingsMacPalette.logbookGreen)
                     }
-                    Button(store.tr("project_complete_action")) {
-                        try? store.database.setProjectStatus(projectId: project.id, status: .completed)
-                    }
-                    Divider()
+                    .buttonStyle(.borderless)
+                    .help(store.tr("macos_complete_project"))
+
                     Button(role: .destructive) {
                         store.deleteProjectWithUndo(project)
                     } label: {
-                        Text(store.tr("project_menu_delete"))
+                        Image(systemName: "trash")
+                            .font(.system(size: 13))
+                            .foregroundStyle(ThingsMacPalette.deadlineCrimson)
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 16))
+                    .buttonStyle(.borderless)
+                    .help(store.tr("macos_delete_project"))
+
+                    Menu {
+                        Button(store.tr("project_edit_title")) {
+                            store.editingProject = project
+                        }
+                        Button(store.tr("action_duplicate_project")) {
+                            if let copy = try? store.database.duplicateProject(project.id, copySuffix: store.tr("macos_copy_suffix")) {
+                                store.selectedDestination = .project(copy.id)
+                            }
+                        }
+                        Button(store.tr("macos_complete_project")) {
+                            try? store.database.setProjectStatus(projectId: project.id, status: .completed)
+                        }
+                        Divider()
+                        Button(role: .destructive) {
+                            store.deleteProjectWithUndo(project)
+                        } label: {
+                            Text(store.tr("macos_delete_project"))
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 15))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
                 }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
             }
 
             if !project.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(MarkdownNotesParser.renderAttributed(project.notes))
-                    .font(.system(size: 13.5))
+                    .font(.system(size: 14))
                     .foregroundStyle(.secondary)
-                    .padding(.leading, 36)
+            }
+
+            // Metadata & Quick Action Pills Row (matching Thingsbook Project Header)
+            HStack(spacing: 8) {
+                if let dl = project.deadline {
+                    let todayDay = DateEpochConverter.epochDay(for: Date())
+                    let dlDay = DateEpochConverter.epochDay(forMillis: dl)
+                    let diff = dlDay - todayDay
+                    let dlText: String = {
+                        if diff == 0 { return store.tr("deadline_today") }
+                        if diff < 0 { return store.trf("deadline_days_overdue", abs(diff)) }
+                        return store.trf("deadline_days_left", diff)
+                    }()
+
+                    Button {
+                        store.editingProject = project
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "flag")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("\(store.tr("project_target_date_label")): \(dlText)")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundStyle(diff <= 0 ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.accentBlue)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill((diff <= 0 ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.accentBlue).opacity(0.12))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if let aid = project.areaId, let area = store.area(byId: aid) {
+                    Button {
+                        store.selectedDestination = .area(area.id)
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "cube")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("\(store.tr("entity_area")): \(area.title)")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundStyle(ThingsMacPalette.accentBlue)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(ThingsMacPalette.accentBlue.opacity(0.12))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Button {
+                    store.createNewTaskInCurrentContext()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(store.tr("entity_todo"))
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Color.primary.opacity(0.06))
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    isAddingHeading = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("H")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                        Text("+ \(store.tr("entity_heading"))")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Color.primary.opacity(0.06))
+                    )
+                }
+                .buttonStyle(.plain)
             }
 
             if isAddingHeading {
                 HStack(spacing: 8) {
-                    TextField(store.tr("project_heading_name_label"), text: $newHeadingTitle)
+                    TextField(store.tr("entity_new_heading"), text: $newHeadingTitle)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit {
                             submitNewHeading(projectId: project.id)
                         }
-                    Button(store.tr("action_add")) {
+                    Button(store.tr("macos_action_add")) {
                         submitNewHeading(projectId: project.id)
                     }
                     .buttonStyle(.borderedProminent)
@@ -345,7 +491,6 @@ public struct SmartViewCanvas: View {
                     }
                     .controlSize(.small)
                 }
-                .padding(.leading, 36)
             }
 
             let openTasks = store.tasksForProject(project.id)
@@ -355,7 +500,7 @@ public struct SmartViewCanvas: View {
             tagFilterBar(for: openTasks)
 
             if openTasks.isEmpty && headings.isEmpty {
-                emptyPlaceholder(icon: "checkmark.circle", text: store.tr("empty_project"))
+                emptyPlaceholder(icon: "checkmark.circle", text: store.tr("empty_view"))
             } else {
                 if !unheaded.isEmpty {
                     reorderableTaskStack(unheaded, showSubtitle: false, targetHeadingId: .some(nil))
@@ -378,8 +523,8 @@ public struct SmartViewCanvas: View {
                             .font(.system(size: 11, weight: .semibold))
                         Text(
                             showProjectLoggedItems
-                                ? store.tr("project_hide_logged")
-                                : store.trf("project_show_logged_count", logged.count)
+                                ? store.tr("macos_logged_hide")
+                                : store.trf("macos_logged_show_count", logged.count)
                         )
                         .font(.system(size: 12.5, weight: .medium))
                     }
@@ -388,7 +533,7 @@ public struct SmartViewCanvas: View {
                 .buttonStyle(.plain)
 
                 if showProjectLoggedItems {
-                    VStack(spacing: 2) {
+                    VStack(spacing: 3) {
                         ForEach(logged) { t in
                             TaskRowCardView(store: store, task: t, showContextSubtitle: false)
                         }
@@ -400,8 +545,83 @@ public struct SmartViewCanvas: View {
 
     private func projectHeadingSection(project: Project, heading: Heading, tasks: [TaskItem]) -> some View {
         let isCollapsed = store.collapsedHeadingIds.contains(heading.id)
+        let isRenaming = renamingHeadingId == heading.id
+
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
+                if isRenaming {
+                    TextField(store.tr("entity_heading"), text: $renameHeadingText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 260)
+                        .onSubmit {
+                            commitHeadingRename(heading)
+                        }
+                    Button(store.tr("action_save")) {
+                        commitHeadingRename(heading)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    Button(store.tr("action_cancel")) {
+                        renamingHeadingId = nil
+                    }
+                    .controlSize(.small)
+                } else {
+                    Button {
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                            if isCollapsed {
+                                store.collapsedHeadingIds.remove(heading.id)
+                            } else {
+                                store.collapsedHeadingIds.insert(heading.id)
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(heading.title)
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(ThingsMacPalette.accentBlue)
+                            if isCollapsed && !tasks.isEmpty {
+                                Text("(\(tasks.count))")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Spacer()
+
+                Button {
+                    store.createNewTaskInCurrentContext(preferredHeadingId: heading.id)
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(store.tr("heading_add_task"))
+
+                Button {
+                    renameHeadingText = heading.title
+                    renamingHeadingId = heading.id
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(store.tr("macos_rename_heading"))
+
+                Button {
+                    try? store.database.deleteHeading(heading.id)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(ThingsMacPalette.deadlineCrimson.opacity(0.85))
+                }
+                .buttonStyle(.plain)
+                .help(store.tr("action_delete"))
+
                 Button {
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
                         if isCollapsed {
@@ -411,45 +631,18 @@ public struct SmartViewCanvas: View {
                         }
                     }
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                            .font(.system(size: 10.5, weight: .bold))
-                            .foregroundStyle(ThingsMacPalette.accentBlue)
-                        Text(heading.title)
-                            .font(.system(size: 14.5, weight: .semibold))
-                            .foregroundStyle(ThingsMacPalette.accentBlue)
-                        if isCollapsed && !tasks.isEmpty {
-                            Text("(\(tasks.count))")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-
-                Spacer()
-
-                Button {
-                    store.createNewTaskInCurrentContext(preferredHeadingId: heading.id)
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 11.5, weight: .semibold))
+                    Image(systemName: isCollapsed ? "chevron.down" : "chevron.up")
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-
-                Button {
-                    try? store.database.deleteHeading(heading.id)
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.plain)
+                .help(store.tr("action_collapse_heading"))
             }
-            .padding(.top, 10)
+            .padding(.top, 14)
 
-            Divider()
+            Rectangle()
+                .fill(ThingsMacPalette.accentBlue.opacity(0.28))
+                .frame(height: 1)
 
             if !isCollapsed {
                 reorderableTaskStack(tasks, showSubtitle: false, targetHeadingId: .some(heading.id))
@@ -470,23 +663,41 @@ public struct SmartViewCanvas: View {
         isAddingHeading = false
     }
 
+    private func commitHeadingRename(_ heading: Heading) {
+        let clean = renameHeadingText.trimmingCharacters(in: .whitespacesAndNewlines)
+        defer { renamingHeadingId = nil }
+        guard !clean.isEmpty else { return }
+        var copy = heading
+        copy.title = clean
+        try? store.database.updateHeading(copy)
+    }
+
     // MARK: - Area View
 
     @ViewBuilder
     private func areaCanvas(_ area: Area) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 Image(systemName: "cube.fill")
-                    .font(.system(size: 24))
+                    .font(.system(size: 25))
                     .foregroundStyle(ThingsMacPalette.areaGreen)
                 Text(area.title)
-                    .font(.system(size: 26, weight: .bold))
+                    .font(.system(size: 28, weight: .bold))
                 Spacer()
+                Button {
+                    store.editingArea = area
+                } label: {
+                    Image(systemName: "pencil")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help(store.tr("areas_rename_label"))
+
                 Button {
                     store.newProjectDefaultAreaId = area.id
                     store.isNewProjectSheetPresented = true
                 } label: {
-                    Label(store.tr("sidebar_new_project"), systemImage: "plus.circle")
+                    Label(store.tr("entity_new_project"), systemImage: "plus.circle")
                         .font(.system(size: 12))
                 }
                 .buttonStyle(.bordered)
@@ -497,26 +708,31 @@ public struct SmartViewCanvas: View {
             let looseTasks = store.looseTasksForArea(area.id)
 
             if !areaProjects.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 8) {
                     ForEach(areaProjects) { proj in
                         Button {
                             store.selectedDestination = .project(proj.id)
                         } label: {
-                            HStack(spacing: 10) {
-                                ProjectProgressRing(progress: proj.progress, size: 17)
+                            HStack(spacing: 12) {
+                                ProjectProgressRing(progress: proj.progress, size: 18)
                                 Text(proj.title)
-                                    .font(.system(size: 14, weight: .semibold))
+                                    .font(.system(size: 14.5, weight: .semibold))
                                 Spacer()
-                                Text("\(max(0, proj.totalTaskCount - proj.completedTaskCount)) items")
+                                if proj.deadline != nil {
+                                    Image(systemName: "flag")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(ThingsMacPalette.deadlineCrimson)
+                                }
+                                Text(store.trf("macos_items_count", max(0, proj.totalTaskCount - proj.completedTaskCount)))
                                     .font(.system(size: 12))
                                     .foregroundStyle(.secondary)
                                 Image(systemName: "chevron.right")
                                     .font(.system(size: 11))
                                     .foregroundStyle(.tertiary)
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 9)
-                            .thingsCardSurface(cornerRadius: 9)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 11)
+                            .thingsCardSurface(cornerRadius: 10)
                         }
                         .buttonStyle(.plain)
                     }
@@ -527,7 +743,7 @@ public struct SmartViewCanvas: View {
                 Divider()
                 reorderableTaskStack(looseTasks, showSubtitle: false)
             } else if areaProjects.isEmpty {
-                emptyPlaceholder(icon: "cube", text: store.tr("empty_area"))
+                emptyPlaceholder(icon: "cube", text: store.tr("empty_view"))
             }
         }
     }
@@ -538,7 +754,7 @@ public struct SmartViewCanvas: View {
     private var logbookCanvas: some View {
         let filtered = store.filterTasksByActiveTag(store.logbookTasks)
         if filtered.isEmpty {
-            emptyPlaceholder(icon: "checkmark.square", text: store.tr("empty_logbook"))
+            emptyPlaceholder(icon: "checkmark.square", text: store.tr("empty_view"))
         } else {
             let grouped = Dictionary(grouping: filtered) { t -> String in
                 let ms = t.completedAt ?? t.updatedAt
@@ -559,10 +775,10 @@ public struct SmartViewCanvas: View {
             ForEach(orderedKeys, id: \.self) { dayTitle in
                 VStack(alignment: .leading, spacing: 6) {
                     Text(dayTitle)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(.secondary)
-                        .padding(.top, 6)
-                    Divider()
+                        .padding(.top, 8)
+                    Divider().opacity(0.65)
                     ForEach(grouped[dayTitle] ?? []) { task in
                         TaskRowCardView(store: store, task: task)
                     }
@@ -574,25 +790,25 @@ public struct SmartViewCanvas: View {
     @ViewBuilder
     private var trashCanvas: some View {
         if store.trashedTasks.isEmpty {
-            emptyPlaceholder(icon: "trash", text: store.tr("empty_trash"))
+            emptyPlaceholder(icon: "trash", text: store.tr("trash_empty_state"))
         } else {
-            VStack(spacing: 6) {
+            VStack(spacing: 8) {
                 ForEach(store.trashedTasks) { task in
                     HStack(spacing: 12) {
                         Image(systemName: "trash")
                             .foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(task.title.isEmpty ? store.tr("todo_untitled") : task.title)
-                                .font(.system(size: 13.5, weight: .medium))
+                            Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
+                                .font(.system(size: 14, weight: .medium))
                             if !task.notes.isEmpty {
                                 Text(task.notes)
-                                    .font(.system(size: 11.5))
+                                    .font(.system(size: 12))
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
                             }
                         }
                         Spacer()
-                        Button(store.tr("action_restore")) {
+                        Button(store.tr("trash_restore_btn")) {
                             try? store.database.restoreTask(task.id)
                         }
                         .buttonStyle(.bordered)
@@ -601,14 +817,14 @@ public struct SmartViewCanvas: View {
                         Button(role: .destructive) {
                             try? store.database.permanentlyDeleteTask(task.id)
                         } label: {
-                            Text(store.tr("trash_delete_forever"))
+                            Text(store.tr("trash_delete_forever_btn"))
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .thingsCardSurface(cornerRadius: 9)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .thingsCardSurface(cornerRadius: 10)
                 }
             }
         }
@@ -617,40 +833,50 @@ public struct SmartViewCanvas: View {
     // MARK: - Shared Subcomponents
 
     private func calendarEventsCard(_ events: [CalendarEventItem]) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 6) {
             ForEach(events) { ev in
                 Button {
                     AppleCalendarService.shared.openEventInAppleCalendar(ev)
                 } label: {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 10) {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(ThingsMacPalette.colorFromArgb(ev.colorHex))
-                            .frame(width: 3.5, height: 15)
+                            .frame(width: 4, height: 18)
 
                         if ev.isAllDay {
                             Text(store.tr("calendar_all_day"))
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.secondary)
+                                .font(.system(size: 11.5, weight: .bold))
+                                .foregroundStyle(ThingsMacPalette.accentBlue)
                         } else {
-                            Text(formatEventTime(ev.startMillis))
-                                .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(.secondary)
+                            Text("\(formatEventTime(ev.startMillis)) – \(formatEventTime(ev.endMillis))")
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                                .foregroundStyle(ThingsMacPalette.accentBlue)
                         }
 
                         Text(ev.title.isEmpty ? store.tr("calendar_untitled_event") : ev.title)
-                            .font(.system(size: 12.5, weight: .medium))
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
 
                         Spacer()
 
-                        Text(ev.calendarDisplayName)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.tertiary)
+                        Text(store.tr("macos_open_in_calendar"))
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Color.primary.opacity(0.05)))
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(0.035)))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(ThingsMacPalette.accentBlue.opacity(0.06))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.16), lineWidth: 0.8)
+                            )
+                    )
                 }
                 .buttonStyle(.plain)
             }
@@ -662,7 +888,7 @@ public struct SmartViewCanvas: View {
         showSubtitle: Bool = true,
         targetHeadingId: String?? = nil
     ) -> some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 3) {
             ForEach(Array(tasks.enumerated()), id: \.element.id) { idx, task in
                 TaskRowCardView(store: store, task: task, showContextSubtitle: showSubtitle)
                     .draggable(task.id)
@@ -680,22 +906,27 @@ public struct SmartViewCanvas: View {
     private func groupedByContainerStack(_ tasks: [TaskItem]) -> some View {
         let grouped = Dictionary(grouping: tasks) { t -> String in
             if let pid = t.projectId, let proj = store.project(byId: pid) {
+                if let aid = proj.areaId, let area = store.area(byId: aid) {
+                    return "\(area.title) › \(proj.title)"
+                }
                 return proj.title
             }
             if let aid = t.areaId, let area = store.area(byId: aid) {
                 return area.title
             }
-            return store.tr("today_group_unassigned")
+            return store.tr("macos_today_unassigned")
         }
         let sortedKeys = grouped.keys.sorted()
 
-        return VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: 16) {
             ForEach(sortedKeys, id: \.self) { groupName in
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 5) {
                     Text(groupName)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 13.5, weight: .bold))
                         .foregroundStyle(ThingsMacPalette.accentBlue)
-                    Divider()
+                    Rectangle()
+                        .fill(ThingsMacPalette.accentBlue.opacity(0.22))
+                        .frame(height: 1)
                     ForEach(grouped[groupName] ?? []) { task in
                         TaskRowCardView(store: store, task: task, showContextSubtitle: false)
                     }
@@ -721,11 +952,15 @@ public struct SmartViewCanvas: View {
         if !availableTags.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    TagPillBadge(title: store.tr("filter_all"), isSelected: store.selectedFilterTagId == nil) {
+                    TagPillBadge(title: store.tr("tags_filter_all"), isSelected: store.selectedFilterTagId == nil) {
                         store.selectedFilterTagId = nil
                     }
                     ForEach(availableTags) { tag in
-                        TagPillBadge(title: tag.title, isSelected: store.selectedFilterTagId == tag.id) {
+                        TagPillBadge(
+                            title: tag.title,
+                            isSelected: store.selectedFilterTagId == tag.id,
+                            showIcon: true
+                        ) {
                             store.selectedFilterTagId = (store.selectedFilterTagId == tag.id) ? nil : tag.id
                         }
                     }
@@ -741,23 +976,23 @@ public struct SmartViewCanvas: View {
                 .foregroundStyle(ThingsMacPalette.accentBlue)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(store.tr("sample_banner_title"))
+                Text(store.tr("setup_banner_title"))
                     .font(.system(size: 13.5, weight: .semibold))
-                Text(store.tr("sample_banner_subtitle"))
+                Text(store.tr("setup_banner_desc"))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
 
             Spacer()
 
-            Button(store.tr("sample_banner_clear_btn")) {
+            Button(store.tr("setup_banner_delete_samples_btn")) {
                 try? store.database.purgeSampleDataLocally(preserveUsedContainers: true)
                 store.preferences.hideSampleSetupBanner = true
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
 
-            Button(store.tr("sample_banner_signin_btn")) {
+            Button(store.tr("setup_banner_connect_btn")) {
                 store.settingsTab = .sync
                 store.isSettingsPresented = true
             }
@@ -772,6 +1007,7 @@ public struct SmartViewCanvas: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .help(store.tr("setup_banner_hide_tooltip"))
         }
         .padding(14)
         .thingsCardSurface(cornerRadius: 12)
@@ -783,21 +1019,21 @@ public struct SmartViewCanvas: View {
                 .font(.system(size: 20))
                 .foregroundStyle(ThingsMacPalette.logbookGreen)
             VStack(alignment: .leading, spacing: 2) {
-                Text(store.trf("update_available_title", info.versionString))
+                Text(store.trf("update_banner_title", info.versionString))
                     .font(.system(size: 13, weight: .semibold))
-                Text(store.tr("update_banner_subtitle"))
+                Text(store.tr("settings_updates_auto_desc"))
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button(store.tr("update_install_now")) {
+            Button(store.tr("update_banner_action_btn")) {
                 AppUpdateService.openUpdatePage(info)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
         }
-        .padding(12)
-        .thingsCardSurface(cornerRadius: 11)
+        .padding(13)
+        .thingsCardSurface(cornerRadius: 12)
     }
 
     private func emptyPlaceholder(icon: String, text: String) -> some View {

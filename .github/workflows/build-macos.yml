@@ -9,6 +9,9 @@ on:
       - macOS
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: macos-build-${{ github.ref }}
   cancel-in-progress: true
@@ -21,7 +24,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Sync & Verify Android <-> macOS Feature & Version Parity
+      - name: Sync & Verify Android <-> macOS Feature, Localization & Version Parity
         run: |
           python3 macos/scripts/sync-strings-from-android.py
           python3 macos/scripts/verify-android-parity.py
@@ -34,6 +37,7 @@ jobs:
         run: |
           chmod +x macos/scripts/build-dmg.sh
           ./macos/scripts/build-dmg.sh
+          cp -f macos/dist/Thingsbook-macOS-v*-Universal.dmg macos/dist/Thingsbook-macOS-Universal.dmg
 
       - name: Upload Universal macOS DMG Artifact
         uses: actions/upload-artifact@v4
@@ -42,3 +46,21 @@ jobs:
           path: macos/dist/*.dmg
           if-no-files-found: error
           retention-days: 90
+
+      - name: Publish Rolling macOS Universal DMG Pre-Release (for 1-Command Installer)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/macOS'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view macos-latest >/dev/null 2>&1; then
+            gh release create macos-latest \
+              --prerelease \
+              --target "${{ github.sha }}" \
+              --title "Thingsbook for macOS (Latest Universal Build)" \
+              --notes "Rolling Universal (Apple Silicon + Intel) macOS DMG built from the \`macOS\` branch. Install or update in one command without Gatekeeper prompts:
+
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/macOS/macos/install.sh | bash
+          \`\`\`"
+          fi
+          gh release upload macos-latest macos/dist/*.dmg --clobber

@@ -16,8 +16,14 @@ public struct QuickFindOverlay: View {
 
     private var matchingSmartViews: [SmartView] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return [.inbox, .today, .upcoming, .anytime, .someday, .logbook] }
+        guard !q.isEmpty else { return SmartView.allCases }
         return SmartView.allCases.filter { store.tr($0.titleKey).lowercased().contains(q) }
+    }
+
+    private var matchingAreas: [Area] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return store.areas }
+        return store.areas.filter { $0.title.lowercased().contains(q) }
     }
 
     public var body: some View {
@@ -27,12 +33,15 @@ public struct QuickFindOverlay: View {
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(.secondary)
 
-                TextField(store.tr("search_placeholder"), text: $query)
+                TextField(store.tr("quick_find_placeholder"), text: $query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 16))
                     .focused($isSearchFocused)
                     .onChange(of: query) { _, newValue in
                         runSearch(newValue)
+                    }
+                    .onSubmit {
+                        selectFirstResult()
                     }
 
                 if !query.isEmpty {
@@ -60,7 +69,7 @@ public struct QuickFindOverlay: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if !matchingSmartViews.isEmpty {
-                        sectionHeader("Lists")
+                        sectionHeader(store.tr("macos_lists_header"))
                         ForEach(matchingSmartViews) { sv in
                             Button {
                                 store.selectedDestination = .smartView(sv)
@@ -82,8 +91,31 @@ public struct QuickFindOverlay: View {
                         }
                     }
 
+                    if !matchingAreas.isEmpty {
+                        sectionHeader(store.tr("entity_areas"))
+                        ForEach(matchingAreas) { area in
+                            Button {
+                                store.selectedDestination = .area(area.id)
+                                dismiss()
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "cube.fill")
+                                        .foregroundStyle(ThingsMacPalette.areaGreen)
+                                        .frame(width: 20)
+                                    Text(area.title)
+                                        .font(.system(size: 13.5, weight: .medium))
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
                     if !matchedProjects.isEmpty {
-                        sectionHeader(store.tr("sidebar_new_project"))
+                        sectionHeader(store.tr("entity_projects"))
                         ForEach(matchedProjects) { proj in
                             Button {
                                 store.selectedDestination = .project(proj.id)
@@ -105,7 +137,7 @@ public struct QuickFindOverlay: View {
                     }
 
                     if !matchedTasks.isEmpty {
-                        sectionHeader("To-Dos")
+                        sectionHeader(store.tr("entity_todos"))
                         ForEach(matchedTasks) { task in
                             Button {
                                 jumpToTask(task)
@@ -116,7 +148,7 @@ public struct QuickFindOverlay: View {
                                         .foregroundStyle(task.status == .completed ? ThingsMacPalette.accentBlue : .secondary)
                                         .frame(width: 20)
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(task.title.isEmpty ? store.tr("todo_untitled") : task.title)
+                                        Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
                                             .font(.system(size: 13.5))
                                             .lineLimit(1)
                                         if !task.notes.isEmpty {
@@ -134,8 +166,11 @@ public struct QuickFindOverlay: View {
                             }
                             .buttonStyle(.plain)
                         }
-                    } else if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && matchedProjects.isEmpty && matchingSmartViews.isEmpty {
-                        Text(store.trf("search_no_results", query))
+                    } else if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        && matchedProjects.isEmpty
+                        && matchingSmartViews.isEmpty
+                        && matchingAreas.isEmpty {
+                        Text(store.tr("quick_find_no_results"))
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .center)
@@ -144,10 +179,10 @@ public struct QuickFindOverlay: View {
                 }
                 .padding(12)
             }
-            .frame(maxHeight: 380)
+            .frame(maxHeight: 400)
         }
-        .frame(width: 540)
-        .background(.regularMaterial)
+        .frame(width: 560)
+        .background(ThingsMacPalette.cardSurface)
         .onAppear {
             isSearchFocused = true
         }
@@ -170,6 +205,22 @@ public struct QuickFindOverlay: View {
         if let res = try? store.database.searchQuickFind(rawQuery: trimmed) {
             matchedTasks = res.tasks
             matchedProjects = res.projects
+        }
+    }
+
+    private func selectFirstResult() {
+        if let firstTask = matchedTasks.first {
+            jumpToTask(firstTask)
+            dismiss()
+        } else if let firstProj = matchedProjects.first {
+            store.selectedDestination = .project(firstProj.id)
+            dismiss()
+        } else if let firstView = matchingSmartViews.first {
+            store.selectedDestination = .smartView(firstView)
+            dismiss()
+        } else if let firstArea = matchingAreas.first {
+            store.selectedDestination = .area(firstArea.id)
+            dismiss()
         }
     }
 

@@ -21,16 +21,19 @@ public final class ThingsbookAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let lang = store?.preferences.language ?? .system
+        let strings = ThingsStrings.shared
         let menu = NSMenu(title: "Thingsbook")
-        let newTaskItem = NSMenuItem(title: "New To-Do", action: #selector(dockNewTodo), keyEquivalent: "")
+
+        let newTaskItem = NSMenuItem(title: strings.text("entity_new_todo", lang: lang), action: #selector(dockNewTodo), keyEquivalent: "")
         newTaskItem.target = self
         menu.addItem(newTaskItem)
 
-        let todayItem = NSMenuItem(title: "Show Today", action: #selector(dockShowToday), keyEquivalent: "")
+        let todayItem = NSMenuItem(title: strings.text("view_today", lang: lang), action: #selector(dockShowToday), keyEquivalent: "")
         todayItem.target = self
         menu.addItem(todayItem)
 
-        let inboxItem = NSMenuItem(title: "Show Inbox", action: #selector(dockShowInbox), keyEquivalent: "")
+        let inboxItem = NSMenuItem(title: strings.text("view_inbox", lang: lang), action: #selector(dockShowInbox), keyEquivalent: "")
         inboxItem.target = self
         menu.addItem(inboxItem)
         return menu
@@ -80,7 +83,7 @@ public struct ThingsbookMacApp: App {
     public var body: some Scene {
         WindowGroup("Thingsbook") {
             MainWorkspaceView(store: store)
-                .frame(minWidth: 820, minHeight: 540)
+                .frame(minWidth: 880, minHeight: 580)
                 .onAppear {
                     appDelegate.store = store
                 }
@@ -94,7 +97,7 @@ public struct ThingsbookMacApp: App {
         }
         .windowStyle(.automatic)
         .windowToolbarStyle(.unified(showsTitle: false))
-        .defaultSize(width: 1080, height: 720)
+        .defaultSize(width: 1140, height: 760)
         .commands {
             ThingsCommandMenus(store: store)
         }

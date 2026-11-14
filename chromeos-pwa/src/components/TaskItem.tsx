@@ -15,6 +15,7 @@ import {
   GripVertical,
   Layers,
   Moon,
+  Paperclip,
   Plus,
   Repeat,
   RotateCcw,
@@ -30,6 +31,7 @@ import {
   daysBetweenToday,
   formatRecurrenceShort,
   type AreaRecord,
+  type AttachmentRecord,
   type ChecklistItemRecord,
   type ProjectRecord,
   type SupportedLang,
@@ -42,6 +44,7 @@ import { localDb } from '../data/localDb';
 import type { TranslationStrings } from '../i18n/translations';
 import { extractDetectedLinksFromNotes } from '../domain/powerUtils';
 import { DetectedNotesLinksRow, MarkdownNotesField } from './MarkdownNotesField';
+import { AttachmentsStrip, processAndAddAttachmentFile } from './AttachmentStrip';
 
 interface ChecklistSubtaskRowProps {
   item: ChecklistItemRecord;
@@ -185,6 +188,7 @@ interface TaskItemProps {
   projectsMap: Map<string, ProjectRecord>;
   tagsMap: Map<string, TagRecord>;
   checklistItems: ChecklistItemRecord[];
+  attachments: AttachmentRecord[];
   lang: SupportedLang;
   geminiApiKey: string;
   t: TranslationStrings;
@@ -215,6 +219,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   projectsMap,
   tagsMap,
   checklistItems,
+  attachments,
   lang,
   geminiApiKey,
   t,
@@ -243,6 +248,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [fileDropOver, setFileDropOver] = useState(false);
   const [loadingAi, setLoadingAi] = useState(false);
   const [focusSubtaskId, setFocusSubtaskId] = useState<string | null>(null);
 
@@ -250,6 +256,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const glideTimerRef = useRef<number | null>(null);
   const subtaskRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const addSubtaskInputRef = useRef<HTMLInputElement | null>(null);
+  const attachmentFileInputRef = useRef<HTMLInputElement | null>(null);
 
   if (prevTaskId !== task.id) {
     setPrevTaskId(task.id);
@@ -407,6 +414,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     .sort((a, b) => a.sortOrder - b.sortOrder);
   const doneChecklistsCount = activeChecklists.filter((c) => c.isCompleted).length;
 
+  const taskAttachments = attachments
+    .filter((a) => !a.isDeleted && a.taskId === task.id)
+    .sort((a, b) => a.createdAt - b.createdAt);
+
   const taskTags = task.tagIds
     .map((id) => tagsMap.get(id))
     .filter((tg): tg is TagRecord => Boolean(tg));
@@ -541,7 +552,29 @@ export const TaskItem: React.FC<TaskItemProps> = ({
       <div
         className="task-card-expanded"
         data-task-id={task.id}
+        style={
+          fileDropOver
+            ? { outline: '2px dashed var(--things-blue)', outlineOffset: -2 }
+            : undefined
+        }
         onClick={(e) => e.stopPropagation()}
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes('Files')) {
+            e.preventDefault();
+            setFileDropOver(true);
+          }
+        }}
+        onDragLeave={() => setFileDropOver(false)}
+        onDrop={async (e) => {
+          if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            e.preventDefault();
+            setFileDropOver(false);
+            const files = Array.from(e.dataTransfer.files);
+            for (const f of files) {
+              await processAndAddAttachmentFile(f, { taskId: task.id }, t, onToast);
+            }
+          }
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Escape') {
             e.stopPropagation();
@@ -590,6 +623,16 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           }}
           placeholder={t.placeholderNotes}
           className="task-card-notes"
+        />
+
+        {/* Attachments Strip (v1.8.0) */}
+        <AttachmentsStrip
+          taskId={task.id}
+          attachments={taskAttachments}
+          t={t}
+          onToast={onToast}
+          showAddButton={taskAttachments.length > 0}
+          fileInputRef={attachmentFileInputRef}
         />
 
         {/* Checklist with Enter Cursor Split / Insert Below + Multiline Paste + Up/Down/Delete */}
@@ -797,7 +840,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           </button>
         </div>
 
-        {/* Bottom Action Toolbar: Left = Magic Breakdown, Right = 7 Icons */}
+        {/* Bottom Action Toolbar: Left = Magic Breakdown, Right = Action Icons */}
         <div className="task-card-toolbar">
           <button
             type="button"
@@ -810,6 +853,14 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           </button>
 
           <div className="task-card-actions">
+            <button
+              type="button"
+              className="icon-btn"
+              title={t.attachmentsAddPhotoBtn}
+              onClick={() => attachmentFileInputRef.current?.click()}
+            >
+              <Paperclip size={15.5} />
+            </button>
             <button
               type="button"
               className="icon-btn"
@@ -930,6 +981,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     task.recurrenceRule != null ||
     task.reminderTime != null ||
     activeChecklists.length > 0 ||
+    taskAttachments.length > 0 ||
     taskTags.length > 0 ||
     task.deadline != null;
 
@@ -1059,6 +1111,14 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                   <span>
                     {doneChecklistsCount}/{activeChecklists.length}
                   </span>
+                </span>
+              )}
+
+              {/* 4b. Attachments Count Badge (v1.8.0) */}
+              {taskAttachments.length > 0 && (
+                <span className="meta-badge" title={t.attachmentsTitle}>
+                  <Paperclip size={10.5} />
+                  <span>{taskAttachments.length}</span>
                 </span>
               )}
 

@@ -83,6 +83,13 @@ export default defineConfig({
             description: 'Jump directly to Quick Find',
             url: '/?action=quick-find',
             icons: [{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' }]
+          },
+          {
+            name: 'Voice Capture',
+            short_name: 'Voice',
+            description: 'Dictate a new To-Do or brain dump by voice',
+            url: '/?action=voice-capture',
+            icons: [{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' }]
           }
         ],
         share_target: {

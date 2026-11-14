@@ -1,4 +1,4 @@
-export type DetectedNotesLinkType = 'WEB' | 'EMAIL' | 'PHONE';
+export type DetectedNotesLinkType = 'WEB' | 'EMAIL' | 'PHONE' | 'MAP';
 
 export interface DetectedNotesLink {
   rawText: string;
@@ -12,14 +12,19 @@ const EMAIL_REGEX = /([A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/g;
 const PHONE_REGEX =
   /(?<!\w)(?:\+\d{1,3}[\s.-]?)?(?:\(?\d{2,5}\)?[\s.-]?)?\d{3,5}[\s.-]?\d{2,6}(?!\w)/g;
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const EXPLICIT_LOCATION_LINE_REGEX =
+  /^(?:[-*•]\s*)?(?:📍\s*|(?:\*\*)?(?:location|address|standort|ort|adresse|lieu|luogo|indirizzo|ubicación|dirección)(?:\*\*)?\s*[:\-]\s*)(.+)$/i;
+const GPS_COORD_REGEX = /(?<!\d)(-?\d{1,2}\.\d{4,})\s*,\s*(-?\d{1,3}\.\d{4,})(?!\d)/g;
+const STREET_ADDRESS_REGEX =
+  /\b([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-\s]{2,35}\s(?:Street|St\.?|Avenue|Ave\.?|Road|Rd\.?|Boulevard|Blvd\.?|Lane|Ln\.?|Drive|Dr\.?|Way|Court|Ct\.?|Plaza|Square|Sq\.?|Straße|Str\.?|Gasse|Weg|Platz|Allee|Rue|Boulevard|Avenue|Via|Piazza|Calle|Avenida)\s*\d{1,5}[A-Za-z]?(?:,\s*\d{4,5}\s+[A-ZÄÖÜa-zäöüß\-\s]{2,25})?)\b/g;
 
 export function stripTrailingPunctuation(raw: string): string {
   return raw.replace(/[.,;:!?)]+$/, '');
 }
 
 /**
- * Extracts clickable Web URLs, Email addresses, and Phone numbers from task/project notes
- * (matching Android v1.7.0 ThingsMarkdownNotesSupport.kt).
+ * Extracts clickable Web URLs, Email addresses, Phone numbers, and Map/Address links from task/project notes
+ * (matching Android v1.8.0 ThingsMarkdownNotesSupport.kt).
  */
 export function extractDetectedLinksFromNotes(notes: string): DetectedNotesLink[] {
   if (!notes || !notes.trim()) return [];
@@ -73,6 +78,64 @@ export function extractDetectedLinksFromNotes(notes: string): DetectedNotesLink[
         targetUri,
         type: 'PHONE'
       });
+    }
+  }
+
+  // 4. Explicit location lines (e.g. "📍 Alexanderplatz 1, Berlin" or "Location: Central Park")
+  for (const line of notes.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const m = EXPLICIT_LOCATION_LINE_REGEX.exec(trimmed);
+    if (m) {
+      const candidate = stripTrailingPunctuation((m[1] || '').trim());
+      if (candidate.length >= 3 && !/^https?:\/\//i.test(candidate)) {
+        const targetUri = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(candidate)}`;
+        if (!seenUris.has(targetUri)) {
+          seenUris.add(targetUri);
+          results.push({
+            rawText: candidate,
+            displayLabel: candidate.length > 34 ? `${candidate.slice(0, 32)}…` : candidate,
+            targetUri,
+            type: 'MAP'
+          });
+        }
+      }
+    }
+  }
+
+  // 5. GPS coordinates (lat, lng)
+  for (const match of notes.matchAll(GPS_COORD_REGEX)) {
+    const lat = Number(match[1]);
+    const lng = Number(match[2]);
+    if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+      const coordLabel = `${match[1]}, ${match[2]}`;
+      const targetUri = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(coordLabel)}`;
+      if (!seenUris.has(targetUri)) {
+        seenUris.add(targetUri);
+        results.push({
+          rawText: match[0],
+          displayLabel: coordLabel,
+          targetUri,
+          type: 'MAP'
+        });
+      }
+    }
+  }
+
+  // 6. Street addresses
+  for (const match of notes.matchAll(STREET_ADDRESS_REGEX)) {
+    const addr = stripTrailingPunctuation(match[0].trim());
+    if (addr.length >= 6) {
+      const targetUri = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`;
+      if (!seenUris.has(targetUri)) {
+        seenUris.add(targetUri);
+        results.push({
+          rawText: addr,
+          displayLabel: addr.length > 34 ? `${addr.slice(0, 32)}…` : addr,
+          targetUri,
+          type: 'MAP'
+        });
+      }
     }
   }
 

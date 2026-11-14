@@ -1,6 +1,7 @@
 package com.culturedcode.things3.data.remote.dto
 
 import com.culturedcode.things3.data.local.entity.AreaEntity
+import com.culturedcode.things3.data.local.entity.AttachmentEntity
 import com.culturedcode.things3.data.local.entity.ChecklistItemEntity
 import com.culturedcode.things3.data.local.entity.HeadingEntity
 import com.culturedcode.things3.data.local.entity.ProjectEntity
@@ -40,7 +41,8 @@ data class CloudDeltaBatchPayload(
     val projects: List<ProjectFirestoreDto> = emptyList(),
     val headings: List<HeadingFirestoreDto> = emptyList(),
     val tasks: List<TaskFirestoreDto> = emptyList(),
-    val checklistItems: List<ChecklistItemFirestoreDto> = emptyList()
+    val checklistItems: List<ChecklistItemFirestoreDto> = emptyList(),
+    val attachments: List<AttachmentFirestoreDto> = emptyList()
 )
 
 @Serializable
@@ -505,3 +507,86 @@ data class TagFirestoreDto(
         }
     }
 }
+
+@Serializable
+data class AttachmentFirestoreDto(
+    val id: String = "",
+    val taskId: String? = null,
+    val projectId: String? = null,
+    val fileName: String = "",
+    val mimeType: String = "",
+    val sizeBytes: Long = 0L,
+    val localRelativePath: String = "",
+    val dataBase64: String = "",
+    val createdAt: Long = 0L,
+    val updatedAt: Long = 0L,
+    val isDeleted: Boolean = false
+) {
+    fun toEntity(resolvedRelativePath: String = localRelativePath): AttachmentEntity = AttachmentEntity(
+        id = id,
+        taskId = taskId?.takeIf { it.isNotBlank() },
+        projectId = projectId?.takeIf { it.isNotBlank() },
+        fileName = fileName,
+        mimeType = mimeType,
+        sizeBytes = sizeBytes.coerceAtLeast(0L),
+        localRelativePath = resolvedRelativePath,
+        createdAt = createdAt,
+        updatedAt = updatedAt,
+        isDeleted = isDeleted,
+        isDirty = false
+    )
+
+    fun toFirestoreMap(): Map<String, Any?> = mapOf(
+        "id" to id,
+        "taskId" to taskId,
+        "projectId" to projectId,
+        "fileName" to fileName,
+        "mimeType" to mimeType,
+        "sizeBytes" to sizeBytes,
+        "localRelativePath" to localRelativePath,
+        "dataBase64" to dataBase64,
+        "createdAt" to createdAt,
+        "updatedAt" to updatedAt,
+        "isDeleted" to isDeleted
+    )
+
+    companion object {
+        fun fromEntity(entity: AttachmentEntity, dataBase64: String = ""): AttachmentFirestoreDto = AttachmentFirestoreDto(
+            id = entity.id,
+            taskId = entity.taskId,
+            projectId = entity.projectId,
+            fileName = entity.fileName,
+            mimeType = entity.mimeType,
+            sizeBytes = entity.sizeBytes,
+            localRelativePath = entity.localRelativePath,
+            dataBase64 = dataBase64,
+            createdAt = entity.createdAt,
+            updatedAt = entity.updatedAt,
+            isDeleted = entity.isDeleted
+        )
+
+        fun fromFirestoreMap(map: Map<String, Any?>?): AttachmentFirestoreDto? {
+            if (map == null) return null
+            val id = (map["id"] as? String)?.trim() ?: return null
+            if (id.isEmpty()) return null
+            val fileName = map["fileName"] as? String ?: "attachment"
+            val safeName = fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(80).ifEmpty { "file" }
+            val relPath = (map["localRelativePath"] as? String)?.takeIf { it.isNotBlank() }
+                ?: "attachments/${id}_${safeName}"
+            return AttachmentFirestoreDto(
+                id = id,
+                taskId = (map["taskId"] as? String)?.takeIf { it.isNotBlank() },
+                projectId = (map["projectId"] as? String)?.takeIf { it.isNotBlank() },
+                fileName = fileName,
+                mimeType = map["mimeType"] as? String ?: "application/octet-stream",
+                sizeBytes = (map["sizeBytes"] as? Number)?.toLong() ?: 0L,
+                localRelativePath = relPath,
+                dataBase64 = map["dataBase64"] as? String ?: "",
+                createdAt = (map["createdAt"] as? Number)?.toLong() ?: 0L,
+                updatedAt = (map["updatedAt"] as? Number)?.toLong() ?: 0L,
+                isDeleted = map["isDeleted"] as? Boolean ?: false
+            )
+        }
+    }
+}
+

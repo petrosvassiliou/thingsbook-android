@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.OpenInNew
+import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -43,7 +44,8 @@ import com.culturedcode.things3.ui.theme.ThingsTheme
 enum class DetectedNoteLinkType {
     WEB,
     EMAIL,
-    PHONE
+    PHONE,
+    MAP
 }
 
 data class DetectedNoteLink(
@@ -60,6 +62,10 @@ private val INLINE_CODE_REGEX = Regex("`([^`\\n]+?)`")
 private val URL_REGEX = Regex("(?i)\\b((?:https?://|www\\.)[^\\s<>()\"']+)")
 private val EMAIL_REGEX = Regex("\\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,})\\b")
 private val PHONE_REGEX = Regex("(?<!\\w)(\\+?[0-9][0-9\\s().-]{6,}[0-9])(?!\\w)")
+private val EXPLICIT_LOCATION_REGEX = Regex("(?im)(?:📍|(?:location|ort|adresse|address|map|lieu|indirizzo|dirección|ubicación)\\s*:)\\s*([^\\n]{3,80})")
+private val GPS_COORDS_REGEX = Regex("(?<!\\d)(-?\\d{1,2}\\.\\d{3,8}\\s*,\\s*-?\\d{1,3}\\.\\d{3,8})(?!\\d)")
+private val EU_STREET_ADDRESS_REGEX = Regex("(?m)(?:^|(?:[-*•]|\\bat)\\s+)([A-ZÄÖÜ][A-Za-zÄÖÜäöüßéèêàùç.\\-\\s]{2,34}(?:straße|strasse|str\\.|weg|platz|allee|gasse|ring|damm|ufer|rue|avenue|boulevard|via|piazza|calle|avenida)\\s+\\d{1,4}[a-zA-Z]?(?:\\s*,\\s*\\d{4,5}\\s+[A-ZÄÖÜa-zäöüß\\-\\s]{2,25})?)", RegexOption.IGNORE_CASE)
+private val US_STREET_ADDRESS_REGEX = Regex("(?m)\\b(\\d{1,5}\\s+[A-Z][A-Za-z0-9.\\-\\s]{2,30}\\s+(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Boulevard|Dr|Drive|Ln|Lane|Way|Ct|Court|Pl|Place|Pkwy|Parkway|Hwy|Highway)\\b(?:\\s*,\\s*[A-Za-z.\\-\\s]{2,25})?)")
 
 fun extractDetectedLinksFromNotes(notes: String): List<DetectedNoteLink> {
     if (notes.isBlank()) return emptyList()
@@ -88,6 +94,37 @@ fun extractDetectedLinksFromNotes(notes: String): List<DetectedNoteLink> {
         val email = match.value
         results.add(DetectedNoteLink(DetectedNoteLinkType.EMAIL, email.take(36), "mailto:$email"))
         occupiedRanges.add(match.range)
+    }
+
+    for (match in EXPLICIT_LOCATION_REGEX.findAll(notes)) {
+        if (occupiedRanges.any { it.first <= match.range.last && match.range.first <= it.last }) continue
+        val loc = match.groupValues.getOrNull(1)?.trim()?.trimEnd('.', ',', ';').orEmpty()
+        if (loc.length >= 3) {
+            val encoded = java.net.URLEncoder.encode(loc, "UTF-8")
+            results.add(DetectedNoteLink(DetectedNoteLinkType.MAP, loc.take(34), "geo:0,0?q=$encoded"))
+            occupiedRanges.add(match.range)
+        }
+    }
+
+    for (match in GPS_COORDS_REGEX.findAll(notes)) {
+        if (occupiedRanges.any { it.first <= match.range.last && match.range.first <= it.last }) continue
+        val coords = match.groupValues.getOrNull(1)?.replace(" ", "").orEmpty()
+        if (coords.isNotEmpty()) {
+            results.add(DetectedNoteLink(DetectedNoteLinkType.MAP, coords, "geo:$coords?q=$coords"))
+            occupiedRanges.add(match.range)
+        }
+    }
+
+    for (regex in listOf(EU_STREET_ADDRESS_REGEX, US_STREET_ADDRESS_REGEX)) {
+        for (match in regex.findAll(notes)) {
+            if (occupiedRanges.any { it.first <= match.range.last && match.range.first <= it.last }) continue
+            val addr = match.groupValues.getOrNull(1)?.trim()?.trimEnd('.', ',', ';').orEmpty()
+            if (addr.length >= 5) {
+                val encoded = java.net.URLEncoder.encode(addr, "UTF-8")
+                results.add(DetectedNoteLink(DetectedNoteLinkType.MAP, addr.take(34), "geo:0,0?q=$encoded"))
+                occupiedRanges.add(match.range)
+            }
+        }
     }
 
     for (match in PHONE_REGEX.findAll(notes)) {
@@ -239,6 +276,7 @@ fun DetectedNotesLinksRow(
                 DetectedNoteLinkType.WEB -> Icons.Outlined.OpenInNew
                 DetectedNoteLinkType.EMAIL -> Icons.Outlined.Email
                 DetectedNoteLinkType.PHONE -> Icons.Outlined.Call
+                DetectedNoteLinkType.MAP -> Icons.Outlined.Place
             }
             Row(
                 modifier = Modifier
@@ -250,11 +288,21 @@ fun DetectedNotesLinksRow(
                         shape = RoundedCornerShape(8.dp)
                     )
                     .clickable {
-                        runCatching {
+                        val launched = runCatching {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(link.targetUri)).apply {
                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             }
                             context.startActivity(intent)
+                            true
+                        }.getOrDefault(false)
+                        if (!launched && link.type == DetectedNoteLinkType.MAP) {
+                            runCatching {
+                                val fallbackUrl = "https://www.google.com/maps/search/?api=1&query=${Uri.encode(link.displayLabel)}"
+                                val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse(fallbackUrl)).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(webIntent)
+                            }
                         }
                     }
                     .padding(horizontal = 8.dp, vertical = 4.dp),

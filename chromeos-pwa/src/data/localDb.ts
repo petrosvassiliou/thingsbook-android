@@ -9,6 +9,7 @@ import {
   startOfDayEpoch,
   type AppPreferences,
   type AreaRecord,
+  type AttachmentRecord,
   type ChecklistItemRecord,
   type HeadingRecord,
   type ProjectRecord,
@@ -47,7 +48,7 @@ import {
 import { resolveLanguage } from '../i18n/translations';
 
 const DB_NAME = 'thingsbook_chromeos_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const PREFS_STORAGE_KEY = 'thingsbook_chromeos_prefs_v1';
 
 export interface DataSnapshot {
@@ -57,6 +58,7 @@ export interface DataSnapshot {
   tasks: TaskRecord[];
   checklistItems: ChecklistItemRecord[];
   tags: TagRecord[];
+  attachments: AttachmentRecord[];
   hasSampleTasks: boolean;
 }
 
@@ -181,6 +183,7 @@ class ThingsLocalDb {
     tasks: [],
     checklistItems: [],
     tags: [],
+    attachments: [],
     hasSampleTasks: false
   };
 
@@ -215,6 +218,9 @@ class ThingsLocalDb {
             db.createObjectStore('checklist_items', { keyPath: 'id' });
           }
           if (!db.objectStoreNames.contains('tags')) db.createObjectStore('tags', { keyPath: 'id' });
+          if (!db.objectStoreNames.contains('attachments')) {
+            db.createObjectStore('attachments', { keyPath: 'id' });
+          }
           if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
         }
       });
@@ -433,13 +439,14 @@ class ThingsLocalDb {
 
   async refreshSnapshot(): Promise<DataSnapshot> {
     const db = await this.getDb();
-    const [areas, projects, headings, tasks, checklistItems, tags] = await Promise.all([
+    const [areas, projects, headings, tasks, checklistItems, tags, attachments] = await Promise.all([
       db.getAll('areas') as Promise<AreaRecord[]>,
       db.getAll('projects') as Promise<ProjectRecord[]>,
       db.getAll('headings') as Promise<HeadingRecord[]>,
       db.getAll('tasks') as Promise<TaskRecord[]>,
       db.getAll('checklist_items') as Promise<ChecklistItemRecord[]>,
-      db.getAll('tags') as Promise<TagRecord[]>
+      db.getAll('tags') as Promise<TagRecord[]>,
+      db.getAll('attachments') as Promise<AttachmentRecord[]>
     ]);
 
     const hasSampleTasks = tasks.some((t) => !t.isDeleted && SAMPLE_TASK_IDS.has(t.id));
@@ -451,6 +458,7 @@ class ThingsLocalDb {
       tasks: tasks.sort((a, b) => a.sortOrder - b.sortOrder || b.createdAt - a.createdAt),
       checklistItems: checklistItems.sort((a, b) => a.sortOrder - b.sortOrder),
       tags: tags.sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title)),
+      attachments: attachments.sort((a, b) => a.createdAt - b.createdAt),
       hasSampleTasks
     };
 
@@ -1753,6 +1761,62 @@ class ThingsLocalDb {
     });
   }
 
+  async addAttachment(params: {
+    taskId: string | null;
+    projectId: string | null;
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    dataBase64: string;
+    sortOrder?: number;
+  }): Promise<AttachmentRecord> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const record: AttachmentRecord = {
+        id: crypto.randomUUID(),
+        taskId: params.taskId,
+        projectId: params.projectId,
+        fileName: params.fileName.trim() || 'attachment',
+        mimeType: params.mimeType || 'application/octet-stream',
+        sizeBytes: params.sizeBytes,
+        dataBase64: params.dataBase64,
+        sortOrder: params.sortOrder ?? now,
+        createdAt: now,
+        updatedAt: now,
+        isDeleted: false,
+        isDirty: true
+      };
+      const tx = db.transaction('attachments', 'readwrite');
+      await tx.store.put(record);
+      await tx.done;
+      await this.refreshSnapshot();
+      this.triggerSync();
+      return record;
+    });
+  }
+
+  async deleteAttachment(attachmentId: string): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const tx = db.transaction('attachments', 'readwrite');
+      const existing = (await tx.store.get(attachmentId)) as AttachmentRecord | undefined;
+      if (existing) {
+        await tx.store.put({
+          ...existing,
+          dataBase64: '',
+          isDeleted: true,
+          updatedAt: now,
+          isDirty: true
+        });
+      }
+      await tx.done;
+      await this.refreshSnapshot();
+      this.triggerSync();
+    });
+  }
+
   // ==================== Sample Data Cleanup & Cloud Merge ====================
 
   countNonSampleTasks(): number {
@@ -1765,7 +1829,7 @@ class ThingsLocalDb {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
       const tx = db.transaction(
-        ['tasks', 'checklist_items', 'headings', 'projects', 'tags', 'areas'],
+        ['tasks', 'checklist_items', 'headings', 'projects', 'tags', 'areas', 'attachments'],
         'readwrite'
       );
 
@@ -1808,7 +1872,7 @@ class ThingsLocalDb {
       }
 
       if (markRemainingDirtyForMerge) {
-        const stores = ['areas', 'projects', 'headings', 'tasks', 'checklist_items', 'tags'] as const;
+        const stores = ['areas', 'projects', 'headings', 'tasks', 'checklist_items', 'tags', 'attachments'] as const;
         for (const sName of stores) {
           const all = await tx.objectStore(sName).getAll();
           for (const rec of all) {
@@ -1828,9 +1892,10 @@ class ThingsLocalDb {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
       const tx = db.transaction(
-        ['areas', 'projects', 'headings', 'tasks', 'checklist_items', 'tags'],
+        ['areas', 'projects', 'headings', 'tasks', 'checklist_items', 'tags', 'attachments'],
         'readwrite'
       );
+      await tx.objectStore('attachments').clear();
       await tx.objectStore('checklist_items').clear();
       await tx.objectStore('tasks').clear();
       await tx.objectStore('headings').clear();
@@ -1846,13 +1911,14 @@ class ThingsLocalDb {
 
   async getDirtyEntities() {
     const db = await this.getDb();
-    const [areas, projects, headings, tasks, checklistItems, tags] = await Promise.all([
+    const [areas, projects, headings, tasks, checklistItems, tags, attachments] = await Promise.all([
       db.getAll('areas') as Promise<AreaRecord[]>,
       db.getAll('projects') as Promise<ProjectRecord[]>,
       db.getAll('headings') as Promise<HeadingRecord[]>,
       db.getAll('tasks') as Promise<TaskRecord[]>,
       db.getAll('checklist_items') as Promise<ChecklistItemRecord[]>,
-      db.getAll('tags') as Promise<TagRecord[]>
+      db.getAll('tags') as Promise<TagRecord[]>,
+      db.getAll('attachments') as Promise<AttachmentRecord[]>
     ]);
     return {
       areas: areas.filter((x) => x.isDirty),
@@ -1860,7 +1926,8 @@ class ThingsLocalDb {
       headings: headings.filter((x) => x.isDirty),
       tasks: tasks.filter((x) => x.isDirty),
       checklistItems: checklistItems.filter((x) => x.isDirty),
-      tags: tags.filter((x) => x.isDirty)
+      tags: tags.filter((x) => x.isDirty),
+      attachments: attachments.filter((x) => x.isDirty)
     };
   }
 
@@ -1871,11 +1938,12 @@ class ThingsLocalDb {
     tasks?: { ids: string[]; maxUpdatedAt?: number };
     checklistItems?: { ids: string[]; maxUpdatedAt?: number };
     tags?: { ids: string[]; maxUpdatedAt?: number };
+    attachments?: { ids: string[]; maxUpdatedAt?: number };
   }): Promise<void> {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
       const tx = db.transaction(
-        ['areas', 'projects', 'headings', 'tasks', 'checklist_items', 'tags'],
+        ['areas', 'projects', 'headings', 'tasks', 'checklist_items', 'tags', 'attachments'],
         'readwrite'
       );
       const map: Array<[string, { ids: string[]; maxUpdatedAt?: number } | undefined]> = [
@@ -1884,7 +1952,8 @@ class ThingsLocalDb {
         ['headings', idsByStore.headings],
         ['tasks', idsByStore.tasks],
         ['checklist_items', idsByStore.checklistItems],
-        ['tags', idsByStore.tags]
+        ['tags', idsByStore.tags],
+        ['attachments', idsByStore.attachments]
       ];
       for (const [storeName, spec] of map) {
         if (!spec || spec.ids.length === 0) continue;
@@ -1908,12 +1977,13 @@ class ThingsLocalDb {
     headings?: HeadingRecord[];
     tasks?: TaskRecord[];
     checklistItems?: ChecklistItemRecord[];
+    attachments?: AttachmentRecord[];
   }): Promise<number> {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
       let maxUpdatedAt = 0;
       const tx = db.transaction(
-        ['tags', 'areas', 'projects', 'headings', 'tasks', 'checklist_items'],
+        ['tags', 'areas', 'projects', 'headings', 'tasks', 'checklist_items', 'attachments'],
         'readwrite'
       );
 
@@ -1941,6 +2011,7 @@ class ThingsLocalDb {
       await applyList('headings', batch.headings);
       await applyList('tasks', batch.tasks);
       await applyList('checklist_items', batch.checklistItems);
+      await applyList('attachments', batch.attachments);
 
       await tx.done;
       await this.refreshSnapshot();
@@ -1962,6 +2033,7 @@ class ThingsLocalDb {
       tasks: snap.tasks,
       checklistItems: snap.checklistItems,
       tags: snap.tags,
+      attachments: snap.attachments,
       preferences: {
         sidebarVisible: prefs.sidebarVisible,
         dailyDigestEnabled: prefs.dailyDigestEnabled,
@@ -1972,7 +2044,7 @@ class ThingsLocalDb {
         selectedCalendarIds: prefs.selectedCalendarIds,
         groupTodayByProjectOrArea: prefs.groupTodayByProjectOrArea
       },
-      appVersionName: '1.7.0-chromeos'
+      appVersionName: '1.8.0-chromeos'
     });
     const bytes = await encodeThingsBackup(payload, password);
     return {
@@ -2145,11 +2217,34 @@ class ThingsLocalDb {
         isDirty: syncAfterRestore
       }));
 
+    const attachments: AttachmentRecord[] = (payload.attachments || [])
+      .filter((att) => {
+        if (!att.id || !att.dataBase64) return false;
+        const hasValidTask = Boolean(att.taskId && validTaskIds.has(att.taskId));
+        const hasValidProj = Boolean(att.projectId && validProjectIds.has(att.projectId));
+        return hasValidTask || hasValidProj;
+      })
+      .map((att) => ({
+        id: att.id,
+        taskId: att.taskId && validTaskIds.has(att.taskId) ? att.taskId : null,
+        projectId: att.projectId && validProjectIds.has(att.projectId) ? att.projectId : null,
+        fileName: att.fileName || 'attachment',
+        mimeType: att.mimeType || 'application/octet-stream',
+        sizeBytes: Number.isFinite(att.sizeBytes) ? att.sizeBytes : 0,
+        dataBase64: att.dataBase64,
+        sortOrder: Number.isFinite(att.sortOrder) ? Number(att.sortOrder) : (att.createdAt || now),
+        createdAt: att.createdAt || now,
+        updatedAt: att.updatedAt || now,
+        isDeleted: false,
+        isDirty: syncAfterRestore
+      }));
+
     const db = await this.getDb();
     const tx = db.transaction(
-      ['areas', 'projects', 'headings', 'tasks', 'checklist_items', 'tags'],
+      ['areas', 'projects', 'headings', 'tasks', 'checklist_items', 'tags', 'attachments'],
       'readwrite'
     );
+    await tx.objectStore('attachments').clear();
     await tx.objectStore('checklist_items').clear();
     await tx.objectStore('tasks').clear();
     await tx.objectStore('headings').clear();
@@ -2163,6 +2258,7 @@ class ThingsLocalDb {
     for (const h of headings) await tx.objectStore('headings').put(h);
     for (const t of tasks) await tx.objectStore('tasks').put(t);
     for (const c of checklistItems) await tx.objectStore('checklist_items').put(c);
+    for (const att of attachments) await tx.objectStore('attachments').put(att);
     await tx.done;
 
     await this.refreshSnapshot();
@@ -2180,7 +2276,8 @@ class ThingsLocalDb {
         headingsCount: headings.length,
         tasksCount: tasks.length,
         checklistItemsCount: checklistItems.length,
-        tagsCount: tags.length
+        tagsCount: tags.length,
+        attachmentsCount: attachments.length
       },
       languageTag: payload.preferences?.languageTag,
       preferences: payload.preferences ?? null

@@ -163,6 +163,7 @@ import com.culturedcode.things3.domain.model.ScheduleState
 import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
+import com.culturedcode.things3.ui.components.AttachmentImportOutcome
 import com.culturedcode.things3.ui.components.CreateOrEditProjectDialog
 import com.culturedcode.things3.ui.components.DeadlineDatePickerDialog
 import com.culturedcode.things3.ui.components.DetectedNotesLinksRow
@@ -207,6 +208,15 @@ import com.culturedcode.things3.ui.theme.ThingsTheme
 import com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget
 import com.culturedcode.things3.ui.viewmodel.ThingsbookStatistics
 import com.culturedcode.things3.ui.viewmodel.ThingsbookViewModel
+import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.activity.result.PickVisualMediaRequest
+import com.culturedcode.things3.domain.model.TaskAttachment
+import com.culturedcode.things3.ui.components.TaskAttachmentsStrip
+import com.culturedcode.things3.ui.components.processPickedAttachmentUri
+import kotlinx.coroutines.launch
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.delay
@@ -292,6 +302,7 @@ fun ThingsSmartViewScreen(
     val activeProjects by viewModel.activeProjects.collectAsState()
     val projectHeadings by viewModel.activeProjectHeadings.collectAsState()
     val projectTasks by viewModel.activeProjectTasks.collectAsState()
+    val projectAttachments by viewModel.activeProjectAttachments.collectAsState()
     val areaTasks by viewModel.activeAreaTasks.collectAsState()
     val allTags by viewModel.allTags.collectAsState()
 
@@ -726,6 +737,7 @@ fun ThingsSmartViewScreen(
                         currentArea = currentArea,
                         areas = areas,
                         projects = activeProjects,
+                        projectAttachments = projectAttachments,
                         locale = activeLocale,
                         trashItemCount = deletedTasks.size + deletedProjects.size,
                         onUpdateProjectDeadline = { pId, dl -> viewModel.updateProjectDeadline(pId, dl) },
@@ -738,6 +750,11 @@ fun ThingsSmartViewScreen(
                         onCompleteProject = { pId -> viewModel.completeProject(pId) },
                         onMoveProject = { pId, up -> viewModel.moveProject(pId, up) },
                         onDeleteProject = { pId -> viewModel.deleteProject(pId) },
+                        onAddProjectAttachment = { pId, fName, mime, bytes ->
+                            viewModel.addProjectAttachment(pId, fName, mime, bytes)
+                        },
+                        onDeleteProjectAttachment = { attId -> viewModel.deleteAttachment(attId) },
+                        onShowMessage = { msg -> viewModel.showUiMessage(msg) },
                         onRequestEmptyTrash = { showEmptyTrashConfirmDialog = true },
                         onAddTaskInCurrentView = {
                             viewModel.createTaskAtPosition(primaryTasks, 0, "")
@@ -1349,7 +1366,7 @@ private fun ThingsTopHeaderAndQuickFindSection(
 
     val showSidebar = isWideScreen && isSidebarVisible
 
-    // Top Utility & Navigation Bar (Sidebar/Hamburger Toggle, Thingsbook Symbol when sidebar hidden, Quick Find, Gemini AI ✨, Areas 📦, Tags 🏷️, Notifications 🔔, Language, Cloud Sync, Settings ⚙️)
+    // Top Utility & Navigation Bar (Sidebar/Hamburger Toggle, Thingsbook Symbol when sidebar hidden, Quick Find, Voice 🎙️, Gemini AI ✨, Areas 📦, Tags 🏷️, Notifications 🔔, Language, Cloud Sync, Settings ⚙️)
     TopThingsbookBar(
         isWideScreen = isWideScreen,
         isSidebarVisible = if (isWideScreen) isSidebarVisible else isMobileDrawerOpen,
@@ -1372,6 +1389,7 @@ private fun ThingsTopHeaderAndQuickFindSection(
             viewModel.switchAppLanguage(tag)
         },
         onOpenQuickFind = { viewModel.setQuickFindOpen(!isQuickFindOpen) },
+        onOpenVoiceCapture = { viewModel.openVoiceQuickCapture() },
         onOpenGeminiHub = { viewModel.setGeminiModalOpen(true) },
         onOpenAreaManager = { viewModel.setAreaManagerOpen(true) },
         onOpenTagManager = { viewModel.setTagManagerOpen(true) },
@@ -1542,6 +1560,15 @@ private fun ThingsTaskRowItem(
             },
             onDuplicateTask = { viewModel.duplicateTask(task.id) },
             onStartFocusTimer = { viewModel.startFocusTimer(task.id, task.title) },
+            onAddTaskAttachment = { fName, mime, bytes ->
+                viewModel.addTaskAttachment(task.id, fName, mime, bytes)
+            },
+            onDeleteTaskAttachment = { attId ->
+                viewModel.deleteAttachment(attId)
+            },
+            onShowMessage = { msg ->
+                viewModel.showUiMessage(msg)
+            },
             externalDialogTriggerToken = if (expandedTaskId == task.id) externalDialogTriggerToken else 0,
             externalDialogTriggerType = if (expandedTaskId == task.id) externalDialogTriggerType else null,
             onDeleteTask = { viewModel.deleteTask(task.id) },
@@ -2607,15 +2634,20 @@ private fun ThingsModalsOverlay(
         )
     }
 
-    // Quick Share to Thingsbook Modal (ACTION_SEND receiver)
+    // Quick Share to Thingsbook Modal (ACTION_SEND receiver & Voice Quick Capture)
+    val isSmartParsingGemini by viewModel.isSmartParsingGemini.collectAsState()
     quickShareDraft?.let { draft ->
         ThingsQuickShareModal(
             draft = draft,
             projects = activeProjects,
             areas = areas,
+            isSmartParsingGemini = isSmartParsingGemini,
             onDismiss = { viewModel.dismissQuickShareDraft() },
             onSave = { title, notes, schedule, projId, areaId ->
                 viewModel.saveQuickShareTask(title, notes, schedule, projId, areaId)
+            },
+            onSmartParseWithGemini = { spokenDump, schedule, projId, areaId ->
+                viewModel.smartParseQuickCaptureWithGemini(spokenDump, schedule, projId, areaId, activeLocale)
             }
         )
     }
@@ -2944,6 +2976,7 @@ private fun TopThingsbookBar(
     onToggleLanguageMenu: (Boolean) -> Unit,
     onSelectLanguage: (String) -> Unit,
     onOpenQuickFind: () -> Unit,
+    onOpenVoiceCapture: () -> Unit,
     onOpenGeminiHub: () -> Unit,
     onOpenAreaManager: () -> Unit,
     onOpenTagManager: () -> Unit,
@@ -3040,6 +3073,21 @@ private fun TopThingsbookBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(if (isWideScreen) 2.dp else 1.dp)
             ) {
+                // Voice Quick Capture Button 🎙️
+                ThingsHoverTooltip(text = stringResource(R.string.voice_capture_btn)) {
+                    IconButton(
+                        onClick = onOpenVoiceCapture,
+                        modifier = Modifier.size(iconButtonSize)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Mic,
+                            contentDescription = stringResource(R.string.voice_capture_btn),
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(iconGlyphSize)
+                        )
+                    }
+                }
+
                 // Gemini AI Button ✨
                 ThingsHoverTooltip(text = "${stringResource(R.string.gemini_hub_title)} (Ctrl+G)") {
                     Row(
@@ -3468,6 +3516,7 @@ private fun ViewTitleHeader(
     currentArea: Area?,
     areas: List<Area>,
     projects: List<Project>,
+    projectAttachments: List<TaskAttachment> = emptyList(),
     locale: Locale,
     trashItemCount: Int = 0,
     onUpdateProjectDeadline: (String, Long?) -> Unit,
@@ -3477,6 +3526,9 @@ private fun ViewTitleHeader(
     onCompleteProject: (String) -> Unit,
     onMoveProject: (String, Boolean) -> Unit,
     onDeleteProject: (String) -> Unit,
+    onAddProjectAttachment: (String, String, String, ByteArray) -> Unit = { _, _, _, _ -> },
+    onDeleteProjectAttachment: (String) -> Unit = {},
+    onShowMessage: (String) -> Unit = {},
     onRequestEmptyTrash: () -> Unit = {},
     onAddTaskInCurrentView: () -> Unit,
     onAddHeadingInProject: () -> Unit,
@@ -3485,9 +3537,57 @@ private fun ViewTitleHeader(
     onDeleteArea: (String) -> Unit
 ) {
     val colors = ThingsTheme.colors
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val zone = ZoneId.systemDefault()
     var showProjectDeadlineDialog by remember(currentProject?.id) { mutableStateOf(false) }
     var showProjectAreaMenu by remember(currentProject?.id) { mutableStateOf(false) }
+    var showProjectAttachMenu by remember(currentProject?.id) { mutableStateOf(false) }
+    val tooLargeMsg = stringResource(R.string.attachment_too_large)
+
+    val projectFilePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        val proj = currentProject ?: return@rememberLauncherForActivityResult
+        if (uri != null) {
+            coroutineScope.launch {
+                when (val outcome = processPickedAttachmentUri(context, uri)) {
+                    is AttachmentImportOutcome.Success -> {
+                        onAddProjectAttachment(
+                            proj.id,
+                            outcome.result.fileName,
+                            outcome.result.mimeType,
+                            outcome.result.bytes
+                        )
+                    }
+                    AttachmentImportOutcome.TooLarge -> onShowMessage(tooLargeMsg)
+                    AttachmentImportOutcome.Error -> onShowMessage(tooLargeMsg)
+                }
+            }
+        }
+    }
+
+    val projectPhotoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        val proj = currentProject ?: return@rememberLauncherForActivityResult
+        if (uri != null) {
+            coroutineScope.launch {
+                when (val outcome = processPickedAttachmentUri(context, uri)) {
+                    is AttachmentImportOutcome.Success -> {
+                        onAddProjectAttachment(
+                            proj.id,
+                            outcome.result.fileName,
+                            outcome.result.mimeType,
+                            outcome.result.bytes
+                        )
+                    }
+                    AttachmentImportOutcome.TooLarge -> onShowMessage(tooLargeMsg)
+                    AttachmentImportOutcome.Error -> onShowMessage(tooLargeMsg)
+                }
+            }
+        }
+    }
     var isRenamingAreaInline by remember(currentArea?.id) { mutableStateOf(false) }
     var inlineAreaField by remember(currentArea?.id, currentArea?.title) {
         val initial = currentArea?.title ?: ""
@@ -3786,7 +3886,7 @@ private fun ViewTitleHeader(
             }
         }
 
-        // Project Notes, Target Date (Zieldatum / Deadline), Area Assignment & Quick Buttons
+        // Project Notes, Target Date (Zieldatum / Deadline), Area Assignment, Attachments & Quick Buttons
         if (currentProject != null) {
             if (currentProject.notes.isNotBlank()) {
                 Spacer(modifier = Modifier.height(4.dp))
@@ -3796,6 +3896,24 @@ private fun ViewTitleHeader(
                     color = colors.secondaryText
                 )
                 DetectedNotesLinksRow(notes = currentProject.notes)
+            }
+
+            if (projectAttachments.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                TaskAttachmentsStrip(
+                    attachments = projectAttachments,
+                    onDeleteAttachment = onDeleteProjectAttachment,
+                    onAttachFileClick = {
+                        runCatching { projectFilePickerLauncher.launch(arrayOf("*/*")) }
+                    },
+                    onTakePhotoClick = {
+                        runCatching {
+                            projectPhotoPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        }
+                    }
+                )
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -3864,6 +3982,53 @@ private fun ViewTitleHeader(
                                 }
                             )
                         }
+                    }
+                }
+
+                // "+ Attach File / Photo" in Project
+                Box {
+                    ThingsTagPill(
+                        title = "📎 + ${stringResource(R.string.action_attach_file)}",
+                        onClick = { showProjectAttachMenu = true }
+                    )
+                    DropdownMenu(
+                        expanded = showProjectAttachMenu,
+                        onDismissRequest = { showProjectAttachMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Outlined.PhotoCamera,
+                                    contentDescription = null,
+                                    tint = colors.thingsBlue
+                                )
+                            },
+                            text = { Text(stringResource(R.string.action_take_photo)) },
+                            onClick = {
+                                showProjectAttachMenu = false
+                                runCatching {
+                                    projectPhotoPickerLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
+                                }
+                            }
+                        )
+                        DropdownMenuItem(
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Outlined.AttachFile,
+                                    contentDescription = null,
+                                    tint = colors.thingsBlue
+                                )
+                            },
+                            text = { Text(stringResource(R.string.action_attach_file)) },
+                            onClick = {
+                                showProjectAttachMenu = false
+                                runCatching {
+                                    projectFilePickerLauncher.launch(arrayOf("*/*"))
+                                }
+                            }
+                        )
                     }
                 }
 

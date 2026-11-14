@@ -378,4 +378,18 @@
     <string name="shortcut_today_short">Today</string>
     <string name="shortcut_inbox_short">Inbox</string>
     <string name="shortcut_quick_find_short">Quick Find</string>
+    <string name="shortcut_voice_capture_short">Voice To-Do</string>
+    <string name="voice_capture_btn">Voice Dictation</string>
+    <string name="voice_capture_prompt">Speak your To-Do or brain dump…</string>
+    <string name="voice_smart_parse_gemini">✨ Smart Parse with Gemini</string>
+    <string name="voice_not_available">Speech recognition is not available on this device.</string>
+    <string name="qs_tile_label">New Thingsbook To-Do</string>
+    <string name="widget_quick_capture_label">Thingsbook Quick Capture (4×1)</string>
+    <string name="widget_pin_project_tab">Project</string>
+    <string name="action_attach_file">Attach Photo or PDF</string>
+    <string name="action_take_photo">Take Photo</string>
+    <string name="attachments_section_title">Attachments</string>
+    <string name="attachment_open_external">Open / Share</string>
+    <string name="attachment_remove">Remove Attachment</string>
+    <string name="attachment_too_large">File exceeds the 5 MB limit.</string>
 </resources>

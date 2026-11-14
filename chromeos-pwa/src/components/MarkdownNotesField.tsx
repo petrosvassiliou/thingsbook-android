@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { ExternalLink, Mail, Phone, Eye, Edit3 } from 'lucide-react';
+import { ExternalLink, Mail, Phone, MapPin, Eye, Edit3 } from 'lucide-react';
 import {
   extractDetectedLinksFromNotes,
   stripTrailingPunctuation,
@@ -20,14 +20,15 @@ export const DetectedNotesLinksRow: React.FC<{
         <a
           key={link.targetUri}
           href={link.targetUri}
-          target={link.type === 'WEB' ? '_blank' : undefined}
-          rel={link.type === 'WEB' ? 'noopener noreferrer' : undefined}
+          target={link.type === 'WEB' || link.type === 'MAP' ? '_blank' : undefined}
+          rel={link.type === 'WEB' || link.type === 'MAP' ? 'noopener noreferrer' : undefined}
           className={`detected-link-chip type-${link.type.toLowerCase()}`}
           title={link.targetUri}
         >
           {link.type === 'WEB' && <ExternalLink size={12} />}
           {link.type === 'EMAIL' && <Mail size={12} />}
           {link.type === 'PHONE' && <Phone size={12} />}
+          {link.type === 'MAP' && <MapPin size={12} />}
           <span>{link.displayLabel}</span>
         </a>
       ))}

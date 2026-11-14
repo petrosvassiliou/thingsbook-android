@@ -240,6 +240,16 @@ export interface TranslationStrings {
   appLockPinPlaceholder: string;
   appLockSetupPinTitle: string;
   copySuffix: string;
+  attachmentsTitle: string;
+  attachmentsAddBtn: string;
+  attachmentsAddPhotoBtn: string;
+  attachmentsTooLargeError: string;
+  attachmentsPreviewTitle: string;
+  attachmentsOpenExternal: string;
+  voiceDictationLabel: string;
+  voiceListeningHint: string;
+  voiceSmartParseBtn: string;
+  notesActionMap: string;
 }
 
 export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
@@ -495,7 +505,17 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     appLockUnlockBtn: 'Unlock Thingsbook',
     appLockPinPlaceholder: 'Enter 4–6 digit PIN',
     appLockSetupPinTitle: 'Set App Lock PIN (4–6 digits)',
-    copySuffix: 'Copy'
+    copySuffix: 'Copy',
+    attachmentsTitle: 'Attachments',
+    attachmentsAddBtn: '+ Attach',
+    attachmentsAddPhotoBtn: 'Photo / File',
+    attachmentsTooLargeError: 'Attachment exceeds the 5 MB size limit.',
+    attachmentsPreviewTitle: 'Attachment Preview',
+    attachmentsOpenExternal: 'Download / Open',
+    voiceDictationLabel: 'Voice Dictation',
+    voiceListeningHint: 'Listening… Speak your To-Do or brain dump',
+    voiceSmartParseBtn: '✨ Smart Parse with Gemini',
+    notesActionMap: 'Map'
   },
   de: {
     appName: 'Thingsbook',
@@ -751,7 +771,17 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     appLockUnlockBtn: 'Thingsbook entsperren',
     appLockPinPlaceholder: '4–6-stellige PIN eingeben',
     appLockSetupPinTitle: 'App-Sperre PIN festlegen (4–6 Ziffern)',
-    copySuffix: 'Kopie'
+    copySuffix: 'Kopie',
+    attachmentsTitle: 'Anhänge',
+    attachmentsAddBtn: '+ Anhang',
+    attachmentsAddPhotoBtn: 'Foto / Datei',
+    attachmentsTooLargeError: 'Anhang überschreitet das Limit von 5 MB.',
+    attachmentsPreviewTitle: 'Anhang-Vorschau',
+    attachmentsOpenExternal: 'Herunterladen / Öffnen',
+    voiceDictationLabel: 'Spracheingabe',
+    voiceListeningHint: 'Höre zu… Sprich deine Aufgabe oder deinen Brain Dump',
+    voiceSmartParseBtn: '✨ Mit Gemini aufteilen',
+    notesActionMap: 'Karte'
   },
   fr: {
     appName: 'Thingsbook',
@@ -1004,7 +1034,17 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     appLockUnlockBtn: 'Déverrouiller Thingsbook',
     appLockPinPlaceholder: 'Code PIN (4–6 chiffres)',
     appLockSetupPinTitle: 'Définir le code PIN (4–6 chiffres)',
-    copySuffix: 'Copie'
+    copySuffix: 'Copie',
+    attachmentsTitle: 'Pièces jointes',
+    attachmentsAddBtn: '+ Joindre',
+    attachmentsAddPhotoBtn: 'Photo / Fichier',
+    attachmentsTooLargeError: 'La pièce jointe dépasse la limite de 5 Mo.',
+    attachmentsPreviewTitle: 'Aperçu de la pièce jointe',
+    attachmentsOpenExternal: 'Télécharger / Ouvrir',
+    voiceDictationLabel: 'Dictée vocale',
+    voiceListeningHint: 'Écoute en cours… Dictez votre tâche ou vos idées',
+    voiceSmartParseBtn: '✨ Analyser avec Gemini',
+    notesActionMap: 'Carte'
   },
   it: {
     appName: 'Thingsbook',
@@ -1257,7 +1297,17 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     appLockUnlockBtn: 'Sblocca Thingsbook',
     appLockPinPlaceholder: 'Inserisci PIN (4–6 cifre)',
     appLockSetupPinTitle: 'Imposta PIN di blocco (4–6 cifre)',
-    copySuffix: 'Copia'
+    copySuffix: 'Copia',
+    attachmentsTitle: 'Allegati',
+    attachmentsAddBtn: '+ Allega',
+    attachmentsAddPhotoBtn: 'Foto / File',
+    attachmentsTooLargeError: "L'allegato supera il limite di 5 MB.",
+    attachmentsPreviewTitle: 'Anteprima allegato',
+    attachmentsOpenExternal: 'Scarica / Apri',
+    voiceDictationLabel: 'Dettatura vocale',
+    voiceListeningHint: 'In ascolto… Detta la tua attività o le tue idee',
+    voiceSmartParseBtn: '✨ Analizza con Gemini',
+    notesActionMap: 'Mappa'
   },
   es: {
     appName: 'Thingsbook',
@@ -1510,7 +1560,17 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     appLockUnlockBtn: 'Desbloquear Thingsbook',
     appLockPinPlaceholder: 'Introduce PIN (4–6 dígitos)',
     appLockSetupPinTitle: 'Configurar PIN de bloqueo (4–6 dígitos)',
-    copySuffix: 'Copia'
+    copySuffix: 'Copia',
+    attachmentsTitle: 'Adjuntos',
+    attachmentsAddBtn: '+ Adjuntar',
+    attachmentsAddPhotoBtn: 'Foto / Archivo',
+    attachmentsTooLargeError: 'El archivo adjunto supera el límite de 5 MB.',
+    attachmentsPreviewTitle: 'Vista previa del adjunto',
+    attachmentsOpenExternal: 'Descargar / Abrir',
+    voiceDictationLabel: 'Dictado por voz',
+    voiceListeningHint: 'Escuchando… Dicta tu tarea o lluvia de ideas',
+    voiceSmartParseBtn: '✨ Analizar con Gemini',
+    notesActionMap: 'Mapa'
   }
 };
 

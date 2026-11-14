@@ -180,3 +180,27 @@ data class ProjectTagCrossRef(
     val projectId: String,
     val tagId: String
 )
+
+@Entity(
+    tableName = "attachments",
+    indices = [
+        Index(value = ["taskId"]),
+        Index(value = ["projectId"]),
+        Index(value = ["updatedAt"]),
+        Index(value = ["isDirty"])
+    ]
+)
+data class AttachmentEntity(
+    @PrimaryKey val id: String,
+    val taskId: String? = null,
+    val projectId: String? = null,
+    val fileName: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val localRelativePath: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val isDeleted: Boolean = false,
+    val isDirty: Boolean = true
+)
+

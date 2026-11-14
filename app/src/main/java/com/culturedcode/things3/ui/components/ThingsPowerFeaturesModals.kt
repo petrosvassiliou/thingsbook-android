@@ -3,9 +3,12 @@ package com.culturedcode.things3.ui.components
 import android.app.Activity
 import android.app.KeyguardManager
 import android.content.Context
+import android.content.Intent
 import android.hardware.biometrics.BiometricPrompt
 import android.os.Build
 import android.os.CancellationSignal
+import android.speech.RecognizerIntent
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -34,6 +37,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
@@ -42,6 +46,7 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.RestoreFromTrash
@@ -50,6 +55,7 @@ import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -86,7 +92,8 @@ import java.util.Locale
 
 data class QuickShareDraft(
     val initialTitle: String,
-    val initialNotes: String
+    val initialNotes: String,
+    val autoLaunchVoice: Boolean = false
 )
 
 data class FocusTimerUiState(
@@ -102,15 +109,62 @@ fun ThingsQuickShareModal(
     draft: QuickShareDraft,
     projects: List<Project>,
     areas: List<Area>,
+    isSmartParsingGemini: Boolean = false,
     onDismiss: () -> Unit,
+    onSmartParseWithGemini: ((spokenDump: String, scheduleState: ScheduleState, projectId: String?, areaId: String?) -> Unit)? = null,
     onSave: (title: String, notes: String, scheduleState: ScheduleState, projectId: String?, areaId: String?) -> Unit
 ) {
+    val context = LocalContext.current
     val colors = ThingsTheme.colors
     var title by remember(draft) { mutableStateOf(draft.initialTitle) }
     var notes by remember(draft) { mutableStateOf(draft.initialNotes) }
     var selectedSchedule by remember { mutableStateOf(ScheduleState.INBOX) }
     var selectedProjectId by remember { mutableStateOf<String?>(null) }
     var selectedAreaId by remember { mutableStateOf<String?>(null) }
+    val voicePrompt = stringResource(R.string.voice_capture_prompt)
+    val voiceNotAvail = stringResource(R.string.voice_not_available)
+
+    val speechLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { res ->
+        if (res.resultCode == Activity.RESULT_OK) {
+            val spoken = res.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+                ?.trim()
+                .orEmpty()
+            if (spoken.isNotEmpty()) {
+                if (title.isBlank()) {
+                    title = spoken
+                } else {
+                    notes = if (notes.isBlank()) spoken else "$notes\n$spoken"
+                }
+            }
+        }
+    }
+
+    val triggerVoiceCapture: () -> Unit = {
+        val ok = runCatching {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(RecognizerIntent.EXTRA_PROMPT, voicePrompt)
+            }
+            speechLauncher.launch(intent)
+            true
+        }.getOrDefault(false)
+        if (!ok) {
+            Toast.makeText(context, voiceNotAvail, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    LaunchedEffect(draft) {
+        if (draft.autoLaunchVoice) {
+            triggerVoiceCapture()
+        }
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -137,12 +191,24 @@ fun ThingsQuickShareModal(
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = colors.primaryText
                     )
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                        Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = stringResource(R.string.action_cancel),
-                            tint = colors.secondaryText
-                        )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        IconButton(onClick = triggerVoiceCapture, modifier = Modifier.size(30.dp)) {
+                            Icon(
+                                imageVector = Icons.Outlined.Mic,
+                                contentDescription = stringResource(R.string.voice_capture_btn),
+                                tint = colors.thingsBlue
+                            )
+                        }
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.action_cancel),
+                                tint = colors.secondaryText
+                            )
+                        }
                     }
                 }
 
@@ -151,6 +217,15 @@ fun ThingsQuickShareModal(
                     onValueChange = { title = it },
                     label = { Text(stringResource(R.string.placeholder_todo_title)) },
                     singleLine = true,
+                    trailingIcon = {
+                        IconButton(onClick = triggerVoiceCapture) {
+                            Icon(
+                                imageVector = Icons.Outlined.Mic,
+                                contentDescription = stringResource(R.string.voice_capture_btn),
+                                tint = colors.thingsBlue
+                            )
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -300,6 +375,48 @@ fun ThingsQuickShareModal(
                     }
                 }
 
+                if (onSmartParseWithGemini != null && (title.isNotBlank() || notes.isNotBlank())) {
+                    OutlinedButton(
+                        onClick = {
+                            val combined = listOf(title.trim(), notes.trim())
+                                .filter { it.isNotEmpty() }
+                                .joinToString("\n")
+                            if (combined.isNotEmpty()) {
+                                onSmartParseWithGemini(
+                                    combined,
+                                    selectedSchedule,
+                                    selectedProjectId,
+                                    selectedAreaId
+                                )
+                            }
+                        },
+                        enabled = !isSmartParsingGemini,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (isSmartParsingGemini) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = colors.thingsBlue
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        } else {
+                            Icon(
+                                imageVector = Icons.Outlined.AutoAwesome,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                        }
+                        Text(
+                            text = stringResource(R.string.voice_smart_parse_gemini),
+                            color = colors.thingsBlue,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
@@ -318,7 +435,7 @@ fun ThingsQuickShareModal(
                                 onSave(cleanTitle, notes.trim(), selectedSchedule, selectedProjectId, selectedAreaId)
                             }
                         },
-                        enabled = title.isNotBlank() || notes.isNotBlank(),
+                        enabled = !isSmartParsingGemini && (title.isNotBlank() || notes.isNotBlank()),
                         colors = ButtonDefaults.buttonColors(containerColor = colors.thingsBlue)
                     ) {
                         Text(stringResource(R.string.action_save), color = Color.White)

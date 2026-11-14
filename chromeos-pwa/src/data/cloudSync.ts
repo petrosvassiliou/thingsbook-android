@@ -24,6 +24,7 @@ import {
 } from 'firebase/firestore';
 import type {
   AreaRecord,
+  AttachmentRecord,
   ChecklistItemRecord,
   CloudSyncStatus,
   HeadingRecord,
@@ -350,6 +351,46 @@ function checklistFromFirestoreMap(map: Record<string, unknown>): ChecklistItemR
     createdAt: Math.trunc(finiteNumber(map.createdAt)),
     updatedAt: Math.trunc(finiteNumber(map.updatedAt)),
     isDeleted: Boolean(map.isDeleted),
+    isDirty: false
+  };
+}
+
+function attachmentToFirestoreMap(att: AttachmentRecord): Record<string, unknown> {
+  return {
+    id: att.id,
+    taskId: att.taskId ?? null,
+    projectId: att.projectId ?? null,
+    fileName: att.fileName,
+    mimeType: att.mimeType,
+    sizeBytes: Math.trunc(finiteNumber(att.sizeBytes)),
+    localRelativePath: '',
+    dataBase64: att.dataBase64 || '',
+    sortOrder: finiteNumber(att.sortOrder),
+    createdAt: Math.trunc(finiteNumber(att.createdAt)),
+    updatedAt: Math.trunc(finiteNumber(att.updatedAt)),
+    isDeleted: Boolean(att.isDeleted)
+  };
+}
+
+function attachmentFromFirestoreMap(map: Record<string, unknown>): AttachmentRecord | null {
+  const id = nullableString(map.id);
+  if (!id) return null;
+  const taskId = nullableString(map.taskId);
+  const projectId = nullableString(map.projectId);
+  const isDeleted = Boolean(map.isDeleted);
+  if (!isDeleted && !taskId && !projectId) return null;
+  return {
+    id,
+    taskId,
+    projectId,
+    fileName: typeof map.fileName === 'string' ? map.fileName : 'attachment',
+    mimeType: typeof map.mimeType === 'string' ? map.mimeType : 'application/octet-stream',
+    sizeBytes: Math.trunc(finiteNumber(map.sizeBytes)),
+    dataBase64: typeof map.dataBase64 === 'string' ? map.dataBase64 : '',
+    sortOrder: finiteNumber(map.sortOrder),
+    createdAt: Math.trunc(finiteNumber(map.createdAt)),
+    updatedAt: Math.trunc(finiteNumber(map.updatedAt)),
+    isDeleted,
     isDirty: false
   };
 }
@@ -928,19 +969,27 @@ class ThingsCloudSyncService {
     for (const chk of dirty.checklistItems) {
       ops.push({ col: 'checklist_items', id: chk.id, data: checklistToFirestoreMap(chk) });
     }
-
-    if (ops.length === 0) return;
-
-    const db = getFirestoreInstance();
-    const CHUNK = 450;
-    for (let i = 0; i < ops.length; i += CHUNK) {
-      const slice = ops.slice(i, i + CHUNK);
-      const batch = writeBatch(db);
-      for (const op of slice) {
-        const ref = doc(db, 'users', userId, op.col, op.id);
-        batch.set(ref, op.data, { merge: true });
+    for (const att of dirty.attachments) {
+      // Firestore document size limit is 1 MiB (~700 KB binary before Base64)
+      if (att.isDeleted || att.sizeBytes <= 700_000) {
+        ops.push({ col: 'attachments', id: att.id, data: attachmentToFirestoreMap(att) });
       }
-      await batch.commit();
+    }
+
+    if (ops.length === 0 && dirty.attachments.length === 0) return;
+
+    if (ops.length > 0) {
+      const db = getFirestoreInstance();
+      const CHUNK = 450;
+      for (let i = 0; i < ops.length; i += CHUNK) {
+        const slice = ops.slice(i, i + CHUNK);
+        const batch = writeBatch(db);
+        for (const op of slice) {
+          const ref = doc(db, 'users', userId, op.col, op.id);
+          batch.set(ref, op.data, { merge: true });
+        }
+        await batch.commit();
+      }
     }
 
     const maxOf = <T extends { updatedAt: number }>(arr: T[]) =>
@@ -955,6 +1004,10 @@ class ThingsCloudSyncService {
       checklistItems: {
         ids: dirty.checklistItems.map((x) => x.id),
         maxUpdatedAt: maxOf(dirty.checklistItems)
+      },
+      attachments: {
+        ids: dirty.attachments.map((x) => x.id),
+        maxUpdatedAt: maxOf(dirty.attachments)
       }
     });
   }
@@ -968,14 +1021,16 @@ class ThingsCloudSyncService {
       return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     };
 
-    const [rawTags, rawAreas, rawProjects, rawHeadings, rawTasks, rawChecklists] = await Promise.all([
-      fetchCollection('tags'),
-      fetchCollection('areas'),
-      fetchCollection('projects'),
-      fetchCollection('headings'),
-      fetchCollection('tasks'),
-      fetchCollection('checklist_items')
-    ]);
+    const [rawTags, rawAreas, rawProjects, rawHeadings, rawTasks, rawChecklists, rawAttachments] =
+      await Promise.all([
+        fetchCollection('tags'),
+        fetchCollection('areas'),
+        fetchCollection('projects'),
+        fetchCollection('headings'),
+        fetchCollection('tasks'),
+        fetchCollection('checklist_items'),
+        fetchCollection('attachments')
+      ]);
 
     const tags = rawTags.map(tagFromFirestoreMap).filter((x): x is TagRecord => x !== null);
     const areas = rawAreas.map(areaFromFirestoreMap).filter((x): x is AreaRecord => x !== null);
@@ -989,6 +1044,9 @@ class ThingsCloudSyncService {
     const checklistItems = rawChecklists
       .map(checklistFromFirestoreMap)
       .filter((x): x is ChecklistItemRecord => x !== null);
+    const attachments = rawAttachments
+      .map(attachmentFromFirestoreMap)
+      .filter((x): x is AttachmentRecord => x !== null);
 
     if (
       tags.length === 0 &&
@@ -996,7 +1054,8 @@ class ThingsCloudSyncService {
       projects.length === 0 &&
       headings.length === 0 &&
       tasks.length === 0 &&
-      checklistItems.length === 0
+      checklistItems.length === 0 &&
+      attachments.length === 0
     ) {
       return sinceTimestamp;
     }
@@ -1007,7 +1066,8 @@ class ThingsCloudSyncService {
       projects,
       headings,
       tasks,
-      checklistItems
+      checklistItems,
+      attachments
     });
   }
 
@@ -1022,7 +1082,8 @@ class ThingsCloudSyncService {
       'projects',
       'headings',
       'tasks',
-      'checklist_items'
+      'checklist_items',
+      'attachments'
     ] as const;
 
     for (const colName of collections) {
@@ -1065,6 +1126,12 @@ class ThingsCloudSyncService {
               checklistItems: docs
                 .map(checklistFromFirestoreMap)
                 .filter((x): x is ChecklistItemRecord => x !== null)
+            });
+          } else if (colName === 'attachments') {
+            maxTs = await localDb.applyRemoteDeltas({
+              attachments: docs
+                .map(attachmentFromFirestoreMap)
+                .filter((x): x is AttachmentRecord => x !== null)
             });
           }
 
@@ -1138,6 +1205,11 @@ class ThingsCloudSyncService {
             ? batch.checklistItems
                 .map(checklistFromFirestoreMap)
                 .filter((x: ChecklistItemRecord | null): x is ChecklistItemRecord => x !== null)
+            : undefined,
+          attachments: Array.isArray(batch.attachments)
+            ? batch.attachments
+                .map(attachmentFromFirestoreMap)
+                .filter((x: AttachmentRecord | null): x is AttachmentRecord => x !== null)
             : undefined
         });
       } catch {

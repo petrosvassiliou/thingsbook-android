@@ -7,6 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.culturedcode.things3.data.local.DatabaseSeeder
 import com.culturedcode.things3.data.local.ThingsDatabase
 import com.culturedcode.things3.data.local.dao.AreaDao
+import com.culturedcode.things3.data.local.dao.AttachmentDao
 import com.culturedcode.things3.data.local.dao.ChecklistDao
 import com.culturedcode.things3.data.local.dao.HeadingDao
 import com.culturedcode.things3.data.local.dao.ProjectDao
@@ -33,6 +34,33 @@ object AppModule {
     private val MIGRATION_1_2 = object : Migration(1, 2) {
         override fun migrate(db: SupportSQLiteDatabase) {
             // Schema v1 -> v2 additive safety migration; ensures user data is preserved when compatible
+        }
+    }
+
+    private val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `attachments` (
+                    `id` TEXT NOT NULL,
+                    `taskId` TEXT,
+                    `projectId` TEXT,
+                    `fileName` TEXT NOT NULL,
+                    `mimeType` TEXT NOT NULL,
+                    `sizeBytes` INTEGER NOT NULL,
+                    `localRelativePath` TEXT NOT NULL,
+                    `createdAt` INTEGER NOT NULL,
+                    `updatedAt` INTEGER NOT NULL,
+                    `isDeleted` INTEGER NOT NULL,
+                    `isDirty` INTEGER NOT NULL,
+                    PRIMARY KEY(`id`)
+                )
+                """.trimIndent()
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_attachments_taskId` ON `attachments` (`taskId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_attachments_projectId` ON `attachments` (`projectId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_attachments_updatedAt` ON `attachments` (`updatedAt`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_attachments_isDirty` ON `attachments` (`isDirty`)")
         }
     }
 
@@ -70,7 +98,7 @@ object AppModule {
             ThingsDatabase::class.java,
             ThingsDatabase.DATABASE_NAME
         )
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .addCallback(DatabaseSeeder(databaseProvider))
             .fallbackToDestructiveMigration()
             .fallbackToDestructiveMigrationOnDowngrade()
@@ -94,6 +122,9 @@ object AppModule {
 
     @Provides
     fun provideTagDao(db: ThingsDatabase): TagDao = db.tagDao()
+
+    @Provides
+    fun provideAttachmentDao(db: ThingsDatabase): AttachmentDao = db.attachmentDao()
 
     @Provides
     @Singleton

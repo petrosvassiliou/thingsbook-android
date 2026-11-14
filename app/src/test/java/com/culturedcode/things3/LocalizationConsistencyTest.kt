@@ -107,4 +107,49 @@ class LocalizationConsistencyTest {
         assertEquals(true, decoded.preferences.sidebarVisible)
         assertEquals("fr", decoded.preferences.languageTag)
     }
+
+    @Test
+    fun `v1_8_0 map and location detection extracts explicit locations coordinates and street addresses`() {
+        val notes = """
+            Meet client at Location: Alexanderplatz 1, 10178 Berlin
+            Coordinates: 48.137154, 11.576124
+            Office HQ at 1600 Amphitheatre Parkway
+            Docs: https://thingsbook.app
+        """.trimIndent()
+
+        val links = com.culturedcode.things3.ui.components.extractDetectedLinksFromNotes(notes)
+        val mapLinks = links.filter {
+            it.type == com.culturedcode.things3.ui.components.DetectedNoteLinkType.MAP
+        }
+        assertTrue("Expected at least 3 MAP links, got: $mapLinks", mapLinks.size >= 3)
+        assertTrue(mapLinks.any { it.displayLabel.contains("Alexanderplatz") })
+        assertTrue(mapLinks.any { it.displayLabel.contains("48.137154") })
+        assertTrue(mapLinks.any { it.displayLabel.contains("1600 Amphitheatre Parkway") })
+    }
+
+    @Test
+    fun `v1_8_0 backup codec round-trips attachments with AES-256-GCM encryption`() {
+        val sampleAttachment = com.culturedcode.things3.data.backup.BackupAttachmentDto(
+            id = "att-1",
+            taskId = "task-1",
+            projectId = null,
+            fileName = "receipt.pdf",
+            mimeType = "application/pdf",
+            sizeBytes = 12,
+            dataBase64 = "JVBERi0xLjQK",
+            createdAt = 1763000000000L,
+            updatedAt = 1763000000000L
+        )
+        val payload = ThingsbookBackupPayload(
+            createdAt = 1763000000000L,
+            appVersionName = "1.8.0",
+            attachments = listOf(sampleAttachment)
+        )
+        val encoded = ThingsBackupCodec.encodeBackup(payload, "secretPass".toCharArray(), "1.8.0", 42)
+        val decoded = ThingsBackupCodec.decodeBackup(encoded, "secretPass".toCharArray())
+        assertEquals(1, decoded.attachments.size)
+        assertEquals("receipt.pdf", decoded.attachments.first().fileName)
+        assertEquals("JVBERi0xLjQK", decoded.attachments.first().dataBase64)
+    }
 }
+

@@ -56,6 +56,7 @@ data class ThingsbookBackupPayload(
     val tags: List<BackupTagDto> = emptyList(),
     val taskTagRefs: List<BackupTaskTagRefDto> = emptyList(),
     val projectTagRefs: List<BackupProjectTagRefDto> = emptyList(),
+    val attachments: List<BackupAttachmentDto> = emptyList(),
     val preferences: BackupPreferencesDto = BackupPreferencesDto()
 )
 
@@ -153,6 +154,20 @@ data class BackupProjectTagRefDto(
 )
 
 @Serializable
+data class BackupAttachmentDto(
+    val id: String,
+    val taskId: String? = null,
+    val projectId: String? = null,
+    val fileName: String,
+    val mimeType: String,
+    val sizeBytes: Long = 0L,
+    val localRelativePath: String = "",
+    val dataBase64: String = "",
+    val createdAt: Long = 0L,
+    val updatedAt: Long = 0L
+)
+
+@Serializable
 data class BackupPreferencesDto(
     val sidebarVisible: Boolean? = null,
     val dailyDigestEnabled: Boolean? = null,
@@ -173,7 +188,8 @@ data class BackupSummary(
     val headingsCount: Int = 0,
     val tasksCount: Int = 0,
     val checklistItemsCount: Int = 0,
-    val tagsCount: Int = 0
+    val tagsCount: Int = 0,
+    val attachmentsCount: Int = 0
 )
 
 sealed interface BackupInspectionResult {
@@ -234,7 +250,8 @@ object ThingsBackupCodec {
             headingsCount = payload.headings.size,
             tasksCount = payload.tasks.size,
             checklistItemsCount = payload.checklistItems.size,
-            tagsCount = payload.tags.size
+            tagsCount = payload.tags.size,
+            attachmentsCount = payload.attachments.size
         )
 
     fun encodeBackup(

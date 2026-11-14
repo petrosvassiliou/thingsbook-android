@@ -40,6 +40,7 @@ import com.culturedcode.things3.domain.model.ProjectStatus
 import com.culturedcode.things3.domain.model.RecurrenceRule
 import com.culturedcode.things3.domain.model.ScheduleState
 import com.culturedcode.things3.domain.model.Tag
+import com.culturedcode.things3.domain.model.TaskAttachment
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
 import com.culturedcode.things3.domain.util.runCatchingCancellable
@@ -150,6 +151,12 @@ class ThingsbookViewModel @Inject constructor(
 
     fun clearUiErrorMessage() {
         _uiErrorMessage.value = null
+    }
+
+    fun showUiMessage(message: String) {
+        if (message.isNotBlank()) {
+            _uiErrorMessage.value = message
+        }
     }
 
     fun clearGeminiErrorMessage() {
@@ -322,6 +329,17 @@ class ThingsbookViewModel @Inject constructor(
         .catch { emit(emptyList()) }
         .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val activeProjectAttachments: StateFlow<List<TaskAttachment>> = _navigationTarget
+        .flatMapLatest { target ->
+            if (target is ActiveNavigationTarget.ProjectDetail) {
+                repository.observeAttachmentsForProject(target.projectId)
+            } else {
+                flowOf(emptyList())
+            }
+        }
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     // Direct tasks belonging to an Area when viewing AreaDetail
     val activeAreaTasks: StateFlow<List<TaskItem>> = _navigationTarget
         .flatMapLatest { target ->
@@ -357,6 +375,23 @@ class ThingsbookViewModel @Inject constructor(
 
     fun handleWidgetLaunchIntent(viewName: String?, taskId: String?, quickAdd: Boolean) {
         clearTaskSelection()
+        if (viewName?.equals("VOICE_CAPTURE", ignoreCase = true) == true) {
+            _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.INBOX)
+            openVoiceQuickCapture()
+            return
+        }
+        if (viewName != null && viewName.startsWith("PROJECT:", ignoreCase = true)) {
+            val projectId = viewName.substringAfter(":").trim()
+            if (projectId.isNotEmpty()) {
+                _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(projectId)
+                if (!taskId.isNullOrBlank()) {
+                    _expandedTaskId.value = taskId
+                } else if (quickAdd) {
+                    createTaskAtPosition(emptyList(), 0, "")
+                }
+                return
+            }
+        }
         if (viewName == null && !taskId.isNullOrBlank()) {
             _expandedTaskId.value = taskId
             safeVmScope.launch {
@@ -2701,6 +2736,161 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
+    fun openVoiceQuickCapture() {
+        _quickShareDraft.value = QuickShareDraft(
+            initialTitle = "",
+            initialNotes = "",
+            autoLaunchVoice = true
+        )
+    }
+
+    private val _isSmartParsingGemini = MutableStateFlow(false)
+    val isSmartParsingGemini: StateFlow<Boolean> = _isSmartParsingGemini.asStateFlow()
+
+    fun smartParseQuickCaptureWithGemini(
+        spokenDump: String,
+        fallbackSchedule: ScheduleState,
+        projectId: String?,
+        areaId: String?,
+        locale: Locale = Locale.getDefault()
+    ) {
+        val cleanDump = spokenDump.trim()
+        if (cleanDump.isEmpty() || _isSmartParsingGemini.value) return
+        safeVmScope.launch {
+            _isSmartParsingGemini.value = true
+            try {
+                val parsedTasks = geminiService.parseBrainDumpToTasks(cleanDump, locale)
+                val zone = ZoneId.systemDefault()
+                val today = LocalDate.now(zone)
+
+                var firstCreatedId: String? = null
+                parsedTasks.forEachIndexed { idx, dto ->
+                    val normalizedState = dto.scheduleState.trim().uppercase(Locale.ROOT)
+                    val parsedState = runCatching { ScheduleState.valueOf(normalizedState) }
+                        .getOrDefault(fallbackSchedule)
+                    val effectiveState = if (parsedTasks.size == 1 && normalizedState == "INBOX") {
+                        fallbackSchedule
+                    } else {
+                        parsedState
+                    }
+                    val whenEpoch = dto.whenDaysOffset?.let { offset ->
+                        runCatching {
+                            today.plusDays(offset.coerceIn(-365, 3650).toLong())
+                                .atStartOfDay(zone)
+                                .toInstant()
+                                .toEpochMilli()
+                        }.getOrNull()
+                    } ?: if (effectiveState == ScheduleState.TODAY || effectiveState == ScheduleState.THIS_EVENING) {
+                        today.atStartOfDay(zone).toInstant().toEpochMilli()
+                    } else {
+                        null
+                    }
+                    val deadlineEpoch = dto.deadlineDaysOffset?.let { offset ->
+                        runCatching {
+                            today.plusDays(offset.coerceIn(-365, 3650).toLong())
+                                .atStartOfDay(zone)
+                                .toInstant()
+                                .toEpochMilli()
+                        }.getOrNull()
+                    }
+
+                    val taskId = repository.createOrUpdateTask(
+                        title = dto.title,
+                        notes = dto.notes,
+                        status = TaskStatus.OPEN,
+                        scheduleState = effectiveState,
+                        whenDate = whenEpoch,
+                        deadline = deadlineEpoch,
+                        projectId = projectId,
+                        areaId = areaId,
+                        sortOrder = (idx + 1) * 500.0 + (System.currentTimeMillis() % 1000)
+                    )
+                    if (dto.checklist.isNotEmpty()) {
+                        repository.addChecklistItemsBatch(taskId, dto.checklist)
+                    }
+                    if (idx == 0) firstCreatedId = taskId
+                }
+
+                _quickShareDraft.value = null
+                when {
+                    projectId != null -> _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(projectId)
+                    areaId != null -> _navigationTarget.value = ActiveNavigationTarget.AreaDetail(areaId)
+                    fallbackSchedule == ScheduleState.INBOX -> _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.INBOX)
+                    else -> _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
+                }
+                if (firstCreatedId != null) {
+                    _expandedTaskId.value = firstCreatedId
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                Log.w(TAG, "Smart Parse Quick Capture failed", t)
+                _uiErrorMessage.value = t.localizedMessage ?: t.message ?: "Smart Parse fehlgeschlagen."
+            } finally {
+                _isSmartParsingGemini.value = false
+            }
+        }
+    }
+
+    // =========================================================================
+    // v1.8.0 Attachments (Task & Project Photos, PDFs & Documents)
+    // =========================================================================
+
+    fun addTaskAttachment(
+        taskId: String,
+        fileName: String,
+        mimeType: String,
+        bytes: ByteArray
+    ) {
+        if (bytes.isEmpty()) return
+        safeVmScope.launch {
+            runCatchingCancellable {
+                repository.addAttachmentFromBytes(
+                    taskId = taskId,
+                    projectId = null,
+                    fileName = fileName,
+                    mimeType = mimeType,
+                    rawBytes = bytes
+                )
+            }.onFailure { err ->
+                _uiErrorMessage.value = err.localizedMessage ?: "Anhang konnte nicht gespeichert werden."
+            }
+        }
+    }
+
+    fun addProjectAttachment(
+        projectId: String,
+        fileName: String,
+        mimeType: String,
+        bytes: ByteArray
+    ) {
+        if (bytes.isEmpty()) return
+        safeVmScope.launch {
+            runCatchingCancellable {
+                repository.addAttachmentFromBytes(
+                    taskId = null,
+                    projectId = projectId,
+                    fileName = fileName,
+                    mimeType = mimeType,
+                    rawBytes = bytes
+                )
+            }.onFailure { err ->
+                _uiErrorMessage.value = err.localizedMessage ?: "Anhang konnte nicht gespeichert werden."
+            }
+        }
+    }
+
+    fun deleteAttachment(attachmentId: String) {
+        if (attachmentId.isBlank()) return
+        safeVmScope.launch {
+            runCatchingCancellable {
+                repository.softDeleteAttachment(attachmentId)
+            }.onFailure { err ->
+                _uiErrorMessage.value = err.localizedMessage ?: "Anhang konnte nicht gelöscht werden."
+            }
+        }
+    }
+
     // Group Today by Project / Area
     private val _groupTodayByProjectOrArea = MutableStateFlow(
         coreSettingsPrefs.getBoolean(PREF_GROUP_TODAY_BY_PROJECT_OR_AREA, false)
@@ -2867,7 +3057,7 @@ class ThingsbookViewModel @Inject constructor(
     companion object {
         private const val TAG = "ThingsbookVM"
         private const val MAX_CSV_IMPORT_CHARS = 10 * 1024 * 1024
-        private const val MAX_BACKUP_FILE_BYTES = 30 * 1024 * 1024
+        private const val MAX_BACKUP_FILE_BYTES = 80 * 1024 * 1024
         private const val PREF_CALENDAR_EVENTS_ENABLED = "calendar_events_enabled"
         private const val PREF_SELECTED_CALENDAR_IDS = "selected_calendar_ids"
         private const val PREF_CALENDAR_IDS_INITIALIZED = "calendar_ids_initialized"

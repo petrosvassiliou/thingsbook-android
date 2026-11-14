@@ -12,6 +12,7 @@ import com.culturedcode.things3.data.local.ThingsDatabase
 import com.culturedcode.things3.data.local.entity.TaskEntity
 import com.culturedcode.things3.data.notifications.ReminderScheduler
 import com.culturedcode.things3.data.remote.dto.AreaFirestoreDto
+import com.culturedcode.things3.data.remote.dto.AttachmentFirestoreDto
 import com.culturedcode.things3.data.remote.dto.ChecklistItemFirestoreDto
 import com.culturedcode.things3.data.remote.dto.CloudDeltaBatchPayload
 import com.culturedcode.things3.data.remote.dto.CloudUserAuthEnvelope
@@ -49,6 +50,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.BufferedReader
+import java.io.File
 import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
@@ -61,6 +63,7 @@ import java.net.SocketTimeoutException
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.util.Base64
 import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
@@ -91,6 +94,48 @@ class SyncRepository @Inject constructor(
     private val firebaseAuth: FirebaseAuth,
     private val reminderScheduler: ReminderScheduler
 ) {
+    fun resolveAttachmentFile(localRelativePath: String): File {
+        val cleanRel = localRelativePath.trim()
+            .removePrefix("/")
+            .replace("..", "_")
+            .ifEmpty { "attachments/unknown" }
+        val file = File(context.filesDir, cleanRel)
+        file.parentFile?.mkdirs()
+        return file
+    }
+
+    fun readAttachmentBase64(localRelativePath: String, maxRawBytes: Long = 5L * 1024L * 1024L): String {
+        if (localRelativePath.isBlank()) return ""
+        return runCatching {
+            val file = resolveAttachmentFile(localRelativePath)
+            if (file.exists() && file.isFile && file.length() in 1..maxRawBytes) {
+                Base64.getEncoder().encodeToString(file.readBytes())
+            } else {
+                ""
+            }
+        }.getOrDefault("")
+    }
+
+    fun writeAttachmentBase64(localRelativePath: String, dataBase64: String): Long {
+        if (localRelativePath.isBlank() || dataBase64.isBlank()) return 0L
+        return runCatching {
+            val bytes = Base64.getMimeDecoder().decode(dataBase64.trim())
+            val file = resolveAttachmentFile(localRelativePath)
+            file.writeBytes(bytes)
+            bytes.size.toLong()
+        }.getOrDefault(0L)
+    }
+
+    fun deleteLocalAttachmentFile(localRelativePath: String) {
+        if (localRelativePath.isBlank()) return
+        runCatching {
+            val file = resolveAttachmentFile(localRelativePath)
+            if (file.exists() && file.isFile) {
+                file.delete()
+            }
+        }
+    }
+
     private fun syncTaskReminderSchedule(entity: TaskEntity) {
         val now = System.currentTimeMillis()
         if (!entity.isDeleted && entity.status == TaskStatus.OPEN &&
@@ -801,6 +846,22 @@ class SyncRepository @Inject constructor(
                 }
                 if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
             }
+
+            for (dto in batch.attachments) {
+                if (dto.id.isBlank()) continue
+                val local = database.attachmentDao().getById(dto.id)
+                if (local == null || dto.updatedAt >= local.updatedAt) {
+                    val safeName = dto.fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(80).ifEmpty { "file" }
+                    val relPath = dto.localRelativePath.takeIf { it.isNotBlank() } ?: "attachments/${dto.id}_${safeName}"
+                    if (dto.isDeleted) {
+                        deleteLocalAttachmentFile(relPath)
+                    } else if (dto.dataBase64.isNotBlank()) {
+                        writeAttachmentBase64(relPath, dto.dataBase64)
+                    }
+                    database.attachmentDao().upsert(dto.toEntity(relPath))
+                }
+                if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
+            }
         }
 
         updatedTasks.forEach { syncTaskReminderSchedule(it) }
@@ -990,6 +1051,7 @@ class SyncRepository @Inject constructor(
         val dirtyTasks = database.taskDao().getDirtyTasks()
         val dirtyChecklists = database.checklistDao().getDirtyChecklistItems()
         val dirtyTags = database.tagDao().getDirtyTags()
+        val dirtyAttachments = database.attachmentDao().getDirtyAttachments()
 
         data class BatchOp(val collectionName: String, val docId: String, val dataMap: Map<String, Any?>)
 
@@ -1002,13 +1064,25 @@ class SyncRepository @Inject constructor(
             dirtyTags.forEach { add(BatchOp("tags", it.id, TagFirestoreDto.fromEntity(it).toFirestoreMap())) }
         }
 
-        if (allOps.isEmpty()) return
+        if (allOps.isEmpty() && dirtyAttachments.isEmpty()) return
 
         allOps.chunked(450).forEach { chunk ->
             val batch = firestore.batch()
             chunk.forEach { op ->
                 val ref = userDoc.collection(op.collectionName).document(op.docId)
                 batch.set(ref, op.dataMap, SetOptions.merge())
+            }
+            batch.commit().await()
+        }
+
+        // Sync attachments individually/in small batches to respect Firestore 1 MiB document / 10 MiB batch caps
+        dirtyAttachments.chunked(8).forEach { chunk ->
+            val batch = firestore.batch()
+            chunk.forEach { att ->
+                val b64 = if (att.isDeleted) "" else readAttachmentBase64(att.localRelativePath, maxRawBytes = 550L * 1024L)
+                val dto = AttachmentFirestoreDto.fromEntity(att, dataBase64 = b64)
+                val ref = userDoc.collection("attachments").document(att.id)
+                batch.set(ref, dto.toFirestoreMap(), SetOptions.merge())
             }
             batch.commit().await()
         }
@@ -1031,6 +1105,9 @@ class SyncRepository @Inject constructor(
             }
             if (dirtyTags.isNotEmpty()) {
                 database.tagDao().markSyncedSafe(dirtyTags.map { it.id }, dirtyTags.maxOf { it.updatedAt })
+            }
+            if (dirtyAttachments.isNotEmpty()) {
+                database.attachmentDao().markSyncedSafe(dirtyAttachments.map { it.id }, dirtyAttachments.maxOf { it.updatedAt })
             }
         }
     }
@@ -1122,6 +1199,27 @@ class SyncRepository @Inject constructor(
             val local = database.checklistDao().getById(dto.id)
             if (local == null || dto.updatedAt >= local.updatedAt) {
                 database.checklistDao().upsert(dto.toEntity())
+            }
+            if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
+        }
+
+        val attachmentSnapshots = userDoc.collection("attachments")
+            .whereGreaterThan("updatedAt", lastSyncTimestamp)
+            .get()
+            .await()
+        for (doc in attachmentSnapshots.documents) {
+            val dto = runCatching { AttachmentFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
+            if (dto.id.isBlank()) continue
+            val local = database.attachmentDao().getById(dto.id)
+            if (local == null || dto.updatedAt >= local.updatedAt) {
+                val safeName = dto.fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(80).ifEmpty { "file" }
+                val relPath = dto.localRelativePath.takeIf { it.isNotBlank() } ?: "attachments/${dto.id}_${safeName}"
+                if (dto.isDeleted) {
+                    deleteLocalAttachmentFile(relPath)
+                } else if (dto.dataBase64.isNotBlank()) {
+                    writeAttachmentBase64(relPath, dto.dataBase64)
+                }
+                database.attachmentDao().upsert(dto.toEntity(relPath))
             }
             if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
         }
@@ -1262,6 +1360,34 @@ class SyncRepository @Inject constructor(
                                         val local = database.tagDao().getById(dto.id)
                                         if (local == null || dto.updatedAt >= local.updatedAt) {
                                             database.tagDao().upsert(dto.toEntity())
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_: Throwable) {}
+                }
+
+            activeListeners += userDoc.collection("attachments")
+                .whereGreaterThan("updatedAt", sinceTimestamp)
+                .addSnapshotListener { snapshot, error ->
+                    try {
+                        if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
+                        scope.launch {
+                            for (change in snapshot.documentChanges) {
+                                runCatchingCancellable {
+                                    val dto = AttachmentFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
+                                    if (dto.id.isNotBlank()) {
+                                        val local = database.attachmentDao().getById(dto.id)
+                                        if (local == null || dto.updatedAt >= local.updatedAt) {
+                                            val safeName = dto.fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(80).ifEmpty { "file" }
+                                            val relPath = dto.localRelativePath.takeIf { it.isNotBlank() } ?: "attachments/${dto.id}_${safeName}"
+                                            if (dto.isDeleted) {
+                                                deleteLocalAttachmentFile(relPath)
+                                            } else if (dto.dataBase64.isNotBlank()) {
+                                                writeAttachmentBase64(relPath, dto.dataBase64)
+                                            }
+                                            database.attachmentDao().upsert(dto.toEntity(relPath))
                                         }
                                     }
                                 }

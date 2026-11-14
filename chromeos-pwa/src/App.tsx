@@ -22,6 +22,7 @@ import {
   Inbox,
   Layers,
   Menu,
+  Mic,
   Moon,
   Package,
   PanelLeftClose,
@@ -67,7 +68,11 @@ import {
   removeImportedIcsCalendar
 } from './data/calendarService';
 import { cloudSync, type CloudSyncSnapshot } from './data/cloudSync';
-import { generateLogbookReflection, type LogbookReviewResponse } from './data/geminiService';
+import {
+  generateLogbookReflection,
+  parseBrainDumpToTasks,
+  type LogbookReviewResponse
+} from './data/geminiService';
 import {
   computeStatistics,
   loadPreferences,
@@ -78,6 +83,7 @@ import {
 import { checkForSwAndReleaseUpdates } from './data/pwaUpdater';
 import { checkDueRemindersAndDigest } from './data/reminderRuntime';
 import { TRANSLATIONS, resolveLanguage } from './i18n/translations';
+import { AttachmentsStrip } from './components/AttachmentStrip';
 import { CalendarEventsBlock } from './components/CalendarEventsBlock';
 import {
   AreaManagerModal,
@@ -419,6 +425,12 @@ export const App: React.FC = () => {
           initialNotes: ''
         };
         setQuickShareDraft(draft);
+      } else if (actionParam === 'voice-capture') {
+        setQuickShareDraft({
+          initialTitle: '',
+          initialNotes: '',
+          autoLaunchVoice: true
+        });
       } else if (actionParam === 'quick-find') {
         setQuickFindOpen(true);
       } else if (actionParam === 'new-todo') {
@@ -1684,6 +1696,7 @@ export const App: React.FC = () => {
       projectsMap={allNonDeletedProjectsMap}
       tagsMap={tagsMap}
       checklistItems={snapshot.checklistItems}
+      attachments={snapshot.attachments}
       lang={lang}
       geminiApiKey={prefs.geminiApiKey}
       t={t}
@@ -1875,6 +1888,23 @@ export const App: React.FC = () => {
             >
               <Sparkles size={14} />
               <span className="topbar-label-hide-sm">Gemini</span>
+            </button>
+
+            {/* Voice Capture Icon (v1.8.0) */}
+            <button
+              type="button"
+              className="icon-btn"
+              data-testid="topbar-voice-capture-btn"
+              title={t.voiceDictationLabel}
+              onClick={() =>
+                setQuickShareDraft({
+                  initialTitle: '',
+                  initialNotes: '',
+                  autoLaunchVoice: true
+                })
+              }
+            >
+              <Mic size={17} />
             </button>
 
             {/* Quick Share / Save to Thingsbook Icon */}
@@ -2900,6 +2930,16 @@ export const App: React.FC = () => {
                       </div>
                     )}
 
+                    {/* Row 2b: Project Attachments Strip (v1.8.0) */}
+                    <AttachmentsStrip
+                      projectId={project.id}
+                      attachments={snapshot.attachments
+                        .filter((a) => !a.isDeleted && a.projectId === project.id)
+                        .sort((a, b) => a.createdAt - b.createdAt)}
+                      t={t}
+                      onToast={showToast}
+                    />
+
                     {/* Row 3: Action Pills (Target Date, Assign Area Dropdown, + To-Do, + Heading) */}
                     <div className="project-action-pills">
                       <button
@@ -3581,6 +3621,32 @@ export const App: React.FC = () => {
           areas={snapshot.areas}
           t={t}
           onClose={() => setQuickShareDraft(null)}
+          onSmartParseWithGemini={async (rawText) => {
+            const parsed = await parseBrainDumpToTasks(rawText, lang, prefs.geminiApiKey);
+            if (parsed.length === 0) return;
+            const todayStart = startOfDayEpoch();
+            for (const dto of parsed) {
+              const whenDate =
+                dto.whenDaysOffset != null ? addDaysLocal(todayStart, dto.whenDaysOffset) : null;
+              const deadline =
+                dto.deadlineDaysOffset != null
+                  ? addDaysLocal(todayStart, dto.deadlineDaysOffset)
+                  : null;
+              const created = await localDb.upsertTask({
+                title: dto.title,
+                notes: dto.notes,
+                scheduleState: dto.scheduleState,
+                whenDate,
+                deadline
+              });
+              if (dto.checklist.length > 0) {
+                await localDb.addChecklistItems(created.id, dto.checklist);
+              }
+            }
+            setQuickShareDraft(null);
+            handleSelectNav({ kind: 'smart', view: 'TODAY' });
+            showToast(`✨ +${parsed.length} ${t.entityTodos}`);
+          }}
           onSave={async (payload) => {
             const minOrder =
               openTasks.length > 0

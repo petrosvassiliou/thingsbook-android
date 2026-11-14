@@ -10,6 +10,7 @@ import androidx.room.Upsert
 import androidx.sqlite.db.SupportSQLiteQuery
 import com.culturedcode.things3.data.local.entity.AreaEntity
 import com.culturedcode.things3.data.local.entity.AreaWithProjectsAndTasks
+import com.culturedcode.things3.data.local.entity.AttachmentEntity
 import com.culturedcode.things3.data.local.entity.ChecklistItemEntity
 import com.culturedcode.things3.data.local.entity.HeadingEntity
 import com.culturedcode.things3.data.local.entity.ProjectEntity
@@ -628,3 +629,64 @@ interface TagDao {
     @Query("UPDATE tags SET isDirty = 1 WHERE isDeleted = 0")
     suspend fun markAllActiveDirty()
 }
+
+@Dao
+interface AttachmentDao {
+    @Query("SELECT * FROM attachments WHERE isDeleted = 0 ORDER BY createdAt ASC")
+    fun observeAllActiveAttachments(): Flow<List<AttachmentEntity>>
+
+    @Query("SELECT * FROM attachments WHERE taskId = :taskId AND isDeleted = 0 ORDER BY createdAt ASC")
+    fun observeForTask(taskId: String): Flow<List<AttachmentEntity>>
+
+    @Query("SELECT * FROM attachments WHERE projectId = :projectId AND isDeleted = 0 ORDER BY createdAt ASC")
+    fun observeForProject(projectId: String): Flow<List<AttachmentEntity>>
+
+    @Query("SELECT * FROM attachments WHERE taskId = :taskId AND isDeleted = 0 ORDER BY createdAt ASC")
+    suspend fun getForTaskSync(taskId: String): List<AttachmentEntity>
+
+    @Query("SELECT * FROM attachments WHERE projectId = :projectId AND isDeleted = 0 ORDER BY createdAt ASC")
+    suspend fun getForProjectSync(projectId: String): List<AttachmentEntity>
+
+    @Query("SELECT * FROM attachments WHERE isDeleted = 0 ORDER BY createdAt ASC")
+    suspend fun getAllNonDeletedAttachmentsList(): List<AttachmentEntity>
+
+    @Query("SELECT * FROM attachments WHERE isDirty = 1")
+    suspend fun getDirtyAttachments(): List<AttachmentEntity>
+
+    @Query("SELECT * FROM attachments WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): AttachmentEntity?
+
+    @Upsert
+    suspend fun upsert(attachment: AttachmentEntity)
+
+    @Upsert
+    suspend fun upsertAll(attachments: List<AttachmentEntity>)
+
+    @Query("UPDATE attachments SET isDirty = 0 WHERE id IN (:ids) AND updatedAt <= :maxUpdatedAt")
+    suspend fun markSynced(ids: List<String>, maxUpdatedAt: Long = Long.MAX_VALUE)
+
+    suspend fun markSyncedSafe(ids: List<String>, maxUpdatedAt: Long = Long.MAX_VALUE) {
+        ids.chunked(500).forEach { chunk ->
+            if (chunk.isNotEmpty()) markSynced(chunk, maxUpdatedAt)
+        }
+    }
+
+    @Query("UPDATE attachments SET isDeleted = 1, updatedAt = :now, isDirty = 1 WHERE id = :id")
+    suspend fun softDeleteById(id: String, now: Long)
+
+    @Query("DELETE FROM attachments WHERE taskId IN (:taskIds)")
+    suspend fun hardDeleteByTaskIds(taskIds: List<String>)
+
+    @Query("DELETE FROM attachments WHERE projectId IN (:projectIds)")
+    suspend fun hardDeleteByProjectIds(projectIds: List<String>)
+
+    @Query("DELETE FROM attachments WHERE id IN (:ids)")
+    suspend fun hardDeleteByIds(ids: List<String>)
+
+    @Query("DELETE FROM attachments")
+    suspend fun hardDeleteAll()
+
+    @Query("UPDATE attachments SET isDirty = 1 WHERE isDeleted = 0")
+    suspend fun markAllActiveDirty()
+}
+

@@ -119,6 +119,7 @@ class MainActivity : AppCompatActivity() {
                                         "TODAY" -> viewModel.selectSmartView(SmartViewType.TODAY)
                                         "INBOX" -> viewModel.selectSmartView(SmartViewType.INBOX)
                                         "QUICK_FIND" -> viewModel.setQuickFindOpen(true)
+                                        "VOICE_CAPTURE" -> viewModel.openVoiceQuickCapture()
                                     }
                                     currentIntent.removeExtra("extra_shortcut_action")
                                 }

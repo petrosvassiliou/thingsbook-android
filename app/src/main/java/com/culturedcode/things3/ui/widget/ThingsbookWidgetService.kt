@@ -54,9 +54,15 @@ private class ThingsbookRemoteViewsFactory(
                 context.applicationContext,
                 ThingsWidgetEntryPoint::class.java
             )
+            val repo = entryPoint.thingsRepository()
             runBlocking {
                 withTimeoutOrNull(5_000L) {
-                    entryPoint.thingsRepository().getTasksForWidgetView(selectedView)
+                    if (selectedView.startsWith(ThingsbookWidgetProvider.VIEW_PROJECT_PREFIX)) {
+                        val projectId = selectedView.removePrefix(ThingsbookWidgetProvider.VIEW_PROJECT_PREFIX)
+                        repo.getTasksForWidgetProject(projectId)
+                    } else {
+                        repo.getTasksForWidgetView(selectedView)
+                    }
                 } ?: emptyList()
             }
         }.onFailure { err ->

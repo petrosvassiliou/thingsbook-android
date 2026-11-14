@@ -65,6 +65,18 @@
                 android:value="true" />
         </service>
 
+        <!-- v1.8.0 Android System Quick Settings Tile ("New To-Do") -->
+        <service
+            android:name=".service.ThingsbookQuickTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_qs_new_todo"
+            android:label="@string/qs_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <!-- Exact Reminder & Daily Digest Receiver with Localized Notification Action Buttons -->
         <receiver
             android:name=".data.notifications.ReminderReceiver"
@@ -91,12 +103,25 @@
                 android:resource="@xml/thingsbook_widget_info" />
         </receiver>
 
+        <!-- v1.8.0 Compact 4x1 Quick Capture Bar Widget -->
+        <receiver
+            android:name=".ui.widget.ThingsbookQuickCaptureWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_quick_capture_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/thingsbook_quick_capture_widget_info" />
+        </receiver>
+
         <service
             android:name=".ui.widget.ThingsbookWidgetService"
             android:exported="false"
             android:permission="android.permission.BIND_REMOTEVIEWS" />
 
-        <!-- FileProvider for securely sharing .tbbackup files -->
+        <!-- FileProvider for securely sharing .tbbackup files & task attachments -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

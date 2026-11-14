@@ -66,6 +66,30 @@ data class Tag(
     val isDeleted: Boolean = false
 )
 
+data class TaskAttachment(
+    val id: String,
+    val taskId: String?,
+    val projectId: String?,
+    val fileName: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val localRelativePath: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val isDeleted: Boolean = false
+) {
+    val isImage: Boolean
+        get() = mimeType.startsWith("image/", ignoreCase = true) ||
+            fileName.endsWith(".jpg", ignoreCase = true) ||
+            fileName.endsWith(".jpeg", ignoreCase = true) ||
+            fileName.endsWith(".png", ignoreCase = true) ||
+            fileName.endsWith(".webp", ignoreCase = true)
+
+    val isPdf: Boolean
+        get() = mimeType.equals("application/pdf", ignoreCase = true) ||
+            fileName.endsWith(".pdf", ignoreCase = true)
+}
+
 data class TaskItem(
     val id: String,
     val title: String,
@@ -83,6 +107,7 @@ data class TaskItem(
     val sortOrder: Double,
     val checklistItems: List<ChecklistItem> = emptyList(),
     val tags: List<Tag> = emptyList(),
+    val attachments: List<TaskAttachment> = emptyList(),
     val createdAt: Long,
     val updatedAt: Long,
     val isDeleted: Boolean = false

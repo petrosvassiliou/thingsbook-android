@@ -1,5 +1,6 @@
 import type {
   AreaRecord,
+  AttachmentRecord,
   ChecklistItemRecord,
   HeadingRecord,
   ProjectRecord,
@@ -19,8 +20,8 @@ const KDF_ITERATIONS = 120_000;
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
 const GCM_TAG_BITS = 128;
-const MAX_FILE_BYTES = 30 * 1024 * 1024;
-const MAX_DECOMPRESSED_BYTES = 50 * 1024 * 1024;
+const MAX_FILE_BYTES = 80 * 1024 * 1024;
+const MAX_DECOMPRESSED_BYTES = 120 * 1024 * 1024;
 
 export interface ThingsbookBackupEnvelope {
   magic: string;
@@ -125,6 +126,19 @@ export interface ThingsbookBackupPayload {
   }>;
   taskTagRefs: Array<{ taskId: string; tagId: string }>;
   projectTagRefs: Array<{ projectId: string; tagId: string }>;
+  attachments?: Array<{
+    id: string;
+    taskId: string | null;
+    projectId: string | null;
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    localRelativePath?: string;
+    dataBase64: string;
+    sortOrder?: number;
+    createdAt: number;
+    updatedAt: number;
+  }>;
   preferences: BackupPreferencesDto;
 }
 
@@ -138,6 +152,7 @@ export interface BackupSummary {
   tasksCount: number;
   checklistItemsCount: number;
   tagsCount: number;
+  attachmentsCount?: number;
 }
 
 export type BackupInspection =
@@ -252,7 +267,8 @@ export function summarizeBackupPayload(
     headingsCount: (payload.headings || []).length,
     tasksCount: (payload.tasks || []).length,
     checklistItemsCount: (payload.checklistItems || []).length,
-    tagsCount: (payload.tags || []).length
+    tagsCount: (payload.tags || []).length,
+    attachmentsCount: (payload.attachments || []).length
   };
 }
 
@@ -263,6 +279,7 @@ export function buildBackupPayloadFromEntities(params: {
   tasks: TaskRecord[];
   checklistItems: ChecklistItemRecord[];
   tags: TagRecord[];
+  attachments?: AttachmentRecord[];
   preferences: BackupPreferencesDto;
   appVersionName: string;
 }): ThingsbookBackupPayload {
@@ -274,6 +291,15 @@ export function buildBackupPayloadFromEntities(params: {
   const checklistItems = params.checklistItems.filter((c) => !c.isDeleted);
   const tags = params.tags.filter((tg) => !tg.isDeleted);
   const validTagIds = new Set(tags.map((tg) => tg.id));
+  const validTaskIds = new Set(tasks.map((t) => t.id));
+  const validProjectIds = new Set(projects.map((p) => p.id));
+  const attachments = (params.attachments || []).filter(
+    (att) =>
+      !att.isDeleted &&
+      Boolean(att.dataBase64) &&
+      ((att.taskId && validTaskIds.has(att.taskId)) ||
+        (att.projectId && validProjectIds.has(att.projectId)))
+  );
 
   const taskTagRefs: Array<{ taskId: string; tagId: string }> = [];
   for (const t of tasks) {
@@ -364,6 +390,18 @@ export function buildBackupPayloadFromEntities(params: {
     })),
     taskTagRefs,
     projectTagRefs,
+    attachments: attachments.map((att) => ({
+      id: att.id,
+      taskId: att.taskId,
+      projectId: att.projectId,
+      fileName: att.fileName,
+      mimeType: att.mimeType,
+      sizeBytes: att.sizeBytes,
+      dataBase64: att.dataBase64,
+      sortOrder: Number.isFinite(att.sortOrder) ? att.sortOrder : 0,
+      createdAt: att.createdAt,
+      updatedAt: att.updatedAt
+    })),
     preferences: params.preferences
   };
 }
@@ -371,8 +409,8 @@ export function buildBackupPayloadFromEntities(params: {
 export async function encodeThingsBackup(
   payload: ThingsbookBackupPayload,
   password: string | null,
-  appVersionName = '1.7.0-chromeos',
-  appVersionCode = 41
+  appVersionName = '1.8.0-chromeos',
+  appVersionCode = 42
 ): Promise<Uint8Array> {
   const jsonBytes = new TextEncoder().encode(JSON.stringify(payload));
   const compressed = await gzipCompress(jsonBytes);

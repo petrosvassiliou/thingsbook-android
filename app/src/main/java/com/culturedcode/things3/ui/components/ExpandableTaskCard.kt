@@ -1,5 +1,10 @@
 package com.culturedcode.things3.ui.components
 
+import android.app.Activity
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
@@ -41,6 +46,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
+import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.Check
@@ -52,6 +58,7 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.LocalOffer
+import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Timer
@@ -73,6 +80,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import android.view.MotionEvent
@@ -105,6 +113,7 @@ import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
@@ -194,6 +203,9 @@ fun ExpandableTaskCard(
     onRenameChecklistItem: ((String, String) -> Unit)? = null,
     onMoveChecklistItem: ((String, Boolean) -> Unit)? = null,
     onDeleteChecklistItem: ((String) -> Unit)? = null,
+    onAddTaskAttachment: ((fileName: String, mimeType: String, bytes: ByteArray) -> Unit)? = null,
+    onDeleteTaskAttachment: ((attachmentId: String) -> Unit)? = null,
+    onShowMessage: ((String) -> Unit)? = null,
     onTriggerGeminiMagicBreakdown: () -> Unit,
     onDeleteTask: () -> Unit,
     onDuplicateTask: (() -> Unit)? = null,
@@ -736,6 +748,22 @@ fun ExpandableTaskCard(
                         onRenameChecklistItem = onRenameChecklistItem,
                         onMoveChecklistItem = onMoveChecklistItem,
                         onDeleteChecklistItem = onDeleteChecklistItem,
+                        onAddTaskAttachment = onAddTaskAttachment,
+                        onDeleteTaskAttachment = onDeleteTaskAttachment,
+                        onShowMessage = onShowMessage,
+                        onDictateTitleOrNotes = { spokenText ->
+                            val clean = spokenText.trim()
+                            if (clean.isNotEmpty()) {
+                                if (editedTitleField.text.isBlank()) {
+                                    editedTitleField = TextFieldValue(text = clean, selection = TextRange(clean.length))
+                                    onTitleNotesChange(clean, editedNotesField.text)
+                                } else {
+                                    val newNotes = if (editedNotesField.text.isBlank()) clean else "${editedNotesField.text.trimEnd()}\n$clean"
+                                    editedNotesField = TextFieldValue(text = newNotes, selection = TextRange(newNotes.length))
+                                    onTitleNotesChange(editedTitleField.text, newNotes)
+                                }
+                            }
+                        },
                         onTriggerGeminiMagicBreakdown = onTriggerGeminiMagicBreakdown,
                         onOpenWhenDialog = { showWhenDialog = true },
                         onOpenDeadlineDialog = { showDeadlineDialog = true },
@@ -914,6 +942,7 @@ private fun hasCollapsedTaskBadges(task: TaskItem): Boolean {
         task.recurrenceRule != null ||
         task.reminderTime != null ||
         task.checklistItems.isNotEmpty() ||
+        task.attachments.isNotEmpty() ||
         task.tags.isNotEmpty() ||
         task.deadline != null
 }
@@ -946,6 +975,9 @@ private fun CollapsedTaskInlineBadges(
         if (task.checklistItems.isNotEmpty()) {
             val doneCount = task.checklistItems.count { it.isCompleted }
             ThingsTagPill(title = "☑ $doneCount/${task.checklistItems.size}")
+        }
+        if (task.attachments.isNotEmpty()) {
+            ThingsTagPill(title = "📎 ${task.attachments.size}")
         }
         task.tags.forEach { tag ->
             ThingsTagPill(title = tag.title)
@@ -1050,6 +1082,10 @@ private fun ExpandedTaskCardBody(
     onRenameChecklistItem: ((String, String) -> Unit)?,
     onMoveChecklistItem: ((String, Boolean) -> Unit)?,
     onDeleteChecklistItem: ((String) -> Unit)?,
+    onAddTaskAttachment: ((fileName: String, mimeType: String, bytes: ByteArray) -> Unit)? = null,
+    onDeleteTaskAttachment: ((attachmentId: String) -> Unit)? = null,
+    onShowMessage: ((String) -> Unit)? = null,
+    onDictateTitleOrNotes: ((String) -> Unit)? = null,
     onTriggerGeminiMagicBreakdown: () -> Unit,
     onOpenWhenDialog: () -> Unit,
     onOpenDeadlineDialog: () -> Unit,
@@ -1061,10 +1097,61 @@ private fun ExpandedTaskCardBody(
     onDeleteTask: () -> Unit,
     onDoneCollapse: () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
     val newChecklistFocusRequester = remember(task.id) { FocusRequester() }
     var pendingAutoFocusSubtaskId by remember(task.id) { mutableStateOf<String?>(null) }
+    val tooLargeMsg = stringResource(R.string.attachment_too_large)
+    val voicePromptMsg = stringResource(R.string.voice_capture_prompt)
+    val voiceUnavailableMsg = stringResource(R.string.voice_not_available)
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null && onAddTaskAttachment != null) {
+            scope.launch {
+                when (val outcome = processPickedAttachmentUri(context, uri)) {
+                    is AttachmentImportOutcome.Success -> {
+                        onAddTaskAttachment(
+                            outcome.result.fileName,
+                            outcome.result.mimeType,
+                            outcome.result.bytes
+                        )
+                    }
+                    AttachmentImportOutcome.TooLarge -> {
+                        onShowMessage?.invoke(tooLargeMsg)
+                    }
+                    AttachmentImportOutcome.Error -> Unit
+                }
+            }
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap ->
+        if (bitmap != null && onAddTaskAttachment != null) {
+            val processed = processCapturedPhotoBitmap(bitmap)
+            onAddTaskAttachment(processed.fileName, processed.mimeType, processed.bytes)
+        }
+    }
+
+    val speechLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { res ->
+        if (res.resultCode == Activity.RESULT_OK) {
+            val spoken = res.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+                ?.trim()
+                .orEmpty()
+            if (spoken.isNotEmpty()) {
+                onDictateTitleOrNotes?.invoke(spoken)
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -1119,6 +1206,18 @@ private fun ExpandedTaskCardBody(
         )
 
         DetectedNotesLinksRow(notes = editedNotesField.text)
+
+        TaskAttachmentsStrip(
+            attachments = task.attachments,
+            onDeleteAttachment = { attId -> onDeleteTaskAttachment?.invoke(attId) },
+            onAttachFileClick = if (onAddTaskAttachment != null) {
+                { filePickerLauncher.launch(arrayOf("image/*", "application/pdf")) }
+            } else null,
+            onTakePhotoClick = if (onAddTaskAttachment != null) {
+                { cameraLauncher.launch(null) }
+            } else null,
+            modifier = Modifier.padding(top = 6.dp)
+        )
 
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -1518,6 +1617,38 @@ private fun ExpandedTaskCardBody(
                             tint = if (task.deadline != null) colors.deadlineUrgentRed else colors.secondaryText,
                             modifier = Modifier.size(16.dp)
                         )
+                    }
+                }
+
+                if (onDictateTitleOrNotes != null) {
+                    ThingsHoverTooltip(text = stringResource(R.string.voice_capture_btn)) {
+                        IconButton(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                val launched = runCatching {
+                                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                        putExtra(
+                                            RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                                            RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                                        )
+                                        putExtra(RecognizerIntent.EXTRA_PROMPT, voicePromptMsg)
+                                    }
+                                    speechLauncher.launch(intent)
+                                    true
+                                }.getOrDefault(false)
+                                if (!launched) {
+                                    onShowMessage?.invoke(voiceUnavailableMsg)
+                                }
+                            },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Mic,
+                                contentDescription = stringResource(R.string.voice_capture_btn),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
 

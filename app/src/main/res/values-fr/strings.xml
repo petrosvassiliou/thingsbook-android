@@ -378,4 +378,18 @@
     <string name="shortcut_today_short">Aujourd\'hui</string>
     <string name="shortcut_inbox_short">Entrée</string>
     <string name="shortcut_quick_find_short">Recherche rapide</string>
+    <string name="shortcut_voice_capture_short">Tâche vocale</string>
+    <string name="voice_capture_btn">Dictée vocale</string>
+    <string name="voice_capture_prompt">Dictez votre tâche ou vos idées…</string>
+    <string name="voice_smart_parse_gemini">✨ Analyser avec Gemini</string>
+    <string name="voice_not_available">La reconnaissance vocale n\'est pas disponible sur cet appareil.</string>
+    <string name="qs_tile_label">Nouvelle tâche Thingsbook</string>
+    <string name="widget_quick_capture_label">Capture rapide Thingsbook (4×1)</string>
+    <string name="widget_pin_project_tab">Projet</string>
+    <string name="action_attach_file">Joindre photo ou PDF</string>
+    <string name="action_take_photo">Prendre une photo</string>
+    <string name="attachments_section_title">Pièces jointes</string>
+    <string name="attachment_open_external">Ouvrir / Partager</string>
+    <string name="attachment_remove">Supprimer la pièce jointe</string>
+    <string name="attachment_too_large">Le fichier dépasse la limite de 5 Mo.</string>
 </resources>

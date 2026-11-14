@@ -85,13 +85,18 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
                     AppWidgetManager.EXTRA_APPWIDGET_ID,
                     AppWidgetManager.INVALID_APPWIDGET_ID
                 )
-                val targetView = normalizeWidgetView(intent.getStringExtra(EXTRA_TARGET_VIEW))
+                val requestedView = intent.getStringExtra(EXTRA_TARGET_VIEW)
                 if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
-                    setSelectedViewForWidget(context, widgetId, targetView)
                     val pendingResult = runCatching { goAsync() }.getOrNull()
                     widgetScope.launch {
                         try {
                             withTimeoutOrNull(RECEIVER_TIMEOUT_MS) {
+                                val resolvedTargetView = if (requestedView == VIEW_PROJECT_CYCLE) {
+                                    resolveNextProjectView(context, widgetId)
+                                } else {
+                                    normalizeWidgetView(requestedView)
+                                }
+                                setSelectedViewForWidget(context, widgetId, resolvedTargetView)
                                 val mgr: AppWidgetManager? = runCatching { AppWidgetManager.getInstance(context) }.getOrNull()
                                 if (mgr != null) {
                                     // Required for minSdk = 26..30 RemoteViewsService adapter refresh
@@ -211,12 +216,43 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
         const val VIEW_UPCOMING = "UPCOMING"
         const val VIEW_ANYTIME = "ANYTIME"
         const val VIEW_SOMEDAY = "SOMEDAY"
+        const val VIEW_PROJECT_CYCLE = "PROJECT_CYCLE"
+        const val VIEW_PROJECT_PREFIX = "PROJECT:"
 
         private val VALID_VIEWS = setOf(VIEW_TODAY, VIEW_INBOX, VIEW_UPCOMING, VIEW_ANYTIME, VIEW_SOMEDAY)
 
         private fun normalizeWidgetView(raw: String?): String {
-            val normalized = raw?.trim()?.uppercase(Locale.ROOT) ?: VIEW_TODAY
+            val trimmed = raw?.trim().orEmpty()
+            if (trimmed.startsWith(VIEW_PROJECT_PREFIX, ignoreCase = true)) {
+                val projId = trimmed.substringAfter(":").trim()
+                if (projId.isNotEmpty()) return "$VIEW_PROJECT_PREFIX$projId"
+            }
+            val normalized = trimmed.uppercase(Locale.ROOT)
             return if (normalized in VALID_VIEWS) normalized else VIEW_TODAY
+        }
+
+        private suspend fun resolveNextProjectView(context: Context, widgetId: Int): String {
+            val entryPoint = EntryPointAccessors.fromApplication(
+                context.applicationContext,
+                ThingsWidgetEntryPoint::class.java
+            )
+            val projects = runCatchingCancellable {
+                entryPoint.thingsRepository().getActiveProjectsForWidget()
+            }.getOrDefault(emptyList())
+            if (projects.isEmpty()) return VIEW_TODAY
+
+            val current = getSelectedViewForWidget(context, widgetId)
+            if (current.startsWith(VIEW_PROJECT_PREFIX)) {
+                val currentProjId = current.removePrefix(VIEW_PROJECT_PREFIX)
+                val idx = projects.indexOfFirst { it.id == currentProjId }
+                val nextProj = if (idx >= 0) {
+                    projects[(idx + 1) % projects.size]
+                } else {
+                    projects.first()
+                }
+                return "$VIEW_PROJECT_PREFIX${nextProj.id}"
+            }
+            return "$VIEW_PROJECT_PREFIX${projects.first().id}"
         }
 
         private fun prefKeyForWidget(widgetId: Int) = "selected_view_$widgetId"
@@ -239,11 +275,6 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
 
         fun refreshAllWidgets(context: Context) {
             runCatching {
-                val mgr: AppWidgetManager? = AppWidgetManager.getInstance(context)
-                if (mgr == null) return
-                val ids: IntArray? = mgr.getAppWidgetIds(ComponentName(context, ThingsbookWidgetProvider::class.java))
-                if (ids == null || ids.isEmpty()) return
-
                 val intent = Intent(context, ThingsbookWidgetProvider::class.java).apply {
                     action = ACTION_REFRESH_ALL
                     setPackage(context.packageName)
@@ -256,6 +287,7 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
 
         suspend fun refreshAllWidgetsSync(context: Context) {
             runCatchingCancellable {
+                ThingsbookQuickCaptureWidgetProvider.refreshAllQuickCaptureWidgetsSync(context)
                 val mgr: AppWidgetManager? = AppWidgetManager.getInstance(context)
                 if (mgr == null) return
                 val ids: IntArray? = mgr.getAppWidgetIds(ComponentName(context, ThingsbookWidgetProvider::class.java))
@@ -281,29 +313,58 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
         ) {
             val mgr = appWidgetManager ?: return
             val localizedContext = androidx.core.content.ContextCompat.getContextForLanguage(context)
-            val selectedView = getSelectedViewForWidget(context, appWidgetId)
+            var selectedView = getSelectedViewForWidget(context, appWidgetId)
             val entryPoint = EntryPointAccessors.fromApplication(
                 context.applicationContext,
                 ThingsWidgetEntryPoint::class.java
             )
+            val repo = entryPoint.thingsRepository()
+
+            val activeProjects = runCatchingCancellable {
+                repo.getActiveProjectsForWidget()
+            }.getOrDefault(emptyList())
+
+            val selectedProject = if (selectedView.startsWith(VIEW_PROJECT_PREFIX)) {
+                val pId = selectedView.removePrefix(VIEW_PROJECT_PREFIX)
+                activeProjects.find { it.id == pId } ?: activeProjects.firstOrNull()?.also { fallback ->
+                    selectedView = "$VIEW_PROJECT_PREFIX${fallback.id}"
+                    setSelectedViewForWidget(context, appWidgetId, selectedView)
+                }
+            } else {
+                null
+            }
+            if (selectedView.startsWith(VIEW_PROJECT_PREFIX) && selectedProject == null) {
+                selectedView = VIEW_TODAY
+                setSelectedViewForWidget(context, appWidgetId, VIEW_TODAY)
+            }
+
             val tasks = runCatchingCancellable {
-                entryPoint.thingsRepository().getTasksForWidgetView(selectedView)
+                if (selectedProject != null) {
+                    repo.getTasksForWidgetProject(selectedProject.id)
+                } else {
+                    repo.getTasksForWidgetView(selectedView)
+                }
             }.getOrDefault(emptyList())
 
             val views = RemoteViews(context.packageName, R.layout.widget_thingsbook)
 
             // 1. Configure Header Icon, Color, Title & Task Count Badge
-            val (iconText, iconColorHex, titleRes) = when (selectedView) {
-                VIEW_INBOX -> Triple("📥", "#2B7BF6", R.string.view_inbox)
-                VIEW_UPCOMING -> Triple("📅", "#FF3B30", R.string.view_upcoming)
-                VIEW_ANYTIME -> Triple("🗂️", "#19A096", R.string.view_anytime)
-                VIEW_SOMEDAY -> Triple("📦", "#B89A52", R.string.view_someday)
-                else -> Triple("★", "#FFC312", R.string.view_today)
+            if (selectedProject != null) {
+                views.setTextViewText(R.id.widget_view_icon, "🎯")
+                views.setTextColor(R.id.widget_view_icon, Color.parseColor("#2B7BF6"))
+                views.setTextViewText(R.id.widget_view_title, selectedProject.title)
+            } else {
+                val (iconText, iconColorHex, titleRes) = when (selectedView) {
+                    VIEW_INBOX -> Triple("📥", "#2B7BF6", R.string.view_inbox)
+                    VIEW_UPCOMING -> Triple("📅", "#FF3B30", R.string.view_upcoming)
+                    VIEW_ANYTIME -> Triple("🗂️", "#19A096", R.string.view_anytime)
+                    VIEW_SOMEDAY -> Triple("📦", "#B89A52", R.string.view_someday)
+                    else -> Triple("★", "#FFC312", R.string.view_today)
+                }
+                views.setTextViewText(R.id.widget_view_icon, iconText)
+                views.setTextColor(R.id.widget_view_icon, Color.parseColor(iconColorHex))
+                views.setTextViewText(R.id.widget_view_title, localizedContext.getString(titleRes))
             }
-
-            views.setTextViewText(R.id.widget_view_icon, iconText)
-            views.setTextColor(R.id.widget_view_icon, Color.parseColor(iconColorHex))
-            views.setTextViewText(R.id.widget_view_title, localizedContext.getString(titleRes))
             views.setTextViewText(R.id.widget_task_count, tasks.size.toString())
             views.setTextViewText(R.id.widget_empty_view, localizedContext.getString(R.string.empty_view))
 
@@ -343,7 +404,34 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
                 views.setOnClickPendingIntent(tabViewId, switchPending)
             }
 
-            // 3. Header Click -> Open App in Selected Smart View
+            // Project Tab ("🎯 Project" — cycles through active projects on tap)
+            val isProjectActive = selectedProject != null
+            val projectTabText = selectedProject?.title?.take(9) ?: localizedContext.getString(R.string.widget_pin_project_tab)
+            views.setTextViewText(R.id.widget_tab_project, projectTabText)
+            views.setInt(
+                R.id.widget_tab_project,
+                "setBackgroundResource",
+                if (isProjectActive) R.drawable.bg_things_widget_tab_active else R.drawable.bg_things_widget_tab_inactive
+            )
+            views.setTextColor(
+                R.id.widget_tab_project,
+                if (isProjectActive) Color.WHITE else Color.parseColor("#5D6573")
+            )
+            val cycleProjectIntent = Intent(context, ThingsbookWidgetProvider::class.java).apply {
+                action = ACTION_SWITCH_VIEW
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+                putExtra(EXTRA_TARGET_VIEW, VIEW_PROJECT_CYCLE)
+                data = Uri.parse("thingsbook://widget/switch/$appWidgetId/$VIEW_PROJECT_CYCLE")
+            }
+            val cycleProjectPending = PendingIntent.getBroadcast(
+                context,
+                appWidgetId * 10 + VIEW_PROJECT_CYCLE.hashCode(),
+                cycleProjectIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            views.setOnClickPendingIntent(R.id.widget_tab_project, cycleProjectPending)
+
+            // 3. Header Click -> Open App in Selected Smart View / Project
             val openViewIntent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra(EXTRA_WIDGET_SMART_VIEW, selectedView)
@@ -357,7 +445,21 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
             )
             views.setOnClickPendingIntent(R.id.widget_header_open_app, openViewPending)
 
-            // 4. "+" Button Click -> Open App in Selected Smart View & Immediately Create + Focus New To-Do
+            // 4a. "🎙️" Voice Button Click -> Open App & Launch Voice Quick Capture
+            val voiceIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("extra_shortcut_action", "VOICE_CAPTURE")
+                data = Uri.parse("thingsbook://widget/voice/$appWidgetId")
+            }
+            val voicePending = PendingIntent.getActivity(
+                context,
+                appWidgetId * 100 + 4,
+                voiceIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            views.setOnClickPendingIntent(R.id.widget_btn_voice_capture, voicePending)
+
+            // 4b. "+" Button Click -> Open App in Selected Smart View / Project & Immediately Create + Focus New To-Do
             val quickAddIntent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra(EXTRA_WIDGET_SMART_VIEW, selectedView)

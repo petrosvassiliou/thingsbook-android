@@ -17,6 +17,20 @@
     </shortcut>
 
     <shortcut
+        android:shortcutId="shortcut_voice_capture"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher_round"
+        android:shortcutShortLabel="@string/shortcut_voice_capture_short"
+        android:shortcutLongLabel="@string/shortcut_voice_capture_short">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.culturedcode.things3"
+            android:targetClass="com.culturedcode.things3.MainActivity">
+            <extra android:name="extra_shortcut_action" android:value="VOICE_CAPTURE" />
+        </intent>
+    </shortcut>
+
+    <shortcut
         android:shortcutId="shortcut_today"
         android:enabled="true"
         android:icon="@mipmap/ic_launcher_round"

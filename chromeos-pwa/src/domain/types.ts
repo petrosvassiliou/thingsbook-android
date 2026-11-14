@@ -1,5 +1,5 @@
-export const APP_VERSION = '1.7.0';
-export const APP_BUILD_CODE = 41;
+export const APP_VERSION = '1.8.0';
+export const APP_BUILD_CODE = 42;
 export const MAX_AREAS = 8;
 
 export type ScheduleState =
@@ -114,6 +114,21 @@ export interface ChecklistItemRecord {
   isDirty: boolean;
 }
 
+export interface AttachmentRecord {
+  id: string;
+  taskId: string | null;
+  projectId: string | null;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  dataBase64: string;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+  isDeleted: boolean;
+  isDirty: boolean;
+}
+
 export type SmartViewType =
   | 'INBOX'
   | 'TODAY'
@@ -157,6 +172,7 @@ export interface AppPreferences {
 export interface QuickShareDraft {
   initialTitle: string;
   initialNotes: string;
+  autoLaunchVoice?: boolean;
 }
 
 export interface FocusTimerUiState {

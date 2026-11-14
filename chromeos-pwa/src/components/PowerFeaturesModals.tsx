@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Share2,
   X,
@@ -19,7 +19,10 @@ import {
   Fingerprint,
   KeyRound,
   BellRing,
-  Clock
+  Clock,
+  Mic,
+  MicOff,
+  Sparkles
 } from 'lucide-react';
 import type {
   AreaRecord,
@@ -37,6 +40,39 @@ import {
   verifyPlatformWebAuthnCredential
 } from '../domain/powerUtils';
 
+interface SpeechRecognitionAlternativeLike {
+  transcript: string;
+}
+
+interface SpeechRecognitionResultLike {
+  isFinal: boolean;
+  0: SpeechRecognitionAlternativeLike;
+}
+
+interface SpeechRecognitionEventLike {
+  results: ArrayLike<SpeechRecognitionResultLike>;
+}
+
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((ev: SpeechRecognitionEventLike) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
+function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
+  if (typeof window === 'undefined') return null;
+  const w = window as unknown as {
+    SpeechRecognition?: new () => SpeechRecognitionLike;
+    webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+  };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
+}
+
 // ==================== 1. Quick Share / Save to Thingsbook Modal ====================
 
 export const QuickShareModal: React.FC<{
@@ -52,12 +88,66 @@ export const QuickShareModal: React.FC<{
     projectId: string | null;
     areaId: string | null;
   }) => void;
-}> = ({ draft, projects, areas, t, onClose, onSave }) => {
+  onSmartParseWithGemini?: (rawText: string) => Promise<void>;
+}> = ({ draft, projects, areas, t, onClose, onSave, onSmartParseWithGemini }) => {
   const [title, setTitle] = useState(draft.initialTitle);
   const [notes, setNotes] = useState(draft.initialNotes);
   const [scheduleState, setScheduleState] = useState<ScheduleState>('INBOX');
   const [projectId, setProjectId] = useState<string | null>(null);
   const [areaId, setAreaId] = useState<string | null>(null);
+  const [isListening, setIsListening] = useState(false);
+  const [isSmartParsing, setIsSmartParsing] = useState(false);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+
+  const toggleVoiceDictation = () => {
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      return;
+    }
+    const Ctor = getSpeechRecognitionCtor();
+    if (!Ctor) return;
+    try {
+      const rec = new Ctor();
+      rec.continuous = false;
+      rec.interimResults = false;
+      rec.lang = typeof navigator !== 'undefined' ? navigator.language || 'en-US' : 'en-US';
+      rec.onresult = (ev) => {
+        const transcript = Array.from(ev.results)
+          .map((r) => r[0]?.transcript || '')
+          .join(' ')
+          .trim();
+        if (transcript) {
+          setTitle((prev) => {
+            if (!prev.trim()) return transcript;
+            setNotes((n) => (n.trim() ? `${n}\n${transcript}` : transcript));
+            return prev;
+          });
+        }
+      };
+      rec.onerror = () => setIsListening(false);
+      rec.onend = () => setIsListening(false);
+      recognitionRef.current = rec;
+      setIsListening(true);
+      rec.start();
+    } catch {
+      setIsListening(false);
+    }
+  };
+
+  useEffect(() => {
+    if (draft.autoLaunchVoice) {
+      const id = window.setTimeout(() => toggleVoiceDictation(), 120);
+      return () => {
+        window.clearTimeout(id);
+        recognitionRef.current?.stop();
+      };
+    }
+    return () => {
+      recognitionRef.current?.stop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const activeProjects = projects.filter((p) => !p.isDeleted && p.status === 'ACTIVE');
   const activeAreas = areas.filter((a) => !a.isDeleted);
@@ -102,6 +192,8 @@ export const QuickShareModal: React.FC<{
     });
   };
 
+  const combinedText = `${title.trim()}${notes.trim() ? `\n${notes.trim()}` : ''}`.trim();
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
@@ -116,24 +208,63 @@ export const QuickShareModal: React.FC<{
               <span>{t.quickShareTitle}</span>
             </h3>
             <div style={{ fontSize: 12.2, color: 'var(--text-secondary)', marginTop: 2 }}>
-              {t.quickShareSubtitle}
+              {isListening ? `🎙️ ${t.voiceListeningHint}` : t.quickShareSubtitle}
             </div>
           </div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
-            <X size={18} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <button
+              type="button"
+              className={`icon-btn ${isListening ? 'active' : ''}`}
+              title={t.voiceDictationLabel}
+              onClick={toggleVoiceDictation}
+              style={
+                isListening
+                  ? { color: 'var(--deadline-red)', background: 'rgba(229, 57, 53, 0.12)' }
+                  : undefined
+              }
+            >
+              {isListening ? <MicOff size={17} /> : <Mic size={17} />}
+            </button>
+            <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         <form onSubmit={handleSubmit}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
-            <input
-              type="text"
-              className="text-field"
-              placeholder={t.placeholderTodoTitle}
-              value={title}
-              autoFocus
-              onChange={(e) => setTitle(e.target.value)}
-            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input
+                type="text"
+                className="text-field"
+                style={{ flex: 1 }}
+                placeholder={isListening ? t.voiceListeningHint : t.placeholderTodoTitle}
+                value={title}
+                autoFocus
+                onChange={(e) => setTitle(e.target.value)}
+              />
+              {onSmartParseWithGemini && combinedText.length >= 6 && (
+                <button
+                  type="button"
+                  className="chip-btn gemini"
+                  disabled={isSmartParsing}
+                  title={t.voiceSmartParseBtn}
+                  onClick={async () => {
+                    if (isSmartParsing) return;
+                    setIsSmartParsing(true);
+                    try {
+                      await onSmartParseWithGemini(combinedText);
+                    } finally {
+                      setIsSmartParsing(false);
+                    }
+                  }}
+                  style={{ flexShrink: 0 }}
+                >
+                  <Sparkles size={13} />
+                  <span>{isSmartParsing ? t.geminiGenerating : t.voiceSmartParseBtn}</span>
+                </button>
+              )}
+            </div>
 
             <div className="quick-share-notes-box">
               <MarkdownNotesField

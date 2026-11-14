@@ -3,4 +3,7 @@
     <cache-path
         name="shared_backups"
         path="backups/" />
+    <files-path
+        name="task_attachments"
+        path="attachments/" />
 </paths>

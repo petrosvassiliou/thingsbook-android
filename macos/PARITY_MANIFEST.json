@@ -1,0 +1,72 @@
+{
+  "platform": "macOS",
+  "minimumMacOSVersion": "14.0",
+  "bundleIdentifier": "com.thingsbook.macos",
+  "syncedAndroidVersionName": "1.7.0",
+  "syncedAndroidVersionCode": 41,
+  "supportedLanguages": ["en", "de", "fr", "it", "es"],
+  "backupFormatMagic": "THINGSBOOK_BACKUP_V1",
+  "backupFormatVersion": 1,
+  "firestoreCollections": [
+    "tags",
+    "areas",
+    "projects",
+    "headings",
+    "tasks",
+    "checklist_items"
+  ],
+  "features": {
+    "smartViews": [
+      "INBOX",
+      "TODAY",
+      "THIS_EVENING",
+      "UPCOMING",
+      "ANYTIME",
+      "SOMEDAY",
+      "LOGBOOK",
+      "TRASH"
+    ],
+    "gtdHierarchy": [
+      "areas_max_8",
+      "projects_with_pie_progress_ring",
+      "collapsible_headings",
+      "tasks_with_reorderable_checklists",
+      "hierarchical_tags_with_single_key_shortcuts",
+      "lexorank_sort_order",
+      "option_click_or_context_cancel_task"
+    ],
+    "offlineStorageAndBackup": [
+      "sqlite3_wal_offline_first",
+      "fts5_unicode61_remove_diacritics_2",
+      "tbbackup_aes_256_gcm_pbkdf2_120000",
+      "csv_export_and_flexible_import",
+      "localized_onboarding_seed_data_and_purge"
+    ],
+    "cloudSync": [
+      "firebase_auth_email_password_and_instant_sync",
+      "firestore_bidirectional_delta_sync_lww",
+      "custom_firebase_project_override",
+      "strict_local_only_db_mode",
+      "ntfy_secondary_instant_relay"
+    ],
+    "geminiAiFeatures": [
+      "magic_breakdown",
+      "brain_dump_to_gtd",
+      "ai_project_architect",
+      "logbook_ai_reflection"
+    ],
+    "v1_7_0_powerPack": [
+      "save_to_thingsbook_share_service_and_quick_entry_menubar",
+      "dock_menu_and_url_scheme_shortcuts",
+      "actionable_reminder_notifications_complete_snooze1h_tomorrow",
+      "live_markdown_notes_and_clickable_web_email_phone_chips",
+      "apple_calendar_eventkit_integration_on_task_dates",
+      "group_today_by_project_or_area_toggle",
+      "trash_smart_view_and_5s_undo_bar_cmd_z",
+      "duplicate_todo_and_duplicate_project_cmd_d",
+      "focus_pomodoro_25m_timer_banner",
+      "touch_id_biometric_or_password_app_lock",
+      "automatic_00_00_midnight_day_rollover"
+    ]
+  }
+}

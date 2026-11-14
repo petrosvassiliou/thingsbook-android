@@ -1,0 +1,44 @@
+name: Build & Verify Thingsbook for macOS
+
+on:
+  push:
+    branches:
+      - macOS
+  pull_request:
+    branches:
+      - macOS
+  workflow_dispatch:
+
+concurrency:
+  group: macos-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-macos:
+    name: Parity Gate, Swift Tests & Universal DMG (macOS 15)
+    runs-on: macos-15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Sync & Verify Android <-> macOS Feature & Version Parity
+        run: |
+          python3 macos/scripts/sync-strings-from-android.py
+          python3 macos/scripts/verify-android-parity.py
+
+      - name: Run ThingsbookCore Swift Unit & Cross-Platform Vector Tests
+        working-directory: macos
+        run: swift test -v
+
+      - name: Package Universal Thingsbook.app & DMG (arm64 + x86_64)
+        run: |
+          chmod +x macos/scripts/build-dmg.sh
+          ./macos/scripts/build-dmg.sh
+
+      - name: Upload Universal macOS DMG Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Thingsbook-macOS-Universal-DMG
+          path: macos/dist/*.dmg
+          if-no-files-found: error
+          retention-days: 90

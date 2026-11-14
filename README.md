@@ -6,13 +6,13 @@
 
 **Native Android GTD Productivity App — with Companion Standalone App for ChromeOS**
 
-[![Version](https://img.shields.io/badge/version-1.6.23-248BFD?style=flat-square)](https://github.com/petrosvassiliou/thingsbook-android)
+[![Version](https://img.shields.io/badge/version-1.7.0%20(Build%2041)-248BFD?style=flat-square)](https://github.com/petrosvassiliou/thingsbook-android/releases/tag/v1.7.0)
 [![Android](https://img.shields.io/badge/Android-100%25%20Kotlin%20%2B%20Compose-3DDC84?style=flat-square&logo=android&logoColor=white)](#1-thingsbook-for-android-native-apk)
 [![ChromeOS](https://img.shields.io/badge/ChromeOS-Standalone%20Launcher%20App-4285F4?style=flat-square&logo=googlechrome&logoColor=white)](#2-thingsbook-for-chromeos-standalone-pwa)
 [![Languages](https://img.shields.io/badge/i18n-DE%20%7C%20EN%20%7C%20FR%20%7C%20IT%20%7C%20ES-6E56CF?style=flat-square)](#localization-5-languages)
 [![Encryption](https://img.shields.io/badge/backup-AES--256--GCM-16A34A?style=flat-square)](#offline-first-storage-backups--cloud-sync)
 
-[**📱 Download Android APK (v1.6.23)**](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.23-full.apk) · [**🤖 Android Overview & Screenshots**](#1-thingsbook-for-android-native-apk) · [**💻 ChromeOS Version & Screenshots**](#2-thingsbook-for-chromeos-standalone-pwa) · [**🇩🇪 Deutsch**](#-deutsche-dokumentation)
+[**📱 Download Android APK (v1.7.0)**](https://github.com/petrosvassiliou/thingsbook-android/raw/v1.7.0/releases/Thingsbook-v1.7.0-GTD-Full.apk) · [**🤖 Android Overview & Screenshots**](#1-thingsbook-for-android-native-apk) · [**💻 ChromeOS Version & Screenshots**](#2-thingsbook-for-chromeos-standalone-pwa) · [**🇩🇪 Deutsch**](#-deutsche-dokumentation)
 
 </div>
 
@@ -30,26 +30,44 @@
 
 **Thingsbook for Android** (`app/`) is a 100% native GTD (*Getting Things Done*) productivity app built from scratch for **Android smartphones, tablets, and foldables** using **Kotlin**, **Jetpack Compose (Material 3)**, and an **offline-first Room + SQLite FTS5 (`unicode61`) database**.
 
-### 📥 Direct Android Download (`v1.6.23`, Build `40`)
-- **[Download `Thingsbook-v1.6.23-full.apk`](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.23-full.apk)**
+### 📥 Direct Android Download (`v1.7.0`, Build `41`)
+- **[Download `Thingsbook-v1.7.0-GTD-Full.apk`](https://github.com/petrosvassiliou/thingsbook-android/raw/v1.7.0/releases/Thingsbook-v1.7.0-GTD-Full.apk)**
+- **[Download `Thingsbook-Full-GTD-Edition.apk`](https://github.com/petrosvassiliou/thingsbook-android/raw/v1.7.0/Thingsbook-Full-GTD-Edition.apk)**
 
 ---
 
-### 📸 Android Screenshots
+### 📸 Android Screenshots (`v1.7.0`)
 
-#### Android Smartphones (`< 700dp` — Single-Handed Layout, 120 Hz Inline Expansion & Dark Mode)
+#### Android Smartphones (`< 700dp` — Focus Timer, Google Calendar, Markdown Notes & Dark Mode)
 
 <div align="center">
 <table>
   <tr>
-    <td align="center"><b>Today &amp; This Evening</b></td>
-    <td align="center"><b>Inline Card &amp; Checklists</b></td>
-    <td align="center"><b>Project &amp; Headings (Dark)</b></td>
+    <td align="center"><b>Today: Focus Timer, Calendar, Project Grouping &amp; Undo</b></td>
+    <td align="center"><b>Inline Card: Live Markdown Notes &amp; Link Chips</b></td>
+    <td align="center"><b>Project &amp; Headings (Dark): Duplicate &amp; Links</b></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/android-phone-today-light.png" alt="Android Phone Today View" width="265" /></td>
-    <td><img src="docs/screenshots/android-phone-expanded-light.png" alt="Android Phone Expanded Task Card" width="265" /></td>
-    <td><img src="docs/screenshots/android-phone-project-dark.png" alt="Android Phone Project Dark Mode" width="265" /></td>
+    <td><img src="docs/screenshots/android-phone-today-light.png" alt="Android Phone Today View with Focus Timer, Google Calendar, Project Grouping and Undo" width="265" /></td>
+    <td><img src="docs/screenshots/android-phone-expanded-light.png" alt="Android Phone Expanded Task Card with Markdown Notes and Link Chips" width="265" /></td>
+    <td><img src="docs/screenshots/android-phone-project-dark.png" alt="Android Phone Project Dark Mode with Duplicate Project and Link Chips" width="265" /></td>
+  </tr>
+</table>
+</div>
+
+#### Android GTD Power Pack (`v1.7.0` — Quick Share Sheet, Trash & Undo, Calendar & Security Settings)
+
+<div align="center">
+<table>
+  <tr>
+    <td align="center"><b>&ldquo;Share to Thingsbook&rdquo; Quick Entry Sheet</b></td>
+    <td align="center"><b>Trash / Recently Deleted &amp; 5s Undo Bar</b></td>
+    <td align="center"><b>Settings: Calendar, Grouping &amp; Biometric Lock</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/android-phone-quick-share-light.png" alt="Share to Thingsbook Quick Entry Sheet" width="265" /></td>
+    <td><img src="docs/screenshots/android-phone-trash-undo-light.png" alt="Trash View and 5-Second Undo Snackbar" width="265" /></td>
+    <td><img src="docs/screenshots/android-phone-settings-power-light.png" alt="Settings for Google Calendar, Group Today by Project/Area and Biometric App Lock" width="265" /></td>
   </tr>
 </table>
 </div>
@@ -60,13 +78,46 @@
 
 ---
 
-### ✨ Native Android Architecture & GTD Features
+### ✨ What’s New in `v1.7.0` (Major GTD Power Pack)
+
+1. **📤 "Share to Thingsbook" (`ACTION_SEND`) & Quick Entry Sheet**
+   - Share URLs, articles, emails, or text from Chrome, Gmail, or any Android app directly into Thingsbook.
+   - Opens the **Save to Thingsbook** quick-capture sheet with editable title, Markdown notes, detected link chips, and one-tap destination selection (*Inbox*, *Today*, *This Evening*, *Anytime*, *Someday*, or any *Project* / *Area*).
+2. **🚀 Launcher App Shortcuts & Home Screen Widget Deep-Links**
+   - Long-press the Thingsbook app icon on your Android home screen for instant actions: **New To-Do**, **Today**, **Inbox**, and **Quick Find**.
+   - Interactive home screen widget (`+` quick-add and direct task opening).
+3. **🔔 Actionable Reminder Notifications (`✓ Complete`, `+1h`, `Tomorrow`)**
+   - Task reminder notifications now include three direct action buttons: **✓ Complete**, **+1h (Snooze)**, and **Tomorrow** (defers the task to tomorrow in *Upcoming*) without even opening the app.
+4. **📝 Live Markdown Formatting & Clickable Link / Email / Phone Chips in Notes**
+   - Task and project notes highlight `# Headings`, `**bold**`, `*italic*`, `` `inline code` ``, `- ` bullet lists, and URLs in real time.
+   - Automatically detects web links (`https://...`), email addresses (`mailto:`), and phone numbers (`tel:`) and renders one-tap clickable chips directly below the notes field.
+5. **📅 Optional Google Calendar & Device Calendar Integration**
+   - Disabled by default; enable in **⚙️ Settings → Google Calendar & Calendar Events** and pick one or more specific calendars (or *All* / *None*).
+   - Displays read-only calendar events in **Today** and **Upcoming** only on dates that have scheduled tasks, and tapping any calendar item opens it directly in the default Google Calendar app.
+6. **🗂️ Group Today by Project / Area (`⚙️ Settings`)**
+   - Optional toggle in **⚙️ Settings → Workflow, Today Grouping & App Lock** (off by default) to organize daytime tasks in **Today** under clickable *Project* or *Area* headers (*Things 3* style).
+7. **🗑️ Trash / Recently Deleted View + 5-Second "Undo" Snackbar (`Ctrl + Z`)**
+   - Completing or deleting a To-Do (or deleting a Project) displays a floating 5-second **Undo** bar (also triggered via `Ctrl + Z`).
+   - Dedicated **Trash** smart view in the sidebar allows restoring soft-deleted tasks and projects, deleting them forever, or emptying the entire Trash.
+8. **📋 Duplicate To-Do & Duplicate Project (Templates — `Ctrl + D`)**
+   - Deep-clone any To-Do (including all checklist items and tags) or any Project (including headings, open tasks, checklists, and tags) via the task toolbar, context menu, project header, or `Ctrl + D`.
+9. **⏱️ Built-in 25-Minute Focus / Pomodoro Timer per Task**
+   - Start a 25-minute countdown on any To-Do from the task toolbar or menu.
+   - Displays an interactive top **Focus Session** banner (**Pause/Resume**, **+5m**, **Complete `✓`**, **Stop `✕`**) synchronized with a silent ongoing Android notification.
+10. **🔒 Optional Biometric / PIN App Lock (`⚙️ Settings`)**
+    - Optional toggle in **⚙️ Settings → Workflow, Today Grouping & App Lock** (off by default) using Android's `BiometricPrompt` / `KeyguardManager` to require fingerprint, face unlock, or device PIN when opening or resuming Thingsbook.
+11. **🌙 Automatic `00:00` Midnight Day Rollover & Keyboard-Safe Task Scrolling**
+    - Automatically rolls over *Today* and *Upcoming* at `00:00` midnight (and upon timezone/date changes) while the app is open, and automatically scrolls expanded bottom tasks above the soft keyboard (`imePadding`).
+
+---
+
+### 🏗️ Core Native Android Architecture & GTD Features
 
 - **Adaptive Layout for Phones, Tablets & Foldables (`700dp` Breakpoint)**
   - **Smartphones (`< 700dp`):** Thumb-friendly navigation drawer, swipe-down *Quick Find*, fluid 120 Hz spring card expansion (`spring(dampingRatio = 0.8f, stiffness = 400f)`), and draggable **Magic Plus (`+`)** Floating Action Button for direct drag-and-drop creation into lists.
-  - **Tablets & Foldables (`>= 700dp`):** 2-column master-detail workspace with persistent sidebar, live Smart View badges, live pie-chart project progress rings, centered reading canvas (`max 840dp`), and hardware keyboard support.
+  - **Tablets & Foldables (`>= 700dp`):** 2-column master-detail workspace with persistent sidebar, live Smart View badges, live pie-chart project progress rings, centered reading canvas (`max 840dp`), and full hardware keyboard shortcuts.
 - **Complete GTD Hierarchy**
-  - **Smart Views:** *Inbox*, *Today* (with a separate **🌙 This Evening** section), *Upcoming* (grouped day-by-day timeline), *Anytime*, *Someday*, and *Logbook*.
+  - **Smart Views:** *Inbox*, *Today* (with a separate **🌙 This Evening** section), *Upcoming* (grouped day-by-day timeline), *Anytime*, *Someday*, *Logbook*, and *Trash*.
   - **Areas, Projects & Headings:** Group responsibilities into **Areas**, track multi-step **Projects** with live pie-chart **Progress Rings** and target dates (`🏁`), and structure projects with collapsible **Headings**.
   - **Rich To-Dos:** Reorderable **Checklists**, **Natural Language Date Input** (*"tomorrow"*, *"next fri"*, *"in 3 days"*), flexible **Recurrence Rules** (*fixed schedule* or *X days/weeks/months after completion*), exact alarm notifications & daily morning digest, hierarchical **Tags**, LexoRank `sortOrder`, and long-press on the checkbox to mark **Canceled (`✕`)**.
 - <a id="offline-first-storage-backups--cloud-sync"></a>**Offline-First Room/SQLite FTS5 + Encrypted `.tbbackup` + Cloud Sync**
@@ -90,7 +141,7 @@
 
 # 2. Thingsbook for ChromeOS (Standalone PWA)
 
-Alongside the native Android APK, this repository includes a completely separate **ChromeOS Standalone PWA** (`chromeos-pwa/`) at **100% feature, version, backup, and cloud-sync parity (`v1.6.23`, Build `40`)** — engineered specifically for Chromebooks without requiring the Linux container (Crostini) or Android VM (ARCVM).
+Alongside the native Android APK, this repository includes a completely separate **ChromeOS Standalone PWA** (`chromeos-pwa/`) engineered specifically for Chromebooks without requiring the Linux container (Crostini) or Android VM (ARCVM).
 
 ### 🚀 Launch & Install on ChromeOS
 - **Live App URL:** **[https://thingsbook-prod.web.app](https://thingsbook-prod.web.app)** *(hosted on Firebase Hosting)*
@@ -111,12 +162,18 @@ Alongside the native Android APK, this repository includes a completely separate
 
 ---
 
-### ⌨️ Chromebook & Hardware Keyboard Shortcuts (Android Tablet + ChromeOS)
+### ⌨️ Hardware Keyboard Shortcuts (Android Foldables, Tablets & ChromeOS)
 
 | Shortcut | Action |
 | :--- | :--- |
-| `Ctrl + N` / `Cmd + N` | **New To-Do** at the top of the current list (works globally, even while editing) |
+| `Ctrl + N` / `Cmd + N` | **New To-Do** in the active view (works globally, even while editing) |
 | `Ctrl + Shift + N` / `Cmd + Shift + N` | **New Project** modal (pre-selects the active Area or current Project's Area) |
+| `Ctrl + D` / `Cmd + D` | **Duplicate** the expanded To-Do (or current Project) with all checklists & tags |
+| `Ctrl + Z` / `Cmd + Z` | **Undo** the last task completion or deletion |
+| `Ctrl + S` / `Cmd + S` | Open **When / Schedule** picker for the expanded To-Do |
+| `Ctrl + Shift + D` / `Cmd + Shift + D` | Open **Deadline** picker for the expanded To-Do |
+| `Ctrl + Shift + M` / `Cmd + Shift + M` | Open **Move to Project / Area** picker for the expanded To-Do |
+| `Ctrl + Backspace` / `Ctrl + Delete` | Move the expanded To-Do to **Trash** |
 | `Ctrl + F` or `Ctrl + K` | Toggle **Quick Find** instant search |
 | `Ctrl + G` | Open **Thingsbook Intelligence (Gemini AI Hub)** |
 | `Ctrl + 1` … `Ctrl + 6` | Jump to *Inbox*, *Today*, *Upcoming*, *Anytime*, *Someday*, or *Logbook* |
@@ -145,12 +202,25 @@ cd ..
 
 ## 🇩🇪 Deutsche Dokumentation
 
-### 1. Thingsbook für Android (Native Android-App — `v1.6.23`)
+### 1. Thingsbook für Android (Native Android-App — `v1.7.0`, Build `41`)
 Eine eigenständige, native Android-Produktivitäts-App für **Android-Smartphones, Tablets & Foldables**, entwickelt mit **100 % Kotlin**, **Jetpack Compose**, **Offline-First Room Database (SQLite FTS5 `unicode61`)**, **AES-256-GCM `.tbbackup` Komplett-Backup**, optionalem **Firebase Firestore Delta-Sync**, **4 Gemini-KI-Funktionen** und **5 Sprachen (`DE`, `EN`, `FR`, `IT`, `ES`)**.
-- **📱 Direkt-Download Android-APK:** **[Thingsbook-v1.6.23-full.apk herunterladen](https://github.com/petrosvassiliou/thingsbook-android/raw/main/Thingsbook-v1.6.23-full.apk)**
+- **📱 Direkt-Download Android-APK (`v1.7.0`):** **[Thingsbook-v1.7.0-GTD-Full.apk herunterladen](https://github.com/petrosvassiliou/thingsbook-android/raw/v1.7.0/releases/Thingsbook-v1.7.0-GTD-Full.apk)**
 
-### 2. Thingsbook für ChromeOS (Eigenständige Standalone-PWA — `v1.6.23`)
-Zusätzlich enthält `chromeos-pwa/` ein komplett separates **ChromeOS-Paket** auf exakt demselben Code- und Funktionsstand (`v1.6.23`, Build `40`) — gehostet auf **Firebase Hosting** und **ohne Linux-Entwicklungsumgebung (Crostini)** direkt im **ChromeOS-Startmenü (Launcher) & Shelf** installierbar:
+#### ✨ Alle neuen Funktionen in `v1.7.0`:
+- **„An Thingsbook teilen“ (`ACTION_SEND`) & Schnellerfassungs-Dialog:** Links, Artikel, E-Mails oder Texte aus jeder Android-App direkt in Thingsbook speichern (inkl. Auswahl von *Eingang*, *Heute*, *Heute Abend*, *Jederzeit*, *Irgendwann* oder *Projekt*/*Bereich*).
+- **App-Icon-Kurzbefehle (Launcher Shortcuts):** Langer Druck auf das App-Icon für **Neue Aufgabe**, **Heute**, **Eingang** und **Schnellsuche**.
+- **Direkte Benachrichtigungs-Aktionen:** Erinnerungs-Benachrichtigungen bieten jetzt 3 Direkt-Buttons: **✓ Erledigen**, **+1 Std. (Snooze)** und **Morgen**.
+- **Live-Markdown & Klickbare Links in Notizen:** Hebt `# Überschriften`, `**Fett**`, `*Kursiv*`, `` `Code` ``, `- ` Listen und URLs live hervor und zeigt anklickbare Link-, E-Mail- und Telefon-Chips direkt unter dem Notizfeld.
+- **Optionale Google-Kalender-Integration:** In den Einstellungen zuschaltbar (standardmäßig aus); zeigt Termine ausgewählter Kalender in *Heute* und *Geplant* an Tagen mit Aufgaben und öffnet Termine per Tipp direkt in der Google Kalender-App.
+- **„Heute nach Projekt oder Bereich gruppieren“:** Optionale Things-3-Gruppierung in den Einstellungen.
+- **Papierkorb (`Trash`) & 5-Sekunden-„Rückgängig“-Leiste (`Strg + Z`):** Gelöschte Aufgaben und Projekte wiederherstellen oder endgültig leeren.
+- **Aufgaben & Projekte duplizieren (`Strg + D`):** Komplettes Klonen inkl. Checklisten, Überschriften und Tags als Vorlage.
+- **Integrierter 25-Minuten-Fokus-/Pomodoro-Timer:** Direkt an jeder Aufgabe startbar mit Fortschritts-Banner (*Pause*, *+5m*, *Erledigen*, *Stopp*) und stiller Android-Benachrichtigung.
+- **Optionale Biometrie-/PIN-App-Sperre:** Schutz per Fingerabdruck, Gesichtserkennung oder Geräte-PIN beim Öffnen der App.
+- **Erweiterte Hardware-Tastaturkürzel:** `Strg + N` (Neue Aufgabe), `Strg + Umschalt + N` (Neues Projekt), `Strg + D` (Duplizieren), `Strg + Z` (Rückgängig), `Strg + S` (Wann/Planen), `Strg + Umschalt + D` (Frist), `Strg + Umschalt + M` (Verschieben), `Strg + Rücktaste/Entf` (Löschen).
+
+### 2. Thingsbook für ChromeOS (Eigenständige Standalone-PWA)
+Zusätzlich enthält `chromeos-pwa/` ein komplett separates **ChromeOS-Paket** — gehostet auf **Firebase Hosting** und **ohne Linux-Entwicklungsumgebung (Crostini)** direkt im **ChromeOS-Startmenü (Launcher) & Shelf** installierbar:
 - **💻 Live-App für Chromebooks:** **[https://thingsbook-prod.web.app](https://thingsbook-prod.web.app)** *(in Chrome öffnen → „Zum ChromeOS-Launcher hinzufügen“ klicken → startet im eigenen Fenster, 100 % offline-fähig via IndexedDB + Service Worker und synchronisiert nahtlos mit der Android-App).*
 
 ---
@@ -162,6 +232,7 @@ thingsbook-android/
 ├── app/                     # 1. Native Android APK (Kotlin, Jetpack Compose, Room + SQLite FTS5)
 ├── chromeos-pwa/            # 2. Standalone ChromeOS PWA (TypeScript, React, IndexedDB + Workbox)
 ├── docs/screenshots/        # Retina UI screenshots (Android Phone, Android Tablet & ChromeOS)
+├── releases/                # Signed release APKs (Thingsbook-v1.7.0-GTD-Full.apk)
 ├── firebase.json            # Firebase Hosting & Firestore configuration
 ├── firestore.rules          # Per-user Firestore security rules
 └── deploy-chromeos-pwa.sh   # One-command build & Firebase Hosting deployment script

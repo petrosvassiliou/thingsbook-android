@@ -11,6 +11,7 @@ import {
   Package,
   Plus,
   Star,
+  Trash2,
   X
 } from 'lucide-react';
 import {
@@ -37,6 +38,7 @@ interface SidebarProps {
     upcoming: number;
     anytime: number;
     someday: number;
+    trash?: number;
   };
   canInstallPwa: boolean;
   isStandalonePwa: boolean;
@@ -156,6 +158,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: t.viewLogbook,
       icon: <BookOpenCheck size={17} style={{ color: 'var(--logbook-green)' }} />
       // Never show count badge on Logbook (exact v1.6.16 rule)
+    },
+    {
+      view: 'TRASH',
+      label: t.viewTrash,
+      icon: <Trash2 size={17} style={{ color: 'var(--text-muted)' }} />,
+      count: counts.trash
     }
   ];
 
@@ -223,6 +231,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
               >
                 <span className="nav-item-icon">{logItem.icon}</span>
                 <span className="nav-item-label">{logItem.label}</span>
+              </button>
+            );
+          })()}
+          {(() => {
+            const trashItem = smartItems[6];
+            const isActive = activeNav.kind === 'smart' && activeNav.view === 'TRASH';
+            const dKey = 'smart-TRASH';
+            return (
+              <button
+                type="button"
+                className={`nav-item ${isActive ? 'active' : ''} ${
+                  dragTargetKey === dKey ? 'drag-over' : ''
+                }`}
+                onClick={() => onSelectNav({ kind: 'smart', view: 'TRASH' })}
+                {...makeDropHandlers(dKey, { kind: 'smart', view: 'TRASH' })}
+              >
+                <span className="nav-item-icon">{trashItem.icon}</span>
+                <span className="nav-item-label">{trashItem.label}</span>
+                {trashItem.count != null && trashItem.count > 0 && (
+                  <span className="nav-item-count">{trashItem.count}</span>
+                )}
               </button>
             );
           })()}
@@ -383,6 +412,7 @@ interface SmartViewNavigationStripProps {
     upcoming: number;
     anytime: number;
     someday: number;
+    trash?: number;
   };
   t: TranslationStrings;
   isSoftKeyboardOpen?: boolean;
@@ -454,6 +484,12 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
       view: 'LOGBOOK',
       label: t.viewLogbook,
       icon: <BookOpenCheck size={13.5} style={{ color: 'var(--logbook-green)' }} />
+    },
+    {
+      view: 'TRASH',
+      label: t.viewTrash,
+      icon: <Trash2 size={13.5} style={{ color: 'var(--text-muted)' }} />,
+      count: counts.trash
     }
   ];
 

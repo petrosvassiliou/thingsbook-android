@@ -12,8 +12,10 @@ import {
   ChevronDown,
   ChevronUp,
   Cloud,
+  Copy,
   Edit3,
   Flag,
+  Folder,
   FolderInput,
   Globe,
   Heading as HeadingIcon,
@@ -26,6 +28,7 @@ import {
   Plus,
   Search,
   Settings,
+  Share2,
   Sparkles,
   Star,
   Tag,
@@ -44,7 +47,9 @@ import {
   type AppPreferences,
   type CalendarEventItem,
   type DeviceCalendarInfo,
+  type FocusTimerUiState,
   type ProjectRecord,
+  type QuickShareDraft,
   type SmartViewType,
   type SupportedLang,
   type TagRecord,
@@ -86,6 +91,21 @@ import {
 import { GeminiModal } from './components/GeminiModal';
 import { InlineQuickFind } from './components/InlineQuickFind';
 import { MagicPlusFab } from './components/MagicPlusFab';
+import { extractDetectedLinksFromNotes } from './domain/powerUtils';
+import {
+  DetectedNotesLinksRow,
+  FormattedMarkdownText
+} from './components/MarkdownNotesField';
+import {
+  ActionableReminderBanner,
+  AppLockOverlay,
+  AppLockPinSetupModal,
+  EmptyTrashConfirmDialog,
+  FocusTimerBanner,
+  QuickShareModal,
+  TrashViewList,
+  UndoSnackbarBanner
+} from './components/PowerFeaturesModals';
 import { ProjectProgressRing } from './components/ProjectProgressRing';
 import { AuthSyncModal, SettingsModal } from './components/SettingsAndAuthModals';
 import { Sidebar, SmartViewNavigationStrip } from './components/Sidebar';
@@ -95,6 +115,45 @@ import { DeadlineModal, RepeatModal, WhenModal } from './components/WhenAndRepea
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+
+function parseSharedDraft(
+  rawTitle: string | null,
+  rawText: string | null,
+  rawUrl: string | null
+): QuickShareDraft | null {
+  const cleanTitle = (rawTitle ?? '').trim();
+  const cleanText = (rawText ?? '').trim();
+  const cleanUrl = (rawUrl ?? '').trim();
+  if (!cleanTitle && !cleanText && !cleanUrl) return null;
+
+  let initialTitle = cleanTitle;
+  const noteParts: string[] = [];
+
+  if (!initialTitle && cleanText) {
+    const lines = cleanText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (lines.length === 1 && /^https?:\/\//i.test(lines[0])) {
+      initialTitle = lines[0].replace(/^https?:\/\/(www\.)?/i, '').slice(0, 80);
+      noteParts.push(lines[0]);
+    } else if (lines.length > 0) {
+      initialTitle = lines[0].slice(0, 120);
+      if (lines.length > 1) noteParts.push(lines.slice(1).join('\n'));
+    }
+  } else if (cleanText && cleanText !== initialTitle) {
+    noteParts.push(cleanText);
+  }
+
+  if (cleanUrl && !noteParts.some((p) => p.includes(cleanUrl))) {
+    noteParts.push(cleanUrl);
+    if (!initialTitle) {
+      initialTitle = cleanUrl.replace(/^https?:\/\/(www\.)?/i, '').slice(0, 80);
+    }
+  }
+
+  return {
+    initialTitle,
+    initialNotes: noteParts.join('\n\n')
+  };
 }
 
 export const App: React.FC = () => {
@@ -152,6 +211,20 @@ export const App: React.FC = () => {
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
 
+  // Android v1.7.0 Power Features State
+  const [quickShareDraft, setQuickShareDraft] = useState<QuickShareDraft | null>(null);
+  const [focusTimer, setFocusTimer] = useState<FocusTimerUiState | null>(null);
+  const [undoBanner, setUndoBanner] = useState<{ id: number; message: string } | null>(null);
+  const [emptyTrashConfirmOpen, setEmptyTrashConfirmOpen] = useState(false);
+  const [appLockSetupOpen, setAppLockSetupOpen] = useState(false);
+  const [isAppLocked, setIsAppLocked] = useState<boolean>(() => {
+    const initial = loadPreferences();
+    return Boolean(initial.biometricAppLockEnabled && initial.appLockPinHash);
+  });
+  const [inAppReminders, setInAppReminders] = useState<Array<{ taskId: string; title: string }>>(
+    []
+  );
+
   // Logbook AI Reflection
   const [reflection, setReflection] = useState<LogbookReviewResponse | null>(null);
   const [loadingReflection, setLoadingReflection] = useState(false);
@@ -170,6 +243,8 @@ export const App: React.FC = () => {
 
   const lang: SupportedLang = useMemo(() => resolveLanguage(prefs.language), [prefs.language]);
   const t = TRANSLATIONS[lang];
+  const tRef = useRef(t);
+  tRef.current = t;
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -181,12 +256,40 @@ export const App: React.FC = () => {
     return () => window.clearTimeout(timer);
   }, [toastMsg]);
 
+  useEffect(() => {
+    if (!undoBanner) return;
+    const timer = window.setTimeout(() => setUndoBanner(null), 5500);
+    return () => window.clearTimeout(timer);
+  }, [undoBanner]);
+
   const updatePrefs = useCallback((patch: Partial<AppPreferences>) => {
     setPrefs((prev) => {
       const next = { ...prev, ...patch };
       savePreferences(next);
       return next;
     });
+  }, []);
+
+  const handleActionableReminderAction = useCallback(async (action: string, taskId: string) => {
+    setInAppReminders((prev) => prev.filter((r) => r.taskId !== taskId));
+    if (action === 'complete') {
+      await localDb.upsertTask({ id: taskId, status: 'COMPLETED' });
+    } else if (action === 'snooze-1h') {
+      await localDb.upsertTask({ id: taskId, reminderTime: Date.now() + 3_600_000 });
+    } else if (action === 'tomorrow') {
+      const tomorrowStart = addDaysLocal(startOfDayEpoch(), 1);
+      const tomorrow9am = new Date(tomorrowStart);
+      tomorrow9am.setHours(9, 0, 0, 0);
+      await localDb.upsertTask({
+        id: taskId,
+        scheduleState: 'UPCOMING',
+        whenDate: tomorrowStart,
+        reminderTime: tomorrow9am.getTime()
+      });
+    } else {
+      setSelectedTaskIds([]);
+      setExpandedTaskId(taskId);
+    }
   }, []);
 
   // Theme application
@@ -210,31 +313,113 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  // Initialize DB, Cloud Sync, Launcher Shortcuts, Auto Update Check, and PWA Install Listener
+  // Re-lock app after 60s in background when Biometric / PIN App Lock is enabled
+  useEffect(() => {
+    if (!prefs.biometricAppLockEnabled || !prefs.appLockPinHash) return;
+    let hiddenSince: number | null = null;
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenSince = Date.now();
+      } else if (
+        document.visibilityState === 'visible' &&
+        hiddenSince != null &&
+        Date.now() - hiddenSince >= 60_000
+      ) {
+        hiddenSince = null;
+        setIsAppLocked(true);
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [prefs.biometricAppLockEnabled, prefs.appLockPinHash]);
+
+  // 25-Minute Focus / Pomodoro Timer Countdown
+  useEffect(() => {
+    if (!focusTimer || !focusTimer.isRunning || focusTimer.remainingSeconds <= 0) return;
+    const id = window.setInterval(() => {
+      setFocusTimer((prev) => {
+        if (!prev || !prev.isRunning) return prev;
+        if (prev.remainingSeconds <= 1) {
+          showToast(`🎉 ${tRef.current.focusTimerFinishedTitle}`);
+          return { ...prev, remainingSeconds: 0, isRunning: false };
+        }
+        return { ...prev, remainingSeconds: prev.remainingSeconds - 1 };
+      });
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [focusTimer, showToast]);
+
+  // Keep Focus Timer title synced or close if task was deleted/completed
+  useEffect(() => {
+    if (!focusTimer) return;
+    const liveTask = snapshot.tasks.find((tk) => tk.id === focusTimer.taskId);
+    if (!liveTask || liveTask.isDeleted || liveTask.status !== 'OPEN') {
+      setFocusTimer(null);
+    } else if (liveTask.title !== focusTimer.taskTitle) {
+      setFocusTimer((prev) => (prev ? { ...prev, taskTitle: liveTask.title } : null));
+    }
+  }, [snapshot.tasks, focusTimer]);
+
+  // Initialize DB, Cloud Sync, Undo, Launcher Shortcuts, Share Target, Reminder Actions, Auto Update Check, and PWA Install Listener
   useEffect(() => {
     const unsubDb = localDb.subscribe(setSnapshot);
     const unsubSync = cloudSync.subscribe(setSyncState);
+    const unsubUndo = localDb.subscribeUndo((ev) => {
+      const tr = tRef.current;
+      const fallbackTitle = ev.entityTitle.trim() || tr.entityNewTodo;
+      const msg =
+        ev.kind === 'task_completed'
+          ? tr.undoTaskCompleted(fallbackTitle)
+          : ev.kind === 'project_deleted'
+            ? tr.undoProjectDeleted(ev.entityTitle.trim() || tr.entityNewProject)
+            : tr.undoTaskDeleted(fallbackTitle);
+      setUndoBanner({ id: Date.now(), message: msg });
+    });
+
+    const onSwMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: string; action?: string; taskId?: string } | null;
+      if (data?.type === 'THINGSBOOK_REMINDER_ACTION' && data.taskId) {
+        void handleActionableReminderAction(data.action || 'open', data.taskId);
+      }
+    };
+    navigator.serviceWorker?.addEventListener('message', onSwMessage);
 
     void localDb.initialize(prefs.language).then(async (initialSnap) => {
       void cloudSync.initializeSession();
 
-      // Handle ChromeOS Launcher Manifest Shortcuts (?action=new-todo | ?action=quick-find | ?view=...)
+      // Handle ChromeOS Launcher Shortcuts, Web Share Target & Actionable Reminder Deep Links
       const params = new URLSearchParams(window.location.search);
       const viewParam = params.get('view')?.toUpperCase();
       const actionParam = params.get('action')?.toLowerCase();
+      const reminderActionParam = params.get('reminder_action')?.toLowerCase();
+      const reminderTaskIdParam = params.get('task_id');
+      const shareTitle = params.get('share_title');
+      const shareText = params.get('share_text');
+      const shareUrl = params.get('share_url');
+
       const validViews: SmartViewType[] = [
         'INBOX',
         'TODAY',
         'UPCOMING',
         'ANYTIME',
         'SOMEDAY',
-        'LOGBOOK'
+        'LOGBOOK',
+        'TRASH'
       ];
 
       if (viewParam && (validViews as string[]).includes(viewParam)) {
         setActiveNav({ kind: 'smart', view: viewParam as SmartViewType });
       }
-      if (actionParam === 'quick-find') {
+
+      if (reminderActionParam && reminderTaskIdParam) {
+        await handleActionableReminderAction(reminderActionParam, reminderTaskIdParam);
+      } else if (actionParam === 'quick-share' || shareTitle || shareText || shareUrl) {
+        const draft = parseSharedDraft(shareTitle, shareText, shareUrl) ?? {
+          initialTitle: '',
+          initialNotes: ''
+        };
+        setQuickShareDraft(draft);
+      } else if (actionParam === 'quick-find') {
         setQuickFindOpen(true);
       } else if (actionParam === 'new-todo') {
         const inboxOpen = initialSnap.tasks.filter(
@@ -261,7 +446,15 @@ export const App: React.FC = () => {
         setSelectedTaskIds([]);
         setExpandedTaskId(created.id);
       }
-      if (viewParam || actionParam) {
+
+      if (
+        viewParam ||
+        actionParam ||
+        reminderActionParam ||
+        shareTitle ||
+        shareText ||
+        shareUrl
+      ) {
         window.history.replaceState({}, '', window.location.pathname);
       }
     });
@@ -284,6 +477,8 @@ export const App: React.FC = () => {
     return () => {
       unsubDb();
       unsubSync();
+      unsubUndo();
+      navigator.serviceWorker?.removeEventListener('message', onSwMessage);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
       window.removeEventListener('appinstalled', handleAppInstalled);
     };
@@ -475,15 +670,29 @@ export const App: React.FC = () => {
   // Reminder & Daily Digest Ticker
   useEffect(() => {
     const tick = () => {
-      checkDueRemindersAndDigest(snapshot.tasks, prefs, (taskId) => {
-        setSelectedTaskIds([]);
-        setExpandedTaskId(taskId);
-      });
+      checkDueRemindersAndDigest(
+        snapshot.tasks,
+        prefs,
+        (taskId) => {
+          setSelectedTaskIds([]);
+          setExpandedTaskId(taskId);
+        },
+        (item) => {
+          setInAppReminders((prev) =>
+            prev.some((x) => x.taskId === item.taskId) ? prev : [...prev, item]
+          );
+        },
+        {
+          complete: t.actionComplete,
+          snooze1h: t.notificationSnooze1h,
+          tomorrow: t.dateTomorrow
+        }
+      );
     };
     tick();
     const intervalId = window.setInterval(tick, 30_000);
     return () => window.clearInterval(intervalId);
-  }, [snapshot.tasks, prefs]);
+  }, [snapshot.tasks, prefs, t.actionComplete, t.notificationSnooze1h, t.dateTomorrow]);
 
   // Lookup Maps
   const activeAreas = useMemo(
@@ -507,10 +716,20 @@ export const App: React.FC = () => {
     [snapshot.tags]
   );
 
-  // ==================== Exact Android v1.6.19 Smart View Queries ====================
+  // ==================== Exact Android v1.7.0 Smart View Queries ====================
   const openTasks = useMemo(
     () => snapshot.tasks.filter((tk) => !tk.isDeleted && tk.status === 'OPEN'),
     [snapshot.tasks]
+  );
+
+  const deletedTasks = useMemo(
+    () => snapshot.tasks.filter((tk) => tk.isDeleted),
+    [snapshot.tasks]
+  );
+
+  const deletedProjects = useMemo(
+    () => snapshot.projects.filter((p) => p.isDeleted),
+    [snapshot.projects]
   );
 
   // Exclude tasks belonging to COMPLETED, CANCELED, or soft-deleted projects from Smart Views (ThingsDaos.kt v1.6.17+)
@@ -604,9 +823,19 @@ export const App: React.FC = () => {
       today: todayDaytimeTasks.length + todayEveningTasks.length,
       upcoming: upcomingTasks.length,
       anytime: anytimeTasks.length,
-      someday: somedayTasks.length
+      someday: somedayTasks.length,
+      trash: deletedTasks.length + deletedProjects.length
     }),
-    [inboxTasks, todayDaytimeTasks, todayEveningTasks, upcomingTasks, anytimeTasks, somedayTasks]
+    [
+      inboxTasks,
+      todayDaytimeTasks,
+      todayEveningTasks,
+      upcomingTasks,
+      anytimeTasks,
+      somedayTasks,
+      deletedTasks,
+      deletedProjects
+    ]
   );
 
   const statistics = useMemo(() => computeStatistics(snapshot, endOfToday), [snapshot, endOfToday]);
@@ -866,6 +1095,8 @@ export const App: React.FC = () => {
           return somedayTasks;
         case 'LOGBOOK':
           return logbookTasks;
+        case 'TRASH':
+          return [];
       }
     }
     if (activeNav.kind === 'area') {
@@ -926,6 +1157,70 @@ export const App: React.FC = () => {
     [selectedFilterTagId]
   );
 
+  const handleSelectNav = useCallback(
+    (nav: ActiveNavigation, highlightTaskId?: string) => {
+      setActiveNav(nav);
+      setMobileDrawerOpen(false);
+      setEditingAreaHeader(false);
+      setProjectAreaDropdownOpen(false);
+      setSelectedTaskIds([]);
+      if (highlightTaskId) {
+        setExpandedTaskId(highlightTaskId);
+      } else {
+        setExpandedTaskId(null);
+      }
+    },
+    []
+  );
+
+  // Android v1.7.0 Power Feature Callbacks
+  const handleStartFocusTimer = useCallback((taskId: string, taskTitle: string) => {
+    setFocusTimer({
+      taskId,
+      taskTitle,
+      totalSeconds: 25 * 60,
+      remainingSeconds: 25 * 60,
+      isRunning: true
+    });
+  }, []);
+
+  const handleDuplicateTask = useCallback(
+    async (taskId: string) => {
+      const newId = await localDb.duplicateTask(taskId, t.copySuffix);
+      if (newId) {
+        setSelectedTaskIds([]);
+        setExpandedTaskId(newId);
+      }
+    },
+    [t.copySuffix]
+  );
+
+  const handleDuplicateProject = useCallback(
+    async (projectId: string) => {
+      const newId = await localDb.duplicateProject(projectId, t.copySuffix);
+      if (newId) {
+        handleSelectNav({ kind: 'project', projectId: newId });
+      }
+    },
+    [t.copySuffix, handleSelectNav]
+  );
+
+  const handleToggleBiometricAppLock = useCallback(
+    (enabled: boolean) => {
+      if (enabled) {
+        setAppLockSetupOpen(true);
+      } else {
+        updatePrefs({
+          biometricAppLockEnabled: false,
+          appLockPinHash: '',
+          appLockWebAuthnCredId: ''
+        });
+        setIsAppLocked(false);
+      }
+    },
+    [updatePrefs]
+  );
+
   // Preselected Area ID for New Project (current Area, or current Project's parent Area — v1.6.18 parity)
   const defaultAreaIdForNewProject = useMemo((): string | null => {
     if (activeNav.kind === 'area') return activeNav.areaId;
@@ -946,7 +1241,8 @@ export const App: React.FC = () => {
       let headingId: string | null = null;
       let areaId: string | null = null;
       const isLogbookRedirect =
-        activeNav.kind === 'smart' && activeNav.view === 'LOGBOOK';
+        activeNav.kind === 'smart' &&
+        (activeNav.view === 'LOGBOOK' || activeNav.view === 'TRASH');
 
       if (activeNav.kind === 'smart') {
         if (activeNav.view === 'TODAY') {
@@ -971,7 +1267,7 @@ export const App: React.FC = () => {
         } else if (activeNav.view === 'SOMEDAY') {
           scheduleState = 'SOMEDAY';
         } else {
-          // INBOX and LOGBOOK both create an INBOX to-do
+          // INBOX, LOGBOOK, and TRASH all create an INBOX to-do
           scheduleState = 'INBOX';
         }
       } else if (activeNav.kind === 'area') {
@@ -1055,9 +1351,11 @@ export const App: React.FC = () => {
     setEditingHeadingTitle('');
   }, [activeNav, snapshot.headings]);
 
-  // Global Keyboard Shortcuts + Ordered Escape Stack (Android v1.6.18 MainActivity + ThingsSmartViewScreen parity)
+  // Global Keyboard Shortcuts + Ordered Escape Stack (Android v1.7.0 MainActivity + ThingsSmartViewScreen parity)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (isAppLocked) return;
+
       const target = e.target as HTMLElement | null;
       const inInput =
         target != null &&
@@ -1067,6 +1365,9 @@ export const App: React.FC = () => {
           target.isContentEditable);
 
       if (e.key === 'Escape') {
+        if (quickShareDraft) return setQuickShareDraft(null);
+        if (emptyTrashConfirmOpen) return setEmptyTrashConfirmOpen(false);
+        if (appLockSetupOpen) return setAppLockSetupOpen(false);
         if (whenModalTaskId) return setWhenModalTaskId(null);
         if (deadlineModalTarget) return setDeadlineModalTarget(null);
         if (repeatModalTaskId) return setRepeatModalTaskId(null);
@@ -1128,6 +1429,61 @@ export const App: React.FC = () => {
           setGeminiModalOpen(true);
           return;
         }
+        // Ctrl+Z -> Undo last task completion or deletion (when not typing in a text field)
+        if (lower === 'z' && !e.shiftKey && !inInput) {
+          e.preventDefault();
+          setUndoBanner(null);
+          void localDb.performUndo();
+          return;
+        }
+        // Ctrl+D -> Duplicate expanded To-Do or active Project
+        if (lower === 'd' && !e.shiftKey) {
+          if (expandedTaskId) {
+            e.preventDefault();
+            void handleDuplicateTask(expandedTaskId);
+            return;
+          }
+          if (!inInput && activeNav.kind === 'project') {
+            e.preventDefault();
+            void handleDuplicateProject(activeNav.projectId);
+            return;
+          }
+        }
+        // Ctrl+S -> Open When Schedule modal for expanded To-Do
+        if (lower === 's' && !e.shiftKey && expandedTaskId) {
+          e.preventDefault();
+          setWhenModalTaskId(expandedTaskId);
+          return;
+        }
+        // Ctrl+Shift+D -> Open Deadline modal for expanded To-Do
+        if (lower === 'd' && e.shiftKey && expandedTaskId) {
+          e.preventDefault();
+          setDeadlineModalTarget({ kind: 'task', taskId: expandedTaskId });
+          return;
+        }
+        // Ctrl+Shift+M -> Move expanded or selected To-Dos
+        if (lower === 'm' && e.shiftKey && (expandedTaskId || selectedTaskIds.length > 0)) {
+          e.preventDefault();
+          setMoveModalTaskIds(expandedTaskId ? [expandedTaskId] : selectedTaskIds);
+          return;
+        }
+        // Ctrl+Backspace / Ctrl+Delete -> Move expanded or selected To-Dos to Trash
+        if (e.key === 'Backspace' || e.key === 'Delete') {
+          if (expandedTaskId) {
+            e.preventDefault();
+            const tid = expandedTaskId;
+            setExpandedTaskId(null);
+            void localDb.softDeleteTasks([tid]);
+            return;
+          }
+          if (!inInput && selectedTaskIds.length > 0) {
+            e.preventDefault();
+            const ids = [...selectedTaskIds];
+            setSelectedTaskIds([]);
+            void localDb.softDeleteTasks(ids);
+            return;
+          }
+        }
         if (
           lower === 'a' &&
           !e.shiftKey &&
@@ -1143,7 +1499,7 @@ export const App: React.FC = () => {
           }
           return;
         }
-        if (!inInput && ['1', '2', '3', '4', '5', '6'].includes(lower)) {
+        if (!inInput && ['1', '2', '3', '4', '5', '6', '7'].includes(lower)) {
           e.preventDefault();
           const views: SmartViewType[] = [
             'INBOX',
@@ -1151,7 +1507,8 @@ export const App: React.FC = () => {
             'UPCOMING',
             'ANYTIME',
             'SOMEDAY',
-            'LOGBOOK'
+            'LOGBOOK',
+            'TRASH'
           ];
           setActiveNav({ kind: 'smart', view: views[Number(lower) - 1] });
           return;
@@ -1186,6 +1543,10 @@ export const App: React.FC = () => {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
+    isAppLocked,
+    quickShareDraft,
+    emptyTrashConfirmOpen,
+    appLockSetupOpen,
     whenModalTaskId,
     deadlineModalTarget,
     repeatModalTaskId,
@@ -1206,26 +1567,16 @@ export const App: React.FC = () => {
     expandedTaskId,
     selectedTaskIds,
     mobileDrawerOpen,
+    activeNav,
     createNewTodoInCurrentContext,
+    handleDuplicateTask,
+    handleDuplicateProject,
     defaultAreaIdForNewProject,
     filterByTag,
     currentViewBaseTasks,
     snapshot.tags,
     snapshot.tasks
   ]);
-
-  const handleSelectNav = (nav: ActiveNavigation, highlightTaskId?: string) => {
-    setActiveNav(nav);
-    setMobileDrawerOpen(false);
-    setEditingAreaHeader(false);
-    setProjectAreaDropdownOpen(false);
-    setSelectedTaskIds([]);
-    if (highlightTaskId) {
-      setExpandedTaskId(highlightTaskId);
-    } else {
-      setExpandedTaskId(null);
-    }
-  };
 
   // Drag-and-drop task onto Sidebar target
   const handleDropTaskOnSidebarTarget = async (
@@ -1253,7 +1604,9 @@ export const App: React.FC = () => {
         areaId: null
       });
     } else {
-      if (target.view === 'LOGBOOK') {
+      if (target.view === 'TRASH') {
+        await localDb.softDeleteTasks([tk.id]);
+      } else if (target.view === 'LOGBOOK') {
         await localDb.upsertTask({ id: tk.id, status: 'COMPLETED' });
       } else if (target.view === 'INBOX') {
         await localDb.upsertTask({
@@ -1355,6 +1708,8 @@ export const App: React.FC = () => {
       onOpenRepeatModal={(taskId) => setRepeatModalTaskId(taskId)}
       onOpenMoveModal={(taskId) => setMoveModalTaskIds([taskId])}
       onOpenTagsModal={(taskId) => setTagPickerTaskId(taskId)}
+      onStartFocusTimer={handleStartFocusTimer}
+      onDuplicateTask={(taskId) => void handleDuplicateTask(taskId)}
       onDropReorder={(draggedId, targetId) =>
         void handleDropReorderTask(draggedId, targetId, listContext)
       }
@@ -1378,6 +1733,8 @@ export const App: React.FC = () => {
           return t.viewSomeday;
         case 'LOGBOOK':
           return t.viewLogbook;
+        case 'TRASH':
+          return t.viewTrash;
       }
     }
     if (activeNav.kind === 'area') {
@@ -1518,6 +1875,17 @@ export const App: React.FC = () => {
             >
               <Sparkles size={14} />
               <span className="topbar-label-hide-sm">Gemini</span>
+            </button>
+
+            {/* Quick Share / Save to Thingsbook Icon */}
+            <button
+              type="button"
+              className="icon-btn"
+              data-testid="topbar-quick-share-btn"
+              title={t.quickShareTitle}
+              onClick={() => setQuickShareDraft({ initialTitle: '', initialNotes: '' })}
+            >
+              <Share2 size={17} />
             </button>
 
             {/* Areas Icon */}
@@ -1728,10 +2096,44 @@ export const App: React.FC = () => {
                 </div>
               )}
 
+            {/* Built-in 25-Minute Focus / Pomodoro Timer Banner (Android v1.7.0) */}
+            {focusTimer && (
+              <FocusTimerBanner
+                timer={focusTimer}
+                t={t}
+                onTogglePause={() =>
+                  setFocusTimer((prev) =>
+                    prev ? { ...prev, isRunning: !prev.isRunning } : null
+                  )
+                }
+                onAddFiveMinutes={() =>
+                  setFocusTimer((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          totalSeconds: prev.totalSeconds + 5 * 60,
+                          remainingSeconds: prev.remainingSeconds + 5 * 60
+                        }
+                      : null
+                  )
+                }
+                onCompleteTask={() => {
+                  const tid = focusTimer.taskId;
+                  setFocusTimer(null);
+                  void localDb.upsertTask({ id: tid, status: 'COMPLETED' });
+                }}
+                onStop={() => setFocusTimer(null)}
+                onSelectTask={(tid) => {
+                  setSelectedTaskIds([]);
+                  setExpandedTaskId(tid);
+                }}
+              />
+            )}
+
             {/* ==================== SMART VIEWS ==================== */}
             {activeNav.kind === 'smart' && (
               <>
-                <div className="view-header">
+                <div className="view-header" onClick={(e) => e.stopPropagation()}>
                   <div className="view-title-row">
                     <div className="view-title-left">
                       {activeNav.view === 'INBOX' && (
@@ -1756,8 +2158,24 @@ export const App: React.FC = () => {
                       {activeNav.view === 'LOGBOOK' && (
                         <BookOpenCheck size={26} style={{ color: 'var(--logbook-green)' }} />
                       )}
+                      {activeNav.view === 'TRASH' && (
+                        <Trash2 size={26} style={{ color: 'var(--text-muted)' }} />
+                      )}
                       <h1 className="view-title">{currentViewTitle}</h1>
                     </div>
+
+                    {activeNav.view === 'TRASH' &&
+                      deletedProjects.length + deletedTasks.length > 0 && (
+                        <button
+                          type="button"
+                          className="chip-btn urgent"
+                          data-testid="empty-trash-btn"
+                          onClick={() => setEmptyTrashConfirmOpen(true)}
+                        >
+                          <Trash2 size={13} />
+                          <span>{t.trashEmptyBtn}</span>
+                        </button>
+                      )}
                   </div>
                 </div>
 
@@ -1887,25 +2305,120 @@ export const App: React.FC = () => {
                   </div>
                 )}
 
-                {/* TODAY View (Daytime + 🌙 This Evening) */}
+                {/* TODAY View (Daytime + Optional Project/Area Grouping + 🌙 This Evening) */}
                 {activeNav.view === 'TODAY' && (() => {
                   const dayFiltered = filterByTag(todayDaytimeTasks);
                   const eveFiltered = filterByTag(todayEveningTasks);
                   if (dayFiltered.length === 0 && eveFiltered.length === 0) {
                     return <div className="empty-state">{t.emptyToday}</div>;
                   }
-                  return (
-                    <>
-                      {prefs.calendarEventsEnabled && todayCalendarEvents.length > 0 && (
-                        <CalendarEventsBlock events={todayCalendarEvents} t={t} />
-                      )}
-                      {dayFiltered.length > 0 && (
+
+                  const renderGroupedDaytime = () => {
+                    if (!prefs.groupTodayByProjectOrArea) {
+                      return (
                         <div className="group-section">
                           <div className="task-list">
                             {dayFiltered.map((tk) => renderTaskRow(tk, dayFiltered, true))}
                           </div>
                         </div>
+                      );
+                    }
+
+                    const renderedIds = new Set<string>();
+                    const ungrouped = dayFiltered.filter(
+                      (tk) => tk.projectId == null && tk.areaId == null
+                    );
+                    ungrouped.forEach((tk) => renderedIds.add(tk.id));
+
+                    const projectSections = activeProjects
+                      .map((proj) => {
+                        const tasks = dayFiltered.filter((tk) => tk.projectId === proj.id);
+                        tasks.forEach((tk) => renderedIds.add(tk.id));
+                        return { proj, tasks };
+                      })
+                      .filter((sec) => sec.tasks.length > 0);
+
+                    const areaSections = activeAreas
+                      .map((area) => {
+                        const tasks = dayFiltered.filter(
+                          (tk) => tk.projectId == null && tk.areaId === area.id
+                        );
+                        tasks.forEach((tk) => renderedIds.add(tk.id));
+                        return { area, tasks };
+                      })
+                      .filter((sec) => sec.tasks.length > 0);
+
+                    const remaining = dayFiltered.filter((tk) => !renderedIds.has(tk.id));
+
+                    return (
+                      <>
+                        {ungrouped.length > 0 && (
+                          <div className="group-section">
+                            <div className="task-list">
+                              {ungrouped.map((tk) => renderTaskRow(tk, ungrouped, true))}
+                            </div>
+                          </div>
+                        )}
+
+                        {projectSections.map(({ proj, tasks }) => (
+                          <div key={`today-proj-${proj.id}`} className="group-section">
+                            <div className="group-header">
+                              <button
+                                type="button"
+                                className="today-context-group-header"
+                                data-testid={`today-group-project-${proj.id}`}
+                                onClick={() =>
+                                  handleSelectNav({ kind: 'project', projectId: proj.id })
+                                }
+                              >
+                                <Folder size={14.5} style={{ color: 'var(--things-blue)' }} />
+                                <span>{proj.title}</span>
+                              </button>
+                            </div>
+                            <div className="task-list">
+                              {tasks.map((tk) => renderTaskRow(tk, tasks, false))}
+                            </div>
+                          </div>
+                        ))}
+
+                        {areaSections.map(({ area, tasks }) => (
+                          <div key={`today-area-${area.id}`} className="group-section">
+                            <div className="group-header">
+                              <button
+                                type="button"
+                                className="today-context-group-header"
+                                data-testid={`today-group-area-${area.id}`}
+                                onClick={() =>
+                                  handleSelectNav({ kind: 'area', areaId: area.id })
+                                }
+                              >
+                                <Package size={14.5} style={{ color: 'var(--anytime-teal)' }} />
+                                <span>{area.title}</span>
+                              </button>
+                            </div>
+                            <div className="task-list">
+                              {tasks.map((tk) => renderTaskRow(tk, tasks, false))}
+                            </div>
+                          </div>
+                        ))}
+
+                        {remaining.length > 0 && (
+                          <div className="group-section">
+                            <div className="task-list">
+                              {remaining.map((tk) => renderTaskRow(tk, remaining, true))}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  };
+
+                  return (
+                    <>
+                      {prefs.calendarEventsEnabled && todayCalendarEvents.length > 0 && (
+                        <CalendarEventsBlock events={todayCalendarEvents} t={t} />
                       )}
+                      {dayFiltered.length > 0 && renderGroupedDaytime()}
                       {eveFiltered.length > 0 && (
                         <div className="group-section">
                           <div className="group-header">
@@ -1955,24 +2468,39 @@ export const App: React.FC = () => {
                   </>
                 )}
 
+                {/* TRASH View (Android v1.7.0) */}
+                {activeNav.view === 'TRASH' && (
+                  <TrashViewList
+                    deletedProjects={deletedProjects}
+                    deletedTasks={deletedTasks}
+                    t={t}
+                    onRestoreProject={(id) => void localDb.restoreDeletedProject(id)}
+                    onDeleteProjectForever={(id) => void localDb.permanentlyDeleteProject(id)}
+                    onRestoreTask={(id) => void localDb.restoreDeletedTask(id)}
+                    onDeleteTaskForever={(id) => void localDb.permanentlyDeleteTask(id)}
+                  />
+                )}
+
                 {/* INBOX / ANYTIME / SOMEDAY / LOGBOOK */}
-                {activeNav.view !== 'TODAY' && activeNav.view !== 'UPCOMING' && (() => {
-                  const list = filterByTag(currentViewBaseTasks);
-                  if (list.length === 0) {
+                {activeNav.view !== 'TODAY' &&
+                  activeNav.view !== 'UPCOMING' &&
+                  activeNav.view !== 'TRASH' && (() => {
+                    const list = filterByTag(currentViewBaseTasks);
+                    if (list.length === 0) {
+                      return (
+                        <div className="empty-state">
+                          {activeNav.view === 'INBOX' ? t.emptyInbox : t.emptyView}
+                        </div>
+                      );
+                    }
                     return (
-                      <div className="empty-state">
-                        {activeNav.view === 'INBOX' ? t.emptyInbox : t.emptyView}
+                      <div className="task-list">
+                        {list.map((tk) =>
+                          renderTaskRow(tk, list, activeNav.view !== 'INBOX')
+                        )}
                       </div>
                     );
-                  }
-                  return (
-                    <div className="task-list">
-                      {list.map((tk) =>
-                        renderTaskRow(tk, list, activeNav.view !== 'INBOX')
-                      )}
-                    </div>
-                  );
-                })()}
+                  })()}
               </>
             )}
 
@@ -2316,6 +2844,15 @@ export const App: React.FC = () => {
                         <button
                           type="button"
                           className="icon-btn"
+                          data-testid="project-duplicate-btn"
+                          title={`${t.actionDuplicateProject} (Ctrl+D)`}
+                          onClick={() => void handleDuplicateProject(project.id)}
+                        >
+                          <Copy size={15.5} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
                           title={t.actionEdit}
                           onClick={() =>
                             setProjectModalState({ open: true, project })
@@ -2353,9 +2890,14 @@ export const App: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Row 2: Project Notes */}
+                    {/* Row 2: Project Notes (Rich Markdown + Detected Links — Android v1.7.0) */}
                     {project.notes.trim() && (
-                      <p className="project-notes-display">{project.notes.trim()}</p>
+                      <div className="project-notes-display">
+                        <FormattedMarkdownText text={project.notes.trim()} />
+                        <DetectedNotesLinksRow
+                          links={extractDetectedLinksFromNotes(project.notes)}
+                        />
+                      </div>
                     )}
 
                     {/* Row 3: Action Pills (Target Date, Assign Area Dropdown, + To-Do, + Heading) */}
@@ -3003,6 +3545,7 @@ export const App: React.FC = () => {
           calendarError={calendarError}
           t={t}
           onUpdatePrefs={updatePrefs}
+          onToggleBiometricAppLock={handleToggleBiometricAppLock}
           onToggleCalendarEventsEnabled={handleToggleCalendarEventsEnabled}
           onRequestCalendarAccess={handleRequestCalendarAccess}
           onImportIcsFile={handleImportIcsFile}
@@ -3031,7 +3574,117 @@ export const App: React.FC = () => {
         />
       )}
 
-      {toastMsg && <div className="toast-banner">{toastMsg}</div>}
+      {quickShareDraft && (
+        <QuickShareModal
+          draft={quickShareDraft}
+          projects={snapshot.projects}
+          areas={snapshot.areas}
+          t={t}
+          onClose={() => setQuickShareDraft(null)}
+          onSave={async (payload) => {
+            const minOrder =
+              openTasks.length > 0
+                ? openTasks.reduce((m, tk) => Math.min(m, tk.sortOrder), Infinity)
+                : null;
+            const whenDate =
+              payload.scheduleState === 'TODAY' || payload.scheduleState === 'THIS_EVENING'
+                ? startOfDayEpoch()
+                : null;
+            const created = await localDb.upsertTask({
+              title: payload.title,
+              notes: payload.notes,
+              scheduleState: payload.scheduleState,
+              whenDate,
+              projectId: payload.projectId,
+              areaId: payload.areaId,
+              sortOrder: computeMidpointSortOrder(
+                null,
+                minOrder != null && Number.isFinite(minOrder) ? minOrder : null
+              )
+            });
+            setQuickShareDraft(null);
+            if (payload.projectId) {
+              handleSelectNav({ kind: 'project', projectId: payload.projectId }, created.id);
+            } else if (payload.areaId) {
+              handleSelectNav({ kind: 'area', areaId: payload.areaId }, created.id);
+            } else {
+              const targetView: SmartViewType =
+                payload.scheduleState === 'THIS_EVENING'
+                  ? 'TODAY'
+                  : payload.scheduleState === 'TODAY' ||
+                      payload.scheduleState === 'ANYTIME' ||
+                      payload.scheduleState === 'SOMEDAY'
+                    ? payload.scheduleState
+                    : 'INBOX';
+              handleSelectNav({ kind: 'smart', view: targetView }, created.id);
+            }
+            showToast(`✓ ${t.quickShareTitle}`);
+          }}
+        />
+      )}
+
+      {emptyTrashConfirmOpen && (
+        <EmptyTrashConfirmDialog
+          count={deletedProjects.length + deletedTasks.length}
+          t={t}
+          onCancel={() => setEmptyTrashConfirmOpen(false)}
+          onConfirm={() => {
+            setEmptyTrashConfirmOpen(false);
+            void localDb.emptyTrash();
+          }}
+        />
+      )}
+
+      {appLockSetupOpen && (
+        <AppLockPinSetupModal
+          t={t}
+          onCancel={() => setAppLockSetupOpen(false)}
+          onConfirm={(pinHash, webAuthnCredId) => {
+            updatePrefs({
+              biometricAppLockEnabled: true,
+              appLockPinHash: pinHash,
+              appLockWebAuthnCredId: webAuthnCredId
+            });
+            setAppLockSetupOpen(false);
+            showToast(`🔒 ${t.settingsBiometricLockTitle}`);
+          }}
+        />
+      )}
+
+      <ActionableReminderBanner
+        reminders={inAppReminders}
+        t={t}
+        onComplete={(taskId) => void handleActionableReminderAction('complete', taskId)}
+        onSnooze1h={(taskId) => void handleActionableReminderAction('snooze-1h', taskId)}
+        onTomorrow={(taskId) => void handleActionableReminderAction('tomorrow', taskId)}
+        onDismiss={(taskId) =>
+          setInAppReminders((prev) => prev.filter((r) => r.taskId !== taskId))
+        }
+      />
+
+      {undoBanner && (
+        <UndoSnackbarBanner
+          key={undoBanner.id}
+          message={undoBanner.message}
+          t={t}
+          onUndo={() => {
+            setUndoBanner(null);
+            void localDb.performUndo();
+          }}
+          onDismiss={() => setUndoBanner(null)}
+        />
+      )}
+
+      {toastMsg && !undoBanner && <div className="toast-banner">{toastMsg}</div>}
+
+      {isAppLocked && prefs.biometricAppLockEnabled && (
+        <AppLockOverlay
+          pinHash={prefs.appLockPinHash}
+          webAuthnCredId={prefs.appLockWebAuthnCredId}
+          t={t}
+          onUnlocked={() => setIsAppLocked(false)}
+        />
+      )}
     </div>
   );
 };

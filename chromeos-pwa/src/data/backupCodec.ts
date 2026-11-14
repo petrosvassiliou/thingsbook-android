@@ -47,6 +47,7 @@ export interface BackupPreferencesDto {
   languageTag?: string | null;
   calendarEventsEnabled?: boolean | null;
   selectedCalendarIds?: string[] | null;
+  groupTodayByProjectOrArea?: boolean | null;
 }
 
 export interface ThingsbookBackupPayload {
@@ -370,8 +371,8 @@ export function buildBackupPayloadFromEntities(params: {
 export async function encodeThingsBackup(
   payload: ThingsbookBackupPayload,
   password: string | null,
-  appVersionName = '1.6.23-chromeos',
-  appVersionCode = 40
+  appVersionName = '1.7.0-chromeos',
+  appVersionCode = 41
 ): Promise<Uint8Array> {
   const jsonBytes = new TextEncoder().encode(JSON.stringify(payload));
   const compressed = await gzipCompress(jsonBytes);

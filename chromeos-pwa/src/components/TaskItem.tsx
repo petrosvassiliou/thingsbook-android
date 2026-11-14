@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   CheckSquare,
   Circle,
+  Copy,
   Flag,
   FolderInput,
   GripVertical,
@@ -20,6 +21,7 @@ import {
   Sparkles,
   Star,
   Tag,
+  Timer,
   Trash2,
   X,
   XCircle
@@ -38,6 +40,8 @@ import {
 import { generateMagicChecklist } from '../data/geminiService';
 import { localDb } from '../data/localDb';
 import type { TranslationStrings } from '../i18n/translations';
+import { extractDetectedLinksFromNotes } from '../domain/powerUtils';
+import { DetectedNotesLinksRow, MarkdownNotesField } from './MarkdownNotesField';
 
 interface ChecklistSubtaskRowProps {
   item: ChecklistItemRecord;
@@ -193,6 +197,8 @@ interface TaskItemProps {
   onOpenRepeatModal: (taskId: string) => void;
   onOpenMoveModal: (taskId: string) => void;
   onOpenTagsModal: (taskId: string) => void;
+  onStartFocusTimer: (taskId: string, taskTitle: string) => void;
+  onDuplicateTask: (taskId: string) => void;
   onDropReorder: (draggedTaskId: string, targetTaskId: string) => void;
   onToast: (msg: string) => void;
 }
@@ -221,6 +227,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   onOpenRepeatModal,
   onOpenMoveModal,
   onOpenTagsModal,
+  onStartFocusTimer,
+  onDuplicateTask,
   onDropReorder,
   onToast
 }) => {
@@ -230,7 +238,6 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const [titleDraft, setTitleDraft] = useState(task.title);
   const [notesDraft, setNotesDraft] = useState(task.notes);
   const [isTitleFocused, setIsTitleFocused] = useState(false);
-  const [isNotesFocused, setIsNotesFocused] = useState(false);
   const [newSubtask, setNewSubtask] = useState('');
   const [animStage, setAnimStage] = useState<'idle' | 'strike' | 'glide'>('idle');
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
@@ -259,7 +266,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     }
     if (prevServerNotes !== task.notes) {
       setPrevServerNotes(task.notes);
-      if (!isNotesFocused) {
+      if (notesDraft !== task.notes) {
         setNotesDraft(task.notes);
       }
     }
@@ -575,27 +582,14 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           />
         </div>
 
-        <textarea
-          className="task-card-notes"
+        <MarkdownNotesField
           value={notesDraft}
-          onPointerDown={() => onRequestEnsureVisible?.(false)}
-          onFocus={() => {
-            setIsNotesFocused(true);
-            onRequestEnsureVisible?.(false);
-          }}
-          onBlur={() => {
-            setIsNotesFocused(false);
-            if (notesDraft !== task.notes) {
-              void localDb.upsertTask({ id: task.id, notes: notesDraft });
-            }
-          }}
-          onChange={(e) => {
-            const nextNotes = e.target.value;
+          onChange={(nextNotes) => {
             setNotesDraft(nextNotes);
             void localDb.upsertTask({ id: task.id, notes: nextNotes });
           }}
           placeholder={t.placeholderNotes}
-          rows={Math.max(2, Math.min(8, notesDraft.split('\n').length))}
+          className="task-card-notes"
         />
 
         {/* Checklist with Enter Cursor Split / Insert Below + Multiline Paste + Up/Down/Delete */}
@@ -871,6 +865,32 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             >
               <Flag size={15.5} />
             </button>
+            {task.status === 'OPEN' && (
+              <button
+                type="button"
+                className="icon-btn"
+                title={t.actionFocusTimer}
+                data-testid="task-start-focus-btn"
+                onClick={() => {
+                  flushDraftsIfNeeded();
+                  onStartFocusTimer(task.id, titleDraft || task.title);
+                }}
+              >
+                <Timer size={15.5} />
+              </button>
+            )}
+            <button
+              type="button"
+              className="icon-btn"
+              title={`${t.actionDuplicateTodo} (Ctrl+D)`}
+              data-testid="task-duplicate-btn"
+              onClick={() => {
+                flushDraftsIfNeeded();
+                onDuplicateTask(task.id);
+              }}
+            >
+              <Copy size={15.5} />
+            </button>
             <button
               type="button"
               className="icon-btn"
@@ -979,7 +999,13 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           </div>
 
           {task.notes.trim() && (
-            <div className="task-row-notes-preview">{task.notes.trim().split('\n')[0]}</div>
+            <>
+              <div className="task-row-notes-preview">{task.notes.trim().split('\n')[0]}</div>
+              <DetectedNotesLinksRow
+                links={extractDetectedLinksFromNotes(task.notes)}
+                compact
+              />
+            </>
           )}
 
           {/* Ordered Second-Row Badges */}
@@ -1191,6 +1217,34 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             >
               <Sparkles size={14} style={{ color: 'var(--gemini-violet)' }} />
               <span>{t.geminiMagicBreakdown} ✨</span>
+            </button>
+
+            {/* 9. Start Focus Timer (25m) */}
+            {task.status === 'OPEN' && (
+              <button
+                type="button"
+                className="context-menu-item"
+                onClick={() => {
+                  setCtxMenu(null);
+                  onStartFocusTimer(task.id, task.title);
+                }}
+              >
+                <Timer size={14} style={{ color: 'var(--things-blue)' }} />
+                <span>{t.actionFocusTimer}</span>
+              </button>
+            )}
+
+            {/* 10. Duplicate To-Do */}
+            <button
+              type="button"
+              className="context-menu-item"
+              onClick={() => {
+                setCtxMenu(null);
+                onDuplicateTask(task.id);
+              }}
+            >
+              <Copy size={14} />
+              <span>{t.actionDuplicateTodo}</span>
             </button>
 
             <div className="context-menu-divider" />

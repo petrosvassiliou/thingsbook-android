@@ -207,6 +207,39 @@ export interface TranslationStrings {
   calendarUntitledEvent: string;
   authVerifyGoogleRestoreBtn: string;
   authGoogleRestoreHint: string;
+  viewTrash: string;
+  trashEmptyState: string;
+  trashEmptyBtn: string;
+  trashRestoreBtn: string;
+  trashDeleteForeverBtn: string;
+  actionDuplicateTodo: string;
+  actionDuplicateProject: string;
+  actionUndo: string;
+  undoTaskCompleted: (title: string) => string;
+  undoTaskDeleted: (title: string) => string;
+  undoProjectDeleted: (title: string) => string;
+  actionFocusTimer: string;
+  focusTimerActiveLabel: string;
+  focusTimerFinishedTitle: string;
+  focusTimerPause: string;
+  focusTimerResume: string;
+  focusTimerPlus5m: string;
+  focusTimerStop: string;
+  notificationSnooze1h: string;
+  quickShareTitle: string;
+  quickShareSubtitle: string;
+  quickShareDestinationLabel: string;
+  settingsWorkflowSecuritySection: string;
+  settingsGroupTodayTitle: string;
+  settingsGroupTodayDesc: string;
+  settingsBiometricLockTitle: string;
+  settingsBiometricLockDesc: string;
+  appLockTitle: string;
+  appLockSubtitle: string;
+  appLockUnlockBtn: string;
+  appLockPinPlaceholder: string;
+  appLockSetupPinTitle: string;
+  copySuffix: string;
 }
 
 export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
@@ -428,7 +461,41 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     calendarUntitledEvent: '(No title)',
     authVerifyGoogleRestoreBtn: 'Verify with Google & Restore Password',
     authGoogleRestoreHint:
-      'If you connected Google Calendar or Google Sign-In, verify once with Google below to sign in and re-link your password for all devices.'
+      'If you connected Google Calendar or Google Sign-In, verify once with Google below to sign in and re-link your password for all devices.',
+    viewTrash: 'Trash',
+    trashEmptyState: 'Trash is empty',
+    trashEmptyBtn: 'Empty Trash',
+    trashRestoreBtn: 'Restore',
+    trashDeleteForeverBtn: 'Delete Forever',
+    actionDuplicateTodo: 'Duplicate To-Do',
+    actionDuplicateProject: 'Duplicate Project',
+    actionUndo: 'Undo',
+    undoTaskCompleted: (s) => `Completed “${s}”`,
+    undoTaskDeleted: (s) => `Moved “${s}” to Trash`,
+    undoProjectDeleted: (s) => `Moved project “${s}” to Trash`,
+    actionFocusTimer: 'Start Focus Timer (25m)',
+    focusTimerActiveLabel: 'Focus Session',
+    focusTimerFinishedTitle: 'Focus Session Complete!',
+    focusTimerPause: 'Pause',
+    focusTimerResume: 'Resume',
+    focusTimerPlus5m: '+5m',
+    focusTimerStop: 'Stop',
+    notificationSnooze1h: '+1h',
+    quickShareTitle: 'Save to Thingsbook',
+    quickShareSubtitle: 'Capture shared link or text as a new To-Do',
+    quickShareDestinationLabel: 'Save in:',
+    settingsWorkflowSecuritySection: 'Workflow, Today Grouping & App Lock',
+    settingsGroupTodayTitle: 'Group Today by Project or Area',
+    settingsGroupTodayDesc: 'Organize Today tasks under their Project or Area headers (Things 3 style).',
+    settingsBiometricLockTitle: 'Biometric / PIN App Lock',
+    settingsBiometricLockDesc:
+      'Require fingerprint, face unlock, or device PIN when opening Thingsbook (off by default).',
+    appLockTitle: 'Thingsbook is Locked',
+    appLockSubtitle: 'Authenticate with your fingerprint, face, or device PIN to access your tasks.',
+    appLockUnlockBtn: 'Unlock Thingsbook',
+    appLockPinPlaceholder: 'Enter 4–6 digit PIN',
+    appLockSetupPinTitle: 'Set App Lock PIN (4–6 digits)',
+    copySuffix: 'Copy'
   },
   de: {
     appName: 'Thingsbook',
@@ -649,7 +716,42 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     calendarUntitledEvent: '(Ohne Titel)',
     authVerifyGoogleRestoreBtn: 'Mit Google bestätigen & Passwort wiederherstellen',
     authGoogleRestoreHint:
-      'Falls du Google Kalender oder Google-Login verbunden hast, bestätige einmalig unten mit Google, um dich anzumelden und dein Passwort für alle Geräte wieder zu verknüpfen.'
+      'Falls du Google Kalender oder Google-Login verbunden hast, bestätige einmalig unten mit Google, um dich anzumelden und dein Passwort für alle Geräte wieder zu verknüpfen.',
+    viewTrash: 'Papierkorb',
+    trashEmptyState: 'Der Papierkorb ist leer',
+    trashEmptyBtn: 'Papierkorb leeren',
+    trashRestoreBtn: 'Wiederherstellen',
+    trashDeleteForeverBtn: 'Endgültig löschen',
+    actionDuplicateTodo: 'Aufgabe duplizieren',
+    actionDuplicateProject: 'Projekt duplizieren',
+    actionUndo: 'Rückgängig',
+    undoTaskCompleted: (s) => `„${s}“ erledigt`,
+    undoTaskDeleted: (s) => `„${s}“ in den Papierkorb verschoben`,
+    undoProjectDeleted: (s) => `Projekt „${s}“ in den Papierkorb verschoben`,
+    actionFocusTimer: 'Fokus-Timer starten (25 Min.)',
+    focusTimerActiveLabel: 'Fokus-Sitzung',
+    focusTimerFinishedTitle: 'Fokus-Sitzung abgeschlossen!',
+    focusTimerPause: 'Pause',
+    focusTimerResume: 'Weiter',
+    focusTimerPlus5m: '+5 Min.',
+    focusTimerStop: 'Stopp',
+    notificationSnooze1h: '+1 Std.',
+    quickShareTitle: 'In Thingsbook speichern',
+    quickShareSubtitle: 'Geteilten Link oder Text als neue Aufgabe erfassen',
+    quickShareDestinationLabel: 'Speichern in:',
+    settingsWorkflowSecuritySection: 'Workflow, Heute-Gruppierung & App-Sperre',
+    settingsGroupTodayTitle: '„Heute“ nach Projekt oder Bereich gruppieren',
+    settingsGroupTodayDesc:
+      'Aufgaben in „Heute“ übersichtlich unter ihren Projekt- oder Bereichsüberschriften gruppieren (Things-3-Stil).',
+    settingsBiometricLockTitle: 'Biometrische App-Sperre (Fingerabdruck / PIN)',
+    settingsBiometricLockDesc:
+      'Beim Öffnen von Thingsbook Fingerabdruck, Gesichtserkennung oder Geräte-PIN anfordern (standardmäßig deaktiviert).',
+    appLockTitle: 'Thingsbook ist gesperrt',
+    appLockSubtitle: 'Bitte mit Fingerabdruck, Gesichtserkennung oder Geräte-PIN entsperren.',
+    appLockUnlockBtn: 'Thingsbook entsperren',
+    appLockPinPlaceholder: '4–6-stellige PIN eingeben',
+    appLockSetupPinTitle: 'App-Sperre PIN festlegen (4–6 Ziffern)',
+    copySuffix: 'Kopie'
   },
   fr: {
     appName: 'Thingsbook',
@@ -867,7 +969,42 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     calendarUntitledEvent: '(Sans titre)',
     authVerifyGoogleRestoreBtn: 'Vérifier avec Google et restaurer le mot de passe',
     authGoogleRestoreHint:
-      'Si vous avez connecté Google Agenda ou Google Sign-In, vérifiez une fois avec Google ci-dessous pour vous connecter et réassocier votre mot de passe sur tous vos appareils.'
+      'Si vous avez connecté Google Agenda ou Google Sign-In, vérifiez une fois avec Google ci-dessous pour vous connecter et réassocier votre mot de passe sur tous vos appareils.',
+    viewTrash: 'Corbeille',
+    trashEmptyState: 'La corbeille est vide',
+    trashEmptyBtn: 'Vider la corbeille',
+    trashRestoreBtn: 'Restaurer',
+    trashDeleteForeverBtn: 'Supprimer définitivement',
+    actionDuplicateTodo: 'Dupliquer la tâche',
+    actionDuplicateProject: 'Dupliquer le projet',
+    actionUndo: 'Annuler',
+    undoTaskCompleted: (s) => `« ${s} » terminée`,
+    undoTaskDeleted: (s) => `« ${s} » déplacée vers la corbeille`,
+    undoProjectDeleted: (s) => `Projet « ${s} » déplacé vers la corbeille`,
+    actionFocusTimer: 'Démarrer le minuteur Focus (25 min)',
+    focusTimerActiveLabel: 'Session Focus',
+    focusTimerFinishedTitle: 'Session Focus terminée !',
+    focusTimerPause: 'Pause',
+    focusTimerResume: 'Reprendre',
+    focusTimerPlus5m: '+5 min',
+    focusTimerStop: 'Arrêter',
+    notificationSnooze1h: '+1 h',
+    quickShareTitle: 'Enregistrer dans Thingsbook',
+    quickShareSubtitle: 'Capturer le lien ou texte partagé comme tâche',
+    quickShareDestinationLabel: 'Enregistrer dans :',
+    settingsWorkflowSecuritySection: 'Flux de travail, Regroupement & Verrouillage',
+    settingsGroupTodayTitle: "Regrouper Aujourd'hui par projet ou domaine",
+    settingsGroupTodayDesc:
+      "Organiser les tâches d'Aujourd'hui sous leurs en-têtes de projet ou de domaine (style Things 3).",
+    settingsBiometricLockTitle: 'Verrouillage biométrique / PIN',
+    settingsBiometricLockDesc:
+      "Exiger l'empreinte digitale, la reconnaissance faciale ou le code PIN à l'ouverture (désactivé par défaut).",
+    appLockTitle: 'Thingsbook est verrouillé',
+    appLockSubtitle: 'Authentifiez-vous avec votre empreinte, visage ou code PIN pour accéder à vos tâches.',
+    appLockUnlockBtn: 'Déverrouiller Thingsbook',
+    appLockPinPlaceholder: 'Code PIN (4–6 chiffres)',
+    appLockSetupPinTitle: 'Définir le code PIN (4–6 chiffres)',
+    copySuffix: 'Copie'
   },
   it: {
     appName: 'Thingsbook',
@@ -1085,7 +1222,42 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     calendarUntitledEvent: '(Senza titolo)',
     authVerifyGoogleRestoreBtn: 'Verifica con Google e ripristina password',
     authGoogleRestoreHint:
-      'Se hai collegato Google Calendar o Google Sign-In, verifica una volta con Google qui sotto per accedere e ricollegare la password su tutti i dispositivi.'
+      'Se hai collegato Google Calendar o Google Sign-In, verifica una volta con Google qui sotto per accedere e ricollegare la password su tutti i dispositivi.',
+    viewTrash: 'Cestino',
+    trashEmptyState: 'Il cestino è vuoto',
+    trashEmptyBtn: 'Svuota cestino',
+    trashRestoreBtn: 'Ripristina',
+    trashDeleteForeverBtn: 'Elimina definitivamente',
+    actionDuplicateTodo: 'Duplica attività',
+    actionDuplicateProject: 'Duplica progetto',
+    actionUndo: 'Annulla',
+    undoTaskCompleted: (s) => `«${s}» completata`,
+    undoTaskDeleted: (s) => `«${s}» spostata nel cestino`,
+    undoProjectDeleted: (s) => `Progetto «${s}» spostato nel cestino`,
+    actionFocusTimer: 'Avvia timer Focus (25 min)',
+    focusTimerActiveLabel: 'Sessione Focus',
+    focusTimerFinishedTitle: 'Sessione Focus completata!',
+    focusTimerPause: 'Pausa',
+    focusTimerResume: 'Riprendi',
+    focusTimerPlus5m: '+5 min',
+    focusTimerStop: 'Ferma',
+    notificationSnooze1h: '+1h',
+    quickShareTitle: 'Salva in Thingsbook',
+    quickShareSubtitle: 'Salva link o testo condiviso come nuova attività',
+    quickShareDestinationLabel: 'Salva in:',
+    settingsWorkflowSecuritySection: 'Flusso di lavoro, Raggruppamento & Blocco app',
+    settingsGroupTodayTitle: 'Raggruppa Oggi per progetto o area',
+    settingsGroupTodayDesc:
+      'Organizza le attività di Oggi sotto le intestazioni di progetto o area (stile Things 3).',
+    settingsBiometricLockTitle: 'Blocco app biometrico / PIN',
+    settingsBiometricLockDesc:
+      "Richiedi impronta digitale, sblocco facciale o PIN all'apertura (disattivato per impostazione predefinita).",
+    appLockTitle: 'Thingsbook è bloccato',
+    appLockSubtitle: 'Autenticati con impronta digitale, volto o PIN per accedere alle tue attività.',
+    appLockUnlockBtn: 'Sblocca Thingsbook',
+    appLockPinPlaceholder: 'Inserisci PIN (4–6 cifre)',
+    appLockSetupPinTitle: 'Imposta PIN di blocco (4–6 cifre)',
+    copySuffix: 'Copia'
   },
   es: {
     appName: 'Thingsbook',
@@ -1303,7 +1475,42 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     calendarUntitledEvent: '(Sin título)',
     authVerifyGoogleRestoreBtn: 'Verificar con Google y restaurar contraseña',
     authGoogleRestoreHint:
-      'Si conectaste Google Calendar o Google Sign-In, verifica una vez con Google abajo para iniciar sesión y volver a vincular tu contraseña en todos tus dispositivos.'
+      'Si conectaste Google Calendar o Google Sign-In, verifica una vez con Google abajo para iniciar sesión y volver a vincular tu contraseña en todos tus dispositivos.',
+    viewTrash: 'Papelera',
+    trashEmptyState: 'La papelera está vacía',
+    trashEmptyBtn: 'Vaciar papelera',
+    trashRestoreBtn: 'Restaurar',
+    trashDeleteForeverBtn: 'Eliminar definitivamente',
+    actionDuplicateTodo: 'Duplicar tarea',
+    actionDuplicateProject: 'Duplicar proyecto',
+    actionUndo: 'Deshacer',
+    undoTaskCompleted: (s) => `«${s}» completada`,
+    undoTaskDeleted: (s) => `«${s}» movida a la papelera`,
+    undoProjectDeleted: (s) => `Proyecto «${s}» movido a la papelera`,
+    actionFocusTimer: 'Iniciar temporizador Focus (25 min)',
+    focusTimerActiveLabel: 'Sesión Focus',
+    focusTimerFinishedTitle: '¡Sesión Focus completada!',
+    focusTimerPause: 'Pausar',
+    focusTimerResume: 'Reanudar',
+    focusTimerPlus5m: '+5 min',
+    focusTimerStop: 'Detener',
+    notificationSnooze1h: '+1h',
+    quickShareTitle: 'Guardar en Thingsbook',
+    quickShareSubtitle: 'Guardar enlace o texto compartido como nueva tarea',
+    quickShareDestinationLabel: 'Guardar en:',
+    settingsWorkflowSecuritySection: 'Flujo de trabajo, Agrupación y Bloqueo',
+    settingsGroupTodayTitle: 'Agrupar Hoy por proyecto o área',
+    settingsGroupTodayDesc:
+      'Organizar las tareas de Hoy bajo sus encabezados de proyecto o área (estilo Things 3).',
+    settingsBiometricLockTitle: 'Bloqueo biométrico / PIN',
+    settingsBiometricLockDesc:
+      'Requerir huella digital, desbloqueo facial o PIN al abrir Thingsbook (desactivado por defecto).',
+    appLockTitle: 'Thingsbook está bloqueado',
+    appLockSubtitle: 'Autentícate con tu huella digital, rostro o PIN para acceder a tus tareas.',
+    appLockUnlockBtn: 'Desbloquear Thingsbook',
+    appLockPinPlaceholder: 'Introduce PIN (4–6 dígitos)',
+    appLockSetupPinTitle: 'Configurar PIN de bloqueo (4–6 dígitos)',
+    copySuffix: 'Copia'
   }
 };
 

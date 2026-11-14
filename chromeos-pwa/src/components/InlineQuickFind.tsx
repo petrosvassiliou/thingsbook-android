@@ -15,6 +15,7 @@ import {
   Search,
   Star,
   Tag,
+  Trash2,
   X
 } from 'lucide-react';
 import {
@@ -79,7 +80,8 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
       { view: 'UPCOMING', label: t.viewUpcoming, icon: <CalendarDays size={15} style={{ color: 'var(--upcoming-coral)' }} /> },
       { view: 'ANYTIME', label: t.viewAnytime, icon: <Layers size={15} style={{ color: 'var(--anytime-teal)' }} /> },
       { view: 'SOMEDAY', label: t.viewSomeday, icon: <Archive size={15} style={{ color: 'var(--someday-amber)' }} /> },
-      { view: 'LOGBOOK', label: t.viewLogbook, icon: <BookOpenCheck size={15} style={{ color: 'var(--logbook-green)' }} /> }
+      { view: 'LOGBOOK', label: t.viewLogbook, icon: <BookOpenCheck size={15} style={{ color: 'var(--logbook-green)' }} /> },
+      { view: 'TRASH', label: t.viewTrash, icon: <Trash2 size={15} style={{ color: 'var(--text-muted)' }} /> }
     ],
     [t]
   );

@@ -1,5 +1,5 @@
-export const APP_VERSION = '1.6.23';
-export const APP_BUILD_CODE = 40;
+export const APP_VERSION = '1.7.0';
+export const APP_BUILD_CODE = 41;
 export const MAX_AREAS = 8;
 
 export type ScheduleState =
@@ -120,7 +120,8 @@ export type SmartViewType =
   | 'UPCOMING'
   | 'ANYTIME'
   | 'SOMEDAY'
-  | 'LOGBOOK';
+  | 'LOGBOOK'
+  | 'TRASH';
 
 export type ActiveNavigation =
   | { kind: 'smart'; view: SmartViewType }
@@ -147,6 +148,23 @@ export interface AppPreferences {
   calendarEventsEnabled: boolean;
   selectedCalendarIds: string[];
   calendarIdsInitialized: boolean;
+  groupTodayByProjectOrArea: boolean;
+  biometricAppLockEnabled: boolean;
+  appLockPinHash: string;
+  appLockWebAuthnCredId: string;
+}
+
+export interface QuickShareDraft {
+  initialTitle: string;
+  initialNotes: string;
+}
+
+export interface FocusTimerUiState {
+  taskId: string;
+  taskTitle: string;
+  totalSeconds: number;
+  remainingSeconds: number;
+  isRunning: boolean;
 }
 
 export interface DeviceCalendarInfo {

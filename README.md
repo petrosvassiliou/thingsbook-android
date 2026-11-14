@@ -139,22 +139,35 @@
 
 ---
 
-# 2. Thingsbook for ChromeOS (Standalone PWA)
+# 2. Thingsbook for ChromeOS (Standalone PWA — `v1.7.0`)
 
-Alongside the native Android APK, this repository includes a completely separate **ChromeOS Standalone PWA** (`chromeos-pwa/`) engineered specifically for Chromebooks without requiring the Linux container (Crostini) or Android VM (ARCVM).
+Alongside the native Android APK, this repository includes a completely separate **ChromeOS Standalone PWA** (`chromeos-pwa/`) engineered specifically for Chromebooks — with **full `v1.7.0` feature and data parity** — without requiring the Linux container (Crostini) or Android VM (ARCVM).
 
 ### 🚀 Launch & Install on ChromeOS
 - **Live App URL:** **[https://thingsbook-prod.web.app](https://thingsbook-prod.web.app)** *(hosted on Firebase Hosting)*
 - **Pin to ChromeOS Start Menu (Launcher) & Shelf:**
   1. Open **`https://thingsbook-prod.web.app`** in Chrome on your Chromebook.
   2. Click **"Add to ChromeOS Launcher"** in the bottom-left sidebar (or the **Install `⊕` icon** in the Chrome address bar).
-  3. Thingsbook installs as a standalone Chromebook application in your **Start Menu (Launcher)** and **Shelf**, opens in its own frameless window, and runs **100% offline** via IndexedDB + Service Worker.
+  3. Thingsbook installs as a standalone Chromebook application in your **Start Menu (Launcher)** and **Shelf**, opens in its own frameless window, registers as a **ChromeOS Share Target** + **Launcher Shortcut** provider (*New To-Do*, *Today*, *Inbox*, *Upcoming*, *Quick Find*), and runs **100% offline** via IndexedDB + Service Worker.
+
+### ✨ ChromeOS `v1.7.0` GTD Power Pack Parity
+- **📤 Web Share Target & Quick Share Modal:** Share links or text from ChromeOS apps directly into Thingsbook (or click the top-bar **Share** icon) with instant destination selection.
+- **⏱️ 25-Minute Focus / Pomodoro Timer:** Start an interactive 25m focus session banner (**Pause/Resume**, **+5m**, **Complete `✓`**, **Stop `✕`**) on any To-Do.
+- **📝 Live Markdown Notes & Link Chips:** Real-time Markdown preview plus automatic clickable **Web**, **Email (`mailto:`)**, and **Phone (`tel:`)** chips on tasks and projects.
+- **🗑️ Trash View (`Ctrl + 7`) & 5s Undo Bar (`Ctrl + Z`):** Soft-delete safety net with instant Undo, individual Restore / Delete Forever, and Empty Trash.
+- **📋 Duplicate To-Do & Duplicate Project (`Ctrl + D`):** Deep-clone tasks (with checklists & tags) and projects (with headings, open tasks, checklists & tags).
+- **🔔 Actionable ChromeOS Notifications:** Service Worker notifications with **`✓ Complete`**, **`+1h`**, and **`Tomorrow`** action buttons.
+- **🗂️ Group Today by Project / Area & 📅 Google Calendar / `.ics` Events:** Optional *Things 3*-style Today grouping and read-only Google Calendar / `.ics` agenda integration.
+- **🔒 Chromebook Fingerprint (WebAuthn) / PIN App Lock:** Optional local app lock in **⚙️ Settings** using platform WebAuthn biometrics or SHA-256 PIN with automatic 60s background re-lock.
 
 ---
 
-### 📸 ChromeOS Screenshots
+### 📸 ChromeOS Screenshots (`v1.7.0`)
 
-#### Chromebook Dark Mode — Project Progress Ring, Collapsible Headings & *Magic Plus* Speed Dial (`Ctrl+N` / `Ctrl+Shift+N`)
+#### Chromebook Light Mode — *Today* Grouped by Project/Area, 25m Focus Timer, Link Chips & *Trash*
+![Thingsbook for ChromeOS Today Power Pack](docs/screenshots/chromeos-today-power.png)
+
+#### Chromebook Dark Mode — Project Progress Ring, Collapsible Headings, Duplicate Project & *Magic Plus* (`Ctrl+N` / `Ctrl+Shift+N`)
 ![Thingsbook for ChromeOS Dark Mode Project View](docs/screenshots/chromeos-project-dark.png)
 
 #### Chromebook *Thingsbook Intelligence* — Multilingual Gemini AI Hub
@@ -173,10 +186,10 @@ Alongside the native Android APK, this repository includes a completely separate
 | `Ctrl + S` / `Cmd + S` | Open **When / Schedule** picker for the expanded To-Do |
 | `Ctrl + Shift + D` / `Cmd + Shift + D` | Open **Deadline** picker for the expanded To-Do |
 | `Ctrl + Shift + M` / `Cmd + Shift + M` | Open **Move to Project / Area** picker for the expanded To-Do |
-| `Ctrl + Backspace` / `Ctrl + Delete` | Move the expanded To-Do to **Trash** |
+| `Ctrl + Backspace` / `Ctrl + Delete` | Move the expanded or selected To-Do(s) to **Trash** |
 | `Ctrl + F` or `Ctrl + K` | Toggle **Quick Find** instant search |
 | `Ctrl + G` | Open **Thingsbook Intelligence (Gemini AI Hub)** |
-| `Ctrl + 1` … `Ctrl + 6` | Jump to *Inbox*, *Today*, *Upcoming*, *Anytime*, *Someday*, or *Logbook* |
+| `Ctrl + 1` … `Ctrl + 7` | Jump to *Inbox*, *Today*, *Upcoming*, *Anytime*, *Someday*, *Logbook*, or *Trash* |
 | `Ctrl + A` | Select all visible To-Dos in the current view for batch actions |
 | `Ctrl + <TagKey>` | Toggle single-key **Tag Shortcut** on selected/expanded To-Do(s) |
 | `Double-Click` / `Enter` | Expand or collapse a To-Do card inline |
@@ -184,7 +197,7 @@ Alongside the native Android APK, this repository includes a completely separate
 
 ### 🔄 Seamless Android ↔ ChromeOS Interoperability
 - **Real-Time Delta Sync:** Sign in with the same account on your Android phone and your Chromebook to sync *Areas*, *Projects*, *Headings*, *Tasks*, *Checklists*, and *Tags* in real time via `thingsbook-prod` Firestore.
-- **Identical `.tbbackup` Binary Format:** Export an AES-256-GCM encrypted `.tbbackup` file on Android and restore it directly on ChromeOS (or vice versa) with 100% cryptographic and schema compatibility.
+- **Identical `.tbbackup` Binary Format:** Export an AES-256-GCM encrypted `.tbbackup` file on Android and restore it directly on ChromeOS (or vice versa) with 100% cryptographic and schema compatibility (including `groupTodayByProjectOrArea`).
 
 ### 🛠️ Build & Deploy ChromeOS PWA
 ```bash
@@ -219,8 +232,8 @@ Eine eigenständige, native Android-Produktivitäts-App für **Android-Smartphon
 - **Optionale Biometrie-/PIN-App-Sperre:** Schutz per Fingerabdruck, Gesichtserkennung oder Geräte-PIN beim Öffnen der App.
 - **Erweiterte Hardware-Tastaturkürzel:** `Strg + N` (Neue Aufgabe), `Strg + Umschalt + N` (Neues Projekt), `Strg + D` (Duplizieren), `Strg + Z` (Rückgängig), `Strg + S` (Wann/Planen), `Strg + Umschalt + D` (Frist), `Strg + Umschalt + M` (Verschieben), `Strg + Rücktaste/Entf` (Löschen).
 
-### 2. Thingsbook für ChromeOS (Eigenständige Standalone-PWA)
-Zusätzlich enthält `chromeos-pwa/` ein komplett separates **ChromeOS-Paket** — gehostet auf **Firebase Hosting** und **ohne Linux-Entwicklungsumgebung (Crostini)** direkt im **ChromeOS-Startmenü (Launcher) & Shelf** installierbar:
+### 2. Thingsbook für ChromeOS (Eigenständige Standalone-PWA — `v1.7.0`)
+Zusätzlich enthält `chromeos-pwa/` ein komplett separates **ChromeOS-Paket mit voller `v1.7.0`-Funktionsparität** (inkl. *Web Share Target*, *25-Min.-Fokus-Timer*, *Live-Markdown & Link-Chips*, *Papierkorb & Rückgängig*, *Aufgaben/Projekte duplizieren*, *Heute-Gruppierung*, *Google-Kalender/.ics-Termine*, *Direkt-Aktionen in Benachrichtigungen* sowie *WebAuthn-Fingerabdruck-/PIN-Sperre*) — gehostet auf **Firebase Hosting** und **ohne Linux-Entwicklungsumgebung (Crostini)** direkt im **ChromeOS-Startmenü (Launcher) & Shelf** installierbar:
 - **💻 Live-App für Chromebooks:** **[https://thingsbook-prod.web.app](https://thingsbook-prod.web.app)** *(in Chrome öffnen → „Zum ChromeOS-Launcher hinzufügen“ klicken → startet im eigenen Fenster, 100 % offline-fähig via IndexedDB + Service Worker und synchronisiert nahtlos mit der Android-App).*
 
 ---

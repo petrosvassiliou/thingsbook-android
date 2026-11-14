@@ -71,15 +71,32 @@ export default defineConfig({
             icons: [{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' }]
           },
           {
+            name: 'Upcoming',
+            short_name: 'Upcoming',
+            description: 'Open Upcoming smart view',
+            url: '/?view=UPCOMING',
+            icons: [{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' }]
+          },
+          {
             name: 'Quick Find',
             short_name: 'Search',
             description: 'Jump directly to Quick Find',
             url: '/?action=quick-find',
             icons: [{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' }]
           }
-        ]
+        ],
+        share_target: {
+          action: '/?action=quick-share',
+          method: 'GET',
+          params: {
+            title: 'share_title',
+            text: 'share_text',
+            url: 'share_url'
+          }
+        }
       },
       workbox: {
+        importScripts: ['/sw-notifications.js'],
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         navigateFallback: '/index.html',
         cleanupOutdatedCaches: true,

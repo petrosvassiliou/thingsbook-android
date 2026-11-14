@@ -30,20 +30,83 @@ export async function sendTestChromeOsNotification(appName: string): Promise<boo
   const granted = await ensureNotificationPermission();
   if (!granted) return false;
   new Notification(appName, {
-    body: 'ChromeOS Reminders & Today Summary notifications are active.',
+    body: 'ChromeOS Actionable Reminders & Today Summary notifications are active.',
     icon: '/pwa-192x192.png',
     badge: '/pwa-192x192.png'
   });
   return true;
 }
 
-export function checkDueRemindersAndDigest(
-  tasks: TaskRecord[],
-  prefs: AppPreferences,
+export interface ActionableReminderLabels {
+  complete: string;
+  snooze1h: string;
+  tomorrow: string;
+}
+
+async function showActionableOsNotification(
+  task: TaskRecord,
+  tagKey: string,
+  labels: ActionableReminderLabels,
   onSelectTask?: (taskId: string) => void
 ) {
   if (typeof window === 'undefined' || !('Notification' in window)) return;
   if (Notification.permission !== 'granted') return;
+
+  const title = task.title || 'Thingsbook Reminder';
+  const body = task.notes ? task.notes.slice(0, 140) : 'Scheduled To-Do reminder';
+
+  try {
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg && typeof reg.showNotification === 'function') {
+        const swOptions: NotificationOptions & {
+          actions?: Array<{ action: string; title: string }>;
+        } = {
+          body,
+          icon: '/pwa-192x192.png',
+          badge: '/pwa-192x192.png',
+          tag: tagKey,
+          data: { taskId: task.id },
+          actions: [
+            { action: 'complete', title: `✓ ${labels.complete}` },
+            { action: 'snooze-1h', title: labels.snooze1h },
+            { action: 'tomorrow', title: labels.tomorrow }
+          ]
+        };
+        await reg.showNotification(title, swOptions);
+        return;
+      }
+    }
+  } catch {
+    // Fall back to standard window Notification below
+  }
+
+  const n = new Notification(title, {
+    body,
+    icon: '/pwa-192x192.png',
+    tag: tagKey
+  });
+  if (onSelectTask) {
+    n.onclick = () => {
+      window.focus();
+      onSelectTask(task.id);
+      n.close();
+    };
+  }
+}
+
+export function checkDueRemindersAndDigest(
+  tasks: TaskRecord[],
+  prefs: AppPreferences,
+  onSelectTask?: (taskId: string) => void,
+  onFireInAppReminder?: (item: { taskId: string; title: string }) => void,
+  actionLabels: ActionableReminderLabels = {
+    complete: 'Complete',
+    snooze1h: '+1h',
+    tomorrow: 'Tomorrow'
+  }
+) {
+  if (typeof window === 'undefined') return;
 
   const now = Date.now();
   const fired = loadFiredReminders();
@@ -56,18 +119,11 @@ export function checkDueRemindersAndDigest(
 
     // Trigger if due within the past 24 hours up to now
     if (task.reminderTime <= now && now - task.reminderTime < 86_400_000) {
-      const n = new Notification(task.title || 'Thingsbook Reminder', {
-        body: task.notes ? task.notes.slice(0, 140) : 'Scheduled To-Do reminder',
-        icon: '/pwa-192x192.png',
-        tag: key
+      void showActionableOsNotification(task, key, actionLabels, onSelectTask);
+      onFireInAppReminder?.({
+        taskId: task.id,
+        title: task.title || 'Thingsbook Reminder'
       });
-      if (onSelectTask) {
-        n.onclick = () => {
-          window.focus();
-          onSelectTask(task.id);
-          n.close();
-        };
-      }
       fired.add(key);
       changed = true;
     }
@@ -77,7 +133,11 @@ export function checkDueRemindersAndDigest(
     saveFiredReminders(fired);
   }
 
-  if (prefs.dailyDigestEnabled) {
+  if (
+    prefs.dailyDigestEnabled &&
+    'Notification' in window &&
+    Notification.permission === 'granted'
+  ) {
     const d = new Date(now);
     const todayKey = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
     const lastDigest = localStorage.getItem(LAST_DIGEST_DATE_KEY);

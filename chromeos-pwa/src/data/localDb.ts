@@ -126,7 +126,11 @@ const DEFAULT_PREFS: AppPreferences = {
   geminiApiKey: '',
   calendarEventsEnabled: false,
   selectedCalendarIds: [],
-  calendarIdsInitialized: false
+  calendarIdsInitialized: false,
+  groupTodayByProjectOrArea: false,
+  biometricAppLockEnabled: false,
+  appLockPinHash: '',
+  appLockWebAuthnCredId: ''
 };
 
 export function loadPreferences(): AppPreferences {
@@ -144,11 +148,30 @@ export function savePreferences(prefs: AppPreferences): void {
   localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify(prefs));
 }
 
+export type UndoEventKind = 'task_completed' | 'task_deleted' | 'project_deleted';
+
+export interface UndoEventPayload {
+  kind: UndoEventKind;
+  entityTitle: string;
+  count: number;
+}
+
+interface InternalUndoSnapshot {
+  tasks: TaskRecord[];
+  checklistItems: ChecklistItemRecord[];
+  projects: ProjectRecord[];
+  headings: HeadingRecord[];
+  spawnedTaskIds: string[];
+}
+
 type Listener = (snapshot: DataSnapshot) => void;
+type UndoListener = (event: UndoEventPayload) => void;
 
 class ThingsLocalDb {
   private dbPromise: Promise<IDBPDatabase> | null = null;
   private listeners = new Set<Listener>();
+  private undoListeners = new Set<UndoListener>();
+  private lastUndoSnapshot: InternalUndoSnapshot | null = null;
   private syncTriggerCallback: (() => void) | null = null;
   private writeChain: Promise<unknown> = Promise.resolve();
   private cachedSnapshot: DataSnapshot = {
@@ -330,6 +353,80 @@ class ThingsLocalDb {
     };
   }
 
+  subscribeUndo(listener: UndoListener): () => void {
+    this.undoListeners.add(listener);
+    return () => {
+      this.undoListeners.delete(listener);
+    };
+  }
+
+  private emitUndoEvent(payload: UndoEventPayload) {
+    for (const listener of this.undoListeners) {
+      listener(payload);
+    }
+  }
+
+  async performUndo(): Promise<boolean> {
+    const snap = this.lastUndoSnapshot;
+    if (!snap) return false;
+    this.lastUndoSnapshot = null;
+
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const tx = db.transaction(
+        ['projects', 'headings', 'tasks', 'checklist_items'],
+        'readwrite'
+      );
+
+      for (const proj of snap.projects) {
+        await tx.objectStore('projects').put({
+          ...proj,
+          updatedAt: now,
+          isDirty: true
+        });
+      }
+      for (const h of snap.headings) {
+        await tx.objectStore('headings').put({
+          ...h,
+          updatedAt: now,
+          isDirty: true
+        });
+      }
+      for (const tk of snap.tasks) {
+        await tx.objectStore('tasks').put({
+          ...tk,
+          updatedAt: now,
+          isDirty: true
+        });
+      }
+      for (const chk of snap.checklistItems) {
+        await tx.objectStore('checklist_items').put({
+          ...chk,
+          updatedAt: now,
+          isDirty: true
+        });
+      }
+      if (snap.spawnedTaskIds.length > 0) {
+        const spawnedSet = new Set(snap.spawnedTaskIds);
+        const allChk = (await tx.objectStore('checklist_items').getAll()) as ChecklistItemRecord[];
+        for (const chk of allChk) {
+          if (spawnedSet.has(chk.taskId)) {
+            await tx.objectStore('checklist_items').delete(chk.id);
+          }
+        }
+        for (const spawnedId of snap.spawnedTaskIds) {
+          await tx.objectStore('tasks').delete(spawnedId);
+        }
+      }
+
+      await tx.done;
+      await this.refreshSnapshot();
+      this.triggerSync();
+      return true;
+    });
+  }
+
   getSnapshot(): DataSnapshot {
     return this.cachedSnapshot;
   }
@@ -505,12 +602,28 @@ class ThingsLocalDb {
     await tx.done;
 
     // Spawn next recurrence instance if transitioning OPEN -> COMPLETED
+    let spawnedTaskId: string | null = null;
     if (
       (!existing || existing.status === 'OPEN') &&
       status === 'COMPLETED' &&
       record.recurrenceRule != null
     ) {
-      await this.spawnNextRecurrence(record, now);
+      spawnedTaskId = await this.spawnNextRecurrence(record, now);
+    }
+
+    if (existing && !existing.isDeleted && existing.status === 'OPEN' && status === 'COMPLETED') {
+      this.lastUndoSnapshot = {
+        tasks: [{ ...existing }],
+        checklistItems: [],
+        projects: [],
+        headings: [],
+        spawnedTaskIds: spawnedTaskId ? [spawnedTaskId] : []
+      };
+      this.emitUndoEvent({
+        kind: 'task_completed',
+        entityTitle: record.title,
+        count: 1
+      });
     }
 
     return record;
@@ -553,25 +666,57 @@ class ThingsLocalDb {
   ): Promise<void> {
     if (taskIds.length === 0) return;
     return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const priorOpenTasks: TaskRecord[] = [];
+      if (patch.status === 'COMPLETED') {
+        for (const id of taskIds) {
+          const existing = (await db.get('tasks', id)) as TaskRecord | undefined;
+          if (existing && !existing.isDeleted && existing.status === 'OPEN') {
+            priorOpenTasks.push({ ...existing });
+          }
+        }
+      }
+
+      const prevExistingIds = new Set(this.cachedSnapshot.tasks.map((t) => t.id));
       for (const id of taskIds) {
         await this.upsertTaskUnlocked({
           id,
           ...patch
         });
       }
+
+      if (priorOpenTasks.length > 1) {
+        const afterAll = (await db.getAll('tasks')) as TaskRecord[];
+        const spawnedIds = afterAll
+          .filter((t) => !prevExistingIds.has(t.id) && !taskIds.includes(t.id))
+          .map((t) => t.id);
+        this.lastUndoSnapshot = {
+          tasks: priorOpenTasks,
+          checklistItems: [],
+          projects: [],
+          headings: [],
+          spawnedTaskIds: spawnedIds
+        };
+        this.emitUndoEvent({
+          kind: 'task_completed',
+          entityTitle: priorOpenTasks[0].title,
+          count: priorOpenTasks.length
+        });
+      }
+
       await this.refreshSnapshot();
       this.triggerSync();
     });
   }
 
-  private async spawnNextRecurrence(completedTask: TaskRecord, now: number): Promise<void> {
-    if (!completedTask.recurrenceRule) return;
+  private async spawnNextRecurrence(completedTask: TaskRecord, now: number): Promise<string | null> {
+    if (!completedTask.recurrenceRule) return null;
     const nextWhen = calculateNextRecurrenceDate(
       completedTask.recurrenceRule,
       completedTask.whenDate,
       now
     );
-    if (nextWhen == null) return;
+    if (nextWhen == null) return null;
 
     const db = await this.getDb();
     const todayEnd = endOfDayEpoch(new Date(now));
@@ -636,16 +781,22 @@ class ThingsLocalDb {
         isDirty: true
       });
     }
+    return newTaskId;
   }
 
   async softDeleteTasks(taskIds: string[]): Promise<void> {
+    if (taskIds.length === 0) return;
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
       const now = Date.now();
       const tx = db.transaction(['tasks', 'checklist_items'], 'readwrite');
+      const priorTasks: TaskRecord[] = [];
+      const priorChecklists: ChecklistItemRecord[] = [];
+
       for (const id of taskIds) {
         const existing = (await tx.objectStore('tasks').get(id)) as TaskRecord | undefined;
-        if (existing) {
+        if (existing && !existing.isDeleted) {
+          priorTasks.push({ ...existing });
           await tx.objectStore('tasks').put({
             ...existing,
             isDeleted: true,
@@ -658,6 +809,7 @@ class ThingsLocalDb {
       const idSet = new Set(taskIds);
       for (const chk of allChk) {
         if (idSet.has(chk.taskId) && !chk.isDeleted) {
+          priorChecklists.push({ ...chk });
           await tx.objectStore('checklist_items').put({
             ...chk,
             isDeleted: true,
@@ -667,24 +819,243 @@ class ThingsLocalDb {
         }
       }
       await tx.done;
+
+      if (priorTasks.length > 0) {
+        this.lastUndoSnapshot = {
+          tasks: priorTasks,
+          checklistItems: priorChecklists,
+          projects: [],
+          headings: [],
+          spawnedTaskIds: []
+        };
+        this.emitUndoEvent({
+          kind: 'task_deleted',
+          entityTitle: priorTasks[0].title,
+          count: priorTasks.length
+        });
+      }
+
       await this.refreshSnapshot();
       this.triggerSync();
     });
   }
 
-  async duplicateTask(taskId: string): Promise<string | null> {
+  async restoreDeletedTask(taskId: string): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const tx = db.transaction(['tasks', 'checklist_items', 'projects', 'areas', 'headings'], 'readwrite');
+      const existing = (await tx.objectStore('tasks').get(taskId)) as TaskRecord | undefined;
+      if (!existing || !existing.isDeleted) {
+        await tx.done;
+        return;
+      }
+
+      const activeProj = existing.projectId
+        ? ((await tx.objectStore('projects').get(existing.projectId)) as ProjectRecord | undefined)
+        : undefined;
+      const validProjId = activeProj && !activeProj.isDeleted ? activeProj.id : null;
+
+      const activeHeading =
+        validProjId && existing.headingId
+          ? ((await tx.objectStore('headings').get(existing.headingId)) as HeadingRecord | undefined)
+          : undefined;
+      const validHeadingId =
+        activeHeading && !activeHeading.isDeleted && activeHeading.projectId === validProjId
+          ? activeHeading.id
+          : null;
+
+      const activeArea = existing.areaId
+        ? ((await tx.objectStore('areas').get(existing.areaId)) as AreaRecord | undefined)
+        : undefined;
+      const validAreaId = activeArea && !activeArea.isDeleted ? activeArea.id : null;
+
+      await tx.objectStore('tasks').put({
+        ...existing,
+        projectId: validProjId,
+        headingId: validHeadingId,
+        areaId: validAreaId,
+        isDeleted: false,
+        updatedAt: now,
+        isDirty: true
+      });
+
+      const allChk = (await tx.objectStore('checklist_items').getAll()) as ChecklistItemRecord[];
+      for (const chk of allChk) {
+        if (chk.taskId === taskId && chk.isDeleted) {
+          await tx.objectStore('checklist_items').put({
+            ...chk,
+            isDeleted: false,
+            updatedAt: now,
+            isDirty: true
+          });
+        }
+      }
+
+      await tx.done;
+      await this.refreshSnapshot();
+      this.triggerSync();
+    });
+  }
+
+  async restoreDeletedProject(projectId: string): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const tx = db.transaction(['projects', 'headings', 'areas'], 'readwrite');
+      const existing = (await tx.objectStore('projects').get(projectId)) as ProjectRecord | undefined;
+      if (!existing || !existing.isDeleted) {
+        await tx.done;
+        return;
+      }
+
+      const activeArea = existing.areaId
+        ? ((await tx.objectStore('areas').get(existing.areaId)) as AreaRecord | undefined)
+        : undefined;
+      const validAreaId = activeArea && !activeArea.isDeleted ? activeArea.id : null;
+
+      await tx.objectStore('projects').put({
+        ...existing,
+        areaId: validAreaId,
+        isDeleted: false,
+        updatedAt: now,
+        isDirty: true
+      });
+
+      const allHeadings = (await tx.objectStore('headings').getAll()) as HeadingRecord[];
+      for (const h of allHeadings) {
+        if (h.projectId === projectId && h.isDeleted) {
+          await tx.objectStore('headings').put({
+            ...h,
+            isDeleted: false,
+            updatedAt: now,
+            isDirty: true
+          });
+        }
+      }
+
+      await tx.done;
+      await this.refreshSnapshot();
+      this.triggerSync();
+    });
+  }
+
+  async permanentlyDeleteTask(taskId: string): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const tx = db.transaction(['tasks', 'checklist_items'], 'readwrite');
+      const allChk = (await tx.objectStore('checklist_items').getAll()) as ChecklistItemRecord[];
+      for (const chk of allChk) {
+        if (chk.taskId === taskId) {
+          await tx.objectStore('checklist_items').delete(chk.id);
+        }
+      }
+      await tx.objectStore('tasks').delete(taskId);
+      await tx.done;
+      await this.refreshSnapshot();
+    });
+  }
+
+  async permanentlyDeleteProject(projectId: string): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const tx = db.transaction(['projects', 'headings', 'tasks'], 'readwrite');
+      const allTasks = (await tx.objectStore('tasks').getAll()) as TaskRecord[];
+      for (const t of allTasks) {
+        if (t.projectId === projectId) {
+          await tx.objectStore('tasks').put({
+            ...t,
+            projectId: null,
+            headingId: null,
+            updatedAt: now,
+            isDirty: true
+          });
+        }
+      }
+      const allHeadings = (await tx.objectStore('headings').getAll()) as HeadingRecord[];
+      for (const h of allHeadings) {
+        if (h.projectId === projectId) {
+          await tx.objectStore('headings').delete(h.id);
+        }
+      }
+      await tx.objectStore('projects').delete(projectId);
+      await tx.done;
+      await this.refreshSnapshot();
+    });
+  }
+
+  async emptyTrash(): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const tx = db.transaction(['projects', 'headings', 'tasks', 'checklist_items'], 'readwrite');
+
+      const allTasks = (await tx.objectStore('tasks').getAll()) as TaskRecord[];
+      const deletedTaskIds = new Set(allTasks.filter((t) => t.isDeleted).map((t) => t.id));
+      if (deletedTaskIds.size > 0) {
+        const allChk = (await tx.objectStore('checklist_items').getAll()) as ChecklistItemRecord[];
+        for (const chk of allChk) {
+          if (deletedTaskIds.has(chk.taskId)) {
+            await tx.objectStore('checklist_items').delete(chk.id);
+          }
+        }
+        for (const id of deletedTaskIds) {
+          await tx.objectStore('tasks').delete(id);
+        }
+      }
+
+      const allProjects = (await tx.objectStore('projects').getAll()) as ProjectRecord[];
+      const deletedProjIds = new Set(allProjects.filter((p) => p.isDeleted).map((p) => p.id));
+      if (deletedProjIds.size > 0) {
+        const remainingTasks = (await tx.objectStore('tasks').getAll()) as TaskRecord[];
+        for (const t of remainingTasks) {
+          if (t.projectId && deletedProjIds.has(t.projectId)) {
+            await tx.objectStore('tasks').put({
+              ...t,
+              projectId: null,
+              headingId: null,
+              updatedAt: now,
+              isDirty: true
+            });
+          }
+        }
+        const allHeadings = (await tx.objectStore('headings').getAll()) as HeadingRecord[];
+        for (const h of allHeadings) {
+          if (deletedProjIds.has(h.projectId)) {
+            await tx.objectStore('headings').delete(h.id);
+          }
+        }
+        for (const pId of deletedProjIds) {
+          await tx.objectStore('projects').delete(pId);
+        }
+      }
+
+      await tx.done;
+      await this.refreshSnapshot();
+    });
+  }
+
+  async duplicateTask(taskId: string, copySuffix = 'Copy'): Promise<string | null> {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
       const existing = (await db.get('tasks', taskId)) as TaskRecord | undefined;
-      if (!existing) return null;
+      if (!existing || existing.isDeleted) return null;
       const now = Date.now();
       const newId = crypto.randomUUID();
+      const trimmed = existing.title.trim();
+      const newTitle = trimmed ? `${trimmed} (${copySuffix})` : existing.title;
       await db.put('tasks', {
         ...existing,
         id: newId,
+        title: newTitle,
         status: 'OPEN',
         completedAt: null,
-        sortOrder: existing.sortOrder + 0.5,
+        reminderTime:
+          existing.reminderTime != null && existing.reminderTime > now
+            ? existing.reminderTime
+            : null,
+        sortOrder: existing.sortOrder + 10.0,
         createdAt: now,
         updatedAt: now,
         isDeleted: false,
@@ -696,6 +1067,7 @@ class ThingsLocalDb {
           ...c,
           id: crypto.randomUUID(),
           taskId: newId,
+          isCompleted: false,
           createdAt: now,
           updatedAt: now,
           isDeleted: false,
@@ -1023,18 +1395,25 @@ class ThingsLocalDb {
       const now = Date.now();
       const tx = db.transaction(['projects', 'headings', 'tasks'], 'readwrite');
       const proj = (await tx.objectStore('projects').get(projectId)) as ProjectRecord | undefined;
-      if (proj) {
+      const prevProjects: ProjectRecord[] = [];
+      const prevHeadings: HeadingRecord[] = [];
+      const prevTasks: TaskRecord[] = [];
+
+      if (proj && !proj.isDeleted) {
+        prevProjects.push({ ...proj });
         await tx.objectStore('projects').put({ ...proj, isDeleted: true, updatedAt: now, isDirty: true });
       }
       const headings = (await tx.objectStore('headings').getAll()) as HeadingRecord[];
       for (const h of headings) {
         if (h.projectId === projectId && !h.isDeleted) {
+          prevHeadings.push({ ...h });
           await tx.objectStore('headings').put({ ...h, isDeleted: true, updatedAt: now, isDirty: true });
         }
       }
       const tasks = (await tx.objectStore('tasks').getAll()) as TaskRecord[];
       for (const t of tasks) {
         if (t.projectId === projectId && !t.isDeleted) {
+          prevTasks.push({ ...t });
           await tx.objectStore('tasks').put({
             ...t,
             projectId: null,
@@ -1046,8 +1425,120 @@ class ThingsLocalDb {
         }
       }
       await tx.done;
+
+      if (prevProjects.length > 0) {
+        this.lastUndoSnapshot = {
+          tasks: prevTasks,
+          checklistItems: [],
+          projects: prevProjects,
+          headings: prevHeadings,
+          spawnedTaskIds: []
+        };
+        this.emitUndoEvent({
+          kind: 'project_deleted',
+          entityTitle: prevProjects[0].title,
+          count: 1
+        });
+      }
+
       await this.refreshSnapshot();
       this.triggerSync();
+    });
+  }
+
+  /**
+   * Duplicates a Project along with its non-deleted Headings, OPEN To-Dos, and their Checklist Items
+   * (matching Android v1.7.0 ThingsRepository.duplicateProject).
+   */
+  async duplicateProject(projectId: string, copySuffix = 'Copy'): Promise<string | null> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const tx = db.transaction(['projects', 'headings', 'tasks', 'checklist_items'], 'readwrite');
+      const source = (await tx.objectStore('projects').get(projectId)) as ProjectRecord | undefined;
+      if (!source || source.isDeleted) {
+        await tx.done;
+        return null;
+      }
+
+      const newProjectId = crypto.randomUUID();
+      const baseTitle = source.title.trim();
+      const newTitle = baseTitle ? `${baseTitle} (${copySuffix})` : copySuffix;
+
+      const clonedProject: ProjectRecord = {
+        ...source,
+        id: newProjectId,
+        title: newTitle,
+        status: 'ACTIVE',
+        completedAt: null,
+        sortOrder: source.sortOrder + 1,
+        createdAt: now,
+        updatedAt: now,
+        isDeleted: false,
+        isDirty: true
+      };
+      await tx.objectStore('projects').put(clonedProject);
+
+      const allHeadings = (await tx.objectStore('headings').getAll()) as HeadingRecord[];
+      const headingIdMap = new Map<string, string>();
+      for (const h of allHeadings) {
+        if (h.projectId === projectId && !h.isDeleted) {
+          const newHeadingId = crypto.randomUUID();
+          headingIdMap.set(h.id, newHeadingId);
+          await tx.objectStore('headings').put({
+            ...h,
+            id: newHeadingId,
+            projectId: newProjectId,
+            createdAt: now,
+            updatedAt: now,
+            isDeleted: false,
+            isDirty: true
+          } satisfies HeadingRecord);
+        }
+      }
+
+      const allTasks = (await tx.objectStore('tasks').getAll()) as TaskRecord[];
+      const allChecklist = (await tx.objectStore('checklist_items').getAll()) as ChecklistItemRecord[];
+      for (const t of allTasks) {
+        if (t.projectId === projectId && !t.isDeleted && t.status === 'OPEN') {
+          const newTaskId = crypto.randomUUID();
+          const mappedHeadingId = t.headingId ? (headingIdMap.get(t.headingId) ?? null) : null;
+          await tx.objectStore('tasks').put({
+            ...t,
+            id: newTaskId,
+            projectId: newProjectId,
+            headingId: mappedHeadingId,
+            status: 'OPEN',
+            completedAt: null,
+            reminderTime: null,
+            createdAt: now,
+            updatedAt: now,
+            isDeleted: false,
+            isDirty: true
+          } satisfies TaskRecord);
+
+          const taskChecklist = allChecklist
+            .filter((ci) => ci.taskId === t.id && !ci.isDeleted)
+            .sort((a, b) => a.sortOrder - b.sortOrder);
+          for (const ci of taskChecklist) {
+            await tx.objectStore('checklist_items').put({
+              ...ci,
+              id: crypto.randomUUID(),
+              taskId: newTaskId,
+              isCompleted: false,
+              createdAt: now,
+              updatedAt: now,
+              isDeleted: false,
+              isDirty: true
+            } satisfies ChecklistItemRecord);
+          }
+        }
+      }
+
+      await tx.done;
+      await this.refreshSnapshot();
+      this.triggerSync();
+      return newProjectId;
     });
   }
 
@@ -1478,9 +1969,10 @@ class ThingsLocalDb {
         dailyDigestMinute: prefs.dailyDigestMinute,
         languageTag: prefs.language === 'system' ? '' : prefs.language,
         calendarEventsEnabled: prefs.calendarEventsEnabled,
-        selectedCalendarIds: prefs.selectedCalendarIds
+        selectedCalendarIds: prefs.selectedCalendarIds,
+        groupTodayByProjectOrArea: prefs.groupTodayByProjectOrArea
       },
-      appVersionName: '1.6.23-chromeos'
+      appVersionName: '1.7.0-chromeos'
     });
     const bytes = await encodeThingsBackup(payload, password);
     return {

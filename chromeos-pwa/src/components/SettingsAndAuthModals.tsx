@@ -300,6 +300,9 @@ const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
         if (p.calendarEventsEnabled != null) {
           restoredPatch.calendarEventsEnabled = Boolean(p.calendarEventsEnabled);
         }
+        if (p.groupTodayByProjectOrArea != null) {
+          restoredPatch.groupTodayByProjectOrArea = Boolean(p.groupTodayByProjectOrArea);
+        }
         if (Array.isArray(p.selectedCalendarIds)) {
           restoredPatch.selectedCalendarIds = p.selectedCalendarIds.filter(
             (id): id is string => typeof id === 'string' && id.trim().length > 0
@@ -452,6 +455,7 @@ interface SettingsModalProps {
   calendarError: string | null;
   t: TranslationStrings;
   onUpdatePrefs: (patch: Partial<AppPreferences>) => void;
+  onToggleBiometricAppLock: (enabled: boolean) => void;
   onToggleCalendarEventsEnabled: (enabled: boolean) => void;
   onRequestCalendarAccess: () => Promise<void>;
   onImportIcsFile: (icsText: string, fileName: string) => Promise<void>;
@@ -475,6 +479,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   calendarError,
   t,
   onUpdatePrefs,
+  onToggleBiometricAppLock,
   onToggleCalendarEventsEnabled,
   onRequestCalendarAccess,
   onImportIcsFile,
@@ -758,6 +763,91 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               >
                 <Bell size={14} />
                 <span>{t.notificationsTitle}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 3a. Workflow, Today Grouping & App Lock Section (Android v1.7.0 Parity) */}
+          <div
+            data-testid="settings-workflow-security-section"
+            style={{
+              padding: '12px 14px',
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--bg-subtle)',
+              border: '1px solid var(--border-subtle)',
+              marginBottom: 16
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 12.5,
+                fontWeight: 700,
+                marginBottom: 10
+              }}
+            >
+              <ShieldCheck size={15} style={{ color: 'var(--things-blue)' }} />
+              <span>{t.settingsWorkflowSecuritySection}</span>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                paddingBottom: 10,
+                borderBottom: '1px solid var(--border-subtle)'
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.3, fontWeight: 600 }}>
+                  {t.settingsGroupTodayTitle}
+                </div>
+                <div style={{ fontSize: 11.8, color: 'var(--text-secondary)', marginTop: 2 }}>
+                  {t.settingsGroupTodayDesc}
+                </div>
+              </div>
+              <button
+                type="button"
+                data-testid="settings-group-today-toggle"
+                aria-label={t.settingsGroupTodayTitle}
+                className={`toggle-switch ${prefs.groupTodayByProjectOrArea ? 'on' : ''}`}
+                onClick={() =>
+                  onUpdatePrefs({ groupTodayByProjectOrArea: !prefs.groupTodayByProjectOrArea })
+                }
+              >
+                <span className="toggle-switch-knob" />
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                paddingTop: 10
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.3, fontWeight: 600 }}>
+                  {t.settingsBiometricLockTitle}
+                </div>
+                <div style={{ fontSize: 11.8, color: 'var(--text-secondary)', marginTop: 2 }}>
+                  {t.settingsBiometricLockDesc}
+                </div>
+              </div>
+              <button
+                type="button"
+                data-testid="settings-app-lock-toggle"
+                aria-label={t.settingsBiometricLockTitle}
+                className={`toggle-switch ${prefs.biometricAppLockEnabled ? 'on' : ''}`}
+                onClick={() => onToggleBiometricAppLock(!prefs.biometricAppLockEnabled)}
+              >
+                <span className="toggle-switch-knob" />
               </button>
             </div>
           </div>

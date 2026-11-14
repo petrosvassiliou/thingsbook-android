@@ -6,6 +6,12 @@ public struct FirebaseConfig: Codable, Equatable, Sendable {
     public var apiKey: String
     public var appId: String
 
+    public init(projectId: String, apiKey: String, appId: String) {
+        self.projectId = projectId
+        self.apiKey = apiKey
+        self.appId = appId
+    }
+
     public static let defaultProduction = FirebaseConfig(
         projectId: "thingsbook-prod",
         apiKey: "AIzaSyCUtSvssQOesHW-heLhNzNvykI1zCl7deY",

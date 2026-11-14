@@ -1167,17 +1167,17 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     }
 
     /// Soft-deletes project and detaches its open tasks so they aren't lost; returns detached task map for Undo.
-    public func softDeleteProject(_ projectId: String) throws -> [String: (projectId: String?, headingId: String?)] {
-        let detached = try queue.sync { () -> [String: (projectId: String?, headingId: String?)] in
+    public func softDeleteProject(_ projectId: String) throws -> [String: DetachedTaskPlacement] {
+        let detached = try queue.sync { () -> [String: DetachedTaskPlacement] in
             let now = nowMillis()
             return try inTransactionLocked {
-                var previousMap: [String: (projectId: String?, headingId: String?)] = [:]
+                var previousMap: [String: DetachedTaskPlacement] = [:]
                 let q = try prepareLocked("SELECT id, project_id, heading_id FROM tasks WHERE project_id = ? AND is_deleted = 0;")
                 defer { sqlite3_finalize(q) }
                 bindText(q, 1, projectId)
                 while sqlite3_step(q) == SQLITE_ROW {
                     if let tid = colString(q, 0) {
-                        previousMap[tid] = (colString(q, 1), colString(q, 2))
+                        previousMap[tid] = DetachedTaskPlacement(projectId: colString(q, 1), headingId: colString(q, 2))
                     }
                 }
 
@@ -1200,7 +1200,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         return detached
     }
 
-    public func restoreDeletedProject(projectId: String, previousTasks: [String: (projectId: String?, headingId: String?)]) throws {
+    public func restoreDeletedProject(projectId: String, previousTasks: [String: DetachedTaskPlacement]) throws {
         try queue.sync {
             let now = nowMillis()
             try inTransactionLocked {

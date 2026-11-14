@@ -68,27 +68,32 @@ public final class AppleCalendarService: @unchecked Sendable {
         let predicate = eventStore.predicateForEvents(withStart: startDate, end: endDate, calendars: targetCals)
         let events = eventStore.events(matching: predicate)
 
-        return events.map { ev in
-            let startMillis = Int64(ev.startDate.timeIntervalSince1970 * 1000.0)
-            let rawEndMillis = Int64(ev.endDate.timeIntervalSince1970 * 1000.0)
-            let startEpochDay = DateEpochConverter.epochDay(for: ev.startDate, calendar: calendar)
+        return events.compactMap { ev -> CalendarEventItem? in
+            guard let evStart = ev.startDate,
+                  let evEnd = ev.endDate,
+                  let cal = ev.calendar else {
+                return nil
+            }
+            let startMillis = Int64(evStart.timeIntervalSince1970 * 1000.0)
+            let rawEndMillis = Int64(evEnd.timeIntervalSince1970 * 1000.0)
+            let startEpochDay = DateEpochConverter.epochDay(for: evStart, calendar: calendar)
 
             // For all-day or midnight-ending events, subtract 1 second when computing inclusive end day
-            let adjustedEnd = ev.endDate.timeIntervalSince(ev.startDate) >= 60
-                ? ev.endDate.addingTimeInterval(-1)
-                : ev.endDate
+            let adjustedEnd: Date = evEnd.timeIntervalSince(evStart) >= 60
+                ? evEnd.addingTimeInterval(-1)
+                : evEnd
             let endEpochDay = max(startEpochDay, DateEpochConverter.epochDay(for: adjustedEnd, calendar: calendar))
 
             return CalendarEventItem(
                 id: "\(ev.eventIdentifier ?? UUID().uuidString)_\(startMillis)",
                 eventIdentifier: ev.eventIdentifier ?? "",
-                calendarId: ev.calendar.calendarIdentifier,
-                calendarDisplayName: ev.calendar.title,
+                calendarId: cal.calendarIdentifier,
+                calendarDisplayName: cal.title,
                 title: (ev.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
                 startMillis: startMillis,
                 endMillis: max(startMillis, rawEndMillis),
                 isAllDay: ev.isAllDay,
-                colorHex: Self.hexFromCGColor(ev.calendar.cgColor),
+                colorHex: Self.hexFromCGColor(cal.cgColor),
                 startDateEpochDay: startEpochDay,
                 endDateInclusiveEpochDay: endEpochDay
             )

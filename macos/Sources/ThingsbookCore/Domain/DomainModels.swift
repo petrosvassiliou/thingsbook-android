@@ -398,10 +398,20 @@ public struct AppPreferences: Codable, Equatable, Sendable {
     }
 }
 
+public struct DetachedTaskPlacement: Equatable, Hashable, Sendable {
+    public let projectId: String?
+    public let headingId: String?
+
+    public init(projectId: String?, headingId: String?) {
+        self.projectId = projectId
+        self.headingId = headingId
+    }
+}
+
 public enum UndoActionKind: Equatable, Sendable {
     case taskCompleted(taskId: String, title: String, spawnedRecurringTaskId: String?)
     case taskDeleted(taskId: String, title: String)
-    case projectDeleted(projectId: String, title: String, previousTaskProjects: [String: (projectId: String?, headingId: String?)])
+    case projectDeleted(projectId: String, title: String, previousTaskProjects: [String: DetachedTaskPlacement])
 }
 
 public struct UndoBannerState: Identifiable, Equatable, Sendable {

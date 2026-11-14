@@ -47,20 +47,20 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Publish Rolling macOS Universal DMG Pre-Release (for 1-Command Installer)
+      - name: Publish macOS Universal DMG Pre-Release (Compatible with GitHub Immutable Releases)
         if: github.event_name == 'push' && github.ref == 'refs/heads/macOS'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if ! gh release view macos-latest >/dev/null 2>&1; then
-            gh release create macos-latest \
-              --prerelease \
-              --target "${{ github.sha }}" \
-              --title "Thingsbook for macOS (Latest Universal Build)" \
-              --notes "Rolling Universal (Apple Silicon + Intel) macOS DMG built from the \`macOS\` branch. Install or update in one command without Gatekeeper prompts:
+          TAG="macos-build-${{ github.run_number }}"
+          gh release create "$TAG" macos/dist/*.dmg \
+            --draft \
+            --prerelease \
+            --target "${{ github.sha }}" \
+            --title "Thingsbook for macOS (Universal Build #${{ github.run_number }})" \
+            --notes "Universal (Apple Silicon + Intel) macOS DMG built from \`macOS\`. Install or update in one command without Gatekeeper prompts:
 
           \`\`\`bash
           curl -fsSL https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/macOS/macos/install.sh | bash
           \`\`\`"
-          fi
-          gh release upload macos-latest macos/dist/*.dmg --clobber
+          gh release edit "$TAG" --draft=false --prerelease

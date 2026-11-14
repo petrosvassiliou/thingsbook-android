@@ -7,7 +7,19 @@ set -euo pipefail
 
 APP_NAME="Thingsbook"
 INSTALL_DIR="/Applications"
-DMG_URL="${THINGSBOOK_DMG_URL:-https://github.com/petrosvassiliou/thingsbook-android/releases/download/macos-latest/Thingsbook-macOS-Universal.dmg}"
+RELEASES_API="https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases?per_page=15"
+
+if [ -n "${THINGSBOOK_DMG_URL:-}" ]; then
+  DMG_URL="$THINGSBOOK_DMG_URL"
+else
+  echo "🔍 Locating latest $APP_NAME Universal macOS build..."
+  DMG_URL="$(curl -fsSL "$RELEASES_API" | grep -Eo 'https://github\.com/petrosvassiliou/thingsbook-android/releases/download/[^"]+\.dmg' | head -n 1 || true)"
+fi
+
+if [ -z "$DMG_URL" ]; then
+  echo "❌ Error: Could not locate a published macOS .dmg asset on GitHub Releases." >&2
+  exit 1
+fi
 
 TMP_DIR="$(mktemp -d)"
 DMG_PATH="$TMP_DIR/Thingsbook-macOS-Universal.dmg"
@@ -21,7 +33,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "⬇️  Downloading latest $APP_NAME for macOS (Universal arm64 + x86_64)..."
+echo "⬇️  Downloading $DMG_URL ..."
 curl -fL --progress-bar "$DMG_URL" -o "$DMG_PATH"
 
 echo "💿 Mounting disk image..."

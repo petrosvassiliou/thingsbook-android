@@ -546,6 +546,9 @@ button {
   right: 0;
   top: calc(100% + 6px);
   min-width: 190px;
+  max-height: min(320px, calc(100dvh - 80px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--bg-card);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
@@ -1304,12 +1307,17 @@ button {
 .context-menu {
   position: fixed;
   width: 248px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--bg-card);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-modal);
   padding: 5px;
-  z-index: 85;
+  z-index: 200;
 }
 
 .context-menu-banner {
@@ -1349,6 +1357,10 @@ button {
   font-size: 12.8px;
   text-align: left;
   color: var(--text-primary);
+}
+
+.context-menu-item svg {
+  flex-shrink: 0;
 }
 
 .context-menu-item:hover {

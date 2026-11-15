@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Archive,
   ArrowDown,
@@ -44,6 +45,7 @@ import {
   DEFAULT_TIMEBLOCK_DURATION_MINUTES,
   TIMEBLOCK_DURATION_PRESETS,
   TIMEBLOCK_QUICK_START_MINUTES,
+  computeClampedContextMenuPosition,
   formatMinutesAsClock,
   formatTimeblockRange,
   parseClockToMinutes
@@ -261,8 +263,14 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const [newSubtask, setNewSubtask] = useState('');
   const [animStage, setAnimStage] = useState<'idle' | 'strike' | 'glide'>('idle');
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
+  const [statusMenuFlipUp, setStatusMenuFlipUp] = useState(false);
   const [timeblockOpen, setTimeblockOpen] = useState(false);
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{
+    anchorX: number;
+    anchorY: number;
+    x: number;
+    y: number;
+  } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [fileDropOver, setFileDropOver] = useState(false);
   const [loadingAi, setLoadingAi] = useState(false);
@@ -270,6 +278,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 
   const strikeTimerRef = useRef<number | null>(null);
   const glideTimerRef = useRef<number | null>(null);
+  const ctxMenuRef = useRef<HTMLDivElement | null>(null);
   const subtaskRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const addSubtaskInputRef = useRef<HTMLInputElement | null>(null);
   const attachmentFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -334,6 +343,42 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     };
   }, []);
 
+  useLayoutEffect(() => {
+    if (!ctxMenu) return;
+    const reclampMenu = () => {
+      const el = ctxMenuRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const clamped = computeClampedContextMenuPosition(
+        ctxMenu.anchorX,
+        ctxMenu.anchorY,
+        rect.width,
+        rect.height,
+        window.innerWidth,
+        window.innerHeight,
+        12
+      );
+      setCtxMenu((prev) => {
+        if (!prev) return null;
+        if (prev.x === clamped.left && prev.y === clamped.top) return prev;
+        return { ...prev, x: clamped.left, y: clamped.top };
+      });
+    };
+
+    reclampMenu();
+    const handleKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') {
+        setCtxMenu(null);
+      }
+    };
+    window.addEventListener('resize', reclampMenu);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('resize', reclampMenu);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [ctxMenu, lang, isSelected, task.status, task.durationMinutes]);
+
   const clearAnimTimers = () => {
     if (strikeTimerRef.current) {
       window.clearTimeout(strikeTimerRef.current);
@@ -371,9 +416,17 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     });
   };
 
+  const updateCheckboxMenuPlacement = (target: EventTarget | null) => {
+    if (target instanceof HTMLElement) {
+      const rect = target.getBoundingClientRect();
+      setStatusMenuFlipUp(rect.bottom + 115 > window.innerHeight - 12);
+    }
+  };
+
   const handlePrimaryCheckboxClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (e.altKey) {
+      updateCheckboxMenuPlacement(e.currentTarget);
       setStatusMenuOpen((v) => !v);
       return;
     }
@@ -404,6 +457,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const handleCheckboxContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    updateCheckboxMenuPlacement(e.currentTarget);
     setStatusMenuOpen(true);
   };
 
@@ -525,7 +579,12 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           />
           <div
             className="dropdown-popover"
-            style={{ left: 0, right: 'auto', minWidth: 185 }}
+            style={{
+              left: 0,
+              right: 'auto',
+              minWidth: 185,
+              ...(statusMenuFlipUp ? { top: 'auto', bottom: 'calc(100% + 6px)' } : {})
+            }}
             onClick={(e) => e.stopPropagation()}
           >
             {task.status !== 'COMPLETED' && (
@@ -1200,9 +1259,21 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           if (quickFindOpen) return;
           e.preventDefault();
           e.stopPropagation();
-          const x = Math.min(e.clientX, window.innerWidth - 264);
-          const y = Math.min(e.clientY, window.innerHeight - 360);
-          setCtxMenu({ x: Math.max(8, x), y: Math.max(8, y) });
+          const initial = computeClampedContextMenuPosition(
+            e.clientX,
+            e.clientY,
+            256,
+            510,
+            window.innerWidth,
+            window.innerHeight,
+            12
+          );
+          setCtxMenu({
+            anchorX: e.clientX,
+            anchorY: e.clientY,
+            x: initial.left,
+            y: initial.top
+          });
         }}
       >
         {renderCheckboxWithStatusMenu()}
@@ -1332,194 +1403,199 @@ export const TaskItem: React.FC<TaskItemProps> = ({
         </span>
       </div>
 
-      {/* Right-Click TaskContextDropdownMenu */}
-      {ctxMenu && !quickFindOpen && (
-        <>
-          <div
-            style={{ position: 'fixed', inset: 0, zIndex: 84 }}
-            onClick={() => setCtxMenu(null)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              setCtxMenu(null);
-            }}
-          />
-          <div
-            className="context-menu"
-            style={{ left: ctxMenu.x, top: ctxMenu.y }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header Banner with Blue Dot + Task Title */}
-            <div className="context-menu-banner">
-              <span className="context-menu-dot" />
-              <span className="context-menu-task-title">
-                {task.title || t.placeholderTodoTitle}
-              </span>
-            </div>
-            <div className="context-menu-divider" />
-
-            {/* 1. Select / Deselect */}
-            <button
-              type="button"
-              className="context-menu-item"
-              onClick={() => {
+      {/* Right-Click TaskContextDropdownMenu (portaled to document.body & clamped to viewport) */}
+      {ctxMenu &&
+        !quickFindOpen &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <>
+            <div
+              style={{ position: 'fixed', inset: 0, zIndex: 199 }}
+              onClick={() => setCtxMenu(null)}
+              onContextMenu={(e) => {
+                e.preventDefault();
                 setCtxMenu(null);
-                onSelect(true);
               }}
+            />
+            <div
+              ref={ctxMenuRef}
+              className="context-menu"
+              style={{ left: ctxMenu.x, top: ctxMenu.y }}
+              onClick={(e) => e.stopPropagation()}
             >
-              <CheckSquare size={14} />
-              <span>{isSelected ? t.ctxDeselect : t.ctxSelect}</span>
-            </button>
+              {/* Header Banner with Blue Dot + Task Title */}
+              <div className="context-menu-banner">
+                <span className="context-menu-dot" />
+                <span className="context-menu-task-title">
+                  {task.title || t.placeholderTodoTitle}
+                </span>
+              </div>
+              <div className="context-menu-divider" />
 
-            {/* 2. Mark Completed / Reopen */}
-            <button
-              type="button"
-              className="context-menu-item"
-              onClick={() => {
-                setCtxMenu(null);
-                void commitStatus(task.status === 'OPEN' ? 'COMPLETED' : 'OPEN');
-              }}
-            >
-              {task.status === 'OPEN' ? <CheckCircle2 size={14} /> : <RotateCcw size={14} />}
-              <span>{task.status === 'OPEN' ? t.actionComplete : t.actionReopenTodo}</span>
-            </button>
-
-            {/* 3. When? (Date & Reminder) */}
-            <button
-              type="button"
-              className="context-menu-item"
-              onClick={() => {
-                setCtxMenu(null);
-                onOpenWhenModal(task.id);
-              }}
-            >
-              <Calendar size={14} />
-              <span>{t.ctxWhenReminder}</span>
-            </button>
-
-            {/* 4. Deadline */}
-            <button
-              type="button"
-              className="context-menu-item"
-              onClick={() => {
-                setCtxMenu(null);
-                onOpenDeadlineModal(task.id);
-              }}
-            >
-              <Flag size={14} />
-              <span>{t.actionDeadline}</span>
-            </button>
-
-            {/* 5. Repeat */}
-            <button
-              type="button"
-              className="context-menu-item"
-              onClick={() => {
-                setCtxMenu(null);
-                onOpenRepeatModal(task.id);
-              }}
-            >
-              <Repeat size={14} />
-              <span>{t.actionRepeat}</span>
-            </button>
-
-            {/* 6. Move (Area / Project) */}
-            <button
-              type="button"
-              className="context-menu-item"
-              onClick={() => {
-                setCtxMenu(null);
-                onOpenMoveModal(task.id);
-              }}
-            >
-              <FolderInput size={14} />
-              <span>{t.ctxMoveContainer}</span>
-            </button>
-
-            {/* 7. Assign Tags */}
-            <button
-              type="button"
-              className="context-menu-item"
-              onClick={() => {
-                setCtxMenu(null);
-                onOpenTagsModal(task.id);
-              }}
-            >
-              <Tag size={14} />
-              <span>{t.ctxAssignTags}</span>
-            </button>
-
-            {/* 8. Magic Breakdown (Gemini ✨) */}
-            <button
-              type="button"
-              className="context-menu-item"
-              onClick={() => {
-                setCtxMenu(null);
-                onExpand();
-                void runMagicBreakdown();
-              }}
-            >
-              <Sparkles size={14} style={{ color: 'var(--gemini-violet)' }} />
-              <span>{t.geminiMagicBreakdown} ✨</span>
-            </button>
-
-            {/* 9. Start Focus Timer (task.durationMinutes ?? 25m) */}
-            {task.status === 'OPEN' && (
+              {/* 1. Select / Deselect */}
               <button
                 type="button"
                 className="context-menu-item"
                 onClick={() => {
                   setCtxMenu(null);
-                  onStartFocusTimer(task.id, task.title, task.durationMinutes ?? 25);
+                  onSelect(true);
                 }}
               >
-                <Timer size={14} style={{ color: 'var(--things-blue)' }} />
-                <span>{t.actionFocusTimerMinutes(focusDurationMins)}</span>
+                <CheckSquare size={14} />
+                <span>{isSelected ? t.ctxDeselect : t.ctxSelect}</span>
               </button>
-            )}
 
-            {/* 10. Duplicate To-Do */}
-            <button
-              type="button"
-              className="context-menu-item"
-              onClick={() => {
-                setCtxMenu(null);
-                onDuplicateTask(task.id);
-              }}
-            >
-              <Copy size={14} />
-              <span>{t.actionDuplicateTodo}</span>
-            </button>
+              {/* 2. Mark Completed / Reopen */}
+              <button
+                type="button"
+                className="context-menu-item"
+                onClick={() => {
+                  setCtxMenu(null);
+                  void commitStatus(task.status === 'OPEN' ? 'COMPLETED' : 'OPEN');
+                }}
+              >
+                {task.status === 'OPEN' ? <CheckCircle2 size={14} /> : <RotateCcw size={14} />}
+                <span>{task.status === 'OPEN' ? t.actionComplete : t.actionReopenTodo}</span>
+              </button>
 
-            <div className="context-menu-divider" />
+              {/* 3. When? (Date & Reminder) */}
+              <button
+                type="button"
+                className="context-menu-item"
+                onClick={() => {
+                  setCtxMenu(null);
+                  onOpenWhenModal(task.id);
+                }}
+              >
+                <Calendar size={14} />
+                <span>{t.ctxWhenReminder}</span>
+              </button>
 
-            {/* 9. Mark as Canceled */}
-            <button
-              type="button"
-              className="context-menu-item"
-              onClick={() => {
-                setCtxMenu(null);
-                void commitStatus('CANCELED');
-              }}
-            >
-              <XCircle size={14} />
-              <span>{t.actionCancelTodo}</span>
-            </button>
+              {/* 4. Deadline */}
+              <button
+                type="button"
+                className="context-menu-item"
+                onClick={() => {
+                  setCtxMenu(null);
+                  onOpenDeadlineModal(task.id);
+                }}
+              >
+                <Flag size={14} />
+                <span>{t.actionDeadline}</span>
+              </button>
 
-            {/* 10. Delete To-Do */}
-            <button
-              type="button"
-              className="context-menu-item danger"
-              onClick={() => {
-                setCtxMenu(null);
-                void localDb.softDeleteTasks([task.id]);
-              }}
-            >
-              <Trash2 size={14} />
-              <span>{t.actionDelete}</span>
-            </button>
-          </div>
-        </>
-      )}
+              {/* 5. Repeat */}
+              <button
+                type="button"
+                className="context-menu-item"
+                onClick={() => {
+                  setCtxMenu(null);
+                  onOpenRepeatModal(task.id);
+                }}
+              >
+                <Repeat size={14} />
+                <span>{t.actionRepeat}</span>
+              </button>
+
+              {/* 6. Move (Area / Project) */}
+              <button
+                type="button"
+                className="context-menu-item"
+                onClick={() => {
+                  setCtxMenu(null);
+                  onOpenMoveModal(task.id);
+                }}
+              >
+                <FolderInput size={14} />
+                <span>{t.ctxMoveContainer}</span>
+              </button>
+
+              {/* 7. Assign Tags */}
+              <button
+                type="button"
+                className="context-menu-item"
+                onClick={() => {
+                  setCtxMenu(null);
+                  onOpenTagsModal(task.id);
+                }}
+              >
+                <Tag size={14} />
+                <span>{t.ctxAssignTags}</span>
+              </button>
+
+              {/* 8. Magic Breakdown (Gemini ✨) */}
+              <button
+                type="button"
+                className="context-menu-item"
+                onClick={() => {
+                  setCtxMenu(null);
+                  onExpand();
+                  void runMagicBreakdown();
+                }}
+              >
+                <Sparkles size={14} style={{ color: 'var(--gemini-violet)' }} />
+                <span>{t.geminiMagicBreakdown} ✨</span>
+              </button>
+
+              {/* 9. Start Focus Timer (task.durationMinutes ?? 25m) */}
+              {task.status === 'OPEN' && (
+                <button
+                  type="button"
+                  className="context-menu-item"
+                  onClick={() => {
+                    setCtxMenu(null);
+                    onStartFocusTimer(task.id, task.title, task.durationMinutes ?? 25);
+                  }}
+                >
+                  <Timer size={14} style={{ color: 'var(--things-blue)' }} />
+                  <span>{t.actionFocusTimerMinutes(focusDurationMins)}</span>
+                </button>
+              )}
+
+              {/* 10. Duplicate To-Do */}
+              <button
+                type="button"
+                className="context-menu-item"
+                onClick={() => {
+                  setCtxMenu(null);
+                  onDuplicateTask(task.id);
+                }}
+              >
+                <Copy size={14} />
+                <span>{t.actionDuplicateTodo}</span>
+              </button>
+
+              <div className="context-menu-divider" />
+
+              {/* 11. Mark as Canceled */}
+              <button
+                type="button"
+                className="context-menu-item"
+                onClick={() => {
+                  setCtxMenu(null);
+                  void commitStatus('CANCELED');
+                }}
+              >
+                <XCircle size={14} />
+                <span>{t.actionCancelTodo}</span>
+              </button>
+
+              {/* 12. Delete To-Do */}
+              <button
+                type="button"
+                className="context-menu-item danger"
+                onClick={() => {
+                  setCtxMenu(null);
+                  void localDb.softDeleteTasks([task.id]);
+                }}
+              >
+                <Trash2 size={14} />
+                <span>{t.actionDelete}</span>
+              </button>
+            </div>
+          </>,
+          document.body
+        )}
     </>
   );
 };

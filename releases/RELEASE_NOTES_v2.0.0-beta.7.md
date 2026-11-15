@@ -10,6 +10,10 @@
 - **Monotonic `lastReviewedAt` Merge Protection**: Cloud Sync (`Firestore` + `ntfy.sh` delta relay + realtime listeners) now merges `lastReviewedAt` monotonically (`max(local, remote)`) across all 3 platforms so concurrent non-review edits or device clock skew never clear or regress a synced project review.
 - **Unified 14-Day Review Detection & Creation Defaults**: Newly created projects on **macOS** and **ChromeOS** now initialize `lastReviewedAt` at creation time (matching **Android**), and all 3 platforms evaluate the 14-day review threshold identically (`lastReviewedAt` when present, falling back to `max(updatedAt, createdAt)` for legacy `v1.8` projects) so Android no longer falsely flags freshly created cross-device projects with `null` `lastReviewedAt`.
 
+### ChromeOS / Web PWA — Task Context Menu & Bottom-Edge Popover Clamping
+- **Full Context Menu Visibility Anywhere on Screen**: Right-clicking a task in the middle or lower portion of the screen on **ChromeOS / Web PWA** now measures the rendered context menu dimensions (`getBoundingClientRect()`) synchronously before paint via a `document.body` portal and clamps the menu cleanly inside the viewport across all languages (including multi-line localized labels) and window heights, so bottom actions (**Cancel** / **Delete**) are never clipped off-screen.
+- **Viewport Resize, Escape & Compact Window Safety**: Added live viewport re-clamping on window resize, `Escape`-to-close support, `max-height: calc(100dvh - 24px)` scroll fallback for compact split-screen windows, and automatic upward flip for bottom-row checkbox status popovers.
+
 ## Downloads & Preview Links
 - **Android (`APK`)**: `Thingsbook-v2.0.0-beta.7-universal-release.apk` (Play Protect friendly, signed with persistent release key)
 - **macOS (`DMG` — Apple Silicon & Intel Universal, macOS 14+)**: `Thingsbook-macOS-v2.0.0-beta.7.dmg` (also available directly via **Settings → Updates → Install & Relaunch** on `v2.0.0-beta.5+`)

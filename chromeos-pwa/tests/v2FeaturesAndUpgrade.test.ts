@@ -13,6 +13,7 @@ import {
   STARTER_GTD_TEMPLATES,
   buildDailyTimeline,
   buildProjectTemplateBlueprint,
+  computeClampedContextMenuPosition,
   detectStalledProjects,
   evaluateProjectStalledStatus,
   formatMinutesAsClock,
@@ -824,5 +825,30 @@ test('v2.0.0-beta.7 cross-device project review sync unifies 14-day review ancho
   );
   assert.equal(afterSyncEval.isStalled, false);
   assert.equal(afterSyncEval.reason, null);
+});
+
+test('ChromeOS 12-item task context menu clamps cleanly inside viewport across top, bottom, right, and split-screen heights', () => {
+  const menuWidth = 248;
+  const menuHeightDe = 498; // Full 12-item context menu with wrapped German label ("Aufgabe auswählen (Mehrfachauswahl)")
+
+  // 1. Top-area click: opens directly at cursor without shifting
+  const topClick = computeClampedContextMenuPosition(420, 160, menuWidth, menuHeightDe, 1366, 768, 12);
+  assert.deepEqual(topClick, { left: 420, top: 160 });
+  assert.ok(topClick.top + menuHeightDe <= 768 - 12);
+
+  // 2. Lower/middle-area click on a 768px ChromeOS display: shifts upward so Cancel & Delete remain 100% visible
+  const lowerClick = computeClampedContextMenuPosition(460, 520, menuWidth, menuHeightDe, 1366, 768, 12);
+  assert.equal(lowerClick.left, 460);
+  assert.equal(lowerClick.top, 768 - menuHeightDe - 12);
+  assert.equal(lowerClick.top + menuHeightDe, 756);
+
+  // 3. Right-edge + bottom-edge click: clamps both X and Y with 12px margin
+  const cornerClick = computeClampedContextMenuPosition(1340, 740, menuWidth, menuHeightDe, 1366, 768, 12);
+  assert.equal(cornerClick.left, 1366 - menuWidth - 12);
+  assert.equal(cornerClick.top, 768 - menuHeightDe - 12);
+
+  // 4. Compact split-screen window shorter than natural menu height: pins cleanly to top margin (paired with CSS max-height scroll)
+  const compactSplit = computeClampedContextMenuPosition(200, 310, menuWidth, 396, 680, 420, 12);
+  assert.deepEqual(compactSplit, { left: 200, top: 12 });
 });
 

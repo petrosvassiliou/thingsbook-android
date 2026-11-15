@@ -3542,7 +3542,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             if localIsDirty {
                 return remoteUpdatedAt > localUpdated
             }
-            return remoteUpdatedAt >= localUpdated
+            return remoteUpdatedAt > localUpdated
         }
         return true
     }

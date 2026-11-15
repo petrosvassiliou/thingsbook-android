@@ -2022,3 +2022,33 @@ export function parseProjectOutlineInput(
     }
   };
 }
+
+export interface ClampedMenuPosition {
+  left: number;
+  top: number;
+}
+
+/**
+ * Computes viewport-clamped `{ left, top }` coordinates for a fixed-position context menu
+ * using the actual rendered menu dimensions so bottom and right items are never clipped off-screen.
+ */
+export function computeClampedContextMenuPosition(
+  anchorX: number,
+  anchorY: number,
+  menuWidth: number,
+  menuHeight: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  margin: number = 12
+): ClampedMenuPosition {
+  const safeMargin = Math.max(0, margin);
+  const safeMenuWidth = Math.max(0, menuWidth);
+  const safeMenuHeight = Math.max(0, menuHeight);
+  const maxLeft = Math.max(safeMargin, viewportWidth - safeMenuWidth - safeMargin);
+  const maxTop = Math.max(safeMargin, viewportHeight - safeMenuHeight - safeMargin);
+
+  return {
+    left: Math.round(Math.min(Math.max(safeMargin, anchorX), maxLeft)),
+    top: Math.round(Math.min(Math.max(safeMargin, anchorY), maxTop))
+  };
+}

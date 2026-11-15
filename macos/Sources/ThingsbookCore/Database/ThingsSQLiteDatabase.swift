@@ -99,6 +99,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     private let baseSupportDirURL: URL
     private let ownsTempAttachmentsDir: Bool
     public var onMutation: (@Sendable () -> Void)?
+    public var onRemoteSyncApplied: (@Sendable () -> Void)?
 
     public static func defaultDatabaseURL() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -552,7 +553,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 } else if t.scheduleState == .today || (t.whenDate != nil && t.whenDate! <= endOfToday) {
                     todayDaytime.append(t)
                 }
-                if t.scheduleState == .upcoming || (t.whenDate != nil && t.whenDate! >= startOfTomorrow) {
+                if (t.scheduleState == .upcoming && (t.whenDate == nil || t.whenDate! >= startOfTomorrow))
+                    || (t.whenDate != nil && t.whenDate! >= startOfTomorrow) {
                     upcoming.append(t)
                 }
                 if t.scheduleState == .anytime || t.scheduleState == .today || t.scheduleState == .thisEvening {
@@ -2289,9 +2291,18 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     }
                 }
             }
+            if appliedAny {
+                rebuildFtsLocked()
+            }
         }
 
-        if appliedAny { notifyMutation() }
+        if appliedAny {
+            if let onRemoteSyncApplied {
+                onRemoteSyncApplied()
+            } else {
+                notifyMutation()
+            }
+        }
         return maxTimestamp
     }
 

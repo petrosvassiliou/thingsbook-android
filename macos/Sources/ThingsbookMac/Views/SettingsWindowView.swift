@@ -110,25 +110,47 @@ public struct SettingsWindowView: View {
     private var generalTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                // Language Card
+                // Language Card (1-Click Flag Icon Selector matching Android)
                 VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Label(store.tr("settings_language"), systemImage: "globe")
-                            .font(.system(size: 13.5, weight: .semibold))
-                        Spacer()
-                        Picker("", selection: $store.preferences.language) {
-                            Text(store.tr("settings_system_default")).tag(AppLanguage.system)
-                            Divider()
-                            Text(store.tr("lang_en")).tag(AppLanguage.en)
-                            Text(store.tr("lang_de")).tag(AppLanguage.de)
-                            Text(store.tr("lang_fr")).tag(AppLanguage.fr)
-                            Text(store.tr("lang_it")).tag(AppLanguage.it)
-                            Text(store.tr("lang_es")).tag(AppLanguage.es)
-                        }
-                        .labelsHidden()
-                        .frame(width: 200)
-                        .onChange(of: store.preferences.language) { _, newLang in
-                            NotificationReminderService.shared.configureCategories(lang: newLang)
+                    Label(store.tr("settings_language"), systemImage: "globe")
+                        .font(.system(size: 13.5, weight: .semibold))
+
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(), spacing: 8),
+                            GridItem(.flexible(), spacing: 8),
+                            GridItem(.flexible(), spacing: 8)
+                        ],
+                        spacing: 8
+                    ) {
+                        ForEach(AppLanguage.orderedMenuCases) { lang in
+                            let isSelected = store.preferences.language == lang
+                            Button {
+                                store.preferences.language = lang
+                                NotificationReminderService.shared.configureCategories(lang: lang)
+                            } label: {
+                                HStack(spacing: 7) {
+                                    Text(lang.flagEmoji)
+                                        .font(.system(size: 16))
+                                    Text(languageLabel(for: lang))
+                                        .font(.system(size: 12.5, weight: isSelected ? .bold : .medium))
+                                        .lineLimit(1)
+                                    Spacer(minLength: 2)
+                                    if isSelected {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 11, weight: .bold))
+                                    }
+                                }
+                                .foregroundStyle(isSelected ? Color.white : Color.primary)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 8)
+                                .frame(maxWidth: .infinity)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .fill(isSelected ? ThingsMacPalette.accentBlue : Color.primary.opacity(0.055))
+                                )
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -230,6 +252,17 @@ public struct SettingsWindowView: View {
         }
     }
 
+    private func languageLabel(for lang: AppLanguage) -> String {
+        switch lang {
+        case .system: return store.tr("settings_system_default")
+        case .en: return store.tr("lang_en")
+        case .de: return store.tr("lang_de")
+        case .it: return store.tr("lang_it")
+        case .fr: return store.tr("lang_fr")
+        case .es: return store.tr("lang_es")
+        }
+    }
+
     private func shortcutRow(title: String, keys: String) -> some View {
         HStack {
             Text(title)
@@ -282,14 +315,34 @@ public struct SettingsWindowView: View {
                 if let userEmail = store.syncSnapshot.userEmailOrId {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 12) {
-                            Image(systemName: "person.crop.circle.badge.checkmark")
-                                .font(.system(size: 24))
-                                .foregroundStyle(ThingsMacPalette.logbookGreen)
+                            Image(
+                                systemName: store.syncSnapshot.errorMessage != nil
+                                    ? "exclamationmark.icloud.fill"
+                                    : (store.preferences.localOnlyDbMode ? "internaldrive.fill" : "person.crop.circle.badge.checkmark")
+                            )
+                            .font(.system(size: 24))
+                            .foregroundStyle(
+                                store.syncSnapshot.errorMessage != nil
+                                    ? ThingsMacPalette.deadlineCrimson
+                                    : (store.preferences.localOnlyDbMode ? Color.secondary : ThingsMacPalette.logbookGreen)
+                            )
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(userEmail)
                                     .font(.system(size: 14, weight: .semibold))
-                                if store.syncSnapshot.lastSyncedAt > 0 {
+
+                                if store.preferences.localOnlyDbMode {
+                                    Text(store.tr("settings_local_mode_active"))
+                                        .font(.system(size: 11.5))
+                                        .foregroundStyle(.secondary)
+                                } else if store.syncSnapshot.status == .syncing {
+                                    HStack(spacing: 6) {
+                                        ProgressView().controlSize(.mini)
+                                        Text(store.tr("sync_status_syncing"))
+                                            .font(.system(size: 11.5))
+                                            .foregroundStyle(ThingsMacPalette.accentBlue)
+                                    }
+                                } else if store.syncSnapshot.lastSyncedAt > 0 {
                                     let formattedDate = DateEpochConverter.date(fromMillis: store.syncSnapshot.lastSyncedAt).formatted()
                                     Text(store.trf("macos_last_synced", formattedDate))
                                         .font(.system(size: 11.5))
@@ -303,20 +356,48 @@ public struct SettingsWindowView: View {
 
                             Spacer()
 
-                            Button(store.tr("sync_action_now")) {
+                            Button {
                                 store.syncNow()
+                            } label: {
+                                HStack(spacing: 6) {
+                                    if store.syncSnapshot.status == .syncing {
+                                        ProgressView().controlSize(.small)
+                                    }
+                                    Text(store.tr("sync_action_now"))
+                                }
                             }
                             .buttonStyle(.borderedProminent)
-                            .disabled(store.preferences.localOnlyDbMode)
+                            .disabled(store.preferences.localOnlyDbMode || store.syncSnapshot.status == .syncing)
 
                             Button(store.tr("auth_sign_out")) {
                                 Task { await store.cloudSync.signOut() }
                             }
                             .buttonStyle(.bordered)
                         }
+
+                        if let syncErr = store.syncSnapshot.errorMessage, !syncErr.isEmpty {
+                            HStack(spacing: 8) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(ThingsMacPalette.deadlineCrimson)
+                                Text(syncErr)
+                                    .font(.system(size: 11.5, weight: .medium))
+                                    .foregroundStyle(ThingsMacPalette.deadlineCrimson)
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(ThingsMacPalette.deadlineCrimson.opacity(0.10))
+                            )
+                        }
                     }
                     .padding(14)
                     .thingsCardSurface(cornerRadius: 11)
+                    .onAppear {
+                        if !store.preferences.localOnlyDbMode {
+                            store.syncNow()
+                        }
+                    }
                 } else {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(store.tr("sync_title"))
@@ -326,14 +407,43 @@ public struct SettingsWindowView: View {
                             .font(.system(size: 11.5))
                             .foregroundStyle(.secondary)
 
+                        Toggle(store.tr("merge_dialog_confirm_merge"), isOn: $mergeLocalOnLogin)
+                            .font(.system(size: 12))
+
+                        Button {
+                            performAuth {
+                                store.preferences.localOnlyDbMode = false
+                                _ = try await store.cloudSync.signInWithGoogleBrowser(
+                                    mergeLocalTasks: mergeLocalOnLogin,
+                                    localOnlyMode: false
+                                )
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                if isAuthBusy {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Image(systemName: "globe")
+                                        .font(.system(size: 13, weight: .semibold))
+                                }
+                                Text(store.tr("auth_sign_in_google"))
+                                    .font(.system(size: 13, weight: .semibold))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 3)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .disabled(isAuthBusy)
+
+                        Divider()
+                            .padding(.vertical, 2)
+
                         TextField(store.tr("auth_email_label"), text: $emailInput)
                             .textFieldStyle(.roundedBorder)
 
                         SecureField(store.tr("auth_password_label"), text: $passwordInput)
                             .textFieldStyle(.roundedBorder)
-
-                        Toggle(store.tr("merge_dialog_confirm_merge"), isOn: $mergeLocalOnLogin)
-                            .font(.system(size: 12))
 
                         if let err = authMessage ?? store.syncSnapshot.errorMessage {
                             Text(err)
@@ -353,7 +463,7 @@ public struct SettingsWindowView: View {
                                     )
                                 }
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(.bordered)
                             .disabled(isAuthBusy || emailInput.trimmingCharacters(in: .whitespaces).isEmpty)
 
                             Button(store.tr("auth_register_account")) {
@@ -891,7 +1001,7 @@ public struct SettingsWindowView: View {
                     Text(
                         store.trf(
                             "macos_version_subtitle",
-                            AppUpdateService.currentVersion,
+                            AppUpdateService.displayVersion,
                             "\(AppUpdateService.currentBuildNumber)"
                         )
                     )
@@ -936,12 +1046,12 @@ public struct SettingsWindowView: View {
                                     updateStatusText = store.trf(
                                         "settings_updates_available_title",
                                         found.versionString,
-                                        AppUpdateService.currentVersion
+                                        AppUpdateService.displayVersion
                                     )
                                 } else {
                                     updateStatusText = store.trf(
                                         "settings_updates_up_to_date",
-                                        AppUpdateService.currentVersion
+                                        AppUpdateService.displayVersion
                                     )
                                 }
                             }

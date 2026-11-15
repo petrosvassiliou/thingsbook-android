@@ -83,8 +83,11 @@ jobs:
           fi
 
           ASSETS=()
+          BASE_TAG="${TAG%%+*}"
           if [ -f "releases/Thingsbook-${TAG}-GTD-Full.apk" ]; then
             ASSETS+=("releases/Thingsbook-${TAG}-GTD-Full.apk")
+          elif [ -f "releases/Thingsbook-${BASE_TAG}-GTD-Full.apk" ]; then
+            ASSETS+=("releases/Thingsbook-${BASE_TAG}-GTD-Full.apk")
           fi
           if [ -f "Thingsbook-Full-GTD-Edition.apk" ]; then
             ASSETS+=("Thingsbook-Full-GTD-Edition.apk")

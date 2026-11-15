@@ -7,6 +7,7 @@ public struct MainWorkspaceView: View {
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isMagicPlusMenuOpen = false
+    @State private var isLanguagePopoverOpen = false
     @State private var decryptPasswordInput = ""
     @State private var decryptError: String?
 
@@ -154,24 +155,27 @@ public struct MainWorkspaceView: View {
                         }
                         .help(store.tr("notifications_title"))
 
-                        // Instant Language Switcher Menu
-                        Menu {
-                            Picker(store.tr("settings_language"), selection: $store.preferences.language) {
-                                Text(store.tr("settings_system_default")).tag(AppLanguage.system)
-                                Divider()
-                                Text(store.tr("lang_en")).tag(AppLanguage.en)
-                                Text(store.tr("lang_de")).tag(AppLanguage.de)
-                                Text(store.tr("lang_fr")).tag(AppLanguage.fr)
-                                Text(store.tr("lang_it")).tag(AppLanguage.it)
-                                Text(store.tr("lang_es")).tag(AppLanguage.es)
-                            }
+                        // Direct 1-Click Language Switcher with Flag Icons (matching Android)
+                        Button {
+                            isLanguagePopoverOpen.toggle()
                         } label: {
-                            Image(systemName: "globe")
+                            if store.preferences.language == .system {
+                                Image(systemName: "globe")
+                            } else {
+                                Text(store.preferences.language.flagEmoji)
+                                    .font(.system(size: 14.5))
+                            }
                         }
                         .help(store.tr("settings_language"))
+                        .popover(isPresented: $isLanguagePopoverOpen, arrowEdge: .bottom) {
+                            languageSelectorPopover
+                        }
 
                         // Cloud Sync Status Button
                         Button {
+                            if !store.preferences.localOnlyDbMode && store.syncSnapshot.userEmailOrId != nil {
+                                store.syncNow()
+                            }
                             store.settingsTab = .sync
                             store.isSettingsPresented = true
                         } label: {
@@ -660,8 +664,65 @@ public struct MainWorkspaceView: View {
         }
     }
 
+    private var languageSelectorPopover: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(AppLanguage.orderedMenuCases) { lang in
+                let isSelected = store.preferences.language == lang
+                Button {
+                    store.preferences.language = lang
+                    isLanguagePopoverOpen = false
+                } label: {
+                    HStack(spacing: 10) {
+                        Text(lang.flagEmoji)
+                            .font(.system(size: 16))
+                            .frame(width: 22, alignment: .center)
+
+                        Text(toolbarLanguageTitle(for: lang))
+                            .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                            .foregroundStyle(.primary)
+
+                        Spacer(minLength: 14)
+
+                        if isSelected {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 11.5, weight: .bold))
+                                .foregroundStyle(ThingsMacPalette.accentBlue)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6.5)
+                    .frame(minWidth: 186, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(isSelected ? ThingsMacPalette.accentBlue.opacity(0.12) : Color.clear)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if lang == .system {
+                    Divider()
+                        .padding(.vertical, 3)
+                }
+            }
+        }
+        .padding(8)
+    }
+
+    private func toolbarLanguageTitle(for lang: AppLanguage) -> String {
+        switch lang {
+        case .system: return store.tr("settings_system_default")
+        case .en: return store.tr("lang_en")
+        case .de: return store.tr("lang_de")
+        case .it: return store.tr("lang_it")
+        case .fr: return store.tr("lang_fr")
+        case .es: return store.tr("lang_es")
+        }
+    }
+
     private var syncDotColor: Color {
         if store.preferences.localOnlyDbMode { return .secondary.opacity(0.6) }
+        if store.syncSnapshot.errorMessage != nil { return ThingsMacPalette.deadlineCrimson }
         switch store.syncSnapshot.status {
         case .synced: return ThingsMacPalette.logbookGreen
         case .syncing: return ThingsMacPalette.todayYellow
@@ -672,6 +733,9 @@ public struct MainWorkspaceView: View {
     private var syncHelpText: String {
         if store.preferences.localOnlyDbMode {
             return store.tr("settings_local_mode_active")
+        }
+        if let err = store.syncSnapshot.errorMessage, !err.isEmpty {
+            return err
         }
         switch store.syncSnapshot.status {
         case .synced: return store.tr("sync_status_synced")

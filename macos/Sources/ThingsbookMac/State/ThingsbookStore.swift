@@ -104,6 +104,9 @@ public final class ThingsbookStore: ObservableObject {
     private var focusTimerCancellable: Timer?
     private var midnightTimer: Timer?
     private var syncDebounceTask: Task<Void, Never>?
+    private var backgroundSyncTask: Task<Void, Never>?
+    private var appActivationObserver: NSObjectProtocol?
+    private var workspaceWakeObserver: NSObjectProtocol?
 
     public init(databasePath: String? = nil) {
         let prefs = AppPreferences.load()
@@ -128,6 +131,12 @@ public final class ThingsbookStore: ObservableObject {
             }
         }
 
+        db.onRemoteSyncApplied = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.reloadSnapshot()
+            }
+        }
+
         NotificationReminderService.shared.configureCategories(lang: prefs.language)
         NotificationReminderService.shared.onActionReceived = { [weak self] taskId, actionId in
             Task { @MainActor [weak self] in
@@ -136,6 +145,7 @@ public final class ThingsbookStore: ObservableObject {
         }
 
         setupMidnightObserver()
+        setupCloudSyncLifecycleObservers()
 
         Task {
             await cloudSync.setObserver { [weak self] snap in
@@ -531,7 +541,7 @@ public final class ThingsbookStore: ObservableObject {
         switch current.action {
         case .taskCompleted(let taskId, _, let spawnedId):
             if let spawnedId {
-                try? database.permanentlyDeleteTask(spawnedId)
+                try? database.softDeleteTask(spawnedId)
             }
             _ = try? database.setTaskStatus(taskId: taskId, status: .open)
         case .taskDeleted(let taskId, _):
@@ -595,8 +605,9 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func syncNow() {
+        syncDebounceTask?.cancel()
         Task {
-            await cloudSync.syncBidirectionalDeltas(forceFullPull: false, localOnlyMode: preferences.localOnlyDbMode)
+            await cloudSync.syncBidirectionalDeltas(forceFullPull: true, localOnlyMode: preferences.localOnlyDbMode)
         }
     }
 
@@ -785,6 +796,47 @@ public final class ThingsbookStore: ObservableObject {
                 guard let self else { return }
                 if let count = try? self.database.performMidnightRollover(), count > 0 {
                     self.reloadSnapshot()
+                }
+            }
+        }
+    }
+
+    private func setupCloudSyncLifecycleObservers() {
+        backgroundSyncTask?.cancel()
+        backgroundSyncTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                guard !Task.isCancelled, let self else { break }
+                let localOnly = await MainActor.run { self.preferences.localOnlyDbMode }
+                guard !localOnly else { continue }
+                if await self.cloudSync.isAuthenticated {
+                    await self.cloudSync.syncBidirectionalDeltas(forceFullPull: false, localOnlyMode: false)
+                }
+            }
+        }
+
+        appActivationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, !self.preferences.localOnlyDbMode else { return }
+                if await self.cloudSync.isAuthenticated {
+                    await self.cloudSync.syncBidirectionalDeltas(forceFullPull: false, localOnlyMode: false)
+                }
+            }
+        }
+
+        workspaceWakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, !self.preferences.localOnlyDbMode else { return }
+                if await self.cloudSync.isAuthenticated {
+                    await self.cloudSync.syncBidirectionalDeltas(forceFullPull: true, localOnlyMode: false)
                 }
             }
         }

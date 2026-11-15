@@ -21,6 +21,7 @@ public struct TaskRowCardView: View {
     @State private var isEditingNotes = false
     @State private var isHoveringRow = false
     @State private var isFileDropTargeted = false
+    @State private var draftSaveTask: Task<Void, Never>?
     @FocusState private var isTitleFocused: Bool
 
     private var isExpanded: Bool {
@@ -51,11 +52,29 @@ public struct TaskRowCardView: View {
         .onAppear {
             syncDrafts()
         }
+        .onDisappear {
+            draftSaveTask?.cancel()
+            commitDraftEditsIfNeeded()
+        }
         .onChange(of: task.title) { _, newValue in
-            if draftTitle != newValue { draftTitle = newValue }
+            if !isExpanded && draftTitle != newValue {
+                draftTitle = newValue
+            }
         }
         .onChange(of: task.notes) { _, newValue in
-            if draftNotes != newValue { draftNotes = newValue }
+            if !isExpanded && draftNotes != newValue {
+                draftNotes = newValue
+            }
+        }
+        .onChange(of: draftTitle) { _, _ in
+            if isExpanded {
+                scheduleDraftAutoSave()
+            }
+        }
+        .onChange(of: draftNotes) { _, _ in
+            if isExpanded {
+                scheduleDraftAutoSave()
+            }
         }
         .onChange(of: isExpanded) { _, expanded in
             if expanded {
@@ -65,6 +84,7 @@ public struct TaskRowCardView: View {
                     isTitleFocused = true
                 }
             } else {
+                draftSaveTask?.cancel()
                 rowVoiceController.stopRecording()
                 commitDraftEditsIfNeeded()
             }
@@ -763,6 +783,15 @@ public struct TaskRowCardView: View {
         draftNotes = task.notes
     }
 
+    private func scheduleDraftAutoSave() {
+        draftSaveTask?.cancel()
+        draftSaveTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard !Task.isCancelled else { return }
+            commitDraftEditsIfNeeded()
+        }
+    }
+
     private func commitDraftEditsIfNeeded() {
         if draftTitle != task.title || draftNotes != task.notes {
             var copy = task
@@ -872,10 +901,13 @@ private struct ChecklistItemRowView: View {
     let item: ChecklistItem
     let allItems: [ChecklistItem]
     @State private var text: String = ""
+    @State private var saveTask: Task<Void, Never>?
 
     var body: some View {
         HStack(spacing: 8) {
             Button {
+                saveTask?.cancel()
+                commitTitle()
                 var copy = item
                 copy.isCompleted.toggle()
                 try? store.database.updateChecklistItem(copy)
@@ -892,6 +924,7 @@ private struct ChecklistItemRowView: View {
                 .foregroundStyle(item.isCompleted ? .secondary : .primary)
                 .strikethrough(item.isCompleted, color: .secondary)
                 .onSubmit {
+                    saveTask?.cancel()
                     commitTitle()
                 }
 
@@ -899,6 +932,8 @@ private struct ChecklistItemRowView: View {
 
             HStack(spacing: 5) {
                 Button {
+                    saveTask?.cancel()
+                    commitTitle()
                     store.moveChecklistItem(item, in: allItems, direction: -1)
                 } label: {
                     Image(systemName: "arrow.up")
@@ -909,6 +944,8 @@ private struct ChecklistItemRowView: View {
                 .help(store.tr("subtask_move_up"))
 
                 Button {
+                    saveTask?.cancel()
+                    commitTitle()
                     store.moveChecklistItem(item, in: allItems, direction: 1)
                 } label: {
                     Image(systemName: "arrow.down")
@@ -919,6 +956,7 @@ private struct ChecklistItemRowView: View {
                 .help(store.tr("subtask_move_down"))
 
                 Button {
+                    saveTask?.cancel()
                     try? store.database.deleteChecklistItem(id: item.id, taskId: item.taskId)
                 } label: {
                     Image(systemName: "xmark")
@@ -931,8 +969,20 @@ private struct ChecklistItemRowView: View {
         }
         .padding(.vertical, 2)
         .onAppear { text = item.title }
+        .onDisappear {
+            saveTask?.cancel()
+            commitTitle()
+        }
         .onChange(of: item.title) { _, newVal in
             if text != newVal { text = newVal }
+        }
+        .onChange(of: text) { _, _ in
+            saveTask?.cancel()
+            saveTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 450_000_000)
+                guard !Task.isCancelled else { return }
+                commitTitle()
+            }
         }
     }
 

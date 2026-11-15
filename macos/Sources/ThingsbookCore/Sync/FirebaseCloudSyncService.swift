@@ -1,5 +1,7 @@
 import Foundation
+import AppKit
 import CryptoKit
+import Darwin
 
 public struct FirebaseConfig: Codable, Equatable, Sendable {
     public var projectId: String
@@ -91,7 +93,8 @@ public enum CloudSyncError: LocalizedError {
     }
 }
 
-/// Pure URLSession Firebase Auth + Firestore v1 Delta Sync engine matching Android (`FirebaseSyncManager.kt`) & ChromeOS (`cloudSync.ts`).
+/// Pure URLSession Firebase Auth + Firestore v1 + Secondary ntfy.sh Delta Sync engine
+/// matching Android (`SyncRepository.kt`) & ChromeOS (`cloudSync.ts`).
 public actor FirebaseCloudSyncService {
     private let database: ThingsSQLiteDatabase
     private let session: URLSession
@@ -99,9 +102,14 @@ public actor FirebaseCloudSyncService {
     private var snapshot = CloudSyncSnapshot()
     private var onStateChange: (@Sendable (CloudSyncSnapshot) -> Void)?
     private var isSyncing = false
+    private var pendingResyncRequested = false
+    private var pendingForceFullPull = false
 
     private static let keychainAccount = "firebase_auth_session_v1"
-    private static let lastSyncPrefix = "thingsbook_macos_last_sync_ts_"
+    private static let lastSyncCursorPrefix = "thingsbook_macos_last_sync_ts_"
+    private static let lastWallSyncPrefix = "thingsbook_macos_last_wall_sync_"
+    /// 2-minute overlap window on incremental pulls so device clock skew never skips peer writes.
+    private static let clockSkewOverlapMillis: Int64 = 120_000
 
     public init(database: ThingsSQLiteDatabase, session: URLSession = .shared) {
         self.database = database
@@ -117,6 +125,10 @@ public actor FirebaseCloudSyncService {
         snapshot
     }
 
+    public var isAuthenticated: Bool {
+        authSession != nil
+    }
+
     public func restoreSessionIfAvailable(localOnlyMode: Bool) async {
         guard let raw = KeychainStore.loadString(account: Self.keychainAccount),
               let data = raw.data(using: .utf8),
@@ -125,22 +137,24 @@ public actor FirebaseCloudSyncService {
             return
         }
         self.authSession = saved
-        let lastSync = loadLastSyncTimestamp(uid: saved.uid)
+        let lastWall = loadLastWallSyncTimestamp(uid: saved.uid)
+        let fallbackCursor = loadLastSyncCursor(uid: saved.uid)
         updateSnapshot(
             CloudSyncSnapshot(
                 status: localOnlyMode ? .offline : .syncing,
                 userEmailOrId: saved.email,
                 userId: saved.uid,
-                lastSyncedAt: lastSync,
+                lastSyncedAt: lastWall > 0 ? lastWall : fallbackCursor,
                 errorMessage: nil
             )
         )
         if !localOnlyMode {
-            await syncBidirectionalDeltas(forceFullPull: false, localOnlyMode: false)
+            // Reconcile full cloud state on launch so upgrades (v1.7 -> v1.8) and offline edits never miss records
+            await syncBidirectionalDeltas(forceFullPull: true, localOnlyMode: false)
         }
     }
 
-    // MARK: - Authentication Flows
+    // MARK: - Authentication Flows (Email/Password, Instant Email, & Native Google OAuth)
 
     public func signInEmail(email rawEmail: String, password: String, mergeLocalTasks: Bool, localOnlyMode: Bool) async throws -> String {
         let email = rawEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -151,11 +165,22 @@ public actor FirebaseCloudSyncService {
         updateSnapshot(patchStatus: .syncing, error: nil)
 
         do {
-            let authRes = try await callAuthEndpoint(
-                endpoint: "accounts:signInWithPassword",
-                apiKey: config.apiKey,
-                body: ["email": email, "password": password, "returnSecureToken": true]
-            )
+            let authRes: AuthTokenResponse
+            do {
+                authRes = try await callAuthEndpoint(
+                    endpoint: "accounts:signInWithPassword",
+                    apiKey: config.apiKey,
+                    body: ["email": email, "password": password, "returnSecureToken": true]
+                )
+            } catch let err as CloudSyncError {
+                let raw = err.localizedDescription.uppercased()
+                if raw.contains("INVALID_LOGIN_CREDENTIALS") || raw.contains("INVALID_PASSWORD") {
+                    throw CloudSyncError.invalidCredentials(
+                        "Incorrect password, or this account uses Google Sign-In. Click 'Continue with Google' below or reset your password."
+                    )
+                }
+                throw err
+            }
             let pwVerifier = Self.sha256Hex("thingsbook-pw-v1:\(email):\(password)")
             let topic = "tb_sync_" + String(Self.sha256Hex("thingsbook-chan-v1:\(email):\(pwVerifier)").prefix(28))
             try await finalizeLogin(authRes: authRes, email: email, topic: topic, mergeLocalTasks: mergeLocalTasks, localOnlyMode: localOnlyMode)
@@ -225,13 +250,98 @@ public actor FirebaseCloudSyncService {
                     )
                 } catch {
                     throw CloudSyncError.invalidCredentials(
-                        "A custom password is already set for \(email). Enter your password above and click Sign In."
+                        "Account \(email) is linked with Google or has a custom password. Click 'Continue with Google' below, or enter your password above."
                     )
                 }
             }
             let topic = "tb_sync_" + String(Self.sha256Hex("thingsbook-instant:\(email)").prefix(28))
             try await finalizeLogin(authRes: authRes, email: email, topic: topic, mergeLocalTasks: mergeLocalTasks, localOnlyMode: localOnlyMode)
             return email
+        } catch {
+            updateSnapshot(patchStatus: .offline, error: error.localizedDescription)
+            throw error
+        }
+    }
+
+    /// Signs in with Google via secure localhost loopback callback bridged through Thingsbook's authorized Firebase Hosting domain,
+    /// exchanging the Google credential via Firebase IdentityToolkit `accounts:signInWithIdp` for a native macOS session.
+    public func signInWithGoogleBrowser(mergeLocalTasks: Bool, localOnlyMode: Bool) async throws -> String {
+        let config = FirebaseConfig.loadActive()
+        updateSnapshot(patchStatus: .syncing, error: nil)
+
+        do {
+            let stateNonce = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+            let loopback = try Self.createLoopbackServerSocket()
+            defer { Darwin.close(loopback.fd) }
+
+            let webHost = "https://\(config.projectId).web.app"
+            guard var comps = URLComponents(string: "\(webHost)/") else {
+                throw CloudSyncError.networkFailure("Invalid Firebase Hosting URL.")
+            }
+            comps.queryItems = [
+                URLQueryItem(name: "macos_google_auth", value: "1"),
+                URLQueryItem(name: "port", value: String(loopback.port)),
+                URLQueryItem(name: "state", value: stateNonce)
+            ]
+            guard let authUrl = comps.url else {
+                throw CloudSyncError.networkFailure("Could not construct Google Sign-In URL.")
+            }
+
+            await MainActor.run {
+                _ = NSWorkspace.shared.open(authUrl)
+            }
+
+            let callbackParams = try await Self.awaitLoopbackOAuthCallback(
+                serverFd: loopback.fd,
+                expectedState: stateNonce,
+                timeoutSeconds: 180
+            )
+
+            await MainActor.run {
+                NSApplication.shared.activate(ignoringOtherApps: true)
+            }
+
+            let idToken = callbackParams["id_token"] ?? ""
+            let accessToken = callbackParams["access_token"] ?? ""
+            guard !idToken.isEmpty || !accessToken.isEmpty else {
+                let errMsg = callbackParams["error"] ?? "Google Sign-In did not return a credential."
+                throw CloudSyncError.invalidCredentials(errMsg)
+            }
+
+            var postParts: [String] = []
+            if !idToken.isEmpty {
+                postParts.append("id_token=\(Self.formUrlEncode(idToken))")
+            }
+            if !accessToken.isEmpty {
+                postParts.append("access_token=\(Self.formUrlEncode(accessToken))")
+            }
+            postParts.append("providerId=google.com")
+
+            let idpRes = try await callAuthEndpoint(
+                endpoint: "accounts:signInWithIdp",
+                apiKey: config.apiKey,
+                body: [
+                    "postBody": postParts.joined(separator: "&"),
+                    "requestUri": webHost,
+                    "returnIdpCredential": true,
+                    "returnSecureToken": true
+                ]
+            )
+
+            let resolvedEmail = (idpRes.email ?? callbackParams["email"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let displayEmail = resolvedEmail.isEmpty ? idpRes.localId : resolvedEmail
+            let topic = !resolvedEmail.isEmpty
+                ? "tb_sync_" + String(Self.sha256Hex("thingsbook-instant:\(resolvedEmail)").prefix(28))
+                : "tb_sync_" + String(Self.sha256Hex(idpRes.localId).prefix(28))
+
+            try await finalizeLogin(
+                authRes: idpRes,
+                email: displayEmail,
+                topic: topic,
+                mergeLocalTasks: mergeLocalTasks,
+                localOnlyMode: localOnlyMode
+            )
+            return displayEmail
         } catch {
             updateSnapshot(patchStatus: .offline, error: error.localizedDescription)
             throw error
@@ -260,6 +370,8 @@ public actor FirebaseCloudSyncService {
 
     public func signOut() {
         authSession = nil
+        pendingResyncRequested = false
+        pendingForceFullPull = false
         KeychainStore.delete(account: Self.keychainAccount)
         updateSnapshot(CloudSyncSnapshot(status: .offline, userEmailOrId: nil, userId: nil, lastSyncedAt: 0, errorMessage: nil))
     }
@@ -290,7 +402,8 @@ public actor FirebaseCloudSyncService {
         )
         self.authSession = newSession
         persistAuthSession(newSession)
-        saveLastSyncTimestamp(uid: authRes.localId, timestamp: 0)
+        saveLastSyncCursor(uid: authRes.localId, timestamp: 0)
+        saveLastWallSyncTimestamp(uid: authRes.localId, timestamp: 0)
 
         updateSnapshot(
             CloudSyncSnapshot(
@@ -307,50 +420,106 @@ public actor FirebaseCloudSyncService {
         }
     }
 
-    // MARK: - Bidirectional Firestore v1 Delta Sync
+    // MARK: - Bidirectional Firestore v1 + Secondary ntfy.sh Delta Sync
 
     public func syncBidirectionalDeltas(forceFullPull: Bool = false, localOnlyMode: Bool) async {
         if localOnlyMode {
             updateSnapshot(patchStatus: .offline, error: nil)
             return
         }
-        guard !isSyncing, let current = authSession else { return }
+        guard authSession != nil else { return }
+
+        if isSyncing {
+            pendingResyncRequested = true
+            if forceFullPull {
+                pendingForceFullPull = true
+            }
+            return
+        }
+
         isSyncing = true
-        defer { isSyncing = false }
+        var runForceFull = forceFullPull
 
-        updateSnapshot(patchStatus: .syncing, error: nil)
+        while true {
+            pendingResyncRequested = false
+            pendingForceFullPull = false
 
-        do {
-            let validToken = try await validIdToken()
-            let config = FirebaseConfig.loadActive()
-            let lastSync = forceFullPull ? 0 : loadLastSyncTimestamp(uid: current.uid)
+            guard let current = authSession else { break }
+            updateSnapshot(patchStatus: .syncing, error: nil)
 
-            try await pushDirtyBatchToFirestore(uid: current.uid, idToken: validToken, projectId: config.projectId)
-            let pulledMax = try await pullDeltasFromFirestore(uid: current.uid, idToken: validToken, projectId: config.projectId, sinceTimestamp: lastSync)
+            do {
+                let validToken = try await validIdToken()
+                let config = FirebaseConfig.loadActive()
+                let cursor = runForceFull ? 0 : loadLastSyncCursor(uid: current.uid)
+                let safeQuerySince = runForceFull ? 0 : max(0, cursor - Self.clockSkewOverlapMillis)
 
-            if !current.channelTopic.isEmpty {
-                try? await pollSecondaryNtfyRelay(uid: current.uid, topic: current.channelTopic, deviceId: current.deviceId, sinceTimestamp: lastSync)
+                // 1. Push local dirty batch to secondary ntfy.sh relay + primary Firestore
+                let dirty = try database.fetchDirtyBatch()
+                if !current.channelTopic.isEmpty {
+                    await pushDirtyBatchToNtfyRelay(dirty: dirty, uid: current.uid, topic: current.channelTopic, deviceId: current.deviceId)
+                }
+                try await pushDirtyBatchToFirestore(dirty: dirty, uid: current.uid, idToken: validToken, projectId: config.projectId)
+
+                // 2. Pull remote deltas from primary Firestore + secondary ntfy.sh relay
+                let firestoreMax = try await pullDeltasFromFirestore(
+                    uid: current.uid,
+                    idToken: validToken,
+                    projectId: config.projectId,
+                    sinceTimestamp: safeQuerySince
+                )
+
+                var ntfyMax: Int64 = 0
+                if !current.channelTopic.isEmpty {
+                    ntfyMax = (try? await pollSecondaryNtfyRelay(
+                        uid: current.uid,
+                        topic: current.channelTopic,
+                        deviceId: current.deviceId,
+                        sinceTimestamp: safeQuerySince,
+                        fetchAllHistory: runForceFull
+                    )) ?? 0
+                }
+
+                // Promote any due UPCOMING tasks pulled from remote into TODAY cleanly
+                _ = try? database.performMidnightRollover()
+
+                let now = Int64(Date().timeIntervalSince1970 * 1000.0)
+                let observedMax = max(firestoreMax, ntfyMax)
+                let nextCursor: Int64
+                if observedMax > cursor {
+                    nextCursor = observedMax
+                } else if cursor == 0 {
+                    nextCursor = now
+                } else {
+                    nextCursor = cursor
+                }
+
+                saveLastSyncCursor(uid: current.uid, timestamp: nextCursor)
+                saveLastWallSyncTimestamp(uid: current.uid, timestamp: now)
+                updateSnapshot(
+                    CloudSyncSnapshot(
+                        status: .synced,
+                        userEmailOrId: current.email,
+                        userId: current.uid,
+                        lastSyncedAt: now,
+                        errorMessage: nil
+                    )
+                )
+            } catch {
+                updateSnapshot(patchStatus: .offline, error: error.localizedDescription)
+                break
             }
 
-            let now = Int64(Date().timeIntervalSince1970 * 1000.0)
-            let nextTs = pulledMax > lastSync ? pulledMax : (lastSync == 0 ? now : lastSync)
-            saveLastSyncTimestamp(uid: current.uid, timestamp: nextTs)
-            updateSnapshot(
-                CloudSyncSnapshot(
-                    status: .synced,
-                    userEmailOrId: current.email,
-                    userId: current.uid,
-                    lastSyncedAt: nextTs,
-                    errorMessage: nil
-                )
-            )
-        } catch {
-            updateSnapshot(patchStatus: .offline, error: error.localizedDescription)
+            if pendingResyncRequested && !localOnlyMode {
+                runForceFull = pendingForceFullPull
+                continue
+            }
+            break
         }
+
+        isSyncing = false
     }
 
-    private func pushDirtyBatchToFirestore(uid: String, idToken: String, projectId: String) async throws {
-        let dirty = try database.fetchDirtyBatch()
+    private func pushDirtyBatchToFirestore(dirty: SyncDirtyBatch, uid: String, idToken: String, projectId: String) async throws {
         var writes: [[String: Any]] = []
         let baseDocPrefix = "projects/\(projectId)/databases/(default)/documents/users/\(uid)"
 
@@ -513,6 +682,182 @@ public actor FirebaseCloudSyncService {
         try database.markDirtyBatchSynced(dirty)
     }
 
+    private func pushDirtyBatchToNtfyRelay(dirty: SyncDirtyBatch, uid: String, topic: String, deviceId: String) async {
+        let hasEntities = !dirty.tags.isEmpty || !dirty.areas.isEmpty || !dirty.projects.isEmpty
+            || !dirty.headings.isEmpty || !dirty.tasks.isEmpty || !dirty.checklistItems.isEmpty
+        guard hasEntities,
+              let encoded = topic.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "https://ntfy.sh/\(encoded)") else { return }
+
+        let now = Int64(Date().timeIntervalSince1970 * 1000.0)
+        let jsonEncoder = JSONEncoder()
+
+        let tagMaps: [[String: Any]] = dirty.tags.map { tag in
+            [
+                "id": tag.id,
+                "title": tag.title,
+                "parentTagId": tag.parentTagId as Any,
+                "shortcut": tag.shortcut as Any,
+                "sortOrder": tag.sortOrder,
+                "createdAt": tag.createdAt,
+                "updatedAt": tag.updatedAt,
+                "isDeleted": tag.isDeleted
+            ]
+        }
+        let areaMaps: [[String: Any]] = dirty.areas.map { area in
+            [
+                "id": area.id,
+                "title": area.title,
+                "sortOrder": area.sortOrder,
+                "tagIds": area.tagIds,
+                "createdAt": area.createdAt,
+                "updatedAt": area.updatedAt,
+                "isDeleted": area.isDeleted
+            ]
+        }
+        let projMaps: [[String: Any]] = dirty.projects.map { proj in
+            [
+                "id": proj.id,
+                "areaId": proj.areaId as Any,
+                "title": proj.title,
+                "notes": proj.notes,
+                "status": proj.status.rawValue,
+                "scheduleState": proj.scheduleState.rawValue,
+                "whenDate": proj.whenDate as Any,
+                "deadline": proj.deadline as Any,
+                "completedAt": proj.completedAt as Any,
+                "sortOrder": proj.sortOrder,
+                "tagIds": proj.tagIds,
+                "createdAt": proj.createdAt,
+                "updatedAt": proj.updatedAt,
+                "isDeleted": proj.isDeleted
+            ]
+        }
+        let headMaps: [[String: Any]] = dirty.headings.map { head in
+            [
+                "id": head.id,
+                "projectId": head.projectId,
+                "title": head.title,
+                "sortOrder": head.sortOrder,
+                "isArchived": head.isArchived,
+                "createdAt": head.createdAt,
+                "updatedAt": head.updatedAt,
+                "isDeleted": head.isDeleted
+            ]
+        }
+        let taskMaps: [[String: Any]] = dirty.tasks.map { task in
+            let recString: String? = task.recurrenceRule.flatMap {
+                guard let d = try? jsonEncoder.encode($0) else { return nil }
+                return String(data: d, encoding: .utf8)
+            }
+            return [
+                "id": task.id,
+                "title": task.title,
+                "notes": task.notes,
+                "status": task.status.rawValue,
+                "scheduleState": task.scheduleState.rawValue,
+                "whenDate": task.whenDate as Any,
+                "deadline": task.deadline as Any,
+                "reminderTime": task.reminderTime as Any,
+                "completedAt": task.completedAt as Any,
+                "projectId": task.projectId as Any,
+                "headingId": task.headingId as Any,
+                "areaId": task.areaId as Any,
+                "recurrenceRule": recString as Any,
+                "sortOrder": task.sortOrder,
+                "tagIds": task.tagIds,
+                "createdAt": task.createdAt,
+                "updatedAt": task.updatedAt,
+                "isDeleted": task.isDeleted
+            ]
+        }
+        let chkMaps: [[String: Any]] = dirty.checklistItems.map { chk in
+            [
+                "id": chk.id,
+                "taskId": chk.taskId,
+                "title": chk.title,
+                "isCompleted": chk.isCompleted,
+                "sortOrder": chk.sortOrder,
+                "createdAt": chk.createdAt,
+                "updatedAt": chk.updatedAt,
+                "isDeleted": chk.isDeleted
+            ]
+        }
+
+        func sanitize(_ dict: [String: Any]) -> [String: Any] {
+            var out: [String: Any] = [:]
+            for (k, v) in dict {
+                let mirror = Mirror(reflecting: v)
+                if mirror.displayStyle == .optional {
+                    if let child = mirror.children.first {
+                        out[k] = child.value
+                    } else {
+                        out[k] = NSNull()
+                    }
+                } else {
+                    out[k] = v
+                }
+            }
+            return out
+        }
+
+        let fullBatch: [String: Any] = [
+            "userId": uid,
+            "deviceId": deviceId,
+            "batchTimestamp": now,
+            "tags": tagMaps.map(sanitize),
+            "areas": areaMaps.map(sanitize),
+            "projects": projMaps.map(sanitize),
+            "headings": headMaps.map(sanitize),
+            "tasks": taskMaps.map(sanitize),
+            "checklistItems": chkMaps.map(sanitize)
+        ]
+
+        var payloads: [Data] = []
+        if let single = try? JSONSerialization.data(withJSONObject: fullBatch), single.count <= 3800 {
+            payloads.append(single)
+        } else {
+            if !tagMaps.isEmpty || !areaMaps.isEmpty || !projMaps.isEmpty || !headMaps.isEmpty {
+                let metaBatch: [String: Any] = [
+                    "userId": uid,
+                    "deviceId": deviceId,
+                    "batchTimestamp": now,
+                    "tags": tagMaps.map(sanitize),
+                    "areas": areaMaps.map(sanitize),
+                    "projects": projMaps.map(sanitize),
+                    "headings": headMaps.map(sanitize)
+                ]
+                if let d = try? JSONSerialization.data(withJSONObject: metaBatch) { payloads.append(d) }
+            }
+            var tIdx = 0
+            while tIdx < taskMaps.count {
+                let slice = Array(taskMaps[tIdx..<min(tIdx + 10, taskMaps.count)]).map(sanitize)
+                if let d = try? JSONSerialization.data(withJSONObject: [
+                    "userId": uid, "deviceId": deviceId, "batchTimestamp": now, "tasks": slice
+                ]) { payloads.append(d) }
+                tIdx += 10
+            }
+            var cIdx = 0
+            while cIdx < chkMaps.count {
+                let slice = Array(chkMaps[cIdx..<min(cIdx + 25, chkMaps.count)]).map(sanitize)
+                if let d = try? JSONSerialization.data(withJSONObject: [
+                    "userId": uid, "deviceId": deviceId, "batchTimestamp": now, "checklistItems": slice
+                ]) { payloads.append(d) }
+                cIdx += 25
+            }
+        }
+
+        for body in payloads {
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.timeoutInterval = 4.0
+            req.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")
+            req.setValue("yes", forHTTPHeaderField: "Cache")
+            req.httpBody = body
+            _ = try? await session.data(for: req)
+        }
+    }
+
     private func pullDeltasFromFirestore(uid: String, idToken: String, projectId: String, sinceTimestamp: Int64) async throws -> Int64 {
         async let rawTags = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "tags", since: sinceTimestamp)
         async let rawAreas = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "areas", since: sinceTimestamp)
@@ -602,6 +947,9 @@ public actor FirebaseCloudSyncService {
             }
             for (k, v) in fields {
                 if let val = Self.unwrapFirestoreValue(v) {
+                    if k == "id", let s = val as? String, s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        continue
+                    }
                     plain[k] = val
                 }
             }
@@ -610,15 +958,23 @@ public actor FirebaseCloudSyncService {
         return unpacked
     }
 
-    private func pollSecondaryNtfyRelay(uid: String, topic: String, deviceId: String, sinceTimestamp: Int64) async throws {
+    private func pollSecondaryNtfyRelay(
+        uid: String,
+        topic: String,
+        deviceId: String,
+        sinceTimestamp: Int64,
+        fetchAllHistory: Bool
+    ) async throws -> Int64 {
+        let sinceParam = fetchAllHistory ? "all" : "24h"
         guard let encoded = topic.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-              let url = URL(string: "https://ntfy.sh/\(encoded)/json?poll=1&since=24h") else { return }
+              let url = URL(string: "https://ntfy.sh/\(encoded)/json?poll=1&since=\(sinceParam)") else { return 0 }
         var req = URLRequest(url: url)
-        req.timeoutInterval = 3.5
+        req.timeoutInterval = 4.0
         let (data, res) = try await session.data(for: req)
         guard let http = res as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-              let text = String(data: data, encoding: .utf8) else { return }
+              let text = String(data: data, encoding: .utf8) else { return 0 }
 
+        var maxApplied: Int64 = 0
         for line in text.split(separator: "\n") {
             guard let lineData = line.data(using: .utf8),
                   let env = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
@@ -628,7 +984,7 @@ public actor FirebaseCloudSyncService {
                   let batch = try? JSONSerialization.jsonObject(with: msgData) as? [String: Any],
                   batch["userId"] as? String == uid else { continue }
 
-            let batchTs = (batch["batchTimestamp"] as? NSNumber)?.int64Value ?? 0
+            let batchTs = Self.asInt64(batch["batchTimestamp"]) ?? 0
             if batch["deviceId"] as? String == deviceId, sinceTimestamp > 0, batchTs <= sinceTimestamp {
                 continue
             }
@@ -646,7 +1002,7 @@ public actor FirebaseCloudSyncService {
             let checklists = (batch["checklistItems"] as? [[String: Any]] ?? []).compactMap(Self.parseChecklist)
             let attachments = (batch["attachments"] as? [[String: Any]] ?? []).compactMap(Self.parseAttachment)
 
-            _ = try? database.applyRemoteDeltas(
+            if let batchMax = try? database.applyRemoteDeltas(
                 RemoteDeltaBatch(
                     tags: tags,
                     areas: areas,
@@ -657,8 +1013,125 @@ public actor FirebaseCloudSyncService {
                     checklistItems: checklists,
                     attachments: attachments
                 )
-            )
+            ) {
+                maxApplied = max(maxApplied, max(batchMax, batchTs))
+            }
         }
+        return maxApplied
+    }
+
+    // MARK: - Loopback OAuth Socket Helper (127.0.0.1)
+
+    private static func createLoopbackServerSocket() throws -> (fd: Int32, port: UInt16) {
+        let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else {
+            throw CloudSyncError.networkFailure("Could not open local sign-in callback port.")
+        }
+        var reuse: Int32 = 1
+        _ = Darwin.setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = 0
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+
+        let bindRes = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bindRes == 0, Darwin.listen(fd, 4) == 0 else {
+            Darwin.close(fd)
+            throw CloudSyncError.networkFailure("Could not bind local Google Sign-In callback port.")
+        }
+
+        var boundAddr = sockaddr_in()
+        var addrLen = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let nameRes = withUnsafeMutablePointer(to: &boundAddr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.getsockname(fd, $0, &addrLen)
+            }
+        }
+        guard nameRes == 0 else {
+            Darwin.close(fd)
+            throw CloudSyncError.networkFailure("Could not determine local Google Sign-In callback port.")
+        }
+        return (fd, UInt16(bigEndian: boundAddr.sin_port))
+    }
+
+    private static func awaitLoopbackOAuthCallback(
+        serverFd: Int32,
+        expectedState: String,
+        timeoutSeconds: Int
+    ) async throws -> [String: String] {
+        try await Task.detached(priority: .userInitiated) {
+            let deadline = Date().addingTimeInterval(TimeInterval(timeoutSeconds))
+            while Date() < deadline {
+                var pfd = pollfd(fd: serverFd, events: Int16(POLLIN), revents: 0)
+                let ready = Darwin.poll(&pfd, 1, 1000)
+                if ready <= 0 { continue }
+
+                var clientAddr = sockaddr_in()
+                var clientLen = socklen_t(MemoryLayout<sockaddr_in>.size)
+                let clientFd = withUnsafeMutablePointer(to: &clientAddr) {
+                    $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                        Darwin.accept(serverFd, $0, &clientLen)
+                    }
+                }
+                if clientFd < 0 { continue }
+                defer { Darwin.close(clientFd) }
+
+                var buffer = [UInt8](repeating: 0, count: 16_384)
+                let bytesRead = Darwin.read(clientFd, &buffer, buffer.count - 1)
+                guard bytesRead > 0 else { continue }
+                let reqString = String(decoding: buffer.prefix(bytesRead), as: UTF8.self)
+                guard let firstLine = reqString.components(separatedBy: "\r\n").first else { continue }
+                let parts = firstLine.split(separator: " ")
+                guard parts.count >= 2 else { continue }
+                let pathAndQuery = String(parts[1])
+                if pathAndQuery.hasPrefix("/favicon") {
+                    let resp = "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n"
+                    _ = resp.withCString { Darwin.write(clientFd, $0, strlen($0)) }
+                    continue
+                }
+
+                guard let comps = URLComponents(string: "http://127.0.0.1\(pathAndQuery)") else { continue }
+                var params: [String: String] = [:]
+                for item in comps.queryItems ?? [] {
+                    params[item.name] = item.value ?? ""
+                }
+
+                if params["state"] != expectedState {
+                    let badHtml = "<html><body style='font-family:-apple-system,sans-serif;padding:40px;text-align:center;'><h3>Invalid OAuth state</h3></body></html>"
+                    let resp = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n\(badHtml)"
+                    _ = resp.withCString { Darwin.write(clientFd, $0, strlen($0)) }
+                    throw CloudSyncError.invalidCredentials("Google Sign-In verification state mismatch. Please try again.")
+                }
+
+                let okHtml = """
+                <!doctype html><html><head><meta charset="utf-8"><title>Thingsbook Cloud Sync</title></head>
+                <body style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f5f7fa;color:#1c1e21;">
+                <div style="background:#fff;padding:32px 40px;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,0.08);text-align:center;max-width:420px;">
+                <div style="font-size:40px;margin-bottom:12px;">✅</div>
+                <h2 style="margin:0 0 8px;font-size:20px;">Thingsbook Connected</h2>
+                <p style="margin:0;color:#606770;font-size:14px;">You can close this browser tab and return to Thingsbook on your Mac.</p>
+                </div>
+                <script>setTimeout(function(){ window.close(); }, 800);</script>
+                </body></html>
+                """
+                let okResp = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: \(okHtml.utf8.count)\r\nConnection: close\r\n\r\n\(okHtml)"
+                _ = okResp.withCString { Darwin.write(clientFd, $0, strlen($0)) }
+                return params
+            }
+            throw CloudSyncError.invalidCredentials("Google Sign-In timed out. Please try again.")
+        }.value
+    }
+
+    private static func formUrlEncode(_ value: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
     // MARK: - Token Management & Helpers
@@ -668,6 +1141,30 @@ public actor FirebaseCloudSyncService {
         let refreshToken: String
         let expiresIn: String
         let localId: String
+        let email: String?
+
+        enum CodingKeys: String, CodingKey {
+            case idToken
+            case refreshToken
+            case expiresIn
+            case localId
+            case email
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.idToken = try c.decode(String.self, forKey: .idToken)
+            self.refreshToken = (try? c.decode(String.self, forKey: .refreshToken)) ?? ""
+            if let expStr = try? c.decode(String.self, forKey: .expiresIn) {
+                self.expiresIn = expStr
+            } else if let expInt = try? c.decode(Int.self, forKey: .expiresIn) {
+                self.expiresIn = String(expInt)
+            } else {
+                self.expiresIn = "3600"
+            }
+            self.localId = try c.decode(String.self, forKey: .localId)
+            self.email = try? c.decodeIfPresent(String.self, forKey: .email)
+        }
     }
 
     private func callAuthEndpoint(endpoint: String, apiKey: String, body: [String: Any]) async throws -> AuthTokenResponse {
@@ -698,12 +1195,12 @@ public actor FirebaseCloudSyncService {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        let form = "grant_type=refresh_token&refresh_token=\(current.refreshToken.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")"
+        let form = "grant_type=refresh_token&refresh_token=\(Self.formUrlEncode(current.refreshToken))"
         req.httpBody = Data(form.utf8)
 
         let (data, res) = try await session.data(for: req)
         if let http = res as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw CloudSyncError.invalidCredentials("Cloud session expired. Please sign in again.")
+            throw CloudSyncError.invalidCredentials("Cloud session expired. Please sign out and sign in with Google or Email.")
         }
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let newIdToken = obj["id_token"] as? String else {
@@ -725,12 +1222,20 @@ public actor FirebaseCloudSyncService {
         }
     }
 
-    private func loadLastSyncTimestamp(uid: String) -> Int64 {
-        Int64(UserDefaults.standard.integer(forKey: "\(Self.lastSyncPrefix)\(uid)"))
+    private func loadLastSyncCursor(uid: String) -> Int64 {
+        Int64(UserDefaults.standard.integer(forKey: "\(Self.lastSyncCursorPrefix)\(uid)"))
     }
 
-    private func saveLastSyncTimestamp(uid: String, timestamp: Int64) {
-        UserDefaults.standard.set(Int(timestamp), forKey: "\(Self.lastSyncPrefix)\(uid)")
+    private func saveLastSyncCursor(uid: String, timestamp: Int64) {
+        UserDefaults.standard.set(Int(timestamp), forKey: "\(Self.lastSyncCursorPrefix)\(uid)")
+    }
+
+    private func loadLastWallSyncTimestamp(uid: String) -> Int64 {
+        Int64(UserDefaults.standard.integer(forKey: "\(Self.lastWallSyncPrefix)\(uid)"))
+    }
+
+    private func saveLastWallSyncTimestamp(uid: String, timestamp: Int64) {
+        UserDefaults.standard.set(Int(timestamp), forKey: "\(Self.lastWallSyncPrefix)\(uid)")
     }
 
     private func updateSnapshot(_ next: CloudSyncSnapshot) {
@@ -784,13 +1289,14 @@ public actor FirebaseCloudSyncService {
         ]
     }
 
-    private static func unwrapFirestoreValue(_ wrapper: [String: Any]) -> Any? {
+    public static func unwrapFirestoreValue(_ wrapper: [String: Any]) -> Any? {
         if wrapper["nullValue"] != nil { return nil }
         if let s = wrapper["stringValue"] as? String { return s }
         if let b = wrapper["booleanValue"] as? Bool { return b }
         if let iStr = wrapper["integerValue"] as? String, let i = Int64(iStr) { return i }
         if let iNum = wrapper["integerValue"] as? NSNumber { return iNum.int64Value }
         if let dNum = wrapper["doubleValue"] as? NSNumber { return dNum.doubleValue }
+        if let dStr = wrapper["doubleValue"] as? String, let d = Double(dStr) { return d }
         if let arrObj = wrapper["arrayValue"] as? [String: Any],
            let vals = arrObj["values"] as? [[String: Any]] {
             return vals.compactMap { unwrapFirestoreValue($0) }
@@ -798,18 +1304,36 @@ public actor FirebaseCloudSyncService {
         return nil
     }
 
-    private static func asInt64(_ any: Any?) -> Int64? {
+    public static func asInt64(_ any: Any?) -> Int64? {
         if let i = any as? Int64 { return i }
         if let i = any as? Int { return Int64(i) }
+        if let d = any as? Double { return d.isFinite ? Int64(d) : nil }
         if let n = any as? NSNumber { return n.int64Value }
-        if let s = any as? String, let parsed = Int64(s) { return parsed }
+        if let s = any as? String {
+            if let parsed = Int64(s) { return parsed }
+            if let parsedDouble = Double(s), parsedDouble.isFinite { return Int64(parsedDouble) }
+        }
         return nil
     }
 
-    private static func asDouble(_ any: Any?, fallback: Double = 0) -> Double {
-        if let d = any as? Double { return d }
-        if let n = any as? NSNumber { return n.doubleValue }
-        if let s = any as? String, let parsed = Double(s) { return parsed }
+    public static func asDouble(_ any: Any?, fallback: Double = 0) -> Double {
+        if let d = any as? Double { return d.isFinite ? d : fallback }
+        if let i = any as? Int64 { return Double(i) }
+        if let i = any as? Int { return Double(i) }
+        if let n = any as? NSNumber {
+            let d = n.doubleValue
+            return d.isFinite ? d : fallback
+        }
+        if let s = any as? String, let parsed = Double(s), parsed.isFinite { return parsed }
+        return fallback
+    }
+
+    private static func asBool(_ any: Any?, fallback: Bool = false) -> Bool {
+        if let b = any as? Bool { return b }
+        if let n = any as? NSNumber { return n.boolValue }
+        if let s = any as? String {
+            return s.lowercased() == "true" || s == "1"
+        }
         return fallback
     }
 
@@ -824,7 +1348,7 @@ public actor FirebaseCloudSyncService {
         return arr.compactMap { asString($0) }
     }
 
-    private static func parseTag(_ map: [String: Any]) -> Tag? {
+    public static func parseTag(_ map: [String: Any]) -> Tag? {
         guard let id = asString(map["id"]) else { return nil }
         return Tag(
             id: id,
@@ -834,11 +1358,11 @@ public actor FirebaseCloudSyncService {
             sortOrder: asDouble(map["sortOrder"]),
             createdAt: asInt64(map["createdAt"]) ?? 0,
             updatedAt: asInt64(map["updatedAt"]) ?? 0,
-            isDeleted: (map["isDeleted"] as? Bool) ?? false
+            isDeleted: asBool(map["isDeleted"])
         )
     }
 
-    private static func parseArea(_ map: [String: Any]) -> Area? {
+    public static func parseArea(_ map: [String: Any]) -> Area? {
         guard let id = asString(map["id"]) else { return nil }
         return Area(
             id: id,
@@ -847,11 +1371,11 @@ public actor FirebaseCloudSyncService {
             tagIds: asStringList(map["tagIds"]),
             createdAt: asInt64(map["createdAt"]) ?? 0,
             updatedAt: asInt64(map["updatedAt"]) ?? 0,
-            isDeleted: (map["isDeleted"] as? Bool) ?? false
+            isDeleted: asBool(map["isDeleted"])
         )
     }
 
-    private static func parseProject(_ map: [String: Any]) -> Project? {
+    public static func parseProject(_ map: [String: Any]) -> Project? {
         guard let id = asString(map["id"]) else { return nil }
         return Project(
             id: id,
@@ -867,25 +1391,25 @@ public actor FirebaseCloudSyncService {
             tagIds: asStringList(map["tagIds"]),
             createdAt: asInt64(map["createdAt"]) ?? 0,
             updatedAt: asInt64(map["updatedAt"]) ?? 0,
-            isDeleted: (map["isDeleted"] as? Bool) ?? false
+            isDeleted: asBool(map["isDeleted"])
         )
     }
 
-    private static func parseHeading(_ map: [String: Any]) -> Heading? {
+    public static func parseHeading(_ map: [String: Any]) -> Heading? {
         guard let id = asString(map["id"]), let projectId = asString(map["projectId"]) else { return nil }
         return Heading(
             id: id,
             projectId: projectId,
             title: (map["title"] as? String) ?? "",
             sortOrder: asDouble(map["sortOrder"]),
-            isArchived: (map["isArchived"] as? Bool) ?? false,
+            isArchived: asBool(map["isArchived"]),
             createdAt: asInt64(map["createdAt"]) ?? 0,
             updatedAt: asInt64(map["updatedAt"]) ?? 0,
-            isDeleted: (map["isDeleted"] as? Bool) ?? false
+            isDeleted: asBool(map["isDeleted"])
         )
     }
 
-    private static func parseTask(_ map: [String: Any]) -> (TaskItem, [String])? {
+    public static func parseTask(_ map: [String: Any]) -> (TaskItem, [String])? {
         guard let id = asString(map["id"]) else { return nil }
         var rule: RecurrenceRule? = nil
         if let recStr = asString(map["recurrenceRule"]), let data = recStr.data(using: .utf8) {
@@ -909,26 +1433,26 @@ public actor FirebaseCloudSyncService {
             sortOrder: asDouble(map["sortOrder"]),
             createdAt: asInt64(map["createdAt"]) ?? 0,
             updatedAt: asInt64(map["updatedAt"]) ?? 0,
-            isDeleted: (map["isDeleted"] as? Bool) ?? false
+            isDeleted: asBool(map["isDeleted"])
         )
         return (task, tids)
     }
 
-    private static func parseChecklist(_ map: [String: Any]) -> ChecklistItem? {
+    public static func parseChecklist(_ map: [String: Any]) -> ChecklistItem? {
         guard let id = asString(map["id"]), let taskId = asString(map["taskId"]) else { return nil }
         return ChecklistItem(
             id: id,
             taskId: taskId,
             title: (map["title"] as? String) ?? "",
-            isCompleted: (map["isCompleted"] as? Bool) ?? false,
+            isCompleted: asBool(map["isCompleted"]),
             sortOrder: asDouble(map["sortOrder"]),
             createdAt: asInt64(map["createdAt"]) ?? 0,
             updatedAt: asInt64(map["updatedAt"]) ?? 0,
-            isDeleted: (map["isDeleted"] as? Bool) ?? false
+            isDeleted: asBool(map["isDeleted"])
         )
     }
 
-    private static func parseAttachment(_ map: [String: Any]) -> RemoteAttachmentDelta? {
+    public static func parseAttachment(_ map: [String: Any]) -> RemoteAttachmentDelta? {
         guard let id = asString(map["id"]) else { return nil }
         let att = TaskAttachment(
             id: id,
@@ -940,7 +1464,7 @@ public actor FirebaseCloudSyncService {
             localRelativePath: (map["localRelativePath"] as? String) ?? "",
             createdAt: asInt64(map["createdAt"]) ?? 0,
             updatedAt: asInt64(map["updatedAt"]) ?? 0,
-            isDeleted: (map["isDeleted"] as? Bool) ?? false
+            isDeleted: asBool(map["isDeleted"])
         )
         let dataB64 = (map["dataBase64"] as? String) ?? ""
         return RemoteAttachmentDelta(attachment: att, dataBase64: dataB64)

@@ -335,4 +335,61 @@ final class ThingsbookCoreTests: XCTestCase {
             }
         }
     }
+
+    func testCloudSyncTypeCoercionRemoteFtsAndLanguageIconsV181() throws {
+        // 1. Verify language flag icons & menu order match Android
+        XCTAssertEqual(AppLanguage.orderedMenuCases, [.system, .en, .de, .it, .fr, .es])
+        XCTAssertEqual(AppLanguage.system.flagEmoji, "🌐")
+        XCTAssertEqual(AppLanguage.en.flagEmoji, "🇬🇧")
+        XCTAssertEqual(AppLanguage.de.flagEmoji, "🇩🇪")
+        XCTAssertEqual(AppLanguage.it.flagEmoji, "🇮🇹")
+        XCTAssertEqual(AppLanguage.fr.flagEmoji, "🇫🇷")
+        XCTAssertEqual(AppLanguage.es.flagEmoji, "🇪🇸")
+
+        // 2. Verify semantic update check upgrades 1.7.0 & 1.8.0 -> 1.8.0+1 without looping on 1.8.0+1
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "1.8.0+1", current: "1.7.0"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "1.8.0+1", current: "1.8.0"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "1.8.0+1", current: "1.8.0+1"))
+
+        // 3. Verify Firestore mixed integerValue / doubleValue / string coercion
+        let intSortWrapped: [String: Any] = ["integerValue": "4"]
+        let doubleSortWrapped: [String: Any] = ["doubleValue": NSNumber(value: 2.5)]
+        XCTAssertEqual(FirebaseCloudSyncService.asDouble(FirebaseCloudSyncService.unwrapFirestoreValue(intSortWrapped)), 4.0)
+        XCTAssertEqual(FirebaseCloudSyncService.asDouble(FirebaseCloudSyncService.unwrapFirestoreValue(doubleSortWrapped)), 2.5)
+        XCTAssertEqual(FirebaseCloudSyncService.asInt64(NSNumber(value: 1_794_736_150_463.0)), 1_794_736_150_463)
+
+        let parsedTask = FirebaseCloudSyncService.parseTask([
+            "id": "remote-sync-task-1",
+            "title": "Synced From ChromeOS",
+            "notes": "Realtime delta verification",
+            "status": "OPEN",
+            "scheduleState": "TODAY",
+            "whenDate": Int64(1_794_700_800_000),
+            "sortOrder": Int64(7),
+            "createdAt": Int64(1_794_736_150_000),
+            "updatedAt": Int64(1_794_736_150_463),
+            "isDeleted": false,
+            "tagIds": []
+        ])
+        XCTAssertNotNil(parsedTask)
+        XCTAssertEqual(parsedTask?.0.sortOrder, 7.0)
+
+        // 4. Verify applyRemoteDeltas triggers onRemoteSyncApplied (NOT onMutation), leaves dirty batch empty, and indexes FTS5
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        var mutationCalls = 0
+        var remoteSyncCalls = 0
+        db.onMutation = { mutationCalls += 1 }
+        db.onRemoteSyncApplied = { remoteSyncCalls += 1 }
+
+        if let (remoteItem, remoteTags) = parsedTask {
+            let applied = try db.applyRemoteDeltas(RemoteDeltaBatch(tasks: [(remoteItem, remoteTags)]))
+            XCTAssertTrue(applied)
+        }
+        XCTAssertEqual(mutationCalls, 0, "Remote delta apply must not mark local DB mutated or bounce sync")
+        XCTAssertEqual(remoteSyncCalls, 1, "Remote delta apply must notify UI observer immediately")
+        XCTAssertTrue(try db.fetchDirtyBatch().isEmpty, "Remote delta records must have syncDirty = 0")
+
+        let searchHits = try db.searchQuickFind(rawQuery: "ChromeOS")
+        XCTAssertEqual(searchHits.tasks.map(\.id), ["remote-sync-task-1"], "FTS5 must index remotely synced tasks")
+    }
 }

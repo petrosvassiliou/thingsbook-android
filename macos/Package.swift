@@ -28,6 +28,7 @@ let package = Package(
                 .linkedLibrary("sqlite3"),
                 .linkedLibrary("z"),
                 .linkedFramework("Security"),
+                .linkedFramework("Network"),
                 .linkedFramework("EventKit"),
                 .linkedFramework("LocalAuthentication"),
                 .linkedFramework("UserNotifications"),

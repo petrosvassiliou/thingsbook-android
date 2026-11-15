@@ -9,7 +9,22 @@ public enum AppLanguage: String, CaseIterable, Codable, Sendable, Identifiable {
     case it = "it"
     case es = "es"
 
+    /// Exact language menu order matching Android (`ThingsSmartViewScreen.kt`) & ChromeOS (`App.tsx`).
+    public static let orderedMenuCases: [AppLanguage] = [.system, .en, .de, .it, .fr, .es]
+
     public var id: String { rawValue }
+
+    /// Language flag / globe icon matching the Android toolbar & settings selector.
+    public var flagEmoji: String {
+        switch self {
+        case .system: return "🌐"
+        case .en: return "🇬🇧"
+        case .de: return "🇩🇪"
+        case .it: return "🇮🇹"
+        case .fr: return "🇫🇷"
+        case .es: return "🇪🇸"
+        }
+    }
 
     public var resolvedCode: String {
         switch self {

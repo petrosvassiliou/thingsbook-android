@@ -2900,8 +2900,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             recurrenceRule: decodeRecurrence(colString(stmt, 12)),
             sortOrder: sqlite3_column_double(stmt, 13),
             checklistItems: checklistsByTask[id] ?? [],
-            attachments: attachmentsByTask[id] ?? [],
             tags: resolvedTags,
+            attachments: attachmentsByTask[id] ?? [],
             createdAt: sqlite3_column_int64(stmt, 15),
             updatedAt: sqlite3_column_int64(stmt, 16),
             isDeleted: colBool(stmt, 17)

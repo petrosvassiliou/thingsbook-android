@@ -7,13 +7,17 @@ set -euo pipefail
 
 APP_NAME="Thingsbook"
 INSTALL_DIR="/Applications"
+LATEST_RELEASE_API="https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases/latest"
 RELEASES_API="https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases?per_page=15"
 
 if [ -n "${THINGSBOOK_DMG_URL:-}" ]; then
   DMG_URL="$THINGSBOOK_DMG_URL"
 else
-  echo "🔍 Locating latest $APP_NAME Universal macOS build..."
-  DMG_URL="$(curl -fsSL "$RELEASES_API" | grep -Eo 'https://github\.com/petrosvassiliou/thingsbook-android/releases/download/[^"]+\.dmg' | head -n 1 || true)"
+  echo "🔍 Locating latest $APP_NAME Universal macOS release..."
+  DMG_URL="$(curl -fsSL "$LATEST_RELEASE_API" 2>/dev/null | grep -Eo 'https://github\.com/petrosvassiliou/thingsbook-android/releases/download/[^"]+\.dmg' | head -n 1 || true)"
+  if [ -z "$DMG_URL" ]; then
+    DMG_URL="$(curl -fsSL "$RELEASES_API" | grep -Eo 'https://github\.com/petrosvassiliou/thingsbook-android/releases/download/[^"]+\.dmg' | head -n 1 || true)"
+  fi
 fi
 
 if [ -z "$DMG_URL" ]; then
@@ -45,9 +49,9 @@ if [ ! -d "$MOUNT_POINT/$APP_NAME.app" ]; then
   exit 1
 fi
 
-if pgrep -x "ThingsbookMac" >/dev/null 2>&1; then
+if pgrep -x "Thingsbook" >/dev/null 2>&1 || pgrep -x "ThingsbookMac" >/dev/null 2>&1; then
   echo "🔄 Closing running $APP_NAME instance..."
-  osascript -e 'tell application "Thingsbook" to quit' 2>/dev/null || killall ThingsbookMac 2>/dev/null || true
+  osascript -e 'tell application "Thingsbook" to quit' 2>/dev/null || killall Thingsbook 2>/dev/null || killall ThingsbookMac 2>/dev/null || true
   sleep 1
 fi
 

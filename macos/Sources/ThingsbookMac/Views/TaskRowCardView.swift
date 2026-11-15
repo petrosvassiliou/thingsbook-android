@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 import ThingsbookCore
 
 public struct TaskRowCardView: View {
@@ -7,6 +8,7 @@ public struct TaskRowCardView: View {
     public let task: TaskItem
     public var showContextSubtitle: Bool = true
 
+    @StateObject private var rowVoiceController = MacVoiceDictationController()
     @State private var draftTitle: String = ""
     @State private var draftNotes: String = ""
     @State private var newChecklistTitle: String = ""
@@ -18,6 +20,7 @@ public struct TaskRowCardView: View {
     @State private var isGeneratingChecklist = false
     @State private var isEditingNotes = false
     @State private var isHoveringRow = false
+    @State private var isFileDropTargeted = false
     @FocusState private var isTitleFocused: Bool
 
     private var isExpanded: Bool {
@@ -62,6 +65,7 @@ public struct TaskRowCardView: View {
                     isTitleFocused = true
                 }
             } else {
+                rowVoiceController.stopRecording()
                 commitDraftEditsIfNeeded()
             }
         }
@@ -121,6 +125,19 @@ public struct TaskRowCardView: View {
 
             // Trailing metadata badges
             HStack(spacing: 6) {
+                if !task.attachments.isEmpty {
+                    HStack(spacing: 3) {
+                        Image(systemName: "paperclip")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("\(task.attachments.count)")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2.5)
+                    .background(Capsule().fill(Color.primary.opacity(0.055)))
+                }
+
                 if let rem = task.reminderTime {
                     HStack(spacing: 3) {
                         Image(systemName: "bell")
@@ -214,7 +231,7 @@ public struct TaskRowCardView: View {
 
     private var expandedCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Top Title Row
+            // Top Title Row + Inline Dictation Mic
             HStack(alignment: .center, spacing: 12) {
                 ThingsCheckboxButton(
                     status: task.status,
@@ -242,6 +259,24 @@ public struct TaskRowCardView: View {
                     }
 
                 Spacer()
+
+                Button {
+                    rowVoiceController.toggleRecording(
+                        locale: store.preferences.language.locale,
+                        onTranscript: { spoken in
+                            draftTitle = spoken
+                        },
+                        onUnavailable: {
+                            store.showToast(store.tr("voice_not_available"))
+                        }
+                    )
+                } label: {
+                    Image(systemName: rowVoiceController.isRecording ? "waveform.circle.fill" : "mic")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(rowVoiceController.isRecording ? ThingsMacPalette.deadlineCrimson : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help(rowVoiceController.isRecording ? store.tr("macos_voice_stop") : store.tr("voice_capture_btn"))
             }
 
             // Markdown Notes Box + Detected Smart Link Chips
@@ -332,6 +367,36 @@ public struct TaskRowCardView: View {
                 }
             }
             .padding(.leading, 30)
+
+            // File & Image Attachments Strip (v1.8)
+            if !task.attachments.isEmpty || isFileDropTargeted {
+                VStack(alignment: .leading, spacing: 6) {
+                    if !task.attachments.isEmpty {
+                        AttachmentsStripView(store: store, attachments: task.attachments) {
+                            commitDraftEditsIfNeeded()
+                            store.pickAndAttachFiles(taskId: task.id)
+                        }
+                    }
+                    if isFileDropTargeted {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.down.doc.fill")
+                                .foregroundStyle(ThingsMacPalette.accentBlue)
+                            Text(store.tr("macos_attachment_drop_hint"))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(ThingsMacPalette.accentBlue)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(ThingsMacPalette.accentBlue, style: StrokeStyle(lineWidth: 1.4, dash: [5, 4]))
+                                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(ThingsMacPalette.accentBlue.opacity(0.06)))
+                        )
+                    }
+                }
+                .padding(.leading, 30)
+            }
 
             // Checklist Section + Gemini Magic Breakdown
             VStack(alignment: .leading, spacing: 6) {
@@ -573,6 +638,16 @@ public struct TaskRowCardView: View {
 
                 Button {
                     commitDraftEditsIfNeeded()
+                    store.pickAndAttachFiles(taskId: task.id)
+                } label: {
+                    Image(systemName: "paperclip")
+                        .foregroundStyle(ThingsMacPalette.accentBlue)
+                        .help(store.tr("action_attach_file"))
+                }
+                .buttonStyle(.borderless)
+
+                Button {
+                    commitDraftEditsIfNeeded()
                     store.startFocusTimer(for: task)
                 } label: {
                     Image(systemName: "timer")
@@ -626,6 +701,10 @@ public struct TaskRowCardView: View {
         }
         .padding(18)
         .thingsCardSurface(cornerRadius: 14, isSelected: true)
+        .onDrop(of: [UTType.fileURL], isTargeted: $isFileDropTargeted) { providers in
+            commitDraftEditsIfNeeded()
+            return store.handleFileDropProviders(providers, taskId: task.id)
+        }
         .padding(.vertical, 5)
     }
 
@@ -659,6 +738,9 @@ public struct TaskRowCardView: View {
             store.updateTask(copy)
         }
         Divider()
+        Button(store.tr("action_attach_file")) {
+            store.pickAndAttachFiles(taskId: task.id)
+        }
         Button(store.tr("action_focus_timer")) {
             store.startFocusTimer(for: task)
         }

@@ -41,7 +41,10 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("SwiftUI"),
                 .linkedFramework("AppKit"),
-                .linkedFramework("UniformTypeIdentifiers")
+                .linkedFramework("UniformTypeIdentifiers"),
+                .linkedFramework("PDFKit"),
+                .linkedFramework("Speech"),
+                .linkedFramework("AVFoundation")
             ]
         ),
         .testTarget(

@@ -27,9 +27,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.7.0</string>
+    <string>1.8.0</string>
     <key>CFBundleVersion</key>
-    <string>41</string>
+    <string>42</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.productivity</string>
     <key>LSMinimumSystemVersion</key>
@@ -46,6 +46,10 @@
     <string>Thingsbook displays read-only events from your selected calendars in Today and Upcoming so you can plan your day calmly.</string>
     <key>NSFaceIDUsageDescription</key>
     <string>Thingsbook uses Touch ID or Apple Watch authentication when Biometric App Lock is enabled in Settings.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Thingsbook uses your microphone when you click the Voice Dictation button to dictate To-Dos and brain dumps.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Thingsbook transcribes spoken To-Dos and brain dumps when you use Voice Dictation.</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>

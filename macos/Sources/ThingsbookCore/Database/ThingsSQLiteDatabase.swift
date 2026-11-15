@@ -19,6 +19,16 @@ public enum ThingsDatabaseError: LocalizedError {
     }
 }
 
+public struct RemoteAttachmentDelta: Equatable, Sendable {
+    public var attachment: TaskAttachment
+    public var dataBase64: String
+
+    public init(attachment: TaskAttachment, dataBase64: String = "") {
+        self.attachment = attachment
+        self.dataBase64 = dataBase64
+    }
+}
+
 public struct SyncDirtyBatch: Sendable {
     public var tags: [Tag]
     public var areas: [Area]
@@ -26,6 +36,7 @@ public struct SyncDirtyBatch: Sendable {
     public var headings: [Heading]
     public var tasks: [TaskItem]
     public var checklistItems: [ChecklistItem]
+    public var attachments: [TaskAttachment]
 }
 
 public struct RemoteDeltaBatch: Sendable {
@@ -36,6 +47,7 @@ public struct RemoteDeltaBatch: Sendable {
     public var tasks: [TaskItem]
     public var taskTagIdsByTaskId: [String: [String]]
     public var checklistItems: [ChecklistItem]
+    public var attachments: [RemoteAttachmentDelta]
 
     public init(
         tags: [Tag] = [],
@@ -44,7 +56,8 @@ public struct RemoteDeltaBatch: Sendable {
         headings: [Heading] = [],
         tasks: [TaskItem] = [],
         taskTagIdsByTaskId: [String: [String]] = [:],
-        checklistItems: [ChecklistItem] = []
+        checklistItems: [ChecklistItem] = [],
+        attachments: [RemoteAttachmentDelta] = []
     ) {
         self.tags = tags
         self.areas = areas
@@ -53,6 +66,7 @@ public struct RemoteDeltaBatch: Sendable {
         self.tasks = tasks
         self.taskTagIdsByTaskId = taskTagIdsByTaskId
         self.checklistItems = checklistItems
+        self.attachments = attachments
     }
 }
 
@@ -60,6 +74,7 @@ public struct WorkspaceSnapshot: Sendable {
     public var areas: [Area]
     public var projects: [Project]
     public var headingsByProject: [String: [Heading]]
+    public var projectAttachments: [String: [TaskAttachment]]
     public var tags: [Tag]
     public var inboxTasks: [TaskItem]
     public var todayDaytimeTasks: [TaskItem]
@@ -81,6 +96,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     private var db: OpaquePointer?
     private let queue = DispatchQueue(label: "com.thingsbook.macos.sqlite", qos: .userInitiated)
     private let dbPath: String
+    private let baseSupportDirURL: URL
+    private let ownsTempAttachmentsDir: Bool
     public var onMutation: (@Sendable () -> Void)?
 
     public static func defaultDatabaseURL() -> URL {
@@ -92,17 +109,36 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     }
 
     public init(path: String? = nil) throws {
-        self.dbPath = path ?? Self.defaultDatabaseURL().path
+        let resolvedPath = path ?? Self.defaultDatabaseURL().path
+        self.dbPath = resolvedPath
+        if resolvedPath == ":memory:" {
+            let tempDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("thingsbook-mem-\(UUID().uuidString)", isDirectory: true)
+            try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            self.baseSupportDirURL = tempDir
+            self.ownsTempAttachmentsDir = true
+        } else {
+            self.baseSupportDirURL = URL(fileURLWithPath: resolvedPath).deletingLastPathComponent()
+            self.ownsTempAttachmentsDir = false
+        }
+        try? FileManager.default.createDirectory(
+            at: self.baseSupportDirURL.appendingPathComponent("attachments", isDirectory: true),
+            withIntermediateDirectories: true
+        )
         try queue.sync {
             try openAndMigrateLocked()
         }
     }
 
     deinit {
+        let cleanupTempDir = ownsTempAttachmentsDir ? baseSupportDirURL : nil
         queue.sync {
             if let db {
                 sqlite3_close(db)
                 self.db = nil
+            }
+            if let cleanupTempDir {
+                try? FileManager.default.removeItem(at: cleanupTempDir)
             }
         }
     }
@@ -235,6 +271,24 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             PRIMARY KEY (project_id, tag_id)
         );
         CREATE INDEX IF NOT EXISTS idx_proj_tags_tag ON project_tags(tag_id);
+
+        CREATE TABLE IF NOT EXISTS attachments (
+            id TEXT PRIMARY KEY NOT NULL,
+            task_id TEXT,
+            project_id TEXT,
+            file_name TEXT NOT NULL,
+            mime_type TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL DEFAULT 0,
+            local_relative_path TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL DEFAULT 0,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            is_dirty INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_attachments_task ON attachments(task_id);
+        CREATE INDEX IF NOT EXISTS idx_attachments_project ON attachments(project_id);
+        CREATE INDEX IF NOT EXISTS idx_attachments_updated ON attachments(updated_at);
+        CREATE INDEX IF NOT EXISTS idx_attachments_dirty ON attachments(is_dirty);
         """)
 
         try installFts5Locked()
@@ -449,6 +503,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             let headingsByProject = Dictionary(grouping: headings, by: \.projectId)
 
             let checklistsByTask = try fetchAllActiveChecklistItemsByTaskLocked()
+            let (attachmentsByTask, projectAttachments) = try fetchAllActiveAttachmentsGroupedLocked()
             let tagIdsByTask = try fetchAllTaskTagIdsLocked()
 
             let endOfToday = DateEpochConverter.endOfDayMillis(for: referenceDate, calendar: calendar)
@@ -464,7 +519,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 orderBy: "sort_order ASC, created_at ASC",
                 tagsById: tagsById,
                 tagIdsByTask: tagIdsByTask,
-                checklistsByTask: checklistsByTask
+                checklistsByTask: checklistsByTask,
+                attachmentsByTask: attachmentsByTask
             )
 
             var inbox: [TaskItem] = []
@@ -533,6 +589,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 areas: areas,
                 projects: projects,
                 headingsByProject: headingsByProject,
+                projectAttachments: projectAttachments,
                 tags: tags,
                 inboxTasks: inbox,
                 todayDaytimeTasks: todayDaytime,
@@ -558,6 +615,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             let tags = try fetchActiveTagsLocked()
             let tagsById = Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0) })
             let checklistsByTask = try fetchAllActiveChecklistItemsByTaskLocked()
+            let (attachmentsByTask, _) = try fetchAllActiveAttachmentsGroupedLocked()
             let tagIdsByTask = try fetchAllTaskTagIdsLocked()
 
             let taskStmt = try prepareLocked("""
@@ -575,7 +633,15 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
             var matchedTasks: [TaskItem] = []
             while sqlite3_step(taskStmt) == SQLITE_ROW {
-                matchedTasks.append(readTaskRowLocked(taskStmt, tagsById: tagsById, tagIdsByTask: tagIdsByTask, checklistsByTask: checklistsByTask))
+                matchedTasks.append(
+                    readTaskRowLocked(
+                        taskStmt,
+                        tagsById: tagsById,
+                        tagIdsByTask: tagIdsByTask,
+                        checklistsByTask: checklistsByTask,
+                        attachmentsByTask: attachmentsByTask
+                    )
+                )
             }
 
             let projStmt = try prepareLocked("""
@@ -888,17 +954,40 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
     public func permanentlyDeleteTask(_ taskId: String) throws {
         try queue.sync {
-            let stmt = try prepareLocked("DELETE FROM tasks WHERE id = ?;")
-            defer { sqlite3_finalize(stmt) }
-            bindText(stmt, 1, taskId)
-            _ = sqlite3_step(stmt)
+            try inTransactionLocked {
+                let escaped = taskId.replacingOccurrences(of: "'", with: "''")
+                let atts = (try? fetchAttachmentsWhereLocked("task_id = '\(escaped)'")) ?? []
+                let now = nowMillis()
+                for var att in atts {
+                    deleteAttachmentFileLocked(relativePath: att.localRelativePath)
+                    att.localRelativePath = ""
+                    att.isDeleted = true
+                    att.updatedAt = now
+                    try upsertAttachmentLocked(att, isDirty: true)
+                }
+                let stmt = try prepareLocked("DELETE FROM tasks WHERE id = ?;")
+                defer { sqlite3_finalize(stmt) }
+                bindText(stmt, 1, taskId)
+                _ = sqlite3_step(stmt)
+            }
         }
         notifyMutation()
     }
 
     public func emptyTrash() throws {
         try queue.sync {
-            try execLocked("DELETE FROM tasks WHERE is_deleted = 1;")
+            try inTransactionLocked {
+                let atts = (try? fetchAttachmentsWhereLocked("task_id IN (SELECT id FROM tasks WHERE is_deleted = 1)")) ?? []
+                let now = nowMillis()
+                for var att in atts {
+                    deleteAttachmentFileLocked(relativePath: att.localRelativePath)
+                    att.localRelativePath = ""
+                    att.isDeleted = true
+                    att.updatedAt = now
+                    try upsertAttachmentLocked(att, isDirty: true)
+                }
+                try execLocked("DELETE FROM tasks WHERE is_deleted = 1;")
+            }
         }
         notifyMutation()
     }
@@ -1042,6 +1131,119 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         bindInt64(stmt, 1, now)
         bindText(stmt, 2, taskId)
         _ = sqlite3_step(stmt)
+    }
+
+    private func touchProjectUpdatedLocked(projectId: String, now: Int64) throws {
+        let stmt = try prepareLocked("UPDATE projects SET updated_at = ?, is_dirty = 1 WHERE id = ?;")
+        defer { sqlite3_finalize(stmt) }
+        bindInt64(stmt, 1, now)
+        bindText(stmt, 2, projectId)
+        _ = sqlite3_step(stmt)
+    }
+
+    // MARK: - Attachment Mutations & File Storage (v1.8)
+
+    public func resolveAttachmentURL(_ attachment: TaskAttachment) -> URL? {
+        guard !attachment.localRelativePath.isEmpty else { return nil }
+        let url = baseSupportDirURL.appendingPathComponent(attachment.localRelativePath)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url
+    }
+
+    public func readAttachmentBase64(_ attachment: TaskAttachment, maxRawBytes: Int? = nil) -> String {
+        queue.sync {
+            readAttachmentBase64Locked(attachment, maxRawBytes: maxRawBytes)
+        }
+    }
+
+    private func readAttachmentBase64Locked(_ attachment: TaskAttachment, maxRawBytes: Int?) -> String {
+        guard !attachment.localRelativePath.isEmpty else { return "" }
+        let url = baseSupportDirURL.appendingPathComponent(attachment.localRelativePath)
+        guard let data = try? Data(contentsOf: url) else { return "" }
+        if let maxRawBytes, data.count > maxRawBytes {
+            return ""
+        }
+        return data.base64EncodedString()
+    }
+
+    private func writeAttachmentDataLocked(id: String, fileName: String, data: Data) throws -> String {
+        let attachmentsDir = baseSupportDirURL.appendingPathComponent("attachments", isDirectory: true)
+        try FileManager.default.createDirectory(at: attachmentsDir, withIntermediateDirectories: true)
+        let sanitized = fileName
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "\\", with: "_")
+            .replacingOccurrences(of: ":", with: "_")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let safeLeaf = sanitized.isEmpty ? "attachment" : String(sanitized.suffix(96))
+        let diskLeaf = "\(id)_\(safeLeaf)"
+        let destURL = attachmentsDir.appendingPathComponent(diskLeaf)
+        try data.write(to: destURL, options: .atomic)
+        return "attachments/\(diskLeaf)"
+    }
+
+    private func deleteAttachmentFileLocked(relativePath: String) {
+        guard !relativePath.isEmpty else { return }
+        let url = baseSupportDirURL.appendingPathComponent(relativePath)
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    @discardableResult
+    public func addAttachment(
+        id: String = UUID().uuidString,
+        taskId: String? = nil,
+        projectId: String? = nil,
+        fileName: String,
+        mimeType: String,
+        data: Data
+    ) throws -> TaskAttachment {
+        let created = try queue.sync { () -> TaskAttachment in
+            let now = nowMillis()
+            return try inTransactionLocked {
+                let relPath = try writeAttachmentDataLocked(id: id, fileName: fileName, data: data)
+                let att = TaskAttachment(
+                    id: id,
+                    taskId: taskId,
+                    projectId: projectId,
+                    fileName: fileName,
+                    mimeType: mimeType,
+                    sizeBytes: Int64(data.count),
+                    localRelativePath: relPath,
+                    createdAt: now,
+                    updatedAt: now,
+                    isDeleted: false
+                )
+                try upsertAttachmentLocked(att, isDirty: true)
+                if let taskId {
+                    try touchTaskUpdatedLocked(taskId: taskId, now: now)
+                } else if let projectId {
+                    try touchProjectUpdatedLocked(projectId: projectId, now: now)
+                }
+                return att
+            }
+        }
+        notifyMutation()
+        return created
+    }
+
+    public func deleteAttachment(_ attachmentId: String) throws {
+        try queue.sync {
+            let now = nowMillis()
+            try inTransactionLocked {
+                let escaped = attachmentId.replacingOccurrences(of: "'", with: "''")
+                guard var existing = try fetchAttachmentsWhereLocked("id = '\(escaped)'").first else { return }
+                deleteAttachmentFileLocked(relativePath: existing.localRelativePath)
+                existing.localRelativePath = ""
+                existing.isDeleted = true
+                existing.updatedAt = now
+                try upsertAttachmentLocked(existing, isDirty: true)
+                if let tid = existing.taskId {
+                    try touchTaskUpdatedLocked(taskId: tid, now: now)
+                } else if let pid = existing.projectId {
+                    try touchProjectUpdatedLocked(projectId: pid, now: now)
+                }
+            }
+        }
+        notifyMutation()
     }
 
     // MARK: - Areas, Projects, Headings, Tags
@@ -1476,7 +1678,12 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     public func purgeAllLocalDataBeforeAccountPull() throws {
         try queue.sync {
             try inTransactionLocked {
+                let existingAtts = (try? fetchAttachmentsWhereLocked("1 = 1")) ?? []
+                for att in existingAtts {
+                    deleteAttachmentFileLocked(relativePath: att.localRelativePath)
+                }
                 try execLocked("""
+                    DELETE FROM attachments;
                     DELETE FROM checklist_items;
                     DELETE FROM task_tags;
                     DELETE FROM project_tags;
@@ -1629,7 +1836,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
     // MARK: - Full `.tbbackup` Export & Atomic Restore
 
-    public func buildBackupPayload(preferences: AppPreferences, appVersionName: String = "1.7.0") throws -> ThingsbookBackupPayload {
+    public func buildBackupPayload(preferences: AppPreferences, appVersionName: String = "1.8.0") throws -> ThingsbookBackupPayload {
         try queue.sync {
             let now = nowMillis()
             let areas = try fetchActiveAreasLocked().map {
@@ -1752,6 +1959,21 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 }
             }
 
+            let activeAttachments = try fetchAttachmentsWhereLocked("is_deleted = 0")
+            let attachmentDtos = activeAttachments.map { att in
+                BackupAttachmentDto(
+                    id: att.id,
+                    taskId: att.taskId,
+                    projectId: att.projectId,
+                    fileName: att.fileName,
+                    mimeType: att.mimeType,
+                    sizeBytes: att.sizeBytes,
+                    dataBase64: readAttachmentBase64Locked(att, maxRawBytes: nil),
+                    createdAt: att.createdAt,
+                    updatedAt: att.updatedAt
+                )
+            }
+
             let prefsDto = BackupPreferencesDto(
                 sidebarVisible: preferences.sidebarVisible,
                 dailyDigestEnabled: preferences.dailyDigestEnabled,
@@ -1775,6 +1997,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 tags: tagDtos,
                 taskTagRefs: taskTagRefs,
                 projectTagRefs: projectTagRefs,
+                attachments: attachmentDtos,
                 preferences: prefsDto
             )
         }
@@ -1786,7 +2009,13 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 try execLocked("PRAGMA foreign_keys = OFF;")
                 defer { try? execLocked("PRAGMA foreign_keys = ON;") }
 
+                let existingAtts = (try? fetchAttachmentsWhereLocked("1 = 1")) ?? []
+                for att in existingAtts {
+                    deleteAttachmentFileLocked(relativePath: att.localRelativePath)
+                }
+
                 try execLocked("""
+                    DELETE FROM attachments;
                     DELETE FROM checklist_items;
                     DELETE FROM task_tags;
                     DELETE FROM project_tags;
@@ -1901,6 +2130,29 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     )
                     try upsertChecklistItemLocked(chk, isDirty: true)
                 }
+
+                for dto in payload.attachments {
+                    let validTask = dto.taskId.flatMap { validTaskIds.contains($0) ? $0 : nil }
+                    let validProj = dto.projectId.flatMap { validProjectIds.contains($0) ? $0 : nil }
+                    guard validTask != nil || validProj != nil else { continue }
+                    var relPath = ""
+                    if !dto.dataBase64.isEmpty, let decodedData = Data(base64Encoded: dto.dataBase64, options: .ignoreUnknownCharacters) {
+                        relPath = (try? writeAttachmentDataLocked(id: dto.id, fileName: dto.fileName, data: decodedData)) ?? ""
+                    }
+                    let att = TaskAttachment(
+                        id: dto.id,
+                        taskId: validTask,
+                        projectId: validProj,
+                        fileName: dto.fileName,
+                        mimeType: dto.mimeType,
+                        sizeBytes: dto.sizeBytes,
+                        localRelativePath: relPath,
+                        createdAt: dto.createdAt,
+                        updatedAt: dto.updatedAt,
+                        isDeleted: false
+                    )
+                    try upsertAttachmentLocked(att, isDirty: true)
+                }
             }
             rebuildFtsLocked()
         }
@@ -1927,13 +2179,15 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 checklistsByTask: [:]
             )
             let checklistItems = try fetchChecklistsWhereLocked("is_dirty = 1")
+            let attachments = try fetchAttachmentsWhereLocked("is_dirty = 1")
             return SyncDirtyBatch(
                 tags: tags,
                 areas: areas,
                 projects: projects,
                 headings: headings,
                 tasks: tasks,
-                checklistItems: checklistItems
+                checklistItems: checklistItems,
+                attachments: attachments
             )
         }
     }
@@ -1947,6 +2201,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 for h in batch.headings { try clearDirtyIfUnchangedLocked(table: "headings", id: h.id, maxUpdatedAt: h.updatedAt) }
                 for t in batch.tasks { try clearDirtyIfUnchangedLocked(table: "tasks", id: t.id, maxUpdatedAt: t.updatedAt) }
                 for c in batch.checklistItems { try clearDirtyIfUnchangedLocked(table: "checklist_items", id: c.id, maxUpdatedAt: c.updatedAt) }
+                for att in batch.attachments { try clearDirtyIfUnchangedLocked(table: "attachments", id: att.id, maxUpdatedAt: att.updatedAt) }
             }
         }
     }
@@ -2009,6 +2264,27 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     maxTimestamp = max(maxTimestamp, remote.updatedAt)
                     if shouldApplyRemoteLocked(table: "checklist_items", id: remote.id, remoteUpdatedAt: remote.updatedAt) {
                         try upsertChecklistItemLocked(remote, isDirty: false)
+                        appliedAny = true
+                    }
+                }
+                for remoteDelta in deltas.attachments {
+                    var att = remoteDelta.attachment
+                    maxTimestamp = max(maxTimestamp, att.updatedAt)
+                    if shouldApplyRemoteLocked(table: "attachments", id: att.id, remoteUpdatedAt: att.updatedAt) {
+                        let existingPath = (try? fetchAttachmentsWhereLocked("id = '\(att.id.replacingOccurrences(of: "'", with: "''"))'").first?.localRelativePath) ?? ""
+                        if att.isDeleted {
+                            deleteAttachmentFileLocked(relativePath: existingPath)
+                            att.localRelativePath = ""
+                        } else if !remoteDelta.dataBase64.isEmpty,
+                                  let decoded = Data(base64Encoded: remoteDelta.dataBase64, options: .ignoreUnknownCharacters) {
+                            if !existingPath.isEmpty {
+                                deleteAttachmentFileLocked(relativePath: existingPath)
+                            }
+                            att.localRelativePath = (try? writeAttachmentDataLocked(id: att.id, fileName: att.fileName, data: decoded)) ?? ""
+                        } else if !existingPath.isEmpty {
+                            att.localRelativePath = existingPath
+                        }
+                        try upsertAttachmentLocked(att, isDirty: false)
                         appliedAny = true
                     }
                 }
@@ -2426,6 +2702,81 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         return out
     }
 
+    private func upsertAttachmentLocked(_ attachment: TaskAttachment, isDirty: Bool) throws {
+        let stmt = try prepareLocked("""
+            INSERT INTO attachments (
+                id, task_id, project_id, file_name, mime_type, size_bytes,
+                local_relative_path, created_at, updated_at, is_deleted, is_dirty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                task_id = excluded.task_id,
+                project_id = excluded.project_id,
+                file_name = excluded.file_name,
+                mime_type = excluded.mime_type,
+                size_bytes = excluded.size_bytes,
+                local_relative_path = excluded.local_relative_path,
+                updated_at = excluded.updated_at,
+                is_deleted = excluded.is_deleted,
+                is_dirty = excluded.is_dirty;
+        """)
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, attachment.id)
+        bindText(stmt, 2, attachment.taskId)
+        bindText(stmt, 3, attachment.projectId)
+        bindText(stmt, 4, attachment.fileName)
+        bindText(stmt, 5, attachment.mimeType)
+        bindInt64(stmt, 6, attachment.sizeBytes)
+        bindText(stmt, 7, attachment.localRelativePath)
+        bindInt64(stmt, 8, attachment.createdAt)
+        bindInt64(stmt, 9, attachment.updatedAt)
+        bindBool(stmt, 10, attachment.isDeleted)
+        bindBool(stmt, 11, isDirty)
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            throw ThingsDatabaseError.sqlError(currentErrorMessageLocked())
+        }
+    }
+
+    private func fetchAllActiveAttachmentsGroupedLocked() throws -> (byTask: [String: [TaskAttachment]], byProject: [String: [TaskAttachment]]) {
+        let active = try fetchAttachmentsWhereLocked("is_deleted = 0")
+        var byTask: [String: [TaskAttachment]] = [:]
+        var byProject: [String: [TaskAttachment]] = [:]
+        for att in active {
+            if let tid = att.taskId, !tid.isEmpty {
+                byTask[tid, default: []].append(att)
+            } else if let pid = att.projectId, !pid.isEmpty {
+                byProject[pid, default: []].append(att)
+            }
+        }
+        return (byTask, byProject)
+    }
+
+    private func fetchAttachmentsWhereLocked(_ whereClause: String) throws -> [TaskAttachment] {
+        let stmt = try prepareLocked("""
+            SELECT id, task_id, project_id, file_name, mime_type, size_bytes,
+                   local_relative_path, created_at, updated_at, is_deleted
+            FROM attachments WHERE \(whereClause) ORDER BY created_at ASC;
+        """)
+        defer { sqlite3_finalize(stmt) }
+        var out: [TaskAttachment] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            out.append(
+                TaskAttachment(
+                    id: colString(stmt, 0) ?? "",
+                    taskId: colString(stmt, 1),
+                    projectId: colString(stmt, 2),
+                    fileName: colString(stmt, 3) ?? "",
+                    mimeType: colString(stmt, 4) ?? "application/octet-stream",
+                    sizeBytes: sqlite3_column_int64(stmt, 5),
+                    localRelativePath: colString(stmt, 6) ?? "",
+                    createdAt: sqlite3_column_int64(stmt, 7),
+                    updatedAt: sqlite3_column_int64(stmt, 8),
+                    isDeleted: colBool(stmt, 9)
+                )
+            )
+        }
+        return out
+    }
+
     private func fetchAllActiveChecklistItemsByTaskLocked() throws -> [String: [ChecklistItem]] {
         let items = try fetchChecklistsWhereLocked("is_deleted = 0")
         return Dictionary(grouping: items, by: \.taskId)
@@ -2468,9 +2819,11 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     }
 
     private func fetchTaskByIdLocked(_ id: String) throws -> TaskItem? {
+        let escapedId = id.replacingOccurrences(of: "'", with: "''")
         let tags = try fetchActiveTagsLocked()
         let tagsById = Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0) })
-        let checklists = try fetchChecklistsWhereLocked("task_id = '\(id.replacingOccurrences(of: "'", with: "''"))' AND is_deleted = 0")
+        let checklists = try fetchChecklistsWhereLocked("task_id = '\(escapedId)' AND is_deleted = 0")
+        let attachments = try fetchAttachmentsWhereLocked("task_id = '\(escapedId)' AND is_deleted = 0")
         let tagIds = try fetchAllTaskTagIdsLocked()
 
         let found = try fetchTasksWhereLocked(
@@ -2479,7 +2832,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             orderBy: "sort_order ASC",
             tagsById: tagsById,
             tagIdsByTask: tagIds,
-            checklistsByTask: [id: checklists]
+            checklistsByTask: [id: checklists],
+            attachmentsByTask: [id: attachments]
         )
         return found.first
     }
@@ -2490,7 +2844,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         orderBy: String,
         tagsById: [String: Tag],
         tagIdsByTask: [String: [String]],
-        checklistsByTask: [String: [ChecklistItem]]
+        checklistsByTask: [String: [ChecklistItem]],
+        attachmentsByTask: [String: [TaskAttachment]] = [:]
     ) throws -> [TaskItem] {
         let stmt = try prepareLocked("""
             SELECT id, title, notes, status, schedule_state, when_date, deadline, reminder_time,
@@ -2503,7 +2858,15 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
         var out: [TaskItem] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
-            out.append(readTaskRowLocked(stmt, tagsById: tagsById, tagIdsByTask: tagIdsByTask, checklistsByTask: checklistsByTask))
+            out.append(
+                readTaskRowLocked(
+                    stmt,
+                    tagsById: tagsById,
+                    tagIdsByTask: tagIdsByTask,
+                    checklistsByTask: checklistsByTask,
+                    attachmentsByTask: attachmentsByTask
+                )
+            )
         }
         return out
     }
@@ -2512,7 +2875,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         _ stmt: OpaquePointer,
         tagsById: [String: Tag],
         tagIdsByTask: [String: [String]],
-        checklistsByTask: [String: [ChecklistItem]]
+        checklistsByTask: [String: [ChecklistItem]],
+        attachmentsByTask: [String: [TaskAttachment]] = [:]
     ) -> TaskItem {
         let id = colString(stmt, 0) ?? ""
         let jsonTagIds = decodeStringArray(colString(stmt, 14))
@@ -2536,6 +2900,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             recurrenceRule: decodeRecurrence(colString(stmt, 12)),
             sortOrder: sqlite3_column_double(stmt, 13),
             checklistItems: checklistsByTask[id] ?? [],
+            attachments: attachmentsByTask[id] ?? [],
             tags: resolvedTags,
             createdAt: sqlite3_column_int64(stmt, 15),
             updatedAt: sqlite3_column_int64(stmt, 16),
@@ -2572,7 +2937,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             scalar("SELECT COUNT(*) FROM areas;") +
             scalar("SELECT COUNT(*) FROM headings;") +
             scalar("SELECT COUNT(*) FROM checklist_items;") +
-            scalar("SELECT COUNT(*) FROM tags;")
+            scalar("SELECT COUNT(*) FROM tags;") +
+            scalar("SELECT COUNT(*) FROM attachments;")
 
         return DatabaseStatistics(
             openTasks: openTasks,

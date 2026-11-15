@@ -18,9 +18,18 @@ public struct ThingsCommandMenus: Commands {
             Button(store.tr("macos_menubar_quick_entry")) {
                 store.quickEntryPrefillTitle = ""
                 store.quickEntryPrefillNotes = ""
+                store.quickEntryAutoStartVoice = false
                 store.isQuickEntryPresented = true
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
+
+            Button(store.tr("shortcut_voice_capture_short")) {
+                store.quickEntryPrefillTitle = ""
+                store.quickEntryPrefillNotes = ""
+                store.quickEntryAutoStartVoice = true
+                store.isQuickEntryPresented = true
+            }
+            .keyboardShortcut("v", modifiers: [.command, .shift, .control])
 
             Divider()
 
@@ -69,6 +78,15 @@ public struct ThingsCommandMenus: Commands {
                 store.duplicateSelectedOrExpandedTask()
             }
             .keyboardShortcut("d", modifiers: [.command])
+
+            Button(store.tr("action_attach_file")) {
+                if let id = store.expandedTaskId ?? store.selectedTaskIds.first {
+                    store.pickAndAttachFiles(taskId: id)
+                } else if case .project(let pid) = store.selectedDestination {
+                    store.pickAndAttachFiles(projectId: pid)
+                }
+            }
+            .keyboardShortcut("a", modifiers: [.command, .shift])
 
             Button(store.tr("action_focus_timer")) {
                 if let id = store.expandedTaskId ?? store.selectedTaskIds.first,

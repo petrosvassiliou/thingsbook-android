@@ -394,6 +394,57 @@ public struct BackupProjectTagRefDto: Codable, Equatable, Sendable {
     }
 }
 
+public struct BackupAttachmentDto: Codable, Equatable, Sendable {
+    public var id: String
+    public var taskId: String?
+    public var projectId: String?
+    public var fileName: String
+    public var mimeType: String
+    public var sizeBytes: Int64
+    public var localRelativePath: String
+    public var dataBase64: String
+    public var createdAt: Int64
+    public var updatedAt: Int64
+
+    public init(
+        id: String,
+        taskId: String? = nil,
+        projectId: String? = nil,
+        fileName: String,
+        mimeType: String,
+        sizeBytes: Int64 = 0,
+        localRelativePath: String = "",
+        dataBase64: String = "",
+        createdAt: Int64 = 0,
+        updatedAt: Int64 = 0
+    ) {
+        self.id = id
+        self.taskId = taskId
+        self.projectId = projectId
+        self.fileName = fileName
+        self.mimeType = mimeType
+        self.sizeBytes = sizeBytes
+        self.localRelativePath = localRelativePath
+        self.dataBase64 = dataBase64
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(String.self, forKey: .id)
+        self.taskId = try? c.decodeIfPresent(String.self, forKey: .taskId)
+        self.projectId = try? c.decodeIfPresent(String.self, forKey: .projectId)
+        self.fileName = (try? c.decode(String.self, forKey: .fileName)) ?? "attachment"
+        self.mimeType = (try? c.decode(String.self, forKey: .mimeType)) ?? "application/octet-stream"
+        self.sizeBytes = (try? c.decode(Int64.self, forKey: .sizeBytes)) ?? 0
+        self.localRelativePath = (try? c.decode(String.self, forKey: .localRelativePath)) ?? ""
+        self.dataBase64 = (try? c.decode(String.self, forKey: .dataBase64)) ?? ""
+        self.createdAt = (try? c.decode(Int64.self, forKey: .createdAt)) ?? 0
+        self.updatedAt = (try? c.decode(Int64.self, forKey: .updatedAt)) ?? 0
+    }
+}
+
 public struct BackupPreferencesDto: Codable, Equatable, Sendable {
     public var sidebarVisible: Bool?
     public var dailyDigestEnabled: Bool?
@@ -437,6 +488,7 @@ public struct ThingsbookBackupPayload: Codable, Equatable, Sendable {
     public var tags: [BackupTagDto]
     public var taskTagRefs: [BackupTaskTagRefDto]
     public var projectTagRefs: [BackupProjectTagRefDto]
+    public var attachments: [BackupAttachmentDto]
     public var preferences: BackupPreferencesDto
 
     public init(
@@ -451,6 +503,7 @@ public struct ThingsbookBackupPayload: Codable, Equatable, Sendable {
         tags: [BackupTagDto] = [],
         taskTagRefs: [BackupTaskTagRefDto] = [],
         projectTagRefs: [BackupProjectTagRefDto] = [],
+        attachments: [BackupAttachmentDto] = [],
         preferences: BackupPreferencesDto = BackupPreferencesDto()
     ) {
         self.schemaVersion = schemaVersion
@@ -464,6 +517,7 @@ public struct ThingsbookBackupPayload: Codable, Equatable, Sendable {
         self.tags = tags
         self.taskTagRefs = taskTagRefs
         self.projectTagRefs = projectTagRefs
+        self.attachments = attachments
         self.preferences = preferences
     }
 
@@ -480,6 +534,7 @@ public struct ThingsbookBackupPayload: Codable, Equatable, Sendable {
         self.tags = (try? c.decode([BackupTagDto].self, forKey: .tags)) ?? []
         self.taskTagRefs = (try? c.decode([BackupTaskTagRefDto].self, forKey: .taskTagRefs)) ?? []
         self.projectTagRefs = (try? c.decode([BackupProjectTagRefDto].self, forKey: .projectTagRefs)) ?? []
+        self.attachments = (try? c.decode([BackupAttachmentDto].self, forKey: .attachments)) ?? []
         self.preferences = (try? c.decode(BackupPreferencesDto.self, forKey: .preferences)) ?? BackupPreferencesDto()
     }
 }
@@ -494,6 +549,7 @@ public struct BackupSummary: Equatable, Sendable {
     public let tasksCount: Int
     public let checklistItemsCount: Int
     public let tagsCount: Int
+    public let attachmentsCount: Int
 
     public init(
         createdAt: Int64,
@@ -504,7 +560,8 @@ public struct BackupSummary: Equatable, Sendable {
         headingsCount: Int = 0,
         tasksCount: Int = 0,
         checklistItemsCount: Int = 0,
-        tagsCount: Int = 0
+        tagsCount: Int = 0,
+        attachmentsCount: Int = 0
     ) {
         self.createdAt = createdAt
         self.appVersionName = appVersionName
@@ -515,6 +572,7 @@ public struct BackupSummary: Equatable, Sendable {
         self.tasksCount = tasksCount
         self.checklistItemsCount = checklistItemsCount
         self.tagsCount = tagsCount
+        self.attachmentsCount = attachmentsCount
     }
 }
 
@@ -535,7 +593,7 @@ public enum ThingsBackupCodec {
     private static let saltBytes = 16
     private static let ivBytes = 12
     private static let gcmTagBits = 128
-    private static let maxDecompressedBytes = 50 * 1024 * 1024 // 50 MB guard
+    private static let maxDecompressedBytes = 120 * 1024 * 1024 // 120 MB guard (with attachments)
 
     public static func summarizePayload(_ payload: ThingsbookBackupPayload, encrypted: Bool) -> BackupSummary {
         BackupSummary(
@@ -547,15 +605,16 @@ public enum ThingsBackupCodec {
             headingsCount: payload.headings.count,
             tasksCount: payload.tasks.count,
             checklistItemsCount: payload.checklistItems.count,
-            tagsCount: payload.tags.count
+            tagsCount: payload.tags.count,
+            attachmentsCount: payload.attachments.count
         )
     }
 
     public static func encodeBackup(
         payload: ThingsbookBackupPayload,
         password: String?,
-        appVersionName: String = "1.7.0",
-        appVersionCode: Int = 41
+        appVersionName: String = "1.8.0",
+        appVersionCode: Int = 42
     ) throws -> Data {
         let compactEncoder = JSONEncoder()
         let rawJsonData = try compactEncoder.encode(payload)

@@ -189,7 +189,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "1.7.0"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "1.8.0"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -197,7 +197,7 @@ final class ThingsbookCoreTests: XCTestCase {
         let decrypted = try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "CorrectHorseBatteryStaple!")
         XCTAssertEqual(decrypted, payload)
 
-        // Authentic Android / ChromeOS WebCrypto AES-256-GCM + GZIP test vector
+        // Authentic Android / ChromeOS WebCrypto AES-256-GCM + GZIP v1.7.0 test vector (v1.7 -> v1.8 upgrade compatibility)
         let androidVectorJson = """
         {"magic":"THINGSBOOK_BACKUP_V1","formatVersion":1,"appVersionName":"1.7.0","appVersionCode":41,"createdAt":1731571200000,"encrypted":true,"kdf":"PBKDF2WithHmacSHA256","kdfIterations":120000,"saltBase64":"AQIDBAUGBwgJCgsMDQ4PEA==","cipher":"AES/GCM/NoPadding","ivBase64":"oaKjpKWmp6ipqqus","gcmTagBits":128,"ciphertextBase64":"CSC233S0+7eSLIfV0yXB8qY0+1244/IZ0OY1B/lk1h7ywTKb49XbD1dHO3EpIgkmybthWy6+BwY/Eyx8Et/AJ7ywor113WLpR/aGUmJ0dMvignjksZ2LNUY8Aj8HZRe7cZBtGsP7/dHjA+03KQ3yoJspVHAlzqcdHq0qXaGprtvn2tvaKSI5O5RTuWbXH6uG989iRoVYhyNzzmKIBxA5LZk7TKIoHYoqG9GTb3chTKVh1IbWjnT/ldg8DXehlL345Eyjnx/Eh40SZlw9ogSzg5koHp2ZUah4yIPytoB69yVemu6buHx0fe+gO7lY9Yn+L2WNei/kzUl2Evsgh81U/XAnHeFHoLF0SAyo7vikaUJQzBJHGXVyp2664jSZWTFRkm4Vlyyo6sL+0C+EqOUy2IQbJR8zQ6pw6yLZ5JOzcPMacB7Z+duMrJdFMyWD2wwOq2ttYXvqyagRAcF3oV0OjnIxfaeF5BbSekRm8T9uVw=="}
         """
@@ -207,6 +207,7 @@ final class ThingsbookCoreTests: XCTestCase {
         )
         XCTAssertEqual(androidDecoded.areas.first?.title, "Android Synced Area")
         XCTAssertEqual(androidDecoded.tasks.first?.title, "Encrypted Cross-Platform Task")
+        XCTAssertTrue(androidDecoded.attachments.isEmpty)
 
         // Atomic restore into fresh DB
         let freshDb = try ThingsSQLiteDatabase(path: ":memory:")
@@ -214,5 +215,124 @@ final class ThingsbookCoreTests: XCTestCase {
         let restoredSnap = try freshDb.loadWorkspaceSnapshot()
         XCTAssertEqual(restoredSnap.areas.map(\.title), ["Android Synced Area"])
         XCTAssertEqual(restoredSnap.allOpenTasks.map(\.title), ["Encrypted Cross-Platform Task"])
+    }
+
+    func testMapLocationChipsDetectionV18() {
+        let notes = """
+        Meet client at 📍 Bahnhofstrasse 10, Zürich
+        Backup coordinates: 47.3769, 8.5417
+        Office: Musterstraße 42, 10115 Berlin
+        US HQ: 742 Evergreen Terrace
+        """
+        let links = MarkdownNotesParser.extractDetectedLinks(from: notes)
+        let mapLinks = links.filter { $0.type == .map }
+        XCTAssertEqual(mapLinks.count, 4)
+        XCTAssertTrue(mapLinks.allSatisfy { $0.targetUri.hasPrefix("https://maps.apple.com/") })
+    }
+
+    func testAttachmentsCrudBackupAndCloudDeltaV18() throws {
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let proj = try db.createProject(title: "Architecture Spec")
+        let task = try db.createTask(title: "Review Floorplan", scheduleState: .today, projectId: proj.id)
+
+        let pdfBytes = Data("%PDF-1.4 sample floorplan".utf8)
+        let imgBytes = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+
+        let taskAtt = try db.addAttachment(
+            taskId: task.id,
+            fileName: "floorplan.pdf",
+            mimeType: "application/pdf",
+            data: pdfBytes
+        )
+        let projAtt = try db.addAttachment(
+            projectId: proj.id,
+            fileName: "facade.png",
+            mimeType: "image/png",
+            data: imgBytes
+        )
+
+        XCTAssertTrue(taskAtt.isPdf)
+        XCTAssertTrue(projAtt.isImage)
+        XCTAssertNotNil(db.resolveAttachmentURL(taskAtt))
+        XCTAssertEqual(db.readAttachmentBase64(taskAtt), pdfBytes.base64EncodedString())
+
+        let snap = try db.loadWorkspaceSnapshot()
+        XCTAssertEqual(snap.allOpenTasks.first(where: { $0.id == task.id })?.attachments.count, 1)
+        XCTAssertEqual(snap.projectAttachments[proj.id]?.count, 1)
+
+        // Dirty batch includes both attachments
+        let dirty = try db.fetchDirtyBatch()
+        XCTAssertEqual(dirty.attachments.count, 2)
+        try db.markDirtyBatchSynced(dirty)
+        XCTAssertTrue(try db.fetchDirtyBatch().attachments.isEmpty)
+
+        // v1.8 .tbbackup roundtrip preserves binary attachment bytes
+        let backupPayload = try db.buildBackupPayload(preferences: AppPreferences())
+        XCTAssertEqual(backupPayload.attachments.count, 2)
+        let encoded = try ThingsBackupCodec.encodeBackup(payload: backupPayload, password: "V18UpgradePassword!")
+        let decoded = try ThingsBackupCodec.decodeBackup(rawBytes: encoded, password: "V18UpgradePassword!")
+        XCTAssertEqual(decoded.attachments.count, 2)
+
+        let restoredDb = try ThingsSQLiteDatabase(path: ":memory:")
+        try restoredDb.restoreBackupPayload(decoded)
+        let restoredSnap = try restoredDb.loadWorkspaceSnapshot()
+        let restoredTaskAtt = restoredSnap.allOpenTasks.first?.attachments.first
+        XCTAssertEqual(restoredTaskAtt?.fileName, "floorplan.pdf")
+        if let restoredTaskAtt {
+            XCTAssertEqual(restoredDb.readAttachmentBase64(restoredTaskAtt), pdfBytes.base64EncodedString())
+        }
+
+        // Remote cloud sync delta applies inline Base64 attachment & tombstone deletion
+        let remotePayload = Data("Remote Cloud Receipt".utf8)
+        let remoteAtt = TaskAttachment(
+            id: "remote-att-1",
+            taskId: task.id,
+            fileName: "receipt.jpg",
+            mimeType: "image/jpeg",
+            sizeBytes: Int64(remotePayload.count),
+            createdAt: 1_750_000_000_000,
+            updatedAt: 1_750_000_000_000
+        )
+        _ = try restoredDb.applyRemoteDeltas(
+            RemoteDeltaBatch(attachments: [
+                RemoteAttachmentDelta(attachment: remoteAtt, dataBase64: remotePayload.base64EncodedString())
+            ])
+        )
+        let afterRemoteSnap = try restoredDb.loadWorkspaceSnapshot()
+        XCTAssertEqual(afterRemoteSnap.allOpenTasks.first?.attachments.count, 2)
+
+        // Delete attachment cleans up file and marks tombstone
+        try db.deleteAttachment(taskAtt.id)
+        XCTAssertNil(db.resolveAttachmentURL(taskAtt))
+        XCTAssertTrue(try db.loadWorkspaceSnapshot().allOpenTasks.first?.attachments.isEmpty ?? false)
+    }
+
+    func testUpgradeFromV17PreferencesAndDatabase() throws {
+        // 1. Simulate v1.7 AppPreferences JSON (without menuBarSelectedProjectId)
+        let v17PrefsJson = """
+        {"localOnlyDbMode":false,"sidebarVisible":true,"dailyDigestEnabled":true,"dailyDigestHour":8,"dailyDigestMinute":30,"language":"de","calendarEventsEnabled":false,"selectedCalendarIds":[],"groupTodayByProjectOrArea":true,"biometricLockEnabled":false,"autoUpdateCheckEnabled":true,"hideSampleSetupBanner":true}
+        """
+        let decodedPrefs = try JSONDecoder().decode(AppPreferences.self, from: Data(v17PrefsJson.utf8))
+        XCTAssertEqual(decodedPrefs.language, .de)
+        XCTAssertTrue(decodedPrefs.groupTodayByProjectOrArea)
+        XCTAssertNil(decodedPrefs.menuBarSelectedProjectId)
+
+        // 2. Verify all v1.8 localization keys exist in EN/DE/FR/IT/ES
+        let v18Keys = [
+            "voice_capture_btn",
+            "voice_smart_parse_gemini",
+            "action_attach_file",
+            "attachments_section_title",
+            "widget_pin_project_tab",
+            "macos_voice_listening",
+            "macos_attachment_drop_hint"
+        ]
+        for lang in [AppLanguage.en, .de, .fr, .it, .es] {
+            for key in v18Keys {
+                let val = ThingsStrings.shared.text(key, lang: lang)
+                XCTAssertFalse(val.isEmpty, "Missing \(key) in \(lang.rawValue)")
+                XCTAssertNotEqual(val, key, "Untranslated \(key) in \(lang.rawValue)")
+            }
+        }
     }
 }

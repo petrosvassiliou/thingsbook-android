@@ -181,6 +181,64 @@ public struct Tag: Identifiable, Equatable, Hashable, Codable, Sendable {
     }
 }
 
+public struct TaskAttachment: Identifiable, Equatable, Hashable, Codable, Sendable {
+    public var id: String
+    public var taskId: String?
+    public var projectId: String?
+    public var fileName: String
+    public var mimeType: String
+    public var sizeBytes: Int64
+    public var localRelativePath: String
+    public var createdAt: Int64
+    public var updatedAt: Int64
+    public var isDeleted: Bool
+
+    public init(
+        id: String,
+        taskId: String? = nil,
+        projectId: String? = nil,
+        fileName: String,
+        mimeType: String,
+        sizeBytes: Int64 = 0,
+        localRelativePath: String = "",
+        createdAt: Int64,
+        updatedAt: Int64,
+        isDeleted: Bool = false
+    ) {
+        self.id = id
+        self.taskId = taskId
+        self.projectId = projectId
+        self.fileName = fileName
+        self.mimeType = mimeType
+        self.sizeBytes = sizeBytes
+        self.localRelativePath = localRelativePath
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.isDeleted = isDeleted
+    }
+
+    public var isImage: Bool {
+        let lower = mimeType.lowercased()
+        if lower.hasPrefix("image/") { return true }
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        return ["jpg", "jpeg", "png", "webp", "heic", "gif", "tiff"].contains(ext)
+    }
+
+    public var isPdf: Bool {
+        mimeType.lowercased() == "application/pdf" || fileName.lowercased().hasSuffix(".pdf")
+    }
+
+    public var formattedSize: String {
+        if sizeBytes < 1024 {
+            return "\(max(0, sizeBytes)) B"
+        } else if sizeBytes < 1024 * 1024 {
+            return String(format: "%.0f KB", Double(sizeBytes) / 1024.0)
+        } else {
+            return String(format: "%.1f MB", Double(sizeBytes) / (1024.0 * 1024.0))
+        }
+    }
+}
+
 public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
     public var id: String
     public var title: String
@@ -198,6 +256,7 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
     public var sortOrder: Double
     public var checklistItems: [ChecklistItem]
     public var tags: [Tag]
+    public var attachments: [TaskAttachment]
     public var createdAt: Int64
     public var updatedAt: Int64
     public var isDeleted: Bool
@@ -219,6 +278,7 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         sortOrder: Double = 1000.0,
         checklistItems: [ChecklistItem] = [],
         tags: [Tag] = [],
+        attachments: [TaskAttachment] = [],
         createdAt: Int64,
         updatedAt: Int64,
         isDeleted: Bool = false
@@ -239,6 +299,7 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.sortOrder = sortOrder
         self.checklistItems = checklistItems
         self.tags = tags
+        self.attachments = attachments
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.isDeleted = isDeleted
@@ -352,6 +413,7 @@ public struct AppPreferences: Codable, Equatable, Sendable {
     public var biometricLockEnabled: Bool
     public var autoUpdateCheckEnabled: Bool
     public var hideSampleSetupBanner: Bool
+    public var menuBarSelectedProjectId: String?
 
     public init(
         localOnlyDbMode: Bool = false,
@@ -365,7 +427,8 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         groupTodayByProjectOrArea: Bool = false,
         biometricLockEnabled: Bool = false,
         autoUpdateCheckEnabled: Bool = true,
-        hideSampleSetupBanner: Bool = false
+        hideSampleSetupBanner: Bool = false,
+        menuBarSelectedProjectId: String? = nil
     ) {
         self.localOnlyDbMode = localOnlyDbMode
         self.sidebarVisible = sidebarVisible
@@ -379,6 +442,7 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         self.biometricLockEnabled = biometricLockEnabled
         self.autoUpdateCheckEnabled = autoUpdateCheckEnabled
         self.hideSampleSetupBanner = hideSampleSetupBanner
+        self.menuBarSelectedProjectId = menuBarSelectedProjectId
     }
 
     private static let storageKey = "thingsbook_macos_preferences_v1"

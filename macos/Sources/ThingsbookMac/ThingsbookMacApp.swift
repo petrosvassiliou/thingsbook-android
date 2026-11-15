@@ -29,6 +29,10 @@ public final class ThingsbookAppDelegate: NSObject, NSApplicationDelegate {
         newTaskItem.target = self
         menu.addItem(newTaskItem)
 
+        let voiceTaskItem = NSMenuItem(title: strings.text("shortcut_voice_capture_short", lang: lang), action: #selector(dockVoiceTodo), keyEquivalent: "")
+        voiceTaskItem.target = self
+        menu.addItem(voiceTaskItem)
+
         let todayItem = NSMenuItem(title: strings.text("view_today", lang: lang), action: #selector(dockShowToday), keyEquivalent: "")
         todayItem.target = self
         menu.addItem(todayItem)
@@ -42,6 +46,14 @@ public final class ThingsbookAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func dockNewTodo() {
         NSApp.activate(ignoringOtherApps: true)
         store?.createNewTaskInCurrentContext()
+    }
+
+    @objc private func dockVoiceTodo() {
+        NSApp.activate(ignoringOtherApps: true)
+        store?.quickEntryPrefillTitle = ""
+        store?.quickEntryPrefillNotes = ""
+        store?.quickEntryAutoStartVoice = true
+        store?.isQuickEntryPresented = true
     }
 
     @objc private func dockShowToday() {

@@ -4,15 +4,16 @@
 
 # Thingsbook
 
-**Native Android GTD Productivity App — with Companion Standalone App for ChromeOS**
+**Native GTD Productivity Suite for Android, ChromeOS & macOS (`v1.8.0`, Build `42`)**
 
 [![Version](https://img.shields.io/badge/version-1.8.0%20(Build%2042)-248BFD?style=flat-square)](https://github.com/petrosvassiliou/thingsbook-android/releases/tag/v1.8.0)
 [![Android](https://img.shields.io/badge/Android-100%25%20Kotlin%20%2B%20Compose-3DDC84?style=flat-square&logo=android&logoColor=white)](#1-thingsbook-for-android-native-apk)
-[![ChromeOS](https://img.shields.io/badge/ChromeOS-Standalone%20Launcher%20App-4285F4?style=flat-square&logo=googlechrome&logoColor=white)](#2-thingsbook-for-chromeos-standalone-pwa)
+[![ChromeOS](https://img.shields.io/badge/ChromeOS-Standalone%20Launcher%20App-4285F4?style=flat-square&logo=googlechrome&logoColor=white)](#2-thingsbook-for-chromeos-standalone-pwa--v180)
+[![macOS](https://img.shields.io/badge/macOS-100%25%20Swift%20%2B%20SwiftUI%20Universal-000000?style=flat-square&logo=apple&logoColor=white)](#3-thingsbook-for-macos-native-universal-app--v180)
 [![Languages](https://img.shields.io/badge/i18n-DE%20%7C%20EN%20%7C%20FR%20%7C%20IT%20%7C%20ES-6E56CF?style=flat-square)](#localization-5-languages)
 [![Encryption](https://img.shields.io/badge/backup-AES--256--GCM-16A34A?style=flat-square)](#offline-first-storage-backups--cloud-sync)
 
-[**📱 Download Android APK (v1.8.0)**](https://github.com/petrosvassiliou/thingsbook-android/raw/v1.8.0/releases/Thingsbook-v1.8.0-GTD-Full.apk) · [**🤖 Android Overview & Screenshots**](#1-thingsbook-for-android-native-apk) · [**💻 ChromeOS Version & Screenshots**](#2-thingsbook-for-chromeos-standalone-pwa) · [**🇩🇪 Deutsch**](#-deutsche-dokumentation)
+[**📱 Download Android APK (v1.8.0)**](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v1.8.0/Thingsbook-v1.8.0-GTD-Full.apk) · [**🍎 Download macOS Universal DMG (v1.8.0)**](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v1.8.0/Thingsbook-macOS-v1.8.0-Universal.dmg) · [**💻 Launch ChromeOS App**](https://thingsbook-prod.web.app) · [**🇩🇪 Deutsch**](#-deutsche-dokumentation)
 
 </div>
 
@@ -20,9 +21,9 @@
 
 ## ⚠️ Independence Disclaimer / Unabhängigkeits-Erklärung
 
-> **EN:** **Thingsbook** is an independent software project and is **in no way affiliated with, endorsed, or sponsored by Cultured Code GmbH & Co. KG** (the creators of *Things* / *Things 3*). Thingsbook operates **100% independently** and has **no data connection, interface, or compatibility with the official "Things Cloud" or any Cultured Code servers**. All data is stored strictly locally on your device (Room/SQLite on Android, IndexedDB on ChromeOS) and optionally synced via this project's own independent Firebase Firestore backend.
+> **EN:** **Thingsbook** is an independent software project and is **in no way affiliated with, endorsed, or sponsored by Cultured Code GmbH & Co. KG** (the creators of *Things* / *Things 3*). Thingsbook operates **100% independently** and has **no data connection, interface, or compatibility with the official "Things Cloud" or any Cultured Code servers**. All data is stored strictly locally on your device (Room/SQLite on Android, IndexedDB on ChromeOS, SQLite3 + WAL on macOS) and optionally synced via this project's own independent Firebase Firestore backend.
 >
-> **DE:** Dieses Projekt ist eine komplett unabhängige Eigenentwicklung und steht in **keinerlei geschäftlicher, technischer oder rechtlicher Verbindung zur Cultured Code GmbH & Co. KG** (den Entwicklern von *Things* / *Things 3*). **Thingsbook funktioniert zu 100 % eigenständig** und besitzt **keinerlei Datenverbindung, Schnittstelle oder Kompatibilität zur offiziellen „Things Cloud“ oder sonstigen Servern von Cultured Code**. Alle Daten werden ausschließlich lokal auf dem jeweiligen Gerät sowie optional im eigenen Firebase-Firestore-Backend des Projekts gespeichert.
+> **DE:** Dieses Projekt ist eine komplett unabhängige Eigenentwicklung und steht in **keinerlei geschäftlicher, technischer oder rechtlicher Verbindung zur Cultured Code GmbH & Co. KG** (den Entwicklern von *Things* / *Things 3*). **Thingsbook funktioniert zu 100 % eigenständig** und besitzt **keinerlei Datenverbindung, Schnittstelle oder Kompatibilität zur offiziellen „Things Cloud“ oder sonstigen Servern von Cultured Code**. Alle Daten werden ausschließlich lokal auf dem jeweiligen Gerät (Android, ChromeOS, macOS) sowie optional im eigenen Firebase-Firestore-Backend des Projekts gespeichert.
 
 ---
 
@@ -209,9 +210,13 @@ Alongside the native Android APK, this repository includes a completely separate
 | `Double-Click` / `Enter` | Expand or collapse a To-Do card inline |
 | `Esc` | Close active popover, modal, Quick Find, expanded card, or selection |
 
-### 🔄 Seamless Android ↔ ChromeOS Interoperability
-- **Real-Time Delta Sync:** Sign in with the same account on your Android phone and your Chromebook to sync *Areas*, *Projects*, *Headings*, *Tasks*, *Checklists*, *Tags*, and *Attachments* in real time via `thingsbook-prod` Firestore.
-- **Identical `.tbbackup` Binary Format:** Export an AES-256-GCM encrypted `.tbbackup` file on Android and restore it directly on ChromeOS (or vice versa) with 100% cryptographic and schema compatibility (including attachments and `groupTodayByProjectOrArea`).
+### 🔄 Seamless Android ↔ ChromeOS ↔ macOS Interoperability & `v1.7 → v1.8` Upgrade
+- **100% In-Place Upgradeable from `v1.7.0`:**
+  - **Android:** Signed with the identical X.509 release certificate (`versionCode 41 → 42`) and automatic Room `MIGRATION_2_3` (`attachments` table + 4 indices). Existing `v1.7.0` installations discover `v1.8.0` automatically via in-app update check or install cleanly over `v1.7.0` with zero data loss.
+  - **ChromeOS:** Automatic additive IndexedDB migration (`DB_VERSION 1 → 2`) and Service Worker `autoUpdate` with full preservation of local tasks, preferences, and Cloud Sync sessions.
+  - **macOS:** Automatic additive SQLite3 schema migration, backward-compatible `AppPreferences` & `.tbbackup` decoding, in-app `AppUpdateService` update detection, and 1-command `install.sh` replacement of `/Applications/Thingsbook.app`.
+- **Real-Time Delta Sync:** Sign in with the same account on Android, ChromeOS, and macOS to sync *Areas*, *Projects*, *Headings*, *Tasks*, *Checklists*, *Tags*, and *Attachments* in real time via `thingsbook-prod` Firestore.
+- **Identical `.tbbackup` Binary Format:** Export an AES-256-GCM encrypted `.tbbackup` file on Android, ChromeOS, or macOS and restore it directly on any of the three platforms with 100% cryptographic and schema compatibility.
 
 ### 🛠️ Build & Deploy ChromeOS PWA
 ```bash
@@ -227,11 +232,38 @@ cd ..
 
 ---
 
+# 3. Thingsbook for macOS (Native Universal App — `v1.8.0`)
+
+**Thingsbook for macOS** (`macos/`) is a **100% native Swift + SwiftUI + AppKit desktop application** for **macOS 14+ (Sonoma, Sequoia & Tahoe)** running natively on both **Apple Silicon (`arm64`) and Intel (`x86_64`)** Macs, engineered in strict feature, localization, SQLite FTS5, `.tbbackup`, and Firestore sync parity with Android and ChromeOS (`v1.8.0`, Build `42`).
+
+### 📥 Install or Upgrade on macOS (`v1.7.0 → v1.8.0`)
+- **Direct Universal DMG Download:** **[Download `Thingsbook-macOS-v1.8.0-Universal.dmg`](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v1.8.0/Thingsbook-macOS-v1.8.0-Universal.dmg)**
+- **Instant 1-Command Terminal Install / Upgrade (No Gatekeeper Prompts):**
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/main/macos/install.sh | bash
+  ```
+  *(Automatically quits a running `v1.7.0` instance if open, replaces `/Applications/Thingsbook.app` with `v1.8.0`, and preserves your SQLite database, attachments, Keychain sync credentials, and preferences.)*
+
+### ✨ What’s New on macOS in `v1.8.0` (Build `42`)
+1. **🎙️ Native macOS Voice Dictation (`SFSpeechRecognizer` + `AVAudioEngine`) & "✨ Smart Parse with Gemini"**
+   - Dictate tasks live from the toolbar **`🎙️` Voice** button, **Quick Entry (`⌃⇧⌘V`)**, **Magic Plus (`+`)**, **Dock Menu**, **`thingsbook://voice`** URL scheme, or inline on any expanded task card — and split multi-task spoken brain dumps in one click with **"✨ Smart Parse with Gemini"**.
+2. **🎯 Menu Bar Extra (`MenuBarExtra`) — Today & Project Mode Switcher**
+   - Switch between **Today** and **🎯 Project** right inside the macOS status bar popover with persistent project selection, quick task completion, and instant Quick Capture / Voice Capture buttons.
+3. **📎 Native Task & Project Attachments (Drag-and-Drop, File Picker, Zoomable Image & `PDFKit` Viewer)**
+   - Drag and drop files from Finder directly onto any expanded task card (or click **`📎` / `⇧⌘A`** on tasks and projects). Includes automatic `1440px` JPEG compression (`5 MB` limit), **`📎 N` count badges** on collapsed rows, horizontal thumbnail strips, and an in-app **zoomable Image & native `PDFKit` PDF viewer** + Finder Reveal.
+   - Synced across macOS, Android, and ChromeOS via **Firestore** and included inside encrypted **`.tbbackup`** archives.
+4. **📍 Apple Maps Location Chips in Notes**
+   - Automatically detects `📍` markers, `Location:` / `Ort:` / `Adresse:` lines, GPS coordinates, and street addresses in task and project notes, rendering clickable **Apple Maps** chips alongside Web, Email, and Phone chips.
+5. **🌍 100% 5-Language Parity (`427` Verified Localization Keys in `EN`, `DE`, `FR`, `IT`, `ES`)**
+   - Verified automatically on every CI build via `macos/scripts/verify-android-parity.py`.
+
+---
+
 ## 🇩🇪 Deutsche Dokumentation
 
 ### 1. Thingsbook für Android (Native Android-App — `v1.8.0`, Build `42`)
-Eine eigenständige, native Android-Produktivitäts-App für **Android-Smartphones, Tablets & Foldables**, entwickelt mit **100 % Kotlin**, **Jetpack Compose**, **Offline-First Room Database (SQLite FTS5 `unicode61`)**, **AES-256-GCM `.tbbackup` Komplett-Backup**, optionalem **Firebase Firestore Delta-Sync**, **4 Gemini-KI-Funktionen** und **5 Sprachen (`DE`, `EN`, `FR`, `IT`, `ES`)**.
-- **📱 Direkt-Download Android-APK (`v1.8.0`):** **[Thingsbook-v1.8.0-GTD-Full.apk herunterladen](https://github.com/petrosvassiliou/thingsbook-android/raw/v1.8.0/releases/Thingsbook-v1.8.0-GTD-Full.apk)**
+Eine eigenständige, native Android-Produktivitäts-App für **Android-Smartphones, Tablets & Foldables**, entwickelt mit **100 % Kotlin**, **Jetpack Compose**, **Offline-First Room Database (SQLite FTS5 `unicode61`)**, **AES-256-GCM `.tbbackup` Komplett-Backup**, optionalem **Firebase Firestore Delta-Sync**, **4 Gemini-KI-Funktionen** und **5 Sprachen (`DE`, `EN`, `FR`, `IT`, `ES`)**. Nahtlos aktualisierbar von `v1.7.0`.
+- **📱 Direkt-Download Android-APK (`v1.8.0`):** **[Thingsbook-v1.8.0-GTD-Full.apk herunterladen](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v1.8.0/Thingsbook-v1.8.0-GTD-Full.apk)**
 
 #### ✨ Alle neuen Funktionen in `v1.8.0` & `v1.7.0`:
 - **⚡ Android-Schnelleinstellungs-Kachel (`TileService`):** Neue Aufgaben direkt aus der Android-Benachrichtigungsleiste / den Schnelleinstellungen mit einem Tipp erfassen.
@@ -246,7 +278,15 @@ Eine eigenständige, native Android-Produktivitäts-App für **Android-Smartphon
 
 ### 2. Thingsbook für ChromeOS (Eigenständige Standalone-PWA — `v1.8.0`)
 Zusätzlich enthält `chromeos-pwa/` ein komplett separates **ChromeOS-Paket mit voller `v1.8.0`-Funktionsparität** (inkl. *Spracheingabe & Gemini Smart Parse*, *Drag-&-Drop-Datei-/Foto-/PDF-Anhänge mit Vorschau*, *Google-Maps-Orts-Chips*, *Web Share Target*, *25-Min.-Fokus-Timer*, *Live-Markdown*, *Papierkorb & Rückgängig*, *Aufgaben/Projekte duplizieren*, *Heute-Gruppierung*, *Google-Kalender/.ics-Termine* sowie *WebAuthn-Fingerabdruck-/PIN-Sperre*) — gehostet auf **Firebase Hosting** und **ohne Linux-Entwicklungsumgebung (Crostini)** direkt im **ChromeOS-Startmenü (Launcher) & Shelf** installierbar:
-- **💻 Live-App für Chromebooks:** **[https://thingsbook-prod.web.app](https://thingsbook-prod.web.app)** *(in Chrome öffnen → „Zum ChromeOS-Launcher hinzufügen“ klicken → startet im eigenen Fenster, 100 % offline-fähig via IndexedDB + Service Worker und synchronisiert nahtlos inkl. Anhängen mit der Android-App).*
+- **💻 Live-App für Chromebooks:** **[https://thingsbook-prod.web.app](https://thingsbook-prod.web.app)** *(in Chrome öffnen → „Zum ChromeOS-Launcher hinzufügen“ klicken → aktualisiert sich nahtlos von `v1.7.0` auf `v1.8.0`, 100 % offline-fähig via IndexedDB + Service Worker und synchronisiert inkl. Anhängen mit Android & macOS).*
+
+### 3. Thingsbook für macOS (Native Universal-App — `v1.8.0`, Build `42`)
+`macos/` enthält die **100 % native Swift/SwiftUI/AppKit-Desktop-App für macOS 14+ (Apple Silicon & Intel)** mit voller `v1.8.0`-Parität (*Live-Sprachdiktat `⌃⇧⌘V` & Gemini Smart Parse*, *Menüleisten-App mit Heute/Projekt-Modus*, *Drag-&-Drop-Datei-/Bild-/PDF-Anhänge inkl. nativem `PDFKit`-Viewer*, *Apple-Maps-Orts-Chips*, *Apple-Kalender-Integration*, *Touch ID*, *SQLite FTS5*, *`.tbbackup`* und *Firestore Cloud-Sync*):
+- **🍎 Direkt-Download Universal-DMG (`v1.8.0`):** **[Thingsbook-macOS-v1.8.0-Universal.dmg herunterladen](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v1.8.0/Thingsbook-macOS-v1.8.0-Universal.dmg)**
+- **⚡ 1-Befehl-Installation / Upgrade von `v1.7.0` im Terminal:**
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/main/macos/install.sh | bash
+  ```
 
 ---
 
@@ -256,6 +296,7 @@ Zusätzlich enthält `chromeos-pwa/` ein komplett separates **ChromeOS-Paket mit
 thingsbook-android/
 ├── app/                     # 1. Native Android APK (Kotlin, Jetpack Compose, Room + SQLite FTS5)
 ├── chromeos-pwa/            # 2. Standalone ChromeOS PWA (TypeScript, React, IndexedDB + Workbox)
+├── macos/                   # 3. Native macOS Universal App (Swift, SwiftUI, AppKit, SQLite3 FTS5 + PDFKit)
 ├── docs/screenshots/        # Retina UI screenshots (Android Phone, Android Tablet & ChromeOS)
 ├── releases/                # Signed release APKs (Thingsbook-v1.8.0-GTD-Full.apk)
 ├── firebase.json            # Firebase Hosting & Firestore configuration

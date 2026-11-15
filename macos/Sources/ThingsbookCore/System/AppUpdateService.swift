@@ -18,8 +18,8 @@ public struct ReleaseUpdateInfo: Equatable, Sendable {
 }
 
 public enum AppUpdateService {
-    public static let currentVersion = "1.7.0"
-    public static let currentBuildNumber = 41
+    public static let currentVersion = "1.8.0"
+    public static let currentBuildNumber = 42
     private static let releasesEndpoint = "https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases?per_page=10"
 
     public static func checkForUpdates(current: String = currentVersion) async throws -> ReleaseUpdateInfo? {

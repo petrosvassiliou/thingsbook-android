@@ -14,6 +14,8 @@ on:
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
+    env:
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_THINGSBOOK_PROD }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -39,8 +41,6 @@ jobs:
 
       - name: Deploy to Firebase Hosting (thingsbook-prod)
         if: env.FIREBASE_SERVICE_ACCOUNT != ''
-        env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_THINGSBOOK_PROD }}
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}

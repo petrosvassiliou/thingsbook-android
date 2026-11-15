@@ -44,6 +44,7 @@ public final class ThingsbookStore: ObservableObject {
     @Published public var areas: [Area] = []
     @Published public var projects: [Project] = []
     @Published public var headingsByProject: [String: [Heading]] = [:]
+    @Published public var projectAttachments: [String: [TaskAttachment]] = [:]
     @Published public var tags: [Tag] = []
 
     @Published public var inboxTasks: [TaskItem] = []
@@ -70,6 +71,8 @@ public final class ThingsbookStore: ObservableObject {
     @Published public var isQuickEntryPresented = false
     @Published public var quickEntryPrefillTitle = ""
     @Published public var quickEntryPrefillNotes = ""
+    @Published public var quickEntryAutoStartVoice = false
+    @Published public var previewingAttachment: TaskAttachment? = nil
     @Published public var isGeminiSheetPresented = false
     @Published public var geminiInitialTab: GeminiSheetTab = .brainDump
     @Published public var isSettingsPresented = false
@@ -176,6 +179,7 @@ public final class ThingsbookStore: ObservableObject {
         self.areas = snap.areas
         self.projects = snap.projects
         self.headingsByProject = snap.headingsByProject
+        self.projectAttachments = snap.projectAttachments
         self.tags = snap.tags
         self.inboxTasks = snap.inboxTasks
         self.todayDaytimeTasks = snap.todayDaytimeTasks
@@ -806,6 +810,152 @@ public final class ThingsbookStore: ObservableObject {
         }
     }
 
+    // MARK: - File & Image Attachments + Voice Smart Parse (v1.8)
+
+    public func pickAndAttachFiles(taskId: String? = nil, projectId: String? = nil) {
+        guard taskId != nil || projectId != nil else { return }
+        let panel = NSOpenPanel()
+        panel.title = tr("action_attach_file")
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.image, .pdf, .item]
+        if panel.runModal() == .OK {
+            attachDroppedURLs(panel.urls, taskId: taskId, projectId: projectId)
+        }
+    }
+
+    public func attachDroppedURLs(_ urls: [URL], taskId: String? = nil, projectId: String? = nil) {
+        guard taskId != nil || projectId != nil else { return }
+        for url in urls {
+            do {
+                let prepared = try MacAttachmentImporter.prepareFileForImport(url: url)
+                _ = try database.addAttachment(
+                    taskId: taskId,
+                    projectId: projectId,
+                    fileName: prepared.fileName,
+                    mimeType: prepared.mimeType,
+                    data: prepared.data
+                )
+            } catch MacAttachmentImportError.tooLarge {
+                showToast(tr("attachment_too_large"))
+            } catch {
+                showToast(error.localizedDescription)
+            }
+        }
+    }
+
+    @discardableResult
+    public func handleFileDropProviders(
+        _ providers: [NSItemProvider],
+        taskId: String? = nil,
+        projectId: String? = nil
+    ) -> Bool {
+        guard !providers.isEmpty else { return false }
+        var accepted = false
+        for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+            accepted = true
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { [weak self] item, _ in
+                let resolvedURL: URL? = {
+                    if let url = item as? URL { return url }
+                    if let data = item as? Data { return URL(dataRepresentation: data, relativeTo: nil) }
+                    if let str = item as? String { return URL(string: str) }
+                    return nil
+                }()
+                guard let fileURL = resolvedURL else { return }
+                Task { @MainActor [weak self] in
+                    self?.attachDroppedURLs([fileURL], taskId: taskId, projectId: projectId)
+                }
+            }
+        }
+        return accepted
+    }
+
+    public func removeAttachment(_ attachment: TaskAttachment) {
+        if previewingAttachment?.id == attachment.id {
+            previewingAttachment = nil
+        }
+        try? database.deleteAttachment(attachment.id)
+    }
+
+    @discardableResult
+    public func smartParseVoiceDump(
+        rawText: String,
+        defaultDestination: QuickShareDestination
+    ) async -> Int {
+        let clean = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return 0 }
+
+        do {
+            let drafts = try await ThingsbookGeminiService.parseBrainDumpToTasks(
+                rawBrainDump: clean,
+                lang: preferences.language
+            )
+            guard !drafts.isEmpty else { return 0 }
+
+            let cal = Calendar.current
+            let sodToday = cal.startOfDay(for: Date())
+            var defaultProjId: String? = nil
+            var defaultAreaId: String? = nil
+            switch defaultDestination {
+            case .project(let pid):
+                defaultProjId = pid
+                defaultAreaId = project(byId: pid)?.areaId
+            case .area(let aid):
+                defaultAreaId = aid
+            default:
+                break
+            }
+
+            var createdCount = 0
+            for draft in drafts {
+                let whenMillis: Int64? = draft.whenDaysOffset.map { offset in
+                    let target = cal.date(byAdding: .day, value: max(0, offset), to: sodToday) ?? sodToday
+                    return DateEpochConverter.startOfDayMillis(for: target, calendar: cal)
+                }
+                let deadlineMillis: Int64? = draft.deadlineDaysOffset.map { offset in
+                    let target = cal.date(byAdding: .day, value: max(0, offset), to: sodToday) ?? sodToday
+                    return DateEpochConverter.startOfDayMillis(for: target, calendar: cal)
+                }
+
+                var finalSched = draft.scheduleState
+                if defaultProjId == nil && defaultAreaId == nil && finalSched == .inbox {
+                    switch defaultDestination {
+                    case .today: finalSched = .today
+                    case .thisEvening: finalSched = .thisEvening
+                    case .anytime: finalSched = .anytime
+                    case .someday: finalSched = .someday
+                    default: break
+                    }
+                }
+                let finalWhen: Int64? = (finalSched == .today || finalSched == .thisEvening)
+                    ? (whenMillis ?? DateEpochConverter.startOfDayMillis(for: sodToday, calendar: cal))
+                    : whenMillis
+
+                if let task = try? database.createTask(
+                    title: draft.title,
+                    notes: draft.notes,
+                    scheduleState: finalSched,
+                    whenDate: finalWhen,
+                    deadline: deadlineMillis,
+                    projectId: defaultProjId,
+                    areaId: defaultAreaId,
+                    checklistTitles: draft.checklist
+                ) {
+                    NotificationReminderService.shared.syncTaskReminder(task, lang: preferences.language)
+                    createdCount += 1
+                }
+            }
+            if createdCount > 0 {
+                showToast(trf("macos_smart_parsed_toast", createdCount))
+            }
+            return createdCount
+        } catch {
+            showToast(error.localizedDescription)
+            return 0
+        }
+    }
+
     // MARK: - URL Scheme (`thingsbook://`) Handler
 
     public func handleDeepLink(_ url: URL) {
@@ -820,6 +970,12 @@ public final class ThingsbookStore: ObservableObject {
         case "add", "quick-entry":
             quickEntryPrefillTitle = queryValue("title") ?? ""
             quickEntryPrefillNotes = queryValue("notes") ?? ""
+            quickEntryAutoStartVoice = false
+            isQuickEntryPresented = true
+        case "voice", "voice-capture":
+            quickEntryPrefillTitle = queryValue("title") ?? ""
+            quickEntryPrefillNotes = queryValue("notes") ?? ""
+            quickEntryAutoStartVoice = true
             isQuickEntryPresented = true
         case "today":
             selectedDestination = .smartView(.today)

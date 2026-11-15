@@ -3,9 +3,11 @@ name: Build & Verify Thingsbook for macOS
 on:
   push:
     branches:
+      - main
       - macOS
   pull_request:
     branches:
+      - main
       - macOS
   workflow_dispatch:
 

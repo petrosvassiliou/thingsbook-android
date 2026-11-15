@@ -2,8 +2,8 @@
   "platform": "macOS",
   "minimumMacOSVersion": "14.0",
   "bundleIdentifier": "com.thingsbook.macos",
-  "syncedAndroidVersionName": "1.7.0",
-  "syncedAndroidVersionCode": 41,
+  "syncedAndroidVersionName": "1.8.0",
+  "syncedAndroidVersionCode": 42,
   "supportedLanguages": ["en", "de", "fr", "it", "es"],
   "backupFormatMagic": "THINGSBOOK_BACKUP_V1",
   "backupFormatVersion": 1,
@@ -13,7 +13,8 @@
     "projects",
     "headings",
     "tasks",
-    "checklist_items"
+    "checklist_items",
+    "attachments"
   ],
   "features": {
     "smartViews": [
@@ -67,6 +68,15 @@
       "focus_pomodoro_25m_timer_banner",
       "touch_id_biometric_or_password_app_lock",
       "automatic_00_00_midnight_day_rollover"
+    ],
+    "v1_8_0_instantCaptureAndAttachments": [
+      "voice_to_task_speech_dictation_and_1tap_gemini_smart_parse",
+      "menubar_quick_capture_today_and_project_mode_switcher",
+      "dock_shortcut_and_url_scheme_voice_capture",
+      "rich_task_and_project_attachments_images_pdfs_files_drag_drop",
+      "in_app_zoomable_image_and_pdfkit_viewer_plus_share",
+      "attachments_sqlite_tbbackup_and_firestore_sync",
+      "location_and_apple_maps_chips_in_markdown_notes"
     ]
   }
 }

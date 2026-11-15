@@ -471,6 +471,33 @@ public struct SmartViewCanvas: View {
                     )
                 }
                 .buttonStyle(.plain)
+
+                Button {
+                    store.pickAndAttachFiles(projectId: project.id)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "paperclip")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(store.tr("action_attach_file"))
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Color.primary.opacity(0.06))
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
+            let projAttachments = store.projectAttachments[project.id] ?? []
+            if !projAttachments.isEmpty {
+                AttachmentsStripView(store: store, attachments: projAttachments) {
+                    store.pickAndAttachFiles(projectId: project.id)
+                }
+                .padding(.top, 4)
             }
 
             if isAddingHeading {

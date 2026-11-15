@@ -452,23 +452,62 @@ public actor FirebaseCloudSyncService {
             ]))
         }
 
-        guard !writes.isEmpty else { return }
+        guard !writes.isEmpty || !dirty.attachments.isEmpty else { return }
 
         let commitURL = URL(string: "https://firestore.googleapis.com/v1/projects/\(projectId)/databases/(default)/documents:commit")!
-        let chunkSize = 450
-        var idx = 0
-        while idx < writes.count {
-            let slice = Array(writes[idx..<min(idx + chunkSize, writes.count)])
-            var req = URLRequest(url: commitURL)
-            req.httpMethod = "POST"
-            req.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            req.httpBody = try JSONSerialization.data(withJSONObject: ["writes": slice])
-            let (data, res) = try await session.data(for: req)
-            if let http = res as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                throw CloudSyncError.networkFailure(extractFirebaseError(from: data) ?? "Firestore commit failed (HTTP \(http.statusCode)).")
+        if !writes.isEmpty {
+            let chunkSize = 450
+            var idx = 0
+            while idx < writes.count {
+                let slice = Array(writes[idx..<min(idx + chunkSize, writes.count)])
+                var req = URLRequest(url: commitURL)
+                req.httpMethod = "POST"
+                req.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                req.httpBody = try JSONSerialization.data(withJSONObject: ["writes": slice])
+                let (data, res) = try await session.data(for: req)
+                if let http = res as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                    throw CloudSyncError.networkFailure(extractFirebaseError(from: data) ?? "Firestore commit failed (HTTP \(http.statusCode)).")
+                }
+                idx += chunkSize
             }
-            idx += chunkSize
+        }
+
+        if !dirty.attachments.isEmpty {
+            let maxInlineAttachmentBytes = 550 * 1024
+            var attWrites: [[String: Any]] = []
+            for att in dirty.attachments {
+                let inlineB64 = att.isDeleted ? "" : database.readAttachmentBase64(att, maxRawBytes: maxInlineAttachmentBytes)
+                attWrites.append(makeUpdateWrite(path: "\(baseDocPrefix)/attachments/\(att.id)", fields: [
+                    "id": fsString(att.id),
+                    "taskId": fsNullableString(att.taskId),
+                    "projectId": fsNullableString(att.projectId),
+                    "fileName": fsString(att.fileName),
+                    "mimeType": fsString(att.mimeType),
+                    "sizeBytes": fsInt(att.sizeBytes),
+                    "localRelativePath": fsString(""),
+                    "dataBase64": fsString(inlineB64),
+                    "sortOrder": fsDouble(Double(att.createdAt)),
+                    "createdAt": fsInt(att.createdAt),
+                    "updatedAt": fsInt(att.updatedAt),
+                    "isDeleted": fsBool(att.isDeleted)
+                ]))
+            }
+            let attChunkSize = 8
+            var attIdx = 0
+            while attIdx < attWrites.count {
+                let slice = Array(attWrites[attIdx..<min(attIdx + attChunkSize, attWrites.count)])
+                var req = URLRequest(url: commitURL)
+                req.httpMethod = "POST"
+                req.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                req.httpBody = try JSONSerialization.data(withJSONObject: ["writes": slice])
+                let (data, res) = try await session.data(for: req)
+                if let http = res as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                    throw CloudSyncError.networkFailure(extractFirebaseError(from: data) ?? "Firestore attachment commit failed (HTTP \(http.statusCode)).")
+                }
+                attIdx += attChunkSize
+            }
         }
 
         try database.markDirtyBatchSynced(dirty)
@@ -481,9 +520,10 @@ public actor FirebaseCloudSyncService {
         async let rawHeadings = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "headings", since: sinceTimestamp)
         async let rawTasks = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "tasks", since: sinceTimestamp)
         async let rawChecklists = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "checklist_items", since: sinceTimestamp)
+        async let rawAttachments = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "attachments", since: sinceTimestamp)
 
-        let (tagMaps, areaMaps, projMaps, headMaps, taskMaps, chkMaps) = try await (
-            rawTags, rawAreas, rawProjects, rawHeadings, rawTasks, rawChecklists
+        let (tagMaps, areaMaps, projMaps, headMaps, taskMaps, chkMaps, attMaps) = try await (
+            rawTags, rawAreas, rawProjects, rawHeadings, rawTasks, rawChecklists, rawAttachments
         )
 
         let tags = tagMaps.compactMap(Self.parseTag)
@@ -497,8 +537,9 @@ public actor FirebaseCloudSyncService {
             return t
         }
         let checklists = chkMaps.compactMap(Self.parseChecklist)
+        let attachments = attMaps.compactMap(Self.parseAttachment)
 
-        if tags.isEmpty && areas.isEmpty && projects.isEmpty && headings.isEmpty && tasks.isEmpty && checklists.isEmpty {
+        if tags.isEmpty && areas.isEmpty && projects.isEmpty && headings.isEmpty && tasks.isEmpty && checklists.isEmpty && attachments.isEmpty {
             return sinceTimestamp
         }
 
@@ -509,7 +550,8 @@ public actor FirebaseCloudSyncService {
             headings: headings,
             tasks: tasks,
             taskTagIdsByTaskId: taskTagIds,
-            checklistItems: checklists
+            checklistItems: checklists,
+            attachments: attachments
         )
         return try database.applyRemoteDeltas(batch)
     }
@@ -602,6 +644,7 @@ public actor FirebaseCloudSyncService {
                 return t
             }
             let checklists = (batch["checklistItems"] as? [[String: Any]] ?? []).compactMap(Self.parseChecklist)
+            let attachments = (batch["attachments"] as? [[String: Any]] ?? []).compactMap(Self.parseAttachment)
 
             _ = try? database.applyRemoteDeltas(
                 RemoteDeltaBatch(
@@ -611,7 +654,8 @@ public actor FirebaseCloudSyncService {
                     headings: headings,
                     tasks: tasks,
                     taskTagIdsByTaskId: taskTags,
-                    checklistItems: checklists
+                    checklistItems: checklists,
+                    attachments: attachments
                 )
             )
         }
@@ -882,5 +926,23 @@ public actor FirebaseCloudSyncService {
             updatedAt: asInt64(map["updatedAt"]) ?? 0,
             isDeleted: (map["isDeleted"] as? Bool) ?? false
         )
+    }
+
+    private static func parseAttachment(_ map: [String: Any]) -> RemoteAttachmentDelta? {
+        guard let id = asString(map["id"]) else { return nil }
+        let att = TaskAttachment(
+            id: id,
+            taskId: asString(map["taskId"]),
+            projectId: asString(map["projectId"]),
+            fileName: (map["fileName"] as? String) ?? "attachment",
+            mimeType: (map["mimeType"] as? String) ?? "application/octet-stream",
+            sizeBytes: asInt64(map["sizeBytes"]) ?? 0,
+            localRelativePath: (map["localRelativePath"] as? String) ?? "",
+            createdAt: asInt64(map["createdAt"]) ?? 0,
+            updatedAt: asInt64(map["updatedAt"]) ?? 0,
+            isDeleted: (map["isDeleted"] as? Bool) ?? false
+        )
+        let dataB64 = (map["dataBase64"] as? String) ?? ""
+        return RemoteAttachmentDelta(attachment: att, dataBase64: dataB64)
     }
 }

@@ -111,11 +111,23 @@ public struct MainWorkspaceView: View {
                         Button {
                             store.quickEntryPrefillTitle = ""
                             store.quickEntryPrefillNotes = ""
+                            store.quickEntryAutoStartVoice = false
                             store.isQuickEntryPresented = true
                         } label: {
                             Image(systemName: "tray.and.arrow.down")
                         }
                         .help(store.tr("quick_share_title") + " (⇧⌘N)")
+
+                        // Instant Voice Capture (v1.8)
+                        Button {
+                            store.quickEntryPrefillTitle = ""
+                            store.quickEntryPrefillNotes = ""
+                            store.quickEntryAutoStartVoice = true
+                            store.isQuickEntryPresented = true
+                        } label: {
+                            Image(systemName: "mic")
+                        }
+                        .help(store.tr("voice_capture_btn") + " (⌃⇧⌘V)")
 
                         // Manage Areas
                         Button {
@@ -224,6 +236,9 @@ public struct MainWorkspaceView: View {
         }
         .sheet(isPresented: $store.isBackupPasswordSheetPresented) {
             backupDecryptSheet
+        }
+        .sheet(item: $store.previewingAttachment) { att in
+            AttachmentPreviewSheet(store: store, attachment: att)
         }
     }
 
@@ -357,6 +372,20 @@ public struct MainWorkspaceView: View {
                 ) {
                     isMagicPlusMenuOpen = false
                     store.createNewTaskInCurrentContext()
+                }
+
+                magicPlusItem(
+                    icon: "mic.fill",
+                    tint: ThingsMacPalette.geminiPurple,
+                    title: store.tr("shortcut_voice_capture_short"),
+                    subtitle: store.tr("voice_smart_parse_gemini"),
+                    shortcut: "⌃⇧⌘V"
+                ) {
+                    isMagicPlusMenuOpen = false
+                    store.quickEntryPrefillTitle = ""
+                    store.quickEntryPrefillNotes = ""
+                    store.quickEntryAutoStartVoice = true
+                    store.isQuickEntryPresented = true
                 }
 
                 if case .project(let projId) = store.selectedDestination {

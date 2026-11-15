@@ -781,6 +781,24 @@ public struct ProjectEditorSheetView: View {
                 }
             }
 
+            if let existing = existingProject {
+                let projAttachments = store.projectAttachments[existing.id] ?? []
+                if projAttachments.isEmpty {
+                    Button {
+                        store.pickAndAttachFiles(projectId: existing.id)
+                    } label: {
+                        Label(store.tr("action_attach_file"), systemImage: "paperclip")
+                            .font(.system(size: 12.5, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                } else {
+                    AttachmentsStripView(store: store, attachments: projAttachments) {
+                        store.pickAndAttachFiles(projectId: existing.id)
+                    }
+                }
+            }
+
             HStack {
                 Spacer()
                 Button(store.tr("action_cancel")) { dismiss() }
@@ -809,7 +827,7 @@ public struct ProjectEditorSheetView: View {
             }
         }
         .padding(20)
-        .frame(width: 430)
+        .frame(width: 450)
     }
 }
 

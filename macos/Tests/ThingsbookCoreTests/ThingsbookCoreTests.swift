@@ -385,13 +385,13 @@ final class ThingsbookCoreTests: XCTestCase {
         db.onRemoteSyncApplied = { box.remoteApplies += 1 }
 
         if let (remoteItem, remoteTags) = parsedTask {
-            let applied = try db.applyRemoteDeltas(
+            let maxUpdatedAt = try db.applyRemoteDeltas(
                 RemoteDeltaBatch(
                     tasks: [remoteItem],
                     taskTagIdsByTaskId: [remoteItem.id: remoteTags]
                 )
             )
-            XCTAssertTrue(applied)
+            XCTAssertEqual(maxUpdatedAt, 1_794_736_150_463)
         }
         XCTAssertEqual(box.mutations, 0, "Remote delta apply must not mark local DB mutated or bounce sync")
         XCTAssertEqual(box.remoteApplies, 1, "Remote delta apply must notify UI observer immediately")

@@ -1653,7 +1653,9 @@ final class ThingsbookCoreTests: XCTestCase {
         let reviewTimestamp = now
         try dbDeviceA.markProjectReviewed(projectId: sharedStaleProject.id, reviewedAt: reviewTimestamp)
         let dirtyA = try dbDeviceA.fetchDirtyBatch()
-        let dirtyReviewedProj = try XCTUnwrap(dirtyA.projects.first(where: { $0.id == sharedStaleProject.id }))
+        guard let dirtyReviewedProj = dirtyA.projects.first(where: { $0.id == sharedStaleProject.id }) else {
+            return XCTFail("Expected dirty reviewed project on Device A")
+        }
         XCTAssertEqual(dirtyReviewedProj.lastReviewedAt, reviewTimestamp)
         XCTAssertGreaterThanOrEqual(dirtyReviewedProj.updatedAt, reviewTimestamp)
 
@@ -1670,11 +1672,15 @@ final class ThingsbookCoreTests: XCTestCase {
             "updatedAt": dirtyReviewedProj.updatedAt,
             "isDeleted": dirtyReviewedProj.isDeleted
         ]
-        let parsedRemote = try XCTUnwrap(FirebaseCloudSyncService.parseProject(wireMap))
+        guard let parsedRemote = FirebaseCloudSyncService.parseProject(wireMap) else {
+            return XCTFail("Expected parseProject to decode reviewed project map")
+        }
         _ = try dbDeviceB.applyRemoteDeltas(RemoteDeltaBatch(projects: [parsedRemote]))
 
         let snapB1 = try dbDeviceB.loadWorkspaceSnapshot()
-        let syncedOnB = try XCTUnwrap(snapB1.projects.first(where: { $0.id == sharedStaleProject.id }))
+        guard let syncedOnB = snapB1.projects.first(where: { $0.id == sharedStaleProject.id }) else {
+            return XCTFail("Expected synced project on Device B")
+        }
         XCTAssertEqual(syncedOnB.lastReviewedAt, reviewTimestamp, "Device B must immediately receive Device A's project review status")
 
         // 4. Even if Device B later receives an edit with nil/older lastReviewedAt or has a newer local updatedAt (clock skew),
@@ -1692,7 +1698,9 @@ final class ThingsbookCoreTests: XCTestCase {
         )
         _ = try dbDeviceB.applyRemoteDeltas(RemoteDeltaBatch(projects: [olderReviewEdit]))
         let snapB2 = try dbDeviceB.loadWorkspaceSnapshot()
-        let afterRenameOnB = try XCTUnwrap(snapB2.projects.first(where: { $0.id == sharedStaleProject.id }))
+        guard let afterRenameOnB = snapB2.projects.first(where: { $0.id == sharedStaleProject.id }) else {
+            return XCTFail("Expected renamed project on Device B")
+        }
         XCTAssertEqual(afterRenameOnB.title, "Q4 Architecture Review (Renamed)")
         XCTAssertEqual(afterRenameOnB.lastReviewedAt, reviewTimestamp, "Non-review edits with nil lastReviewedAt must not wipe synced review timestamp")
 
@@ -1711,7 +1719,9 @@ final class ThingsbookCoreTests: XCTestCase {
         )
         _ = try dbDeviceB.applyRemoteDeltas(RemoteDeltaBatch(projects: [clockSkewedPeerReview]))
         let snapB3 = try dbDeviceB.loadWorkspaceSnapshot()
-        let afterSkewedPeerReview = try XCTUnwrap(snapB3.projects.first(where: { $0.id == sharedStaleProject.id }))
+        guard let afterSkewedPeerReview = snapB3.projects.first(where: { $0.id == sharedStaleProject.id }) else {
+            return XCTFail("Expected project after skewed peer review on Device B")
+        }
         XCTAssertEqual(afterSkewedPeerReview.title, "Q4 Architecture Review (Renamed)")
         XCTAssertEqual(afterSkewedPeerReview.lastReviewedAt, newerPeerReview)
         XCTAssertEqual(

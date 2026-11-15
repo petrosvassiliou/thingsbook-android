@@ -190,7 +190,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.5"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.6"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -405,12 +405,12 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(searchHits.tasks.map(\.id), ["remote-sync-task-1"], "FTS5 must index remotely synced tasks")
     }
 
-    // MARK: - 7. v2.0.0-beta.5 AppUpdateService Beta Channel, Stable Isolation & Version Bump
+    // MARK: - 7. v2.0.0-beta.6 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.5")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.5")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 49)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.6")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.6")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 50)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
 
         // Core [major, minor, patch] + build metadata comparisons on stable channel (includeBeta inferred false for 1.8.1)
@@ -433,8 +433,9 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.3", current: "2.0.0-beta.2"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.4", current: "2.0.0-beta.3"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.5", current: "2.0.0-beta.4"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.10", current: "2.0.0-beta.5"))
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.5", current: "2.0.0-beta.10"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.6", current: "2.0.0-beta.5"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.10", current: "2.0.0-beta.6"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.6", current: "2.0.0-beta.10"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.1"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.99"))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.99", current: "2.0.0", includeBeta: true))

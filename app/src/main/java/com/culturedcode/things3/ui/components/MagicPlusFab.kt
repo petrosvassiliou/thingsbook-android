@@ -62,6 +62,11 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -232,6 +237,9 @@ fun MagicPlusFab(
 
     val fabInteractionSource = remember { MutableInteractionSource() }
     val isFabPressed by fabInteractionSource.collectIsPressedAsState()
+    val isInteractionHovered by fabInteractionSource.collectIsHoveredAsState()
+    var isPointerHovered by remember { mutableStateOf(false) }
+    val isFabHovered = (isInteractionHovered || isPointerHovered) && !isDragging && !isFabPressed
 
     val showMenu = isMenuExpanded && !isDragging
     val menuTransition = updateTransition(targetState = showMenu, label = "magicPlusMenuTransition")
@@ -262,10 +270,31 @@ fun MagicPlusFab(
         targetValue = when {
             isDragging -> 1.14f
             isFabPressed -> 0.94f
+            isFabHovered -> 1.06f
             else -> 1.0f
         },
-        animationSpec = tween(durationMillis = 150, easing = SmoothPopoverOutEasing),
+        animationSpec = tween(durationMillis = 180, easing = SmoothPopoverOutEasing),
         label = "magicPlusScale"
+    )
+
+    val hoverLiftTargetPx = with(density) { (-2).dp.toPx() }
+    val fabHoverLiftPx by animateFloatAsState(
+        targetValue = if (isFabHovered && !showMenu) hoverLiftTargetPx else 0f,
+        animationSpec = tween(durationMillis = 180, easing = SmoothPopoverOutEasing),
+        label = "magicPlusHoverLift"
+    )
+
+    val fabHoverBlue = if (colors.isDark) Color(0xFF58ADFF) else Color(0xFF1479EC)
+    val fabBgColor by animateColorAsState(
+        targetValue = if (isFabHovered || isFabPressed) fabHoverBlue else colors.thingsBlue,
+        animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing),
+        label = "magicPlusBgColor"
+    )
+
+    val fabRingAlpha by animateFloatAsState(
+        targetValue = if (isFabHovered) 0.28f else 0f,
+        animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing),
+        label = "magicPlusRingAlpha"
     )
 
     val iconRotation by animateFloatAsState(
@@ -328,7 +357,7 @@ fun MagicPlusFab(
             }
         }
 
-        // Draggable + Clickable Magic Plus Circle Button with zero ripple flash
+        // Draggable + Clickable Magic Plus Circle Button with smooth mouse/stylus hover animation & zero ripple flash
         ThingsHoverTooltip(
             text = stringResource(R.string.magic_plus_fab_tooltip),
             enabled = !isDragging && !isMenuExpanded
@@ -344,18 +373,53 @@ fun MagicPlusFab(
                     .onGloballyPositioned { fabCoordsHolder[0] = it }
                     .graphicsLayer {
                         val safeScale = if (fabScale.isFinite()) fabScale else 1f
+                        val safeLift = if (fabHoverLiftPx.isFinite()) fabHoverLiftPx else 0f
                         scaleX = safeScale
                         scaleY = safeScale
+                        translationY = safeLift
                     }
                     .shadow(
-                        elevation = if (isDragging) 14.dp else 8.dp,
+                        elevation = when {
+                            isDragging -> 14.dp
+                            isFabHovered -> 12.dp
+                            else -> 8.dp
+                        },
                         shape = CircleShape,
-                        ambientColor = colors.thingsBlue.copy(alpha = 0.38f),
-                        spotColor = colors.thingsBlue.copy(alpha = 0.48f)
+                        ambientColor = colors.thingsBlue.copy(alpha = if (isFabHovered) 0.46f else 0.38f),
+                        spotColor = colors.thingsBlue.copy(alpha = if (isFabHovered) 0.58f else 0.48f)
                     )
                     .size(58.dp)
                     .clip(CircleShape)
-                    .background(colors.thingsBlue)
+                    .background(fabBgColor)
+                    .border(
+                        width = 1.dp,
+                        color = Color.White.copy(alpha = if (fabRingAlpha.isFinite()) fabRingAlpha.coerceIn(0f, 1f) else 0f),
+                        shape = CircleShape
+                    )
+                    .pointerHoverIcon(PointerIcon.Hand)
+                    .hoverable(interactionSource = fabInteractionSource)
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val pointerType = event.changes.firstOrNull()?.type
+                                val isHoverCapable = pointerType == PointerType.Mouse || pointerType == PointerType.Stylus
+                                when (event.type) {
+                                    PointerEventType.Enter, PointerEventType.Move -> {
+                                        if (isHoverCapable && event.changes.none { it.pressed }) {
+                                            isPointerHovered = true
+                                        }
+                                    }
+                                    PointerEventType.Exit, PointerEventType.Press -> {
+                                        if (isPointerHovered) {
+                                            isPointerHovered = false
+                                        }
+                                    }
+                                    else -> Unit
+                                }
+                            }
+                        }
+                    }
                     .clickable(
                         interactionSource = fabInteractionSource,
                         indication = null,
@@ -367,6 +431,7 @@ fun MagicPlusFab(
                     .pointerInput(itemCount, allowHeadingDrop) {
                         detectDragGestures(
                             onDragStart = {
+                                isPointerHovered = false
                                 onMenuExpandedChange(false)
                                 isDragging = true
                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -596,6 +661,7 @@ private fun MagicPlusOptionRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(rowBg)
+            .pointerHoverIcon(PointerIcon.Hand)
             .hoverable(interactionSource = interactionSource)
             .clickable(
                 interactionSource = interactionSource,

@@ -7,6 +7,7 @@ public struct MainWorkspaceView: View {
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isMagicPlusMenuOpen = false
+    @State private var isMagicPlusHovered = false
     @State private var isLanguagePopoverOpen = false
     @State private var decryptPasswordInput = ""
     @State private var decryptError: String?
@@ -423,12 +424,15 @@ public struct MainWorkspaceView: View {
             if NSEvent.modifierFlags.contains(.option) {
                 store.createNewTaskInCurrentContext()
             } else {
-                isMagicPlusMenuOpen.toggle()
+                withAnimation(.spring(response: 0.24, dampingFraction: 0.76)) {
+                    isMagicPlusMenuOpen.toggle()
+                }
             }
         } label: {
-            Image(systemName: isMagicPlusMenuOpen ? "xmark" : "plus")
+            Image(systemName: "plus")
                 .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(.white)
+                .rotationEffect(.degrees(isMagicPlusMenuOpen ? 45 : 0))
                 .frame(width: 46, height: 46)
                 .background(
                     Circle()
@@ -439,10 +443,32 @@ public struct MainWorkspaceView: View {
                                 endPoint: .bottomTrailing
                             )
                         )
-                        .shadow(color: ThingsMacPalette.accentBlue.opacity(0.36), radius: 12, x: 0, y: 5)
+                        .brightness(isMagicPlusHovered ? 0.06 : 0.0)
+                        .overlay(
+                            Circle()
+                                .strokeBorder(Color.white.opacity(isMagicPlusHovered ? 0.30 : 0.0), lineWidth: 1)
+                        )
+                        .shadow(
+                            color: ThingsMacPalette.accentBlue.opacity(isMagicPlusHovered ? 0.50 : 0.36),
+                            radius: isMagicPlusHovered ? 15 : 12,
+                            x: 0,
+                            y: isMagicPlusHovered ? 7 : 5
+                        )
                 )
+                .scaleEffect(isMagicPlusHovered ? 1.06 : 1.0)
+                .offset(y: (isMagicPlusHovered && !isMagicPlusMenuOpen) ? -1.5 : 0)
+                .animation(.spring(response: 0.22, dampingFraction: 0.72), value: isMagicPlusHovered)
+                .animation(.spring(response: 0.24, dampingFraction: 0.76), value: isMagicPlusMenuOpen)
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            isMagicPlusHovered = hovering
+            if hovering {
+                NSCursor.pointingHand.set()
+            } else {
+                NSCursor.arrow.set()
+            }
+        }
         .help(store.tr("magic_plus_fab_tooltip"))
         .popover(isPresented: $isMagicPlusMenuOpen, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 4) {
@@ -545,47 +571,14 @@ public struct MainWorkspaceView: View {
         shortcut: String?,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 11) {
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 28, height: 28)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(tint.opacity(0.12))
-                    )
-
-                VStack(alignment: .leading, spacing: 1.5) {
-                    HStack(spacing: 6) {
-                        Text(title)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.primary)
-                        if let shortcut {
-                            Text(shortcut)
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                        .fill(Color.primary.opacity(0.07))
-                                )
-                        }
-                    }
-                    Text(subtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer()
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 7)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        MagicPlusPopoverRow(
+            icon: icon,
+            tint: tint,
+            title: title,
+            subtitle: subtitle,
+            shortcut: shortcut,
+            action: action
+        )
     }
 
     // MARK: - Bottom Multi-Select, Undo & Toast Banners
@@ -882,4 +875,74 @@ private struct MacWindowTitlebarConfigurator: NSViewRepresentable {
         }
     }
 }
+
+private struct MagicPlusPopoverRow: View {
+    let icon: String
+    let tint: Color
+    let title: String
+    let subtitle: String
+    let shortcut: String?
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 11) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 28, height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(tint.opacity(isHovered ? 0.18 : 0.12))
+                    )
+
+                VStack(alignment: .leading, spacing: 1.5) {
+                    HStack(spacing: 6) {
+                        Text(title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        if let shortcut {
+                            Text(shortcut)
+                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                        .fill(Color.primary.opacity(0.07))
+                                )
+                        }
+                    }
+                    Text(subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(isHovered ? ThingsMacPalette.accentBlue.opacity(0.09) : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovered = hovering
+            }
+            if hovering {
+                NSCursor.pointingHand.set()
+            } else {
+                NSCursor.arrow.set()
+            }
+        }
+    }
+}
+
 

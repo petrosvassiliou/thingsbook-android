@@ -1496,16 +1496,21 @@ button {
   justify-content: center;
   box-shadow: var(--shadow-fab);
   z-index: 45;
-  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), background 0.15s ease;
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), background 0.15s ease, box-shadow 0.2s ease;
 }
 
 .magic-fab-circle:hover {
   background: var(--things-blue-hover);
-  transform: scale(1.04);
+  transform: translateY(-1px) scale(1.05);
 }
 
 .magic-fab-circle.open {
   transform: rotate(45deg);
+}
+
+.magic-fab-circle.open:hover {
+  background: var(--things-blue-hover);
+  transform: rotate(45deg) scale(1.05);
 }
 
 /* ==================== Common Buttons, Inputs & Modals ==================== */

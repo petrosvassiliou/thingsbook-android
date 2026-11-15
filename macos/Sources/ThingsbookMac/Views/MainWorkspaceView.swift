@@ -6,14 +6,23 @@ public struct MainWorkspaceView: View {
     @ObservedObject var store: ThingsbookStore
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var detailPaneWidth: CGFloat = 880
     @State private var isMagicPlusMenuOpen = false
     @State private var isMagicPlusHovered = false
+    @State private var isQuickFindHovered = false
     @State private var isLanguagePopoverOpen = false
     @State private var decryptPasswordInput = ""
     @State private var decryptError: String?
 
     public init(store: ThingsbookStore) {
         self.store = store
+    }
+
+    private var toolbarMetrics: MacToolbarLayoutMetrics {
+        MacToolbarLayoutMetrics.compute(
+            detailWidth: Double(detailPaneWidth),
+            isSidebarCollapsed: columnVisibility == .detailOnly
+        )
     }
 
     public var body: some View {
@@ -42,6 +51,14 @@ public struct MainWorkspaceView: View {
                             .ignoresSafeArea(.container, edges: .top)
                     )
                     .background(MacWindowTitlebarConfigurator())
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(
+                                key: DetailPaneWidthPreferenceKey.self,
+                                value: geo.size.width
+                            )
+                        }
+                    )
 
                     // Bottom Overlays: Multi-select bar, Undo Banner, Toast & Magic Plus Button
                     HStack(alignment: .bottom, spacing: 14) {
@@ -62,192 +79,23 @@ public struct MainWorkspaceView: View {
                     .padding(.horizontal, 28)
                     .padding(.bottom, 22)
                 }
+                .onPreferenceChange(DetailPaneWidthPreferenceKey.self) { newWidth in
+                    if newWidth > 200, abs(newWidth - detailPaneWidth) >= 2 {
+                        detailPaneWidth = newWidth
+                    }
+                }
                 .toolbarBackground(.hidden, for: .windowToolbar)
                 .toolbar {
                     ToolbarItem(placement: .navigation) {
-                        Button {
-                            guard !store.isLocked else { return }
-                            store.isQuickFindPresented = true
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "magnifyingglass")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(.secondary)
-                                Text(store.tr("quick_find_title"))
-                                    .font(.system(size: 12.5, weight: .medium))
-                                    .foregroundStyle(.secondary)
-                                Text("⌘F")
-                                    .font(.system(size: 10.5, weight: .semibold, design: .rounded))
-                                    .foregroundStyle(.tertiary)
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 1)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                            .fill(Color.primary.opacity(0.06))
-                                    )
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4.5)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(Color.primary.opacity(0.05))
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(store.isLocked)
-                        .help(store.tr("quick_find_title") + " (⌘F)")
+                        quickFindToolbarButton(metrics: toolbarMetrics)
                     }
 
-                    ToolbarItemGroup(placement: .primaryAction) {
-                        // Gemini Intelligence Pill
-                        Button {
-                            guard !store.isLocked else { return }
-                            store.geminiInitialTab = .brainDump
-                            store.isGeminiSheetPresented = true
-                        } label: {
-                            HStack(spacing: 5) {
-                                Image(systemName: "sparkles")
-                                    .font(.system(size: 12, weight: .semibold))
-                                Text("Gemini")
-                                    .font(.system(size: 12, weight: .semibold))
-                            }
-                            .foregroundStyle(ThingsMacPalette.geminiPurple)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4.5)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(ThingsMacPalette.geminiPurple.opacity(0.13))
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(store.isLocked)
-                        .help(store.tr("gemini_hub_title") + " (⌘G)")
+                    ToolbarItem {
+                        Spacer()
+                    }
 
-                        // Guided Weekly Review (v2.0)
-                        Button {
-                            guard !store.isLocked else { return }
-                            store.isWeeklyReviewPresented = true
-                        } label: {
-                            Image(systemName: "checklist.checked")
-                        }
-                        .disabled(store.isLocked)
-                        .help(store.tr("v2_weekly_review_title") + " (⇧⌘R)")
-
-                        // Project Templates & Markdown Import (v2.0)
-                        Button {
-                            guard !store.isLocked else { return }
-                            store.templatesInitialTab = .gallery
-                            store.isTemplatesSheetPresented = true
-                        } label: {
-                            Image(systemName: "square.on.square")
-                        }
-                        .disabled(store.isLocked)
-                        .help(store.tr("v2_templates_title"))
-
-                        // Quick Entry
-                        Button {
-                            guard !store.isLocked else { return }
-                            store.quickEntryPrefillTitle = ""
-                            store.quickEntryPrefillNotes = ""
-                            store.quickEntryAutoStartVoice = false
-                            store.isQuickEntryPresented = true
-                        } label: {
-                            Image(systemName: "tray.and.arrow.down")
-                        }
-                        .disabled(store.isLocked)
-                        .help(store.tr("quick_share_title") + " (⇧⌘N)")
-
-                        // Instant Voice Capture (v1.8)
-                        Button {
-                            guard !store.isLocked else { return }
-                            store.quickEntryPrefillTitle = ""
-                            store.quickEntryPrefillNotes = ""
-                            store.quickEntryAutoStartVoice = true
-                            store.isQuickEntryPresented = true
-                        } label: {
-                            Image(systemName: "mic")
-                        }
-                        .disabled(store.isLocked)
-                        .help(store.tr("voice_capture_btn") + " (⌃⇧⌘V)")
-
-                        // Manage Areas
-                        Button {
-                            guard !store.isLocked else { return }
-                            store.isAreaManagerPresented = true
-                        } label: {
-                            Image(systemName: "cube")
-                        }
-                        .disabled(store.isLocked)
-                        .help(store.tr("areas_manage_title"))
-
-                        // Manage Tags
-                        Button {
-                            guard !store.isLocked else { return }
-                            store.isTagManagerPresented = true
-                        } label: {
-                            Image(systemName: "tag")
-                        }
-                        .disabled(store.isLocked)
-                        .help(store.tr("tags_manage_title"))
-
-                        // Notifications
-                        Button {
-                            guard !store.isLocked else { return }
-                            store.settingsTab = .notifications
-                            store.isSettingsPresented = true
-                        } label: {
-                            Image(systemName: store.preferences.dailyDigestEnabled ? "bell.badge.fill" : "bell")
-                        }
-                        .disabled(store.isLocked)
-                        .help(store.tr("notifications_title"))
-
-                        // Direct 1-Click Language Switcher with Flag Icons (matching Android)
-                        Button {
-                            guard !store.isLocked else { return }
-                            isLanguagePopoverOpen.toggle()
-                        } label: {
-                            if store.preferences.language == .system {
-                                Image(systemName: "globe")
-                            } else {
-                                Text(store.preferences.language.flagEmoji)
-                                    .font(.system(size: 14.5))
-                            }
-                        }
-                        .disabled(store.isLocked)
-                        .help(store.tr("settings_language"))
-                        .popover(isPresented: $isLanguagePopoverOpen, arrowEdge: .bottom) {
-                            languageSelectorPopover
-                        }
-
-                        // Cloud Sync Status Button
-                        Button {
-                            guard !store.isLocked else { return }
-                            if !store.preferences.localOnlyDbMode && store.syncSnapshot.userEmailOrId != nil {
-                                store.syncNow()
-                            }
-                            store.settingsTab = .sync
-                            store.isSettingsPresented = true
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: store.preferences.localOnlyDbMode ? "internaldrive" : "icloud")
-                                Circle()
-                                    .fill(syncDotColor)
-                                    .frame(width: 6, height: 6)
-                            }
-                        }
-                        .disabled(store.isLocked)
-                        .help(syncHelpText)
-
-                        // Settings
-                        Button {
-                            guard !store.isLocked else { return }
-                            store.settingsTab = .general
-                            store.isSettingsPresented = true
-                        } label: {
-                            Image(systemName: "gearshape")
-                        }
-                        .disabled(store.isLocked)
-                        .help(store.tr("settings_title") + " (⌘,)")
+                    ToolbarItem(placement: .primaryAction) {
+                        detailToolbarActionsBar(metrics: toolbarMetrics)
                     }
                 }
             }
@@ -840,6 +688,415 @@ public struct MainWorkspaceView: View {
         case .synced: return store.tr("sync_status_synced")
         case .syncing: return store.tr("sync_status_syncing")
         case .offline: return store.tr("sync_status_offline")
+        }
+    }
+
+    // MARK: - Adaptive Top Toolbar Controls
+
+    private func quickFindToolbarButton(metrics: MacToolbarLayoutMetrics) -> some View {
+        Button {
+            guard !store.isLocked else { return }
+            store.isQuickFindPresented = true
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+
+                Text(store.tr("quick_find_title"))
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 4)
+
+                if metrics.showSearchShortcutBadge {
+                    Text("⌘F")
+                        .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 5.5)
+                        .padding(.vertical, 1.5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(Color.primary.opacity(0.06))
+                        )
+                }
+            }
+            .padding(.horizontal, 11)
+            .frame(width: CGFloat(metrics.searchWidth), height: CGFloat(metrics.buttonHeight))
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.primary.opacity(isQuickFindHovered ? 0.085 : 0.05))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(Color.primary.opacity(isQuickFindHovered ? 0.13 : 0.065), lineWidth: 0.75)
+            )
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: false)
+        .disabled(store.isLocked)
+        .help(store.tr("quick_find_title") + " (⌘F)")
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isQuickFindHovered = hovering
+            }
+            if hovering && !store.isLocked {
+                NSCursor.pointingHand.set()
+            } else {
+                NSCursor.arrow.set()
+            }
+        }
+    }
+
+    private func detailToolbarActionsBar(metrics: MacToolbarLayoutMetrics) -> some View {
+        let btnW = CGFloat(metrics.buttonWidth)
+        let btnH = CGFloat(metrics.buttonHeight)
+        let spacing = CGFloat(metrics.itemSpacing)
+
+        return HStack(spacing: 0) {
+            // Group 1: Intelligence & Review Planning
+            HStack(spacing: spacing) {
+                MacToolbarGeminiButton(
+                    minWidth: CGFloat(metrics.geminiPillMinWidth),
+                    height: btnH,
+                    isDisabled: store.isLocked,
+                    helpText: store.tr("gemini_hub_title") + " (⌘G)"
+                ) {
+                    guard !store.isLocked else { return }
+                    store.geminiInitialTab = .brainDump
+                    store.isGeminiSheetPresented = true
+                }
+
+                MacToolbarIconButton(
+                    width: btnW,
+                    height: btnH,
+                    isDisabled: store.isLocked,
+                    helpText: store.tr("v2_weekly_review_title") + " (⇧⌘R)",
+                    action: {
+                        guard !store.isLocked else { return }
+                        store.isWeeklyReviewPresented = true
+                    }
+                ) {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "checklist.checked")
+                            .font(.system(size: 14, weight: .medium))
+                        if !store.stalledProjects.isEmpty {
+                            Circle()
+                                .fill(ThingsMacPalette.accentBlue)
+                                .frame(width: 6, height: 6)
+                                .offset(x: 3.5, y: -2.5)
+                        }
+                    }
+                }
+
+                MacToolbarIconButton(
+                    systemImage: "square.on.square",
+                    width: btnW,
+                    height: btnH,
+                    isDisabled: store.isLocked,
+                    helpText: store.tr("v2_templates_title")
+                ) {
+                    guard !store.isLocked else { return }
+                    store.templatesInitialTab = .gallery
+                    store.isTemplatesSheetPresented = true
+                }
+            }
+
+            toolbarGroupDivider(metrics: metrics)
+
+            // Group 2: Quick Capture & Organization
+            HStack(spacing: spacing) {
+                MacToolbarIconButton(
+                    systemImage: "tray.and.arrow.down",
+                    width: btnW,
+                    height: btnH,
+                    isDisabled: store.isLocked,
+                    helpText: store.tr("quick_share_title") + " (⇧⌘N)"
+                ) {
+                    guard !store.isLocked else { return }
+                    store.quickEntryPrefillTitle = ""
+                    store.quickEntryPrefillNotes = ""
+                    store.quickEntryAutoStartVoice = false
+                    store.isQuickEntryPresented = true
+                }
+
+                MacToolbarIconButton(
+                    systemImage: "mic",
+                    width: btnW,
+                    height: btnH,
+                    isDisabled: store.isLocked,
+                    helpText: store.tr("voice_capture_btn") + " (⌃⇧⌘V)"
+                ) {
+                    guard !store.isLocked else { return }
+                    store.quickEntryPrefillTitle = ""
+                    store.quickEntryPrefillNotes = ""
+                    store.quickEntryAutoStartVoice = true
+                    store.isQuickEntryPresented = true
+                }
+
+                MacToolbarIconButton(
+                    systemImage: "cube",
+                    width: btnW,
+                    height: btnH,
+                    isDisabled: store.isLocked,
+                    helpText: store.tr("areas_manage_title")
+                ) {
+                    guard !store.isLocked else { return }
+                    store.isAreaManagerPresented = true
+                }
+
+                MacToolbarIconButton(
+                    systemImage: "tag",
+                    width: btnW,
+                    height: btnH,
+                    isDisabled: store.isLocked,
+                    helpText: store.tr("tags_manage_title")
+                ) {
+                    guard !store.isLocked else { return }
+                    store.isTagManagerPresented = true
+                }
+            }
+
+            toolbarGroupDivider(metrics: metrics)
+
+            // Group 3: Workspace Status & Preferences
+            HStack(spacing: spacing) {
+                MacToolbarIconButton(
+                    systemImage: store.preferences.dailyDigestEnabled ? "bell.badge.fill" : "bell",
+                    width: btnW,
+                    height: btnH,
+                    isActive: store.preferences.dailyDigestEnabled,
+                    isDisabled: store.isLocked,
+                    helpText: store.tr("notifications_title")
+                ) {
+                    guard !store.isLocked else { return }
+                    store.settingsTab = .notifications
+                    store.isSettingsPresented = true
+                }
+
+                MacToolbarIconButton(
+                    width: btnW,
+                    height: btnH,
+                    isActive: isLanguagePopoverOpen,
+                    isDisabled: store.isLocked,
+                    helpText: store.tr("settings_language"),
+                    action: {
+                        guard !store.isLocked else { return }
+                        isLanguagePopoverOpen.toggle()
+                    }
+                ) {
+                    if store.preferences.language == .system {
+                        Image(systemName: "globe")
+                            .font(.system(size: 14, weight: .medium))
+                    } else {
+                        Text(store.preferences.language.flagEmoji)
+                            .font(.system(size: 15))
+                    }
+                }
+                .popover(isPresented: $isLanguagePopoverOpen, arrowEdge: .bottom) {
+                    languageSelectorPopover
+                }
+
+                MacToolbarIconButton(
+                    width: CGFloat(metrics.syncButtonWidth),
+                    height: btnH,
+                    isDisabled: store.isLocked,
+                    helpText: syncHelpText,
+                    action: {
+                        guard !store.isLocked else { return }
+                        if !store.preferences.localOnlyDbMode && store.syncSnapshot.userEmailOrId != nil {
+                            store.syncNow()
+                        }
+                        store.settingsTab = .sync
+                        store.isSettingsPresented = true
+                    }
+                ) {
+                    HStack(spacing: 4.5) {
+                        Image(systemName: store.preferences.localOnlyDbMode ? "internaldrive" : "icloud")
+                            .font(.system(size: 14, weight: .medium))
+                        Circle()
+                            .fill(syncDotColor)
+                            .frame(width: 6.5, height: 6.5)
+                    }
+                }
+
+                MacToolbarIconButton(
+                    systemImage: "gearshape",
+                    width: btnW,
+                    height: btnH,
+                    isDisabled: store.isLocked,
+                    helpText: store.tr("settings_title") + " (⌘,)"
+                ) {
+                    guard !store.isLocked else { return }
+                    store.settingsTab = .general
+                    store.isSettingsPresented = true
+                }
+            }
+        }
+        .padding(.trailing, 4)
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func toolbarGroupDivider(metrics: MacToolbarLayoutMetrics) -> some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.11))
+            .frame(width: 1, height: 16)
+            .padding(.horizontal, CGFloat(metrics.groupDividerPadding))
+    }
+}
+
+private struct DetailPaneWidthPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 880
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        let next = nextValue()
+        if next > 0 {
+            value = next
+        }
+    }
+}
+
+private struct MacToolbarGeminiButton: View {
+    let minWidth: CGFloat
+    let height: CGFloat
+    let isDisabled: Bool
+    let helpText: String
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5.5) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("Gemini")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(ThingsMacPalette.geminiPurple)
+            .padding(.horizontal, 11)
+            .frame(minWidth: minWidth, minHeight: height, maxHeight: height)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(ThingsMacPalette.geminiPurple.opacity(isHovered ? 0.21 : 0.13))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(ThingsMacPalette.geminiPurple.opacity(isHovered ? 0.28 : 0.14), lineWidth: 0.75)
+            )
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .help(helpText)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovered = hovering
+            }
+            if hovering && !isDisabled {
+                NSCursor.pointingHand.set()
+            } else {
+                NSCursor.arrow.set()
+            }
+        }
+    }
+}
+
+private struct ToolbarSymbolIcon: View {
+    let systemImage: String
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 14, weight: .medium))
+    }
+}
+
+private struct MacToolbarIconButton<Label: View>: View {
+    let width: CGFloat
+    let height: CGFloat
+    let isActive: Bool
+    let isDisabled: Bool
+    let helpText: String
+    let action: () -> Void
+    let label: Label
+
+    @State private var isHovered = false
+
+    init(
+        width: CGFloat,
+        height: CGFloat,
+        isActive: Bool = false,
+        isDisabled: Bool = false,
+        helpText: String,
+        action: @escaping () -> Void,
+        @ViewBuilder label: () -> Label
+    ) {
+        self.width = width
+        self.height = height
+        self.isActive = isActive
+        self.isDisabled = isDisabled
+        self.helpText = helpText
+        self.action = action
+        self.label = label()
+    }
+
+    var body: some View {
+        Button(action: action) {
+            label
+                .foregroundStyle(
+                    isActive
+                        ? ThingsMacPalette.accentBlue
+                        : (isHovered ? Color.primary : Color.primary.opacity(0.78))
+                )
+                .frame(width: width, height: height)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(
+                            isActive
+                                ? ThingsMacPalette.accentBlue.opacity(isHovered ? 0.16 : 0.10)
+                                : Color.primary.opacity(isHovered ? 0.075 : 0.0)
+                        )
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .help(helpText)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovered = hovering
+            }
+            if hovering && !isDisabled {
+                NSCursor.pointingHand.set()
+            } else {
+                NSCursor.arrow.set()
+            }
+        }
+    }
+}
+
+extension MacToolbarIconButton where Label == ToolbarSymbolIcon {
+    init(
+        systemImage: String,
+        width: CGFloat,
+        height: CGFloat,
+        isActive: Bool = false,
+        isDisabled: Bool = false,
+        helpText: String,
+        action: @escaping () -> Void
+    ) {
+        self.init(
+            width: width,
+            height: height,
+            isActive: isActive,
+            isDisabled: isDisabled,
+            helpText: helpText,
+            action: action
+        ) {
+            ToolbarSymbolIcon(systemImage: systemImage)
         }
     }
 }

@@ -1681,3 +1681,93 @@ public struct FocusTimerState: Equatable, Sendable {
         return min(1.0, max(0.0, 1.0 - (Double(remainingSeconds) / Double(totalSeconds))))
     }
 }
+
+public struct MacToolbarLayoutMetrics: Equatable, Sendable {
+    public let usableWidth: Double
+    public let searchWidth: Double
+    public let buttonWidth: Double
+    public let buttonHeight: Double
+    public let syncButtonWidth: Double
+    public let geminiPillMinWidth: Double
+    public let itemSpacing: Double
+    public let groupDividerPadding: Double
+    public let showSearchShortcutBadge: Bool
+
+    public var estimatedActionsBarWidth: Double {
+        let group1 = geminiPillMinWidth + (2.0 * buttonWidth) + (2.0 * itemSpacing)
+        let divider = (2.0 * groupDividerPadding) + 1.0
+        let group2 = (4.0 * buttonWidth) + (3.0 * itemSpacing)
+        let group3 = (3.0 * buttonWidth) + syncButtonWidth + (3.0 * itemSpacing)
+        return group1 + divider + group2 + divider + group3
+    }
+
+    public var estimatedTotalControlsWidth: Double {
+        searchWidth + estimatedActionsBarWidth
+    }
+
+    public static func compute(
+        detailWidth: Double,
+        isSidebarCollapsed: Bool = false
+    ) -> MacToolbarLayoutMetrics {
+        let leadingReserved = isSidebarCollapsed ? 124.0 : 0.0
+        let toolbarMargins = 44.0
+        let usable = max(500.0, detailWidth - leadingReserved - toolbarMargins)
+
+        let lerp: (Double, Double, Double) -> Double = { a, b, frac in
+            a + (b - a) * frac
+        }
+
+        let rawSearchW: Double
+        let rawBtnW: Double
+        let rawGeminiMinW: Double
+        let rawSpacing: Double
+        let rawDivPad: Double
+
+        if usable < 574.0 {
+            // Compact sidebar-expanded minimum window tier (500pt..574pt usable)
+            let s = max(0.0, (usable - 500.0) / 74.0)
+            rawSearchW = lerp(132.0, 148.0, s)
+            rawBtnW = lerp(25.0, 28.0, s)
+            rawGeminiMinW = lerp(72.0, 78.0, s)
+            rawSpacing = lerp(2.0, 3.0, s)
+            rawDivPad = lerp(4.0, 6.0, s)
+        } else if usable <= 834.0 {
+            // Standard tier up to default 1140pt window / 878pt detail pane (574pt..834pt usable)
+            let t = (usable - 574.0) / 260.0
+            rawSearchW = lerp(148.0, 216.0, t)
+            rawBtnW = lerp(28.0, 34.0, t)
+            rawGeminiMinW = lerp(78.0, 88.0, t)
+            rawSpacing = lerp(3.0, 11.0, t)
+            rawDivPad = lerp(6.0, 14.0, t)
+        } else {
+            // Wide & fullscreen tier (834pt..1060pt+ usable)
+            let u = min(1.0, (usable - 834.0) / 226.0)
+            rawSearchW = lerp(216.0, 248.0, u)
+            rawBtnW = lerp(34.0, 37.0, u)
+            rawGeminiMinW = lerp(88.0, 93.0, u)
+            rawSpacing = lerp(11.0, 15.0, u)
+            rawDivPad = lerp(14.0, 18.0, u)
+        }
+
+        let roundRule: FloatingPointRoundingRule = usable < 600.0 ? .down : .toNearestOrAwayFromZero
+        let searchW = rawSearchW.rounded(roundRule)
+        let btnW = rawBtnW.rounded(roundRule)
+        let syncW = btnW + 8.0
+        let geminiMinW = rawGeminiMinW.rounded(roundRule)
+        let spacing = rawSpacing.rounded(roundRule)
+        let divPad = rawDivPad.rounded(roundRule)
+
+        return MacToolbarLayoutMetrics(
+            usableWidth: usable,
+            searchWidth: searchW,
+            buttonWidth: btnW,
+            buttonHeight: 30.0,
+            syncButtonWidth: syncW,
+            geminiPillMinWidth: geminiMinW,
+            itemSpacing: spacing,
+            groupDividerPadding: divPad,
+            showSearchShortcutBadge: searchW >= 165.0
+        )
+    }
+}
+

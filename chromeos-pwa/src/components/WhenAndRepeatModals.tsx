@@ -206,7 +206,9 @@ export const WhenModal: React.FC<WhenModalProps> = ({
     onApply({
       scheduleState: parsedNlp.scheduleState,
       whenDate: parsedNlp.whenDateEpochMillis,
-      reminderTime: combineReminderWithDay(parsedNlp.whenDateEpochMillis ?? startOfDayEpoch())
+      reminderTime:
+        parsedNlp.reminderTimeEpochMillis ??
+        combineReminderWithDay(parsedNlp.whenDateEpochMillis ?? startOfDayEpoch())
     });
     onClose();
   };

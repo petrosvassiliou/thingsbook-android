@@ -11,6 +11,7 @@ public final class ThingsbookAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func application(_ application: NSApplication, open urls: [URL]) {
+        guard store?.isLocked != true else { return }
         for url in urls {
             if url.scheme?.lowercased() == "thingsbook" {
                 store?.handleDeepLink(url)
@@ -21,6 +22,7 @@ public final class ThingsbookAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        guard store?.isLocked != true else { return nil }
         let lang = store?.preferences.language ?? .system
         let strings = ThingsStrings.shared
         let menu = NSMenu(title: "Thingsbook")
@@ -44,11 +46,13 @@ public final class ThingsbookAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func dockNewTodo() {
+        guard store?.isLocked != true else { return }
         NSApp.activate(ignoringOtherApps: true)
         store?.createNewTaskInCurrentContext()
     }
 
     @objc private func dockVoiceTodo() {
+        guard store?.isLocked != true else { return }
         NSApp.activate(ignoringOtherApps: true)
         store?.quickEntryPrefillTitle = ""
         store?.quickEntryPrefillNotes = ""
@@ -57,11 +61,13 @@ public final class ThingsbookAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func dockShowToday() {
+        guard store?.isLocked != true else { return }
         NSApp.activate(ignoringOtherApps: true)
         store?.selectedDestination = .smartView(.today)
     }
 
     @objc private func dockShowInbox() {
+        guard store?.isLocked != true else { return }
         NSApp.activate(ignoringOtherApps: true)
         store?.selectedDestination = .smartView(.inbox)
     }
@@ -72,6 +78,7 @@ public final class ThingsbookAppDelegate: NSObject, NSApplicationDelegate {
         userData: String?,
         error: AutoreleasingUnsafeMutablePointer<NSString?>
     ) {
+        guard store?.isLocked != true else { return }
         guard let text = pboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
               !text.isEmpty else { return }
         let lines = text.components(separatedBy: .newlines)
@@ -93,13 +100,14 @@ public struct ThingsbookMacApp: App {
     public init() {}
 
     public var body: some Scene {
-        WindowGroup("Thingsbook") {
+        WindowGroup("Thingsbook", id: "main") {
             MainWorkspaceView(store: store)
                 .frame(minWidth: 880, minHeight: 580)
                 .onAppear {
                     appDelegate.store = store
                 }
                 .onOpenURL { url in
+                    guard !store.isLocked else { return }
                     if url.scheme?.lowercased() == "thingsbook" {
                         store.handleDeepLink(url)
                     } else if url.pathExtension.lowercased() == "tbbackup" {
@@ -119,7 +127,11 @@ public struct ThingsbookMacApp: App {
         }
 
         MenuBarExtra {
-            QuickEntrySheetView(store: store, isMenuBarPopover: true)
+            if store.isLocked {
+                MenuBarLockedPopoverView(store: store)
+            } else {
+                QuickEntrySheetView(store: store, isMenuBarPopover: true)
+            }
         } label: {
             if let img = ThingsResourceLoader.menuBarIconImage() {
                 Image(nsImage: img)
@@ -128,5 +140,56 @@ public struct ThingsbookMacApp: App {
             }
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+private struct MenuBarLockedPopoverView: View {
+    @ObservedObject var store: ThingsbookStore
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 30, weight: .semibold))
+                .foregroundStyle(ThingsMacPalette.accentBlue)
+
+            Text(store.tr("app_lock_title"))
+                .font(.system(size: 14.5, weight: .bold))
+
+            Text(store.tr("macos_app_lock_subtitle"))
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            Button {
+                store.unlockWithBiometrics()
+            } label: {
+                Label(store.tr("app_lock_unlock_btn"), systemImage: "touchid")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+            }
+            .buttonStyle(.borderedProminent)
+
+            Divider()
+
+            HStack {
+                Button(store.tr("macos_menubar_open_app")) {
+                    openWindow(id: "main")
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                }
+                .font(.system(size: 12))
+
+                Spacer()
+
+                Button(store.tr("macos_menubar_quit")) {
+                    NSApplication.shared.terminate(nil)
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(18)
+        .frame(width: 320)
     }
 }

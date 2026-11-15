@@ -4,7 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
+import android.media.ExifInterface
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
@@ -43,6 +45,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -50,6 +53,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,10 +72,12 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import com.culturedcode.things3.R
+import com.culturedcode.things3.data.repository.SyncRepository
 import com.culturedcode.things3.domain.model.TaskAttachment
 import com.culturedcode.things3.ui.theme.ThingsTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.text.SimpleDateFormat
@@ -93,6 +99,95 @@ sealed interface AttachmentImportOutcome {
 }
 
 private const val MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024 // 5 MB
+private const val TARGET_INLINE_SYNC_IMAGE_BYTES = 680_000 // < 700 KB Cloud Sync inline cap
+private val JPEG_COMPRESSION_STEPS = intArrayOf(82, 68, 54)
+
+internal fun calculateInSampleSize(
+    options: BitmapFactory.Options,
+    reqWidth: Int,
+    reqHeight: Int
+): Int {
+    val height = options.outHeight
+    val width = options.outWidth
+    var inSampleSize = 1
+    if (height > reqHeight || width > reqWidth) {
+        val halfHeight = height / 2
+        val halfWidth = width / 2
+        while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+            inSampleSize *= 2
+        }
+    }
+    return inSampleSize.coerceAtLeast(1)
+}
+
+private fun applyExifOrientation(source: Bitmap, exifOrientation: Int): Bitmap {
+    val matrix = Matrix()
+    when (exifOrientation) {
+        ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+        ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+        ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.preScale(-1f, 1f)
+        ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.preScale(1f, -1f)
+        ExifInterface.ORIENTATION_TRANSPOSE -> {
+            matrix.postRotate(90f)
+            matrix.preScale(-1f, 1f)
+        }
+        ExifInterface.ORIENTATION_TRANSVERSE -> {
+            matrix.postRotate(270f)
+            matrix.preScale(-1f, 1f)
+        }
+        else -> return source
+    }
+    return runCatching {
+        val rotated = Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+        if (rotated !== source && !source.isRecycled) {
+            source.recycle()
+        }
+        rotated
+    }.getOrDefault(source)
+}
+
+private fun decodeSampledByteArrayWithExif(
+    rawBytes: ByteArray,
+    reqWidth: Int,
+    reqHeight: Int
+): Bitmap? {
+    val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, boundsOpts)
+    if (boundsOpts.outWidth <= 0 || boundsOpts.outHeight <= 0) return null
+
+    val decodeOpts = BitmapFactory.Options().apply {
+        inSampleSize = calculateInSampleSize(boundsOpts, reqWidth, reqHeight)
+        inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
+    val decoded = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, decodeOpts) ?: return null
+    val orientation = runCatching {
+        ExifInterface(ByteArrayInputStream(rawBytes))
+            .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+    return applyExifOrientation(decoded, orientation)
+}
+
+private fun decodeSampledFileWithExif(
+    file: File,
+    reqWidth: Int,
+    reqHeight: Int
+): Bitmap? {
+    val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(file.absolutePath, boundsOpts)
+    if (boundsOpts.outWidth <= 0 || boundsOpts.outHeight <= 0) return null
+
+    val decodeOpts = BitmapFactory.Options().apply {
+        inSampleSize = calculateInSampleSize(boundsOpts, reqWidth, reqHeight)
+        inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
+    val decoded = BitmapFactory.decodeFile(file.absolutePath, decodeOpts) ?: return null
+    val orientation = runCatching {
+        ExifInterface(file.absolutePath)
+            .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+    return applyExifOrientation(decoded, orientation)
+}
 
 suspend fun processPickedAttachmentUri(
     context: Context,
@@ -135,8 +230,8 @@ suspend fun processPickedAttachmentUri(
                 val r = input.read(buffer)
                 if (r == -1) break
                 total += r
-                // Allow reading up to 16 MB for images before downscaling, or 5 MB for non-images
-                val readCap = if (isImage) 16 * 1024 * 1024 else MAX_ATTACHMENT_BYTES
+                // Allow reading up to 24 MB for camera images before sampled bounds decode, or 5 MB for non-images
+                val readCap = if (isImage) 24 * 1024 * 1024 else MAX_ATTACHMENT_BYTES
                 if (total > readCap) {
                     return@withContext AttachmentImportOutcome.TooLarge
                 }
@@ -148,9 +243,9 @@ suspend fun processPickedAttachmentUri(
         if (rawBytes.isEmpty()) return@withContext AttachmentImportOutcome.Error
 
         if (isImage) {
-            val decoded = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
+            val decoded = decodeSampledByteArrayWithExif(rawBytes, reqWidth = 1600, reqHeight = 1600)
             if (decoded != null) {
-                val compressed = compressBitmapForAttachment(decoded)
+                val compressed = compressBitmapForAttachment(decoded, recycleSourceWhenDone = true)
                 val baseName = displayName.substringBeforeLast('.').ifBlank { "photo" }
                 return@withContext AttachmentImportOutcome.Success(
                     ProcessedAttachmentResult(
@@ -179,7 +274,7 @@ suspend fun processPickedAttachmentUri(
 }
 
 fun processCapturedPhotoBitmap(bitmap: Bitmap): ProcessedAttachmentResult {
-    val bytes = compressBitmapForAttachment(bitmap)
+    val bytes = compressBitmapForAttachment(bitmap, recycleSourceWhenDone = false)
     val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ROOT).format(Date())
     return ProcessedAttachmentResult(
         fileName = "Photo_$stamp.jpg",
@@ -188,21 +283,58 @@ fun processCapturedPhotoBitmap(bitmap: Bitmap): ProcessedAttachmentResult {
     )
 }
 
-private fun compressBitmapForAttachment(source: Bitmap, maxEdgePx: Int = 1440): ByteArray {
+private fun scaleBitmapDownIfNeeded(source: Bitmap, maxEdgePx: Int): Bitmap {
     val w = source.width.coerceAtLeast(1)
     val h = source.height.coerceAtLeast(1)
     val longest = max(w, h)
-    val scaled = if (longest > maxEdgePx) {
-        val ratio = maxEdgePx.toFloat() / longest.toFloat()
-        val targetW = (w * ratio).roundToInt().coerceAtLeast(1)
-        val targetH = (h * ratio).roundToInt().coerceAtLeast(1)
-        Bitmap.createScaledBitmap(source, targetW, targetH, true)
-    } else {
-        source
+    if (longest <= maxEdgePx) return source
+    val ratio = maxEdgePx.toFloat() / longest.toFloat()
+    val targetW = (w * ratio).roundToInt().coerceAtLeast(1)
+    val targetH = (h * ratio).roundToInt().coerceAtLeast(1)
+    return Bitmap.createScaledBitmap(source, targetW, targetH, true)
+}
+
+private fun compressBitmapForAttachment(
+    source: Bitmap,
+    maxEdgePx: Int = 1440,
+    recycleSourceWhenDone: Boolean = false
+): ByteArray {
+    val working = scaleBitmapDownIfNeeded(source, maxEdgePx)
+    if (working !== source && recycleSourceWhenDone && !source.isRecycled) {
+        source.recycle()
     }
+
     val out = ByteArrayOutputStream()
-    scaled.compress(Bitmap.CompressFormat.JPEG, 80, out)
-    return out.toByteArray()
+    var resultBytes = ByteArray(0)
+    for (quality in JPEG_COMPRESSION_STEPS) {
+        out.reset()
+        working.compress(Bitmap.CompressFormat.JPEG, quality, out)
+        resultBytes = out.toByteArray()
+        if (resultBytes.size < TARGET_INLINE_SYNC_IMAGE_BYTES) {
+            break
+        }
+    }
+
+    if (resultBytes.size >= TARGET_INLINE_SYNC_IMAGE_BYTES && max(working.width, working.height) > 1152) {
+        val smaller = scaleBitmapDownIfNeeded(working, 1152)
+        if (smaller !== working) {
+            if ((working !== source || recycleSourceWhenDone) && !working.isRecycled) {
+                working.recycle()
+            }
+            out.reset()
+            smaller.compress(Bitmap.CompressFormat.JPEG, JPEG_COMPRESSION_STEPS.last(), out)
+            resultBytes = out.toByteArray()
+            if (!smaller.isRecycled) {
+                smaller.recycle()
+            }
+            return resultBytes
+        }
+    }
+
+    if ((working !== source || recycleSourceWhenDone) && !working.isRecycled) {
+        working.recycle()
+    }
+    return resultBytes
 }
 
 fun formatAttachmentSize(sizeBytes: Long): String {
@@ -215,9 +347,8 @@ fun formatAttachmentSize(sizeBytes: Long): String {
 
 fun openAttachmentExternally(context: Context, attachment: TaskAttachment) {
     runCatching {
-        val cleanRel = attachment.localRelativePath.trim().removePrefix("/")
-        val file = File(context.filesDir, cleanRel)
-        if (!file.exists()) return
+        val file = SyncRepository.resolveVerifiedAttachmentFile(context.filesDir, attachment.localRelativePath)
+        if (!file.exists() || !file.isFile) return
         val contentUri = FileProvider.getUriForFile(
             context,
             "${context.packageName}.fileprovider",
@@ -363,12 +494,16 @@ private fun AttachmentThumbnailCard(
         if (attachment.isImage) {
             thumbnailBitmap = withContext(Dispatchers.IO) {
                 runCatching {
-                    val file = File(context.filesDir, attachment.localRelativePath.removePrefix("/"))
-                    if (!file.exists()) return@runCatching null
-                    val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
-                    BitmapFactory.decodeFile(file.absolutePath, opts)?.asImageBitmap()
+                    val file = SyncRepository.resolveVerifiedAttachmentFile(
+                        context.filesDir,
+                        attachment.localRelativePath
+                    )
+                    if (!file.exists() || !file.isFile) return@runCatching null
+                    decodeSampledFileWithExif(file, reqWidth = 160, reqHeight = 160)?.asImageBitmap()
                 }.getOrNull()
             }
+        } else {
+            thumbnailBitmap = null
         }
     }
 
@@ -449,35 +584,90 @@ private fun AttachmentFullScreenPreviewDialog(
     var pdfPageCount by remember(attachment.id) { mutableIntStateOf(0) }
     var currentPdfPage by remember(attachment.id) { mutableIntStateOf(0) }
     var pdfPageBitmap by remember(attachment.id) { mutableStateOf<ImageBitmap?>(null) }
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offsetX by remember { mutableFloatStateOf(0f) }
-    var offsetY by remember { mutableFloatStateOf(0f) }
+    val heldImageRawRef = remember(attachment.id) { arrayOfNulls<Bitmap>(1) }
+    val heldPdfPageRawRef = remember(attachment.id) { arrayOfNulls<Bitmap>(1) }
+    var scale by remember(attachment.id) { mutableFloatStateOf(1f) }
+    var offsetX by remember(attachment.id) { mutableFloatStateOf(0f) }
+    var offsetY by remember(attachment.id) { mutableFloatStateOf(0f) }
+
+    DisposableEffect(attachment.id) {
+        onDispose {
+            fullImageBitmap = null
+            pdfPageBitmap = null
+            heldImageRawRef[0]?.let { bmp ->
+                heldImageRawRef[0] = null
+                if (!bmp.isRecycled) runCatching { bmp.recycle() }
+            }
+            heldPdfPageRawRef[0]?.let { bmp ->
+                heldPdfPageRawRef[0] = null
+                if (!bmp.isRecycled) runCatching { bmp.recycle() }
+            }
+        }
+    }
 
     LaunchedEffect(attachment.id, currentPdfPage) {
-        withContext(Dispatchers.IO) {
-            val file = File(context.filesDir, attachment.localRelativePath.removePrefix("/"))
-            if (!file.exists()) return@withContext
-            if (attachment.isImage) {
-                runCatching {
-                    fullImageBitmap = BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
+        scale = 1f
+        offsetX = 0f
+        offsetY = 0f
+
+        if (attachment.isImage) {
+            if (fullImageBitmap == null) {
+                val decoded = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val file = SyncRepository.resolveVerifiedAttachmentFile(
+                            context.filesDir,
+                            attachment.localRelativePath
+                        )
+                        if (!file.exists() || !file.isFile) return@runCatching null
+                        decodeSampledFileWithExif(file, reqWidth = 2048, reqHeight = 2048)
+                    }.getOrNull()
                 }
-            } else if (attachment.isPdf) {
+                if (decoded != null) {
+                    val prev = heldImageRawRef[0]
+                    heldImageRawRef[0] = decoded
+                    fullImageBitmap = decoded.asImageBitmap()
+                    if (prev != null && prev !== decoded && !prev.isRecycled) {
+                        withFrameNanos { }
+                        runCatching { prev.recycle() }
+                    }
+                }
+            }
+        } else if (attachment.isPdf) {
+            val renderedPair = withContext(Dispatchers.IO) {
                 runCatching {
+                    val file = SyncRepository.resolveVerifiedAttachmentFile(
+                        context.filesDir,
+                        attachment.localRelativePath
+                    )
+                    if (!file.exists() || !file.isFile) return@runCatching null
                     ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
                         PdfRenderer(pfd).use { renderer ->
-                            pdfPageCount = renderer.pageCount
-                            if (renderer.pageCount > 0) {
-                                val pageIdx = currentPdfPage.coerceIn(0, renderer.pageCount - 1)
-                                renderer.openPage(pageIdx).use { page ->
-                                    val renderW = (page.width * 2).coerceIn(400, 1800)
-                                    val renderH = (page.height * 2).coerceIn(400, 2400)
-                                    val bmp = Bitmap.createBitmap(renderW, renderH, Bitmap.Config.ARGB_8888)
-                                    bmp.eraseColor(android.graphics.Color.WHITE)
-                                    page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                                    pdfPageBitmap = bmp.asImageBitmap()
+                            val count = renderer.pageCount
+                            if (count <= 0) return@runCatching count to null
+                            val pageIdx = currentPdfPage.coerceIn(0, count - 1)
+                            val bmp = renderer.openPage(pageIdx).use { page ->
+                                val renderW = (page.width * 2).coerceIn(400, 1800)
+                                val renderH = (page.height * 2).coerceIn(400, 2400)
+                                Bitmap.createBitmap(renderW, renderH, Bitmap.Config.ARGB_8888).also { target ->
+                                    target.eraseColor(android.graphics.Color.WHITE)
+                                    page.render(target, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                                 }
                             }
+                            count to bmp
                         }
+                    }
+                }.getOrNull()
+            }
+            if (renderedPair != null) {
+                pdfPageCount = renderedPair.first
+                val newBmp = renderedPair.second
+                if (newBmp != null) {
+                    val prevBmp = heldPdfPageRawRef[0]
+                    heldPdfPageRawRef[0] = newBmp
+                    pdfPageBitmap = newBmp.asImageBitmap()
+                    if (prevBmp != null && prevBmp !== newBmp && !prevBmp.isRecycled) {
+                        withFrameNanos { }
+                        runCatching { prevBmp.recycle() }
                     }
                 }
             }
@@ -551,7 +741,7 @@ private fun AttachmentFullScreenPreviewDialog(
                         .weight(1f)
                         .fillMaxWidth()
                         .background(Color.Black.copy(alpha = 0.05f))
-                        .pointerInput(Unit) {
+                        .pointerInput(attachment.id, currentPdfPage) {
                             detectTransformGestures { _, pan, zoom, _ ->
                                 val newScale = (scale * zoom).coerceIn(1f, 4f)
                                 scale = newScale

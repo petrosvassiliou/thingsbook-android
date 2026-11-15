@@ -528,11 +528,13 @@ class ReminderReceiver : BroadcastReceiver() {
                     notificationManager.cancel(taskId.hashCode())
                     notificationManager.cancel(888003)
                 }
+                val appCtx = context.applicationContext
                 val pendingResult = goAsync()
                 scope.launch {
                     try {
                         runCatchingCancellable {
                             repository.updateTaskStatus(taskId, TaskStatus.COMPLETED)
+                            com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.refreshAllWidgetsSync(appCtx)
                         }
                     } finally {
                         pendingResult.finish()
@@ -543,11 +545,13 @@ class ReminderReceiver : BroadcastReceiver() {
             ACTION_SNOOZE_1H -> {
                 val taskId = intent.getStringExtra(EXTRA_TASK_ID)?.takeIf { it.isNotBlank() } ?: return
                 runCatching { notificationManager.cancel(taskId.hashCode()) }
+                val appCtx = context.applicationContext
                 val pendingResult = goAsync()
                 scope.launch {
                     try {
                         runCatchingCancellable {
                             repository.snoozeTaskReminder(taskId, 60)
+                            com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.refreshAllWidgetsSync(appCtx)
                         }
                     } finally {
                         pendingResult.finish()
@@ -558,11 +562,13 @@ class ReminderReceiver : BroadcastReceiver() {
             ACTION_DEFER_TOMORROW -> {
                 val taskId = intent.getStringExtra(EXTRA_TASK_ID)?.takeIf { it.isNotBlank() } ?: return
                 runCatching { notificationManager.cancel(taskId.hashCode()) }
+                val appCtx = context.applicationContext
                 val pendingResult = goAsync()
                 scope.launch {
                     try {
                         runCatchingCancellable {
                             repository.deferTaskToTomorrow(taskId)
+                            com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.refreshAllWidgetsSync(appCtx)
                         }
                     } finally {
                         pendingResult.finish()
@@ -573,11 +579,13 @@ class ReminderReceiver : BroadcastReceiver() {
             ACTION_DEFER_THIS_EVENING -> {
                 val taskId = intent.getStringExtra(EXTRA_TASK_ID)?.takeIf { it.isNotBlank() } ?: return
                 runCatching { notificationManager.cancel(taskId.hashCode()) }
+                val appCtx = context.applicationContext
                 val pendingResult = goAsync()
                 scope.launch {
                     try {
                         runCatchingCancellable {
                             repository.deferTaskToThisEvening(taskId)
+                            com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.refreshAllWidgetsSync(appCtx)
                         }
                     } finally {
                         pendingResult.finish()

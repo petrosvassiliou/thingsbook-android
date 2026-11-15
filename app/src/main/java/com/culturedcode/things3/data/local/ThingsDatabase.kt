@@ -178,30 +178,53 @@ abstract class ThingsDatabase : RoomDatabase() {
                 .joinToString(" ") { "\"$it\"*" }
         }
 
+        fun escapeSqlLikePattern(raw: String): String {
+            return raw
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+        }
+
         fun buildTasksFts5SqlQuery(rawQuery: String): SupportSQLiteQuery {
             val cleaned = rawQuery.replace("\u0000", "").trim()
+            val likePattern = "%${escapeSqlLikePattern(cleaned)}%"
             val ftsMatch = if (fts5Available && cleaned.isNotBlank()) sanitizeFts5Query(cleaned) else ""
             if (fts5Available && ftsMatch.isNotBlank()) {
                 return SimpleSQLiteQuery(
                     """
                     SELECT t.* FROM tasks t
-                    INNER JOIN tasks_fts fts ON t.id = fts.task_id
-                    WHERE t.isDeleted = 0 AND tasks_fts MATCH ?
-                    ORDER BY t.sortOrder ASC
+                    WHERE t.isDeleted = 0 AND (
+                        t.id IN (SELECT task_id FROM tasks_fts WHERE tasks_fts MATCH ?)
+                        OR EXISTS (
+                            SELECT 1 FROM attachments a
+                            WHERE a.taskId = t.id
+                              AND a.isDeleted = 0
+                              AND (a.fileName COLLATE NOCASE) LIKE ? ESCAPE '\'
+                        )
+                    )
+                    ORDER BY CASE WHEN t.status = 'OPEN' THEN 0 ELSE 1 END ASC, t.sortOrder ASC
                     LIMIT 50
                     """.trimIndent(),
-                    arrayOf(ftsMatch)
+                    arrayOf(ftsMatch, likePattern)
                 )
             }
-            val pattern = "%$cleaned%"
             return SimpleSQLiteQuery(
                 """
                 SELECT * FROM tasks
-                WHERE isDeleted = 0 AND (title LIKE ? COLLATE NOCASE OR notes LIKE ? COLLATE NOCASE)
-                ORDER BY sortOrder ASC
+                WHERE isDeleted = 0 AND (
+                    (title COLLATE NOCASE) LIKE ? ESCAPE '\'
+                    OR (notes COLLATE NOCASE) LIKE ? ESCAPE '\'
+                    OR EXISTS (
+                        SELECT 1 FROM attachments a
+                        WHERE a.taskId = tasks.id
+                          AND a.isDeleted = 0
+                          AND (a.fileName COLLATE NOCASE) LIKE ? ESCAPE '\'
+                    )
+                )
+                ORDER BY CASE WHEN status = 'OPEN' THEN 0 ELSE 1 END ASC, sortOrder ASC
                 LIMIT 50
                 """.trimIndent(),
-                arrayOf(pattern, pattern)
+                arrayOf(likePattern, likePattern, likePattern)
             )
         }
 
@@ -220,15 +243,15 @@ abstract class ThingsDatabase : RoomDatabase() {
                     arrayOf(ftsMatch)
                 )
             }
-            val pattern = "%$cleaned%"
+            val likePattern = "%${escapeSqlLikePattern(cleaned)}%"
             return SimpleSQLiteQuery(
                 """
                 SELECT * FROM projects
-                WHERE isDeleted = 0 AND (title LIKE ? COLLATE NOCASE OR notes LIKE ? COLLATE NOCASE)
+                WHERE isDeleted = 0 AND ((title COLLATE NOCASE) LIKE ? ESCAPE '\' OR (notes COLLATE NOCASE) LIKE ? ESCAPE '\')
                 ORDER BY sortOrder ASC
                 LIMIT 25
                 """.trimIndent(),
-                arrayOf(pattern, pattern)
+                arrayOf(likePattern, likePattern)
             )
         }
     }

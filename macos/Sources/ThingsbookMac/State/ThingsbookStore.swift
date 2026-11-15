@@ -55,6 +55,7 @@ public final class ThingsbookStore: ObservableObject {
     @Published public var somedayTasks: [TaskItem] = []
     @Published public var logbookTasks: [TaskItem] = []
     @Published public var trashedTasks: [TaskItem] = []
+    @Published public var trashedProjects: [Project] = []
     @Published public var allOpenTasks: [TaskItem] = []
     @Published public var statistics = DatabaseStatistics()
     @Published public var hasSampleTasks = false
@@ -100,6 +101,23 @@ public final class ThingsbookStore: ObservableObject {
     @Published public var pendingEncryptedBackupData: Data? = nil
     @Published public var isBackupPasswordSheetPresented = false
 
+    /// Non-nil identifier whenever any modal sheet or overlay is currently presented.
+    public var activeSheet: String? {
+        if isQuickFindPresented { return "quickFind" }
+        if isQuickEntryPresented { return "quickEntry" }
+        if previewingAttachment != nil { return "attachmentPreview" }
+        if isGeminiSheetPresented { return "gemini" }
+        if isSettingsPresented { return "settings" }
+        if isNewProjectSheetPresented { return "newProject" }
+        if editingProject != nil { return "editProject" }
+        if isNewAreaSheetPresented { return "newArea" }
+        if editingArea != nil { return "editArea" }
+        if isAreaManagerPresented { return "areaManager" }
+        if isTagManagerPresented { return "tagManager" }
+        if isBackupPasswordSheetPresented { return "backupPassword" }
+        return nil
+    }
+
     private var undoDismissTask: Task<Void, Never>?
     private var focusTimerCancellable: Timer?
     private var midnightTimer: Timer?
@@ -107,6 +125,7 @@ public final class ThingsbookStore: ObservableObject {
     private var backgroundSyncTask: Task<Void, Never>?
     private var appActivationObserver: NSObjectProtocol?
     private var workspaceWakeObserver: NSObjectProtocol?
+    private var appTerminateObserver: NSObjectProtocol?
 
     public init(databasePath: String? = nil) {
         let prefs = AppPreferences.load()
@@ -133,7 +152,12 @@ public final class ThingsbookStore: ObservableObject {
 
         db.onRemoteSyncApplied = { [weak self] in
             Task { @MainActor [weak self] in
-                self?.reloadSnapshot()
+                guard let self else { return }
+                self.reloadSnapshot()
+                NotificationReminderService.shared.syncAllTaskReminders(
+                    openTasks: self.allOpenTasks,
+                    lang: self.preferences.language
+                )
             }
         }
 
@@ -199,6 +223,7 @@ public final class ThingsbookStore: ObservableObject {
         self.somedayTasks = snap.somedayTasks
         self.logbookTasks = snap.logbookTasks
         self.trashedTasks = snap.trashedTasks
+        self.trashedProjects = snap.trashedProjects
         self.allOpenTasks = snap.allOpenTasks
         self.statistics = snap.statistics
         self.hasSampleTasks = snap.hasSampleTasks
@@ -376,10 +401,15 @@ public final class ThingsbookStore: ObservableObject {
 
     public func toggleTaskCompletion(_ task: TaskItem) {
         let nextStatus: TaskStatus = (task.status == .completed) ? .open : .completed
-        let spawnedId = try? database.setTaskStatus(taskId: task.id, status: nextStatus)
+        let spawnedId = (try? database.setTaskStatus(taskId: task.id, status: nextStatus)) ?? nil
+        reloadSnapshot()
         if nextStatus == .completed {
             if focusTimer?.taskId == task.id {
                 stopFocusTimer()
+            }
+            NotificationReminderService.shared.cancelTaskReminder(taskId: task.id)
+            if let spawnedId, let spawnedTask = allOpenTasks.first(where: { $0.id == spawnedId }) {
+                NotificationReminderService.shared.syncTaskReminder(spawnedTask, lang: preferences.language)
             }
             let displayTitle = task.title.isEmpty ? tr("macos_untitled_todo") : task.title
             presentUndo(
@@ -390,12 +420,23 @@ public final class ThingsbookStore: ObservableObject {
                     spawnedRecurringTaskId: spawnedId
                 )
             )
+        } else if let reopened = allOpenTasks.first(where: { $0.id == task.id }) {
+            NotificationReminderService.shared.syncTaskReminder(reopened, lang: preferences.language)
         }
     }
 
     public func cancelTask(_ task: TaskItem) {
         let nextStatus: TaskStatus = (task.status == .canceled) ? .open : .canceled
         _ = try? database.setTaskStatus(taskId: task.id, status: nextStatus)
+        reloadSnapshot()
+        if nextStatus == .canceled {
+            if focusTimer?.taskId == task.id {
+                stopFocusTimer()
+            }
+            NotificationReminderService.shared.cancelTaskReminder(taskId: task.id)
+        } else if let reopened = allOpenTasks.first(where: { $0.id == task.id }) {
+            NotificationReminderService.shared.syncTaskReminder(reopened, lang: preferences.language)
+        }
     }
 
     public func updateTask(_ task: TaskItem, tagIds: [String]? = nil) {
@@ -447,6 +488,10 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func deleteTask(_ task: TaskItem) {
+        if focusTimer?.taskId == task.id {
+            stopFocusTimer()
+        }
+        NotificationReminderService.shared.cancelTaskReminder(taskId: task.id)
         try? database.softDeleteTask(task.id)
         if expandedTaskId == task.id { expandedTaskId = nil }
         selectedTaskIds.remove(task.id)
@@ -465,20 +510,32 @@ public final class ThingsbookStore: ObservableObject {
             }
             return
         }
-        var lastDeleted: TaskItem?
+        let candidates = allOpenTasks + logbookTasks
+        var deletedTasks: [TaskItem] = []
         for id in ids {
-            if let t = (allOpenTasks + logbookTasks).first(where: { $0.id == id }) {
+            if let t = candidates.first(where: { $0.id == id }) {
+                if focusTimer?.taskId == id {
+                    stopFocusTimer()
+                }
+                NotificationReminderService.shared.cancelTaskReminder(taskId: id)
                 try? database.softDeleteTask(id)
-                lastDeleted = t
+                deletedTasks.append(t)
             }
         }
         selectedTaskIds.removeAll()
-        expandedTaskId = nil
-        if let lastDeleted {
-            let displayTitle = lastDeleted.title.isEmpty ? tr("macos_untitled_todo") : lastDeleted.title
+        if let exp = expandedTaskId, ids.contains(exp) {
+            expandedTaskId = nil
+        }
+        if deletedTasks.count == 1, let single = deletedTasks.first {
+            let displayTitle = single.title.isEmpty ? tr("macos_untitled_todo") : single.title
             presentUndo(
                 message: trf("undo_task_deleted", displayTitle),
-                action: .taskDeleted(taskId: lastDeleted.id, title: displayTitle)
+                action: .taskDeleted(taskId: single.id, title: displayTitle)
+            )
+        } else if deletedTasks.count > 1 {
+            presentUndo(
+                message: trf("undo_task_deleted", "\(deletedTasks.count)"),
+                action: .tasksDeleted(deletedTasks.map(\.id))
             )
         }
     }
@@ -520,6 +577,37 @@ public final class ThingsbookStore: ObservableObject {
         )
     }
 
+    public func restoreTrashedTask(_ taskId: String) {
+        try? database.restoreTask(taskId)
+        reloadSnapshot()
+        if let restored = allOpenTasks.first(where: { $0.id == taskId }) {
+            NotificationReminderService.shared.syncTaskReminder(restored, lang: preferences.language)
+        }
+    }
+
+    public func permanentlyDeleteTask(_ taskId: String) {
+        NotificationReminderService.shared.cancelTaskReminder(taskId: taskId)
+        try? database.permanentlyDeleteTask(taskId)
+    }
+
+    public func restoreTrashedProject(_ project: Project) {
+        try? database.restoreProject(project.id)
+        reloadSnapshot()
+        NotificationReminderService.shared.syncAllTaskReminders(
+            openTasks: allOpenTasks,
+            lang: preferences.language
+        )
+    }
+
+    public func permanentlyDeleteProject(_ project: Project) {
+        try? database.permanentlyDeleteProject(project.id)
+    }
+
+    public func emptyAllTrash() {
+        NotificationReminderService.shared.cancelTaskReminders(taskIds: trashedTasks.map(\.id))
+        try? database.emptyTrash()
+    }
+
     private func presentUndo(message: String, action: UndoActionKind) {
         undoDismissTask?.cancel()
         let banner = UndoBannerState(message: message, action: action)
@@ -541,13 +629,36 @@ public final class ThingsbookStore: ObservableObject {
         switch current.action {
         case .taskCompleted(let taskId, _, let spawnedId):
             if let spawnedId {
+                NotificationReminderService.shared.cancelTaskReminder(taskId: spawnedId)
                 try? database.softDeleteTask(spawnedId)
             }
             _ = try? database.setTaskStatus(taskId: taskId, status: .open)
+            reloadSnapshot()
+            if let reopened = allOpenTasks.first(where: { $0.id == taskId }) {
+                NotificationReminderService.shared.syncTaskReminder(reopened, lang: preferences.language)
+            }
         case .taskDeleted(let taskId, _):
             try? database.restoreTask(taskId)
+            reloadSnapshot()
+            if let restored = allOpenTasks.first(where: { $0.id == taskId }) {
+                NotificationReminderService.shared.syncTaskReminder(restored, lang: preferences.language)
+            }
+        case .tasksDeleted(let taskIds):
+            for id in taskIds {
+                try? database.restoreTask(id)
+            }
+            reloadSnapshot()
+            NotificationReminderService.shared.syncAllTaskReminders(
+                openTasks: allOpenTasks,
+                lang: preferences.language
+            )
         case .projectDeleted(let projectId, _, let previousTasks):
             try? database.restoreDeletedProject(projectId: projectId, previousTasks: previousTasks)
+            reloadSnapshot()
+            NotificationReminderService.shared.syncAllTaskReminders(
+                openTasks: allOpenTasks,
+                lang: preferences.language
+            )
         }
     }
 
@@ -840,6 +951,22 @@ public final class ThingsbookStore: ObservableObject {
                 }
             }
         }
+
+        appTerminateObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, !self.preferences.localOnlyDbMode else { return }
+            self.syncDebounceTask?.cancel()
+            let sync = self.cloudSync
+            let sem = DispatchSemaphore(value: 0)
+            Task.detached(priority: .userInitiated) {
+                await sync.pushDirtyOnlyIfSignedIn(localOnlyMode: false)
+                sem.signal()
+            }
+            _ = sem.wait(timeout: .now() + .milliseconds(1200))
+        }
     }
 
     private func handleNotificationAction(taskId: String, actionIdentifier: String) {
@@ -1011,6 +1138,7 @@ public final class ThingsbookStore: ObservableObject {
     // MARK: - URL Scheme (`thingsbook://`) Handler
 
     public func handleDeepLink(_ url: URL) {
+        guard !isLocked else { return }
         guard url.scheme?.lowercased() == "thingsbook" else { return }
         let host = (url.host ?? "").lowercased()
         let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)

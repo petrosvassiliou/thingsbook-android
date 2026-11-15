@@ -1,7 +1,9 @@
 package com.culturedcode.things3.data.repository
 
+import android.app.Activity
 import android.content.Context
 import android.util.Log
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -20,9 +22,11 @@ import com.culturedcode.things3.data.remote.dto.HeadingFirestoreDto
 import com.culturedcode.things3.data.remote.dto.ProjectFirestoreDto
 import com.culturedcode.things3.data.remote.dto.TagFirestoreDto
 import com.culturedcode.things3.data.remote.dto.TaskFirestoreDto
+import com.culturedcode.things3.data.remote.dto.toFirestoreDto
 import com.culturedcode.things3.domain.model.TaskStatus
 import com.culturedcode.things3.domain.util.runCatchingCancellable
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.OAuthProvider
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
@@ -54,22 +58,20 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
-import java.net.DatagramPacket
-import java.net.DatagramSocket
 import java.net.HttpURLConnection
-import java.net.InetAddress
-import java.net.InetSocketAddress
-import java.net.SocketTimeoutException
 import java.net.URL
+import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.Base64
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private val Context.syncDataStore by preferencesDataStore(name = "things3_cloud_sync_prefs")
+val Context.syncDataStore by preferencesDataStore(name = "things3_cloud_sync_prefs")
+val SYNC_KEY_LOCAL_ONLY_DB_MODE = booleanPreferencesKey("local_only_db_mode")
 
 enum class CloudSyncStatus {
     OFFLINE,
@@ -95,43 +97,40 @@ class SyncRepository @Inject constructor(
     private val reminderScheduler: ReminderScheduler
 ) {
     fun resolveAttachmentFile(localRelativePath: String): File {
-        val cleanRel = localRelativePath.trim()
-            .removePrefix("/")
-            .replace("..", "_")
-            .ifEmpty { "attachments/unknown" }
-        val file = File(context.filesDir, cleanRel)
-        file.parentFile?.mkdirs()
-        return file
+        return resolveVerifiedAttachmentFile(context.filesDir, localRelativePath)
     }
 
-    fun readAttachmentBase64(localRelativePath: String, maxRawBytes: Long = 5L * 1024L * 1024L): String {
-        if (localRelativePath.isBlank()) return ""
-        return runCatching {
-            val file = resolveAttachmentFile(localRelativePath)
-            if (file.exists() && file.isFile && file.length() in 1..maxRawBytes) {
-                Base64.getEncoder().encodeToString(file.readBytes())
-            } else {
-                ""
-            }
-        }.getOrDefault("")
+    fun buildSafeLocalAttachmentPath(attachmentId: String, fileName: String): String {
+        return Companion.buildSafeLocalAttachmentPath(attachmentId, fileName)
+    }
+
+    fun readAttachmentBase64(localRelativePath: String, maxRawBytes: Long = MAX_INLINE_SYNC_BYTES): String {
+        return readAttachmentBase64InRoot(context.filesDir, localRelativePath, maxRawBytes)
     }
 
     fun writeAttachmentBase64(localRelativePath: String, dataBase64: String): Long {
-        if (localRelativePath.isBlank() || dataBase64.isBlank()) return 0L
-        return runCatching {
-            val bytes = Base64.getMimeDecoder().decode(dataBase64.trim())
-            val file = resolveAttachmentFile(localRelativePath)
-            file.writeBytes(bytes)
-            bytes.size.toLong()
-        }.getOrDefault(0L)
+        return writeAttachmentBase64InRoot(context.filesDir, localRelativePath, dataBase64)
+    }
+
+    fun deleteAttachmentFile(localRelativePath: String) {
+        deleteAttachmentFileInRoot(context.filesDir, localRelativePath)
     }
 
     fun deleteLocalAttachmentFile(localRelativePath: String) {
-        if (localRelativePath.isBlank()) return
+        deleteAttachmentFile(localRelativePath)
+    }
+
+    fun clearAllLocalAttachmentFiles() {
         runCatching {
-            val file = resolveAttachmentFile(localRelativePath)
-            if (file.exists() && file.isFile) {
-                file.delete()
+            val attachmentsRoot = File(context.filesDir, "attachments")
+            if (attachmentsRoot.exists() && attachmentsRoot.isDirectory) {
+                attachmentsRoot.listFiles()?.forEach { child ->
+                    if (child.isFile) {
+                        runCatching { child.delete() }
+                    } else if (child.isDirectory) {
+                        runCatching { child.deleteRecursively() }
+                    }
+                }
             }
         }
     }
@@ -146,16 +145,19 @@ class SyncRepository @Inject constructor(
             reminderScheduler.cancelReminder(entity.id)
         }
     }
+
     private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
         Log.w("SyncRepository", "Unhandled background sync exception", throwable)
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + exceptionHandler)
     private val syncMutex = Mutex()
+    private val dbApplyMutex = Mutex()
     private val activeListeners = java.util.Collections.synchronizedList(mutableListOf<ListenerRegistration>())
     private var realtimeCloudPollJob: Job? = null
-    private var lanUdpListenerJob: Job? = null
+    private val lastNtfyMessageIdByTopic = ConcurrentHashMap<String, String>()
+
     @Volatile
-    private var activeUdpSocket: DatagramSocket? = null
+    private var dataStoreLocalOnlyFlag: Boolean = false
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -178,6 +180,13 @@ class SyncRepository @Inject constructor(
 
     init {
         scope.launch {
+            context.syncDataStore.data
+                .catch { emit(emptyPreferences()) }
+                .collect { prefs ->
+                    dataStoreLocalOnlyFlag = prefs[SYNC_KEY_LOCAL_ONLY_DB_MODE] == true
+                }
+        }
+        scope.launch {
             delay(800L)
             runCatchingCancellable {
                 restoreBuiltInCloudSession()
@@ -192,8 +201,26 @@ class SyncRepository @Inject constructor(
             .getBoolean("local_only_db_mode", false)
         val settingsPrefs = context.getSharedPreferences("thingsbook_settings_prefs", Context.MODE_PRIVATE)
             .getBoolean("local_only_db_mode", false)
-        uiPrefs || settingsPrefs
-    }.getOrDefault(false)
+        uiPrefs || settingsPrefs || dataStoreLocalOnlyFlag
+    }.getOrDefault(dataStoreLocalOnlyFlag)
+
+    suspend fun setLocalOnlyDbModePreference(localOnly: Boolean) {
+        dataStoreLocalOnlyFlag = localOnly
+        runCatchingCancellable {
+            context.syncDataStore.edit { prefs ->
+                prefs[SYNC_KEY_LOCAL_ONLY_DB_MODE] = localOnly
+            }
+        }
+        if (localOnly) {
+            detachRealtimeDeltaListeners()
+            _syncStatus.value = CloudSyncStatus.OFFLINE
+        }
+    }
+
+    fun hasActiveCloudAccount(): Boolean {
+        if (!_activeUserIdentifier.value.isNullOrBlank()) return true
+        return runCatching { firebaseAuth.currentUser != null }.getOrDefault(false)
+    }
 
     fun triggerBackgroundSync() {
         if (isLocalOnlyDbModeEnabled()) {
@@ -219,13 +246,15 @@ class SyncRepository @Inject constructor(
     }
 
     private suspend fun restoreBuiltInCloudSession() {
+        val prefs = context.syncDataStore.data
+            .catch { emit(emptyPreferences()) }
+            .first()
+        dataStoreLocalOnlyFlag = prefs[SYNC_KEY_LOCAL_ONLY_DB_MODE] == true
         if (isLocalOnlyDbModeEnabled()) {
             _syncStatus.value = CloudSyncStatus.OFFLINE
             return
         }
-        val prefs = context.syncDataStore.data
-            .catch { emit(emptyPreferences()) }
-            .first()
+
         val userId = prefs[KEY_ACTIVE_USER_ID]
         val email = prefs[KEY_ACTIVE_USER_EMAIL]
         val channelTopic = prefs[KEY_ACTIVE_CHANNEL_TOPIC]
@@ -236,6 +265,10 @@ class SyncRepository @Inject constructor(
         }
 
         if (!userId.isNullOrBlank() && !channelTopic.isNullOrBlank()) {
+            _lastSyncedAt.value = prefs[lastSyncKeyForUser(userId)] ?: 0L
+            prefs[lastNtfyMsgIdKeyForTopic(channelTopic)]?.takeIf { it.isNotBlank() }?.let {
+                lastNtfyMessageIdByTopic[channelTopic] = it
+            }
             _activeUserIdentifier.value = email ?: userId
             syncBidirectionalDeltas()
             startRealtimeMultiDeviceSync(userId, channelTopic)
@@ -247,8 +280,21 @@ class SyncRepository @Inject constructor(
                     signOutAccount()
                     return
                 }
+                val resolvedTopic = channelTopic?.takeIf { it.isNotBlank() }
+                    ?: deriveOAuthChannelTopic(fbUser.uid)
+                runCatchingCancellable {
+                    context.syncDataStore.edit { editPrefs ->
+                        editPrefs[KEY_ACTIVE_USER_ID] = fbUser.uid
+                        if (!fbEmail.isNullOrBlank()) {
+                            editPrefs[KEY_ACTIVE_USER_EMAIL] = fbEmail
+                        }
+                        editPrefs[KEY_ACTIVE_CHANNEL_TOPIC] = resolvedTopic
+                    }
+                }
+                _lastSyncedAt.value = prefs[lastSyncKeyForUser(fbUser.uid)] ?: 0L
                 _activeUserIdentifier.value = fbEmail ?: fbUser.uid
                 syncBidirectionalDeltas()
+                startRealtimeMultiDeviceSync(fbUser.uid, resolvedTopic)
             }
         }
     }
@@ -271,6 +317,9 @@ class SyncRepository @Inject constructor(
     private fun deriveDeltaChannelTopic(normalizedEmail: String, passwordVerifier: String): String =
         "tb_sync_${sha256Hex("thingsbook-chan-v1:$normalizedEmail:$passwordVerifier").take(28)}"
 
+    private fun deriveOAuthChannelTopic(uid: String): String =
+        "tb_sync_${sha256Hex("thingsbook-oauth:$uid").take(28)}"
+
     private suspend fun authenticateFirebaseEmailWithFallback(
         email: String,
         password: String,
@@ -291,9 +340,7 @@ class SyncRepository @Inject constructor(
                 } catch (createErr: Exception) {
                     val msg = (createErr.message ?: signInErr.message ?: "").lowercase(Locale.ROOT)
                     if (msg.contains("password") || msg.contains("credential") || msg.contains("already in use")) {
-                        throw IllegalArgumentException(
-                            "Falsches Passwort für $email. Klicke unten auf 'Passwort vergessen?', um es per E-Mail zurückzusetzen."
-                        )
+                        throw IllegalArgumentException(localizedWrongPasswordError(email))
                     }
                     throw createErr
                 }
@@ -303,11 +350,73 @@ class SyncRepository @Inject constructor(
         }
     }
 
+    suspend fun signInWithGoogleOAuth(activity: Activity): Result<String> = withContext(Dispatchers.IO) {
+        runCatchingCancellable {
+            _syncStatus.value = CloudSyncStatus.SYNCING
+
+            val provider = OAuthProvider.newBuilder("google.com").apply {
+                addCustomParameter("prompt", "select_account")
+            }.build()
+
+            val authResult = withContext(Dispatchers.Main) {
+                firebaseAuth.pendingAuthResult?.await()
+                    ?: firebaseAuth.startActivityForSignInWithProvider(activity, provider).await()
+            }
+
+            val fbUser = authResult.user
+                ?: throw IllegalStateException(localizedGoogleSignInFailedError())
+            val uid = fbUser.uid
+            val email = fbUser.email?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.isNotBlank() } ?: uid
+            val channelTopic = deriveOAuthChannelTopic(uid)
+
+            lastNtfyMessageIdByTopic.remove(channelTopic)
+            context.syncDataStore.edit { prefs ->
+                prefs[KEY_ACTIVE_USER_ID] = uid
+                prefs[KEY_ACTIVE_USER_EMAIL] = email
+                prefs[KEY_ACTIVE_CHANNEL_TOPIC] = channelTopic
+                prefs[lastSyncKeyForUser(uid)] = 0L
+                prefs.remove(lastNtfyMsgIdKeyForTopic(channelTopic))
+            }
+            _activeUserIdentifier.value = email
+
+            if (!isLocalOnlyDbModeEnabled()) {
+                var maxPulled = 0L
+                if (isLiveFirebaseConfigured()) {
+                    maxPulled = maxOf(maxPulled, pullDeltaRecordsFromFirestore(uid, 0L))
+                }
+                maxPulled = maxOf(
+                    maxPulled,
+                    pullDeltaRecordsFromBuiltInCloud(uid, channelTopic, 0L, forceFullHistory = true)
+                )
+                val cloudOk = pushDirtyRecordsToBuiltInCloud(uid, channelTopic, markAsSynced = false)
+                val fbOk = if (isLiveFirebaseConfigured()) {
+                    runCatchingCancellable { pushDirtyRecordsToFirestore(uid, markAsSynced = true) }.isSuccess
+                } else {
+                    false
+                }
+                if (cloudOk && !fbOk) {
+                    pushDirtyRecordsToBuiltInCloud(uid, channelTopic, markAsSynced = true)
+                }
+                val nowMillis = System.currentTimeMillis()
+                saveLastSyncTimestamp(uid, maxOf(clampRemoteTimestamp(maxPulled, nowMillis), nowMillis))
+                _lastSyncedAt.value = nowMillis
+                _syncStatus.value = CloudSyncStatus.SYNCED
+                startRealtimeMultiDeviceSync(uid, channelTopic)
+            } else {
+                _syncStatus.value = CloudSyncStatus.OFFLINE
+            }
+            email
+        }.onFailure { err ->
+            Log.w("SyncRepository", "signInWithGoogleOAuth failed", err)
+            _syncStatus.value = CloudSyncStatus.OFFLINE
+        }
+    }
+
     suspend fun registerAccount(rawEmail: String, password: String): Result<String> = withContext(Dispatchers.IO) {
         runCatchingCancellable {
             val email = rawEmail.trim().lowercase(Locale.ROOT)
-            require(email.contains("@") && email.contains(".")) { "Bitte gib eine gültige E-Mail-Adresse ein." }
-            require(password.length >= 6) { "Das Passwort muss mindestens 6 Zeichen lang sein." }
+            require(email.contains("@") && email.contains(".")) { localizedInvalidEmailError() }
+            require(password.length >= 6) { localizedPasswordTooShortError() }
 
             _syncStatus.value = CloudSyncStatus.SYNCING
 
@@ -327,7 +436,7 @@ class SyncRepository @Inject constructor(
             } else {
                 val existingEnvelope = fetchCloudUserEnvelope(registryTopic)
                 if (existingEnvelope != null && existingEnvelope.passwordVerifierHash != passwordVerifier) {
-                    throw IllegalStateException("Dieses Konto existiert bereits. Bitte melde dich mit deinem Passwort an oder nutze 'Passwort vergessen?'.")
+                    throw IllegalStateException(localizedAccountAlreadyExistsError())
                 }
                 val derivedId = deriveUserId(email)
                 if (existingEnvelope == null) {
@@ -342,19 +451,25 @@ class SyncRepository @Inject constructor(
                 derivedId
             }
 
+            lastNtfyMessageIdByTopic.remove(channelTopic)
             context.syncDataStore.edit { prefs ->
                 prefs[KEY_ACTIVE_USER_ID] = userId
                 prefs[KEY_ACTIVE_USER_EMAIL] = email
                 prefs[KEY_ACTIVE_CHANNEL_TOPIC] = channelTopic
                 prefs[lastSyncKeyForUser(userId)] = 0L
+                prefs.remove(lastNtfyMsgIdKeyForTopic(channelTopic))
             }
             _activeUserIdentifier.value = email
 
             if (!isLocalOnlyDbModeEnabled()) {
+                var maxPulled = 0L
                 if (isLiveFirebaseConfigured()) {
-                    pullDeltaRecordsFromFirestore(userId, 0L)
+                    maxPulled = maxOf(maxPulled, pullDeltaRecordsFromFirestore(userId, 0L))
                 }
-                pullDeltaRecordsFromBuiltInCloud(userId, channelTopic, 0L)
+                maxPulled = maxOf(
+                    maxPulled,
+                    pullDeltaRecordsFromBuiltInCloud(userId, channelTopic, 0L, forceFullHistory = true)
+                )
                 val cloudOk = pushDirtyRecordsToBuiltInCloud(userId, channelTopic, markAsSynced = false)
                 val fbOk = if (isLiveFirebaseConfigured()) {
                     runCatchingCancellable { pushDirtyRecordsToFirestore(userId, markAsSynced = true) }.isSuccess
@@ -364,7 +479,9 @@ class SyncRepository @Inject constructor(
                 if (cloudOk && !fbOk) {
                     pushDirtyRecordsToBuiltInCloud(userId, channelTopic, markAsSynced = true)
                 }
-                saveLastSyncTimestamp(userId, System.currentTimeMillis())
+                val nowMillis = System.currentTimeMillis()
+                saveLastSyncTimestamp(userId, maxOf(clampRemoteTimestamp(maxPulled, nowMillis), nowMillis))
+                _lastSyncedAt.value = nowMillis
                 _syncStatus.value = CloudSyncStatus.SYNCED
                 startRealtimeMultiDeviceSync(userId, channelTopic)
             } else {
@@ -380,8 +497,8 @@ class SyncRepository @Inject constructor(
     suspend fun signInAccount(rawEmail: String, password: String): Result<String> = withContext(Dispatchers.IO) {
         runCatchingCancellable {
             val email = rawEmail.trim().lowercase(Locale.ROOT)
-            require(email.contains("@") && email.contains(".")) { "Bitte gib eine gültige E-Mail-Adresse ein." }
-            require(password.length >= 6) { "Das Passwort muss mindestens 6 Zeichen lang sein." }
+            require(email.contains("@") && email.contains(".")) { localizedInvalidEmailError() }
+            require(password.length >= 6) { localizedPasswordTooShortError() }
 
             _syncStatus.value = CloudSyncStatus.SYNCING
 
@@ -395,7 +512,7 @@ class SyncRepository @Inject constructor(
                 val existingEnvelope = fetchCloudUserEnvelope(registryTopic)
                 val derivedId = deriveUserId(email)
                 if (existingEnvelope != null && existingEnvelope.passwordVerifierHash != passwordVerifier) {
-                    throw IllegalArgumentException("Ungültiges Passwort für $email. Tipp: Nutze 'Passwort vergessen?'.")
+                    throw IllegalArgumentException(localizedWrongPasswordError(email))
                 } else if (existingEnvelope == null) {
                     val envelope = CloudUserAuthEnvelope(
                         userId = derivedId,
@@ -408,11 +525,13 @@ class SyncRepository @Inject constructor(
                 derivedId
             }
 
+            lastNtfyMessageIdByTopic.remove(channelTopic)
             context.syncDataStore.edit { prefs ->
                 prefs[KEY_ACTIVE_USER_ID] = userId
                 prefs[KEY_ACTIVE_USER_EMAIL] = email
                 prefs[KEY_ACTIVE_CHANNEL_TOPIC] = channelTopic
                 prefs[lastSyncKeyForUser(userId)] = 0L
+                prefs.remove(lastNtfyMsgIdKeyForTopic(channelTopic))
             }
             _activeUserIdentifier.value = email
 
@@ -421,7 +540,10 @@ class SyncRepository @Inject constructor(
                 if (isLiveFirebaseConfigured()) {
                     maxPulled = maxOf(maxPulled, pullDeltaRecordsFromFirestore(userId, 0L))
                 }
-                maxPulled = maxOf(maxPulled, pullDeltaRecordsFromBuiltInCloud(userId, channelTopic, 0L))
+                maxPulled = maxOf(
+                    maxPulled,
+                    pullDeltaRecordsFromBuiltInCloud(userId, channelTopic, 0L, forceFullHistory = true)
+                )
                 val cloudOk = pushDirtyRecordsToBuiltInCloud(userId, channelTopic, markAsSynced = false)
                 val fbOk = if (isLiveFirebaseConfigured()) {
                     runCatchingCancellable { pushDirtyRecordsToFirestore(userId, markAsSynced = true) }.isSuccess
@@ -431,7 +553,9 @@ class SyncRepository @Inject constructor(
                 if (cloudOk && !fbOk) {
                     pushDirtyRecordsToBuiltInCloud(userId, channelTopic, markAsSynced = true)
                 }
-                saveLastSyncTimestamp(userId, maxOf(maxPulled, System.currentTimeMillis()))
+                val nowMillis = System.currentTimeMillis()
+                saveLastSyncTimestamp(userId, maxOf(clampRemoteTimestamp(maxPulled, nowMillis), nowMillis))
+                _lastSyncedAt.value = nowMillis
                 _syncStatus.value = CloudSyncStatus.SYNCED
                 startRealtimeMultiDeviceSync(userId, channelTopic)
             } else {
@@ -448,86 +572,24 @@ class SyncRepository @Inject constructor(
         runCatchingCancellable {
             val email = rawEmail.trim().lowercase(Locale.ROOT)
             require(email.contains("@") && email.contains(".")) {
-                "Bitte gib oben zuerst deine E-Mail-Adresse ein und tippe dann auf 'Passwort zurücksetzen'."
+                localizedResetEmailMissingError()
             }
             if (isLiveFirebaseConfigured()) {
                 firebaseAuth.sendPasswordResetEmail(email).await()
             }
-            "E-Mail zum Zurücksetzen des Passworts wurde an $email gesendet. Bitte prüfe dein Postfach (auch den Spam-Ordner)."
-        }
-    }
-
-    suspend fun signInInstantCloudAccount(preferredEmail: String? = null): Result<String> = withContext(Dispatchers.IO) {
-        runCatchingCancellable {
-            val googleEmail = preferredEmail?.trim()?.lowercase(Locale.ROOT)
-                ?.takeIf { it.contains("@") && it.contains(".") && !it.endsWith("@thingsbook.app") }
-                ?: throw IllegalArgumentException(
-                    "Bitte wähle dein Google-Konto im Android-Auswahldialog aus oder gib oben deine E-Mail-Adresse ein."
-                )
-
-            _syncStatus.value = CloudSyncStatus.SYNCING
-
-            val generatedPassword = "TbCloud!${sha256Hex("tb-instant-v2:$googleEmail").take(14)}"
-
-            val uid = if (isLiveFirebaseConfigured()) {
-                try {
-                    authenticateFirebaseEmailWithFallback(
-                        email = googleEmail,
-                        password = generatedPassword,
-                        allowAutoCreateOnSignIn = true
-                    )
-                } catch (ce: CancellationException) {
-                    throw ce
-                } catch (_: Exception) {
-                    throw IllegalArgumentException(
-                        "Für $googleEmail wurde bereits ein eigenes Passwort vergeben. Bitte gib oben dein Passwort ein und tippe auf 'Mit E-Mail anmelden' (oder nutze 'Passwort vergessen?')."
-                    )
-                }
-            } else {
-                deriveUserId(googleEmail)
-            }
-
-            val channelTopic = "tb_sync_${sha256Hex("thingsbook-instant:$googleEmail").take(28)}"
-            context.syncDataStore.edit { prefs ->
-                prefs[KEY_ACTIVE_USER_ID] = uid
-                prefs[KEY_ACTIVE_USER_EMAIL] = googleEmail
-                prefs[KEY_ACTIVE_CHANNEL_TOPIC] = channelTopic
-            }
-            _activeUserIdentifier.value = googleEmail
-
-            if (!isLocalOnlyDbModeEnabled()) {
-                if (isLiveFirebaseConfigured()) {
-                    pullDeltaRecordsFromFirestore(uid, 0L)
-                }
-                pullDeltaRecordsFromBuiltInCloud(uid, channelTopic, 0L)
-                val cloudOk = pushDirtyRecordsToBuiltInCloud(uid, channelTopic, markAsSynced = false)
-                val fbOk = if (isLiveFirebaseConfigured()) {
-                    runCatchingCancellable { pushDirtyRecordsToFirestore(uid, markAsSynced = true) }.isSuccess
-                } else {
-                    false
-                }
-                if (cloudOk && !fbOk) {
-                    pushDirtyRecordsToBuiltInCloud(uid, channelTopic, markAsSynced = true)
-                }
-                saveLastSyncTimestamp(uid, System.currentTimeMillis())
-
-                _syncStatus.value = CloudSyncStatus.SYNCED
-                startRealtimeMultiDeviceSync(uid, channelTopic)
-            } else {
-                _syncStatus.value = CloudSyncStatus.OFFLINE
-            }
-            googleEmail
-        }.onFailure { err ->
-            Log.w("SyncRepository", "signInInstantCloudAccount failed", err)
-            _syncStatus.value = CloudSyncStatus.OFFLINE
+            localizedPasswordResetSentInfo(email)
         }
     }
 
     suspend fun signOutAccount() {
         detachRealtimeDeltaListeners()
+        lastNtfyMessageIdByTopic.clear()
         runCatching { firebaseAuth.signOut() }
         runCatchingCancellable {
             context.syncDataStore.edit { prefs ->
+                prefs[KEY_ACTIVE_CHANNEL_TOPIC]?.let { topic ->
+                    prefs.remove(lastNtfyMsgIdKeyForTopic(topic))
+                }
                 prefs.remove(KEY_ACTIVE_USER_ID)
                 prefs.remove(KEY_ACTIVE_USER_EMAIL)
                 prefs.remove(KEY_ACTIVE_CHANNEL_TOPIC)
@@ -540,6 +602,12 @@ class SyncRepository @Inject constructor(
     private fun lastSyncKeyForUser(userId: String) =
         longPreferencesKey("last_sync_timestamp_$userId")
 
+    private fun attachmentsBackfillKeyForUser(userId: String) =
+        booleanPreferencesKey("attachments_backfill_v1_$userId")
+
+    private fun lastNtfyMsgIdKeyForTopic(channelTopic: String) =
+        stringPreferencesKey("last_ntfy_msg_id_$channelTopic")
+
     suspend fun getLastSyncTimestamp(userId: String): Long {
         return context.syncDataStore.data
             .catch { emit(emptyPreferences()) }
@@ -548,12 +616,35 @@ class SyncRepository @Inject constructor(
     }
 
     private suspend fun saveLastSyncTimestamp(userId: String, timestamp: Long) {
+        val clamped = clampRemoteTimestamp(timestamp)
         runCatchingCancellable {
             context.syncDataStore.edit { prefs ->
-                prefs[lastSyncKeyForUser(userId)] = timestamp
+                prefs[lastSyncKeyForUser(userId)] = clamped
             }
         }
-        _lastSyncedAt.value = timestamp
+        _lastSyncedAt.value = clamped
+    }
+
+    private suspend fun getLastNtfyMessageId(channelTopic: String): String? {
+        lastNtfyMessageIdByTopic[channelTopic]?.takeIf { it.isNotBlank() }?.let { return it }
+        val stored = context.syncDataStore.data
+            .catch { emit(emptyPreferences()) }
+            .map { prefs -> prefs[lastNtfyMsgIdKeyForTopic(channelTopic)] }
+            .first()
+        if (!stored.isNullOrBlank()) {
+            lastNtfyMessageIdByTopic[channelTopic] = stored
+        }
+        return stored
+    }
+
+    private suspend fun saveLastNtfyMessageId(channelTopic: String, msgId: String) {
+        if (msgId.isBlank()) return
+        lastNtfyMessageIdByTopic[channelTopic] = msgId
+        runCatchingCancellable {
+            context.syncDataStore.edit { prefs ->
+                prefs[lastNtfyMsgIdKeyForTopic(channelTopic)] = msgId
+            }
+        }
     }
 
     suspend fun syncBidirectionalDeltas(): Result<Unit> = withContext(Dispatchers.IO) {
@@ -563,17 +654,18 @@ class SyncRepository @Inject constructor(
         }
         syncMutex.withLock {
             runCatchingCancellable {
+                val prefs = context.syncDataStore.data
+                    .catch { emit(emptyPreferences()) }
+                    .first()
+                dataStoreLocalOnlyFlag = prefs[SYNC_KEY_LOCAL_ONLY_DB_MODE] == true
                 if (isLocalOnlyDbModeEnabled()) {
                     _syncStatus.value = CloudSyncStatus.OFFLINE
                     return@runCatchingCancellable
                 }
-                val prefs = context.syncDataStore.data
-                    .catch { emit(emptyPreferences()) }
-                    .first()
                 val userId = prefs[KEY_ACTIVE_USER_ID]
                     ?: runCatching { firebaseAuth.currentUser?.uid }.getOrNull()
                     ?: return@runCatchingCancellable
-                val channelTopic = prefs[KEY_ACTIVE_CHANNEL_TOPIC] ?: "tb_sync_${sha256Hex(userId).take(28)}"
+                val channelTopic = prefs[KEY_ACTIVE_CHANNEL_TOPIC] ?: deriveOAuthChannelTopic(userId)
 
                 _syncStatus.value = CloudSyncStatus.SYNCING
 
@@ -599,13 +691,17 @@ class SyncRepository @Inject constructor(
                     runCatchingCancellable { pullDeltaRecordsFromFirestore(userId, lastSync) }
                         .onSuccess { fbMax ->
                             anyTransportSucceeded = true
-                            if (fbMax > maxObservedTimestamp) maxObservedTimestamp = fbMax
+                            val clampedFbMax = clampRemoteTimestamp(fbMax)
+                            if (clampedFbMax > maxObservedTimestamp) maxObservedTimestamp = clampedFbMax
                         }
                 }
-                fetchDeltaBatchesResultFromBuiltInCloud(channelTopic).onSuccess { batches ->
+
+                val sinceMsgId = if (lastSync <= 0L) null else getLastNtfyMessageId(channelTopic)
+                fetchDeltaBatchesResultFromBuiltInCloud(channelTopic, sinceMessageId = sinceMsgId).onSuccess { pollResult ->
                     anyTransportSucceeded = true
+                    pollResult.latestMessageId?.let { saveLastNtfyMessageId(channelTopic, it) }
                     val localDeviceId = getOrCreateDeviceId()
-                    for (batch in batches) {
+                    for (batch in pollResult.batches) {
                         if (batch.userId != userId) continue
                         if (batch.deviceId == localDeviceId && lastSync > 0L && batch.batchTimestamp <= lastSync) {
                             continue
@@ -616,14 +712,16 @@ class SyncRepository @Inject constructor(
                 }
 
                 if (!anyTransportSucceeded) {
-                    throw IOException("Cloud-Relay ist derzeit offline oder nicht erreichbar.")
+                    throw IOException(localizedCloudOfflineError())
                 }
 
+                val nowMillis = System.currentTimeMillis()
                 if (maxObservedTimestamp > lastSync) {
-                    saveLastSyncTimestamp(userId, maxObservedTimestamp)
+                    saveLastSyncTimestamp(userId, clampRemoteTimestamp(maxObservedTimestamp, nowMillis))
                 } else if (lastSync == 0L) {
-                    saveLastSyncTimestamp(userId, System.currentTimeMillis())
+                    saveLastSyncTimestamp(userId, nowMillis)
                 }
+                _lastSyncedAt.value = nowMillis
 
                 _syncStatus.value = CloudSyncStatus.SYNCED
             }.onFailure { err ->
@@ -640,6 +738,53 @@ class SyncRepository @Inject constructor(
                 !apiKey.contains("DummyKey") &&
                 !apiKey.contains("OfflinePlaceholderKey")
         }.getOrDefault(false)
+    }
+
+    private fun buildSafeNtfyPayloadChunks(
+        userId: String,
+        deviceId: String,
+        batchTimestamp: Long,
+        fullPayload: CloudDeltaBatchPayload
+    ): List<String> {
+        val fullJson = json.encodeToString(fullPayload)
+        if (fullJson.toByteArray(StandardCharsets.UTF_8).size < MAX_NTFY_CHUNK_BYTES) {
+            return listOf(fullJson)
+        }
+
+        val out = mutableListOf<String>()
+        fun <T> appendSplitChunks(items: List<T>, makePayload: (List<T>) -> CloudDeltaBatchPayload) {
+            if (items.isEmpty()) return
+            val encoded = json.encodeToString(makePayload(items))
+            if (encoded.toByteArray(StandardCharsets.UTF_8).size < MAX_NTFY_CHUNK_BYTES) {
+                out += encoded
+            } else if (items.size > 1) {
+                val mid = items.size / 2
+                appendSplitChunks(items.subList(0, mid), makePayload)
+                appendSplitChunks(items.subList(mid, items.size), makePayload)
+            } else {
+                Log.w("SyncRepository", "Skipping oversized single ntfy relay item (>= $MAX_NTFY_CHUNK_BYTES bytes)")
+            }
+        }
+
+        appendSplitChunks(fullPayload.tags) {
+            CloudDeltaBatchPayload(userId = userId, deviceId = deviceId, batchTimestamp = batchTimestamp, tags = it)
+        }
+        appendSplitChunks(fullPayload.areas) {
+            CloudDeltaBatchPayload(userId = userId, deviceId = deviceId, batchTimestamp = batchTimestamp, areas = it)
+        }
+        appendSplitChunks(fullPayload.projects) {
+            CloudDeltaBatchPayload(userId = userId, deviceId = deviceId, batchTimestamp = batchTimestamp, projects = it)
+        }
+        appendSplitChunks(fullPayload.headings) {
+            CloudDeltaBatchPayload(userId = userId, deviceId = deviceId, batchTimestamp = batchTimestamp, headings = it)
+        }
+        appendSplitChunks(fullPayload.tasks) {
+            CloudDeltaBatchPayload(userId = userId, deviceId = deviceId, batchTimestamp = batchTimestamp, tasks = it)
+        }
+        appendSplitChunks(fullPayload.checklistItems) {
+            CloudDeltaBatchPayload(userId = userId, deviceId = deviceId, batchTimestamp = batchTimestamp, checklistItems = it)
+        }
+        return out
     }
 
     private suspend fun pushDirtyRecordsToBuiltInCloud(
@@ -682,54 +827,7 @@ class SyncRepository @Inject constructor(
             checklistItems = dirtyChecklists.map { ChecklistItemFirestoreDto.fromEntity(it) }
         )
 
-        val serializedFull = json.encodeToString(fullPayload)
-        broadcastDeltaOverLanUdp(serializedFull)
-
-        val payloadsToPost: List<String> = if (serializedFull.toByteArray(StandardCharsets.UTF_8).size <= 3800) {
-            listOf(serializedFull)
-        } else {
-            buildList {
-                if (fullPayload.tags.isNotEmpty() || fullPayload.areas.isNotEmpty() || fullPayload.projects.isNotEmpty() || fullPayload.headings.isNotEmpty()) {
-                    add(
-                        json.encodeToString(
-                            CloudDeltaBatchPayload(
-                                userId = userId,
-                                deviceId = deviceId,
-                                batchTimestamp = now,
-                                tags = fullPayload.tags,
-                                areas = fullPayload.areas,
-                                projects = fullPayload.projects,
-                                headings = fullPayload.headings
-                            )
-                        )
-                    )
-                }
-                fullPayload.tasks.chunked(12).forEach { taskChunk ->
-                    add(
-                        json.encodeToString(
-                            CloudDeltaBatchPayload(
-                                userId = userId,
-                                deviceId = deviceId,
-                                batchTimestamp = now,
-                                tasks = taskChunk
-                            )
-                        )
-                    )
-                }
-                fullPayload.checklistItems.chunked(25).forEach { clChunk ->
-                    add(
-                        json.encodeToString(
-                            CloudDeltaBatchPayload(
-                                userId = userId,
-                                deviceId = deviceId,
-                                batchTimestamp = now,
-                                checklistItems = clChunk
-                            )
-                        )
-                    )
-                }
-            }
-        }
+        val payloadsToPost = buildSafeNtfyPayloadChunks(userId, deviceId, now, fullPayload)
 
         var allSucceeded = true
         for (body in payloadsToPost) {
@@ -765,14 +863,19 @@ class SyncRepository @Inject constructor(
     private suspend fun pullDeltaRecordsFromBuiltInCloud(
         userId: String,
         channelTopic: String,
-        lastSyncTimestamp: Long
+        lastSyncTimestamp: Long,
+        forceFullHistory: Boolean = false
     ): Long {
         if (isLocalOnlyDbModeEnabled()) return lastSyncTimestamp
         var maxTimestamp = lastSyncTimestamp
         val localDeviceId = getOrCreateDeviceId()
 
-        val batches = fetchDeltaBatchesFromBuiltInCloud(channelTopic)
-        for (batch in batches) {
+        val sinceMsgId = if (forceFullHistory || lastSyncTimestamp <= 0L) null else getLastNtfyMessageId(channelTopic)
+        val pollResult = fetchDeltaBatchesResultFromBuiltInCloud(channelTopic, sinceMessageId = sinceMsgId)
+            .getOrNull() ?: return maxTimestamp
+        pollResult.latestMessageId?.let { saveLastNtfyMessageId(channelTopic, it) }
+
+        for (batch in pollResult.batches) {
             if (batch.userId != userId) continue
             if (batch.deviceId == localDeviceId && lastSyncTimestamp > 0L && batch.batchTimestamp <= lastSyncTimestamp) {
                 continue
@@ -783,10 +886,43 @@ class SyncRepository @Inject constructor(
         return maxTimestamp
     }
 
+    private suspend fun applyRemoteAttachmentDto(dto: AttachmentFirestoreDto) {
+        if (dto.id.isBlank()) return
+        val localExisting = database.attachmentDao().getById(dto.id)
+        if (localExisting == null || dto.updatedAt >= localExisting.updatedAt) {
+            val generatedLocalPath = buildSafeLocalAttachmentPath(dto.id, dto.fileName)
+            if (dto.isDeleted) {
+                localExisting?.localRelativePath?.takeIf { it.isNotBlank() }?.let { deleteAttachmentFile(it) }
+                deleteAttachmentFile(generatedLocalPath)
+                database.attachmentDao().upsert(dto.toEntity(generatedLocalPath))
+            } else {
+                if (localExisting != null &&
+                    localExisting.localRelativePath.isNotBlank() &&
+                    localExisting.localRelativePath != generatedLocalPath &&
+                    dto.dataBase64.isNotBlank()
+                ) {
+                    deleteAttachmentFile(localExisting.localRelativePath)
+                }
+                val targetRelPath = if (dto.dataBase64.isNotBlank()) {
+                    writeAttachmentBase64(generatedLocalPath, dto.dataBase64)
+                    generatedLocalPath
+                } else {
+                    localExisting?.localRelativePath
+                        ?.takeIf { path ->
+                            path.isNotBlank() && runCatching { resolveAttachmentFile(path).isFile }.getOrDefault(false)
+                        }
+                        ?: generatedLocalPath
+                }
+                database.attachmentDao().upsert(dto.toEntity(targetRelPath))
+            }
+        }
+    }
+
     private suspend fun applyDeltaBatchToRoom(
         batch: CloudDeltaBatchPayload,
         currentMaxTimestamp: Long
-    ): Long {
+    ): Long = dbApplyMutex.withLock {
+        val nowMillis = System.currentTimeMillis()
         var maxTimestamp = currentMaxTimestamp
         val updatedTasks = mutableListOf<TaskEntity>()
 
@@ -797,7 +933,8 @@ class SyncRepository @Inject constructor(
                 if (local == null || dto.updatedAt >= local.updatedAt) {
                     database.tagDao().upsert(dto.toEntity())
                 }
-                if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
+                val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
+                if (clamped > maxTimestamp) maxTimestamp = clamped
             }
 
             for (dto in batch.areas) {
@@ -806,7 +943,8 @@ class SyncRepository @Inject constructor(
                 if (local == null || dto.updatedAt >= local.updatedAt) {
                     database.areaDao().upsert(dto.toEntity())
                 }
-                if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
+                val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
+                if (clamped > maxTimestamp) maxTimestamp = clamped
             }
 
             for (dto in batch.projects) {
@@ -815,7 +953,8 @@ class SyncRepository @Inject constructor(
                 if (local == null || dto.updatedAt >= local.updatedAt) {
                     database.projectDao().upsertProjectWithTags(dto.toEntity(), dto.tagIds)
                 }
-                if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
+                val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
+                if (clamped > maxTimestamp) maxTimestamp = clamped
             }
 
             for (dto in batch.headings) {
@@ -824,7 +963,8 @@ class SyncRepository @Inject constructor(
                 if (local == null || dto.updatedAt >= local.updatedAt) {
                     database.headingDao().upsert(dto.toEntity())
                 }
-                if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
+                val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
+                if (clamped > maxTimestamp) maxTimestamp = clamped
             }
 
             for (dto in batch.tasks) {
@@ -835,7 +975,8 @@ class SyncRepository @Inject constructor(
                     database.taskDao().upsertTaskWithTags(entity, dto.tagIds)
                     updatedTasks += entity
                 }
-                if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
+                val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
+                if (clamped > maxTimestamp) maxTimestamp = clamped
             }
 
             for (dto in batch.checklistItems) {
@@ -844,35 +985,31 @@ class SyncRepository @Inject constructor(
                 if (local == null || dto.updatedAt >= local.updatedAt) {
                     database.checklistDao().upsert(dto.toEntity())
                 }
-                if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
+                val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
+                if (clamped > maxTimestamp) maxTimestamp = clamped
             }
 
             for (dto in batch.attachments) {
                 if (dto.id.isBlank()) continue
-                val local = database.attachmentDao().getById(dto.id)
-                if (local == null || dto.updatedAt >= local.updatedAt) {
-                    val safeName = dto.fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(80).ifEmpty { "file" }
-                    val relPath = dto.localRelativePath.takeIf { it.isNotBlank() } ?: "attachments/${dto.id}_${safeName}"
-                    if (dto.isDeleted) {
-                        deleteLocalAttachmentFile(relPath)
-                    } else if (dto.dataBase64.isNotBlank()) {
-                        writeAttachmentBase64(relPath, dto.dataBase64)
-                    }
-                    database.attachmentDao().upsert(dto.toEntity(relPath))
-                }
-                if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
+                applyRemoteAttachmentDto(dto)
+                val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
+                if (clamped > maxTimestamp) maxTimestamp = clamped
             }
         }
 
         updatedTasks.forEach { syncTaskReminderSchedule(it) }
 
-        if (batch.batchTimestamp > maxTimestamp) {
-            maxTimestamp = batch.batchTimestamp
+        val clampedBatchTs = clampRemoteTimestamp(batch.batchTimestamp, nowMillis)
+        if (clampedBatchTs > maxTimestamp) {
+            maxTimestamp = clampedBatchTs
         }
-        return maxTimestamp
+        maxTimestamp
     }
 
     private fun postJsonToBuiltInCloud(topic: String, bodyJson: String): Boolean {
+        if (bodyJson.toByteArray(StandardCharsets.UTF_8).size >= MAX_NTFY_CHUNK_BYTES) {
+            return false
+        }
         return runCatching {
             val url = URL("https://ntfy.sh/$topic")
             val conn = (url.openConnection() as HttpURLConnection).apply {
@@ -928,9 +1065,20 @@ class SyncRepository @Inject constructor(
         }.getOrNull()
     }
 
-    private fun fetchDeltaBatchesResultFromBuiltInCloud(channelTopic: String): Result<List<CloudDeltaBatchPayload>> {
+    private data class NtfyPollResult(
+        val batches: List<CloudDeltaBatchPayload>,
+        val latestMessageId: String?
+    )
+
+    private fun fetchDeltaBatchesResultFromBuiltInCloud(
+        channelTopic: String,
+        sinceMessageId: String? = null
+    ): Result<NtfyPollResult> {
         return runCatching {
-            val url = URL("https://ntfy.sh/$channelTopic/json?poll=1&since=all")
+            val sinceParam = sinceMessageId?.trim()?.takeIf { it.isNotEmpty() }
+                ?.let { URLEncoder.encode(it, StandardCharsets.UTF_8.name()) }
+                ?: "all"
+            val url = URL("https://ntfy.sh/$channelTopic/json?poll=1&since=$sinceParam")
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 connectTimeout = 8000
@@ -938,46 +1086,31 @@ class SyncRepository @Inject constructor(
             }
             try {
                 val result = mutableListOf<CloudDeltaBatchPayload>()
+                var latestId: String? = null
                 BufferedReader(InputStreamReader(conn.inputStream, StandardCharsets.UTF_8)).use { reader ->
                     var line: String?
                     while (reader.readLine().also { line = it } != null) {
                         val raw = line?.trim().orEmpty()
                         if (raw.isEmpty()) continue
                         val streamLine = runCatching { json.decodeFromString<NtfyStreamLine>(raw) }.getOrNull()
-                        if (streamLine != null && streamLine.event == "message" && streamLine.message.isNotBlank()) {
-                            val batch = runCatching {
-                                json.decodeFromString<CloudDeltaBatchPayload>(streamLine.message)
-                            }.getOrNull()
-                            if (batch != null && batch.userId.isNotBlank()) {
-                                result += batch
+                        if (streamLine != null && streamLine.event == "message") {
+                            if (streamLine.id.isNotBlank()) {
+                                latestId = streamLine.id
+                            }
+                            if (streamLine.message.isNotBlank()) {
+                                val batch = runCatching {
+                                    json.decodeFromString<CloudDeltaBatchPayload>(streamLine.message)
+                                }.getOrNull()
+                                if (batch != null && batch.userId.isNotBlank()) {
+                                    result += batch
+                                }
                             }
                         }
                     }
                 }
-                result
+                NtfyPollResult(batches = result, latestMessageId = latestId)
             } finally {
                 conn.disconnect()
-            }
-        }
-    }
-
-    private fun fetchDeltaBatchesFromBuiltInCloud(channelTopic: String): List<CloudDeltaBatchPayload> =
-        fetchDeltaBatchesResultFromBuiltInCloud(channelTopic).getOrDefault(emptyList())
-
-    private fun broadcastDeltaOverLanUdp(serializedPayload: String) {
-        if (isLocalOnlyDbModeEnabled()) return
-        runCatching {
-            val bytes = serializedPayload.toByteArray(StandardCharsets.UTF_8)
-            if (bytes.size > 60000) return
-            DatagramSocket().use { socket ->
-                socket.broadcast = true
-                val packet = DatagramPacket(
-                    bytes,
-                    bytes.size,
-                    InetAddress.getByName("255.255.255.255"),
-                    45833
-                )
-                socket.send(packet)
             }
         }
     }
@@ -992,45 +1125,6 @@ class SyncRepository @Inject constructor(
                 delay(pollIntervalMs)
                 if (isLocalOnlyDbModeEnabled()) break
                 syncBidirectionalDeltas()
-            }
-        }
-
-        lanUdpListenerJob = scope.launch {
-            runCatchingCancellable {
-                val localDeviceId = getOrCreateDeviceId()
-                val socket = DatagramSocket(null).apply {
-                    reuseAddress = true
-                    soTimeout = 3000
-                    bind(InetSocketAddress(45833))
-                }
-                activeUdpSocket = socket
-                try {
-                    val buffer = ByteArray(65507)
-                    while (isActive && !isLocalOnlyDbModeEnabled()) {
-                        val packet = DatagramPacket(buffer, buffer.size)
-                        try {
-                            socket.receive(packet)
-                        } catch (_: SocketTimeoutException) {
-                            continue
-                        }
-                        val text = String(packet.data, 0, packet.length, StandardCharsets.UTF_8)
-                        val batch = runCatching { json.decodeFromString<CloudDeltaBatchPayload>(text) }.getOrNull()
-                        if (batch != null && batch.userId == userId && batch.deviceId != localDeviceId) {
-                            val lastSync = getLastSyncTimestamp(userId)
-                            val newMax = applyDeltaBatchToRoom(batch, lastSync)
-                            if (newMax > lastSync) {
-                                saveLastSyncTimestamp(userId, newMax)
-                            }
-                        }
-                    }
-                } finally {
-                    runCatching { socket.close() }
-                    if (activeUdpSocket === socket) {
-                        activeUdpSocket = null
-                    }
-                }
-            }.onFailure { err ->
-                Log.w("SyncRepository", "LAN UDP listener stopped", err)
             }
         }
 
@@ -1075,14 +1169,24 @@ class SyncRepository @Inject constructor(
             batch.commit().await()
         }
 
-        // Sync attachments individually/in small batches to respect Firestore 1 MiB document / 10 MiB batch caps
+        // Sync attachments in batches of 8 with 700 KB inline cap and metadata-only merge when file exceeds cap/missing
         dirtyAttachments.chunked(8).forEach { chunk ->
             val batch = firestore.batch()
             chunk.forEach { att ->
-                val b64 = if (att.isDeleted) "" else readAttachmentBase64(att.localRelativePath, maxRawBytes = 550L * 1024L)
-                val dto = AttachmentFirestoreDto.fromEntity(att, dataBase64 = b64)
                 val ref = userDoc.collection("attachments").document(att.id)
-                batch.set(ref, dto.toFirestoreMap(), SetOptions.merge())
+                if (att.isDeleted) {
+                    val dto = att.toFirestoreDto(dataBase64 = "")
+                    batch.set(ref, dto.toFirestoreMap(), SetOptions.merge())
+                } else {
+                    val b64 = readAttachmentBase64(att.localRelativePath, maxRawBytes = MAX_INLINE_SYNC_BYTES)
+                    val dto = att.toFirestoreDto(dataBase64 = b64)
+                    val mapToWrite = if (b64.isNotEmpty()) {
+                        dto.toFirestoreMap()
+                    } else {
+                        dto.toFirestoreMap().minus("dataBase64")
+                    }
+                    batch.set(ref, mapToWrite, SetOptions.merge())
+                }
             }
             batch.commit().await()
         }
@@ -1115,113 +1219,135 @@ class SyncRepository @Inject constructor(
     suspend fun pullDeltaRecordsFromFirestore(userId: String, lastSyncTimestamp: Long): Long {
         if (isLocalOnlyDbModeEnabled()) return lastSyncTimestamp
         val userDoc = firestore.collection("users").document(userId)
+        val queryFloor = computeDeltaQueryFloor(lastSyncTimestamp)
         var maxTimestamp = lastSyncTimestamp
 
+        val prefs = context.syncDataStore.data
+            .catch { emit(emptyPreferences()) }
+            .first()
+        val needsAttachmentsBackfill = prefs[attachmentsBackfillKeyForUser(userId)] != true
+
         val tagSnapshots = userDoc.collection("tags")
-            .whereGreaterThan("updatedAt", lastSyncTimestamp)
+            .whereGreaterThan("updatedAt", queryFloor)
             .get()
             .await()
-        for (doc in tagSnapshots.documents) {
-            val dto = runCatching { TagFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
-            if (dto.id.isBlank()) continue
-            val local = database.tagDao().getById(dto.id)
-            if (local == null || dto.updatedAt >= local.updatedAt) {
-                database.tagDao().upsert(dto.toEntity())
-            }
-            if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
-        }
-
         val areaSnapshots = userDoc.collection("areas")
-            .whereGreaterThan("updatedAt", lastSyncTimestamp)
+            .whereGreaterThan("updatedAt", queryFloor)
             .get()
             .await()
-        for (doc in areaSnapshots.documents) {
-            val dto = runCatching { AreaFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
-            if (dto.id.isBlank()) continue
-            val local = database.areaDao().getById(dto.id)
-            if (local == null || dto.updatedAt >= local.updatedAt) {
-                database.areaDao().upsert(dto.toEntity())
-            }
-            if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
-        }
-
         val projectSnapshots = userDoc.collection("projects")
-            .whereGreaterThan("updatedAt", lastSyncTimestamp)
+            .whereGreaterThan("updatedAt", queryFloor)
             .get()
             .await()
-        for (doc in projectSnapshots.documents) {
-            val dto = runCatching { ProjectFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
-            if (dto.id.isBlank()) continue
-            val local = database.projectDao().getById(dto.id)
-            if (local == null || dto.updatedAt >= local.updatedAt) {
-                database.projectDao().upsertProjectWithTags(dto.toEntity(), dto.tagIds)
-            }
-            if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
-        }
-
         val headingSnapshots = userDoc.collection("headings")
-            .whereGreaterThan("updatedAt", lastSyncTimestamp)
+            .whereGreaterThan("updatedAt", queryFloor)
             .get()
             .await()
-        for (doc in headingSnapshots.documents) {
-            val dto = runCatching { HeadingFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
-            if (dto.id.isBlank() || dto.projectId.isBlank()) continue
-            val local = database.headingDao().getById(dto.id)
-            if (local == null || dto.updatedAt >= local.updatedAt) {
-                database.headingDao().upsert(dto.toEntity())
-            }
-            if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
-        }
-
         val taskSnapshots = userDoc.collection("tasks")
-            .whereGreaterThan("updatedAt", lastSyncTimestamp)
+            .whereGreaterThan("updatedAt", queryFloor)
             .get()
             .await()
-        for (doc in taskSnapshots.documents) {
-            val dto = runCatching { TaskFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
-            if (dto.id.isBlank()) continue
-            val local = database.taskDao().getById(dto.id)
-            if (local == null || dto.updatedAt >= local.updatedAt) {
-                val entity = dto.toEntity()
-                database.taskDao().upsertTaskWithTags(entity, dto.tagIds)
-                syncTaskReminderSchedule(entity)
-            }
-            if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
-        }
-
         val checklistSnapshots = userDoc.collection("checklist_items")
-            .whereGreaterThan("updatedAt", lastSyncTimestamp)
+            .whereGreaterThan("updatedAt", queryFloor)
             .get()
             .await()
-        for (doc in checklistSnapshots.documents) {
-            val dto = runCatching { ChecklistItemFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
-            if (dto.id.isBlank() || dto.taskId.isBlank()) continue
-            val local = database.checklistDao().getById(dto.id)
-            if (local == null || dto.updatedAt >= local.updatedAt) {
-                database.checklistDao().upsert(dto.toEntity())
-            }
-            if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
+        val attachmentSnapshots = if (needsAttachmentsBackfill) {
+            userDoc.collection("attachments")
+                .whereGreaterThan("updatedAt", 0L)
+                .get()
+                .await()
+        } else {
+            userDoc.collection("attachments")
+                .whereGreaterThan("updatedAt", queryFloor)
+                .get()
+                .await()
         }
 
-        val attachmentSnapshots = userDoc.collection("attachments")
-            .whereGreaterThan("updatedAt", lastSyncTimestamp)
-            .get()
-            .await()
-        for (doc in attachmentSnapshots.documents) {
-            val dto = runCatching { AttachmentFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
-            if (dto.id.isBlank()) continue
-            val local = database.attachmentDao().getById(dto.id)
-            if (local == null || dto.updatedAt >= local.updatedAt) {
-                val safeName = dto.fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(80).ifEmpty { "file" }
-                val relPath = dto.localRelativePath.takeIf { it.isNotBlank() } ?: "attachments/${dto.id}_${safeName}"
-                if (dto.isDeleted) {
-                    deleteLocalAttachmentFile(relPath)
-                } else if (dto.dataBase64.isNotBlank()) {
-                    writeAttachmentBase64(relPath, dto.dataBase64)
+        val nowMillis = System.currentTimeMillis()
+        dbApplyMutex.withLock {
+            for (doc in tagSnapshots.documents) {
+                val dto = runCatching { TagFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
+                if (dto.id.isBlank()) continue
+                val local = database.tagDao().getById(dto.id)
+                if (local == null || dto.updatedAt >= local.updatedAt) {
+                    database.tagDao().upsert(dto.toEntity())
                 }
-                database.attachmentDao().upsert(dto.toEntity(relPath))
+                val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
+                if (clamped > maxTimestamp) maxTimestamp = clamped
             }
-            if (dto.updatedAt > maxTimestamp) maxTimestamp = dto.updatedAt
+
+            for (doc in areaSnapshots.documents) {
+                val dto = runCatching { AreaFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
+                if (dto.id.isBlank()) continue
+                val local = database.areaDao().getById(dto.id)
+                if (local == null || dto.updatedAt >= local.updatedAt) {
+                    database.areaDao().upsert(dto.toEntity())
+                }
+                val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
+                if (clamped > maxTimestamp) maxTimestamp = clamped
+            }
+
+            for (doc in projectSnapshots.documents) {
+                val dto = runCatching { ProjectFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
+                if (dto.id.isBlank()) continue
+                val local = database.projectDao().getById(dto.id)
+                if (local == null || dto.updatedAt >= local.updatedAt) {
+                    database.projectDao().upsertProjectWithTags(dto.toEntity(), dto.tagIds)
+                }
+                val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
+                if (clamped > maxTimestamp) maxTimestamp = clamped
+            }
+
+            for (doc in headingSnapshots.documents) {
+                val dto = runCatching { HeadingFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
+                if (dto.id.isBlank() || dto.projectId.isBlank()) continue
+                val local = database.headingDao().getById(dto.id)
+                if (local == null || dto.updatedAt >= local.updatedAt) {
+                    database.headingDao().upsert(dto.toEntity())
+                }
+                val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
+                if (clamped > maxTimestamp) maxTimestamp = clamped
+            }
+
+            for (doc in taskSnapshots.documents) {
+                val dto = runCatching { TaskFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
+                if (dto.id.isBlank()) continue
+                val local = database.taskDao().getById(dto.id)
+                if (local == null || dto.updatedAt >= local.updatedAt) {
+                    val entity = dto.toEntity()
+                    database.taskDao().upsertTaskWithTags(entity, dto.tagIds)
+                    syncTaskReminderSchedule(entity)
+                }
+                val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
+                if (clamped > maxTimestamp) maxTimestamp = clamped
+            }
+
+            for (doc in checklistSnapshots.documents) {
+                val dto = runCatching { ChecklistItemFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
+                if (dto.id.isBlank() || dto.taskId.isBlank()) continue
+                val local = database.checklistDao().getById(dto.id)
+                if (local == null || dto.updatedAt >= local.updatedAt) {
+                    database.checklistDao().upsert(dto.toEntity())
+                }
+                val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
+                if (clamped > maxTimestamp) maxTimestamp = clamped
+            }
+
+            for (doc in attachmentSnapshots.documents) {
+                val dto = runCatching { AttachmentFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
+                if (dto.id.isBlank()) continue
+                applyRemoteAttachmentDto(dto)
+                val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
+                if (clamped > maxTimestamp) maxTimestamp = clamped
+            }
+        }
+
+        if (needsAttachmentsBackfill) {
+            runCatchingCancellable {
+                context.syncDataStore.edit { editPrefs ->
+                    editPrefs[attachmentsBackfillKeyForUser(userId)] = true
+                }
+            }
         }
 
         return maxTimestamp
@@ -1236,161 +1362,220 @@ class SyncRepository @Inject constructor(
             }
 
             val sinceTimestamp = getLastSyncTimestamp(userId)
+            val queryFloor = computeDeltaQueryFloor(sinceTimestamp)
             val userDoc = firestore.collection("users").document(userId)
 
             activeListeners += userDoc.collection("tasks")
-                .whereGreaterThan("updatedAt", sinceTimestamp)
+                .whereGreaterThan("updatedAt", queryFloor)
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
-                            for (change in snapshot.documentChanges) {
-                                runCatchingCancellable {
-                                    val dto = TaskFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
-                                    if (dto.id.isNotBlank()) {
-                                        val local = database.taskDao().getById(dto.id)
-                                        if (local == null || dto.updatedAt >= local.updatedAt) {
-                                            val entity = dto.toEntity()
-                                            database.taskDao().upsertTaskWithTags(entity, dto.tagIds)
-                                            syncTaskReminderSchedule(entity)
-                                            saveLastSyncTimestamp(userId, maxOf(getLastSyncTimestamp(userId), dto.updatedAt))
+                            dbApplyMutex.withLock {
+                                var maxTs = getLastSyncTimestamp(userId)
+                                var changed = false
+                                for (change in snapshot.documentChanges) {
+                                    runCatchingCancellable {
+                                        val dto = TaskFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
+                                        if (dto.id.isNotBlank()) {
+                                            val local = database.taskDao().getById(dto.id)
+                                            if (local == null || dto.updatedAt >= local.updatedAt) {
+                                                val entity = dto.toEntity()
+                                                database.taskDao().upsertTaskWithTags(entity, dto.tagIds)
+                                                syncTaskReminderSchedule(entity)
+                                            }
+                                            val clamped = clampRemoteTimestamp(dto.updatedAt)
+                                            if (clamped > maxTs) {
+                                                maxTs = clamped
+                                                changed = true
+                                            }
                                         }
                                     }
                                 }
+                                if (changed) saveLastSyncTimestamp(userId, maxTs)
                             }
                         }
                     } catch (_: Throwable) {}
                 }
 
             activeListeners += userDoc.collection("projects")
-                .whereGreaterThan("updatedAt", sinceTimestamp)
+                .whereGreaterThan("updatedAt", queryFloor)
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
-                            for (change in snapshot.documentChanges) {
-                                runCatchingCancellable {
-                                    val dto = ProjectFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
-                                    if (dto.id.isNotBlank()) {
-                                        val local = database.projectDao().getById(dto.id)
-                                        if (local == null || dto.updatedAt >= local.updatedAt) {
-                                            database.projectDao().upsertProjectWithTags(dto.toEntity(), dto.tagIds)
-                                            saveLastSyncTimestamp(userId, maxOf(getLastSyncTimestamp(userId), dto.updatedAt))
+                            dbApplyMutex.withLock {
+                                var maxTs = getLastSyncTimestamp(userId)
+                                var changed = false
+                                for (change in snapshot.documentChanges) {
+                                    runCatchingCancellable {
+                                        val dto = ProjectFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
+                                        if (dto.id.isNotBlank()) {
+                                            val local = database.projectDao().getById(dto.id)
+                                            if (local == null || dto.updatedAt >= local.updatedAt) {
+                                                database.projectDao().upsertProjectWithTags(dto.toEntity(), dto.tagIds)
+                                            }
+                                            val clamped = clampRemoteTimestamp(dto.updatedAt)
+                                            if (clamped > maxTs) {
+                                                maxTs = clamped
+                                                changed = true
+                                            }
                                         }
                                     }
                                 }
+                                if (changed) saveLastSyncTimestamp(userId, maxTs)
                             }
                         }
                     } catch (_: Throwable) {}
                 }
 
             activeListeners += userDoc.collection("areas")
-                .whereGreaterThan("updatedAt", sinceTimestamp)
+                .whereGreaterThan("updatedAt", queryFloor)
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
-                            for (change in snapshot.documentChanges) {
-                                runCatchingCancellable {
-                                    val dto = AreaFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
-                                    if (dto.id.isNotBlank()) {
-                                        val local = database.areaDao().getById(dto.id)
-                                        if (local == null || dto.updatedAt >= local.updatedAt) {
-                                            database.areaDao().upsert(dto.toEntity())
+                            dbApplyMutex.withLock {
+                                var maxTs = getLastSyncTimestamp(userId)
+                                var changed = false
+                                for (change in snapshot.documentChanges) {
+                                    runCatchingCancellable {
+                                        val dto = AreaFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
+                                        if (dto.id.isNotBlank()) {
+                                            val local = database.areaDao().getById(dto.id)
+                                            if (local == null || dto.updatedAt >= local.updatedAt) {
+                                                database.areaDao().upsert(dto.toEntity())
+                                            }
+                                            val clamped = clampRemoteTimestamp(dto.updatedAt)
+                                            if (clamped > maxTs) {
+                                                maxTs = clamped
+                                                changed = true
+                                            }
                                         }
                                     }
                                 }
+                                if (changed) saveLastSyncTimestamp(userId, maxTs)
                             }
                         }
                     } catch (_: Throwable) {}
                 }
 
             activeListeners += userDoc.collection("headings")
-                .whereGreaterThan("updatedAt", sinceTimestamp)
+                .whereGreaterThan("updatedAt", queryFloor)
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
-                            for (change in snapshot.documentChanges) {
-                                runCatchingCancellable {
-                                    val dto = HeadingFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
-                                    if (dto.id.isNotBlank() && dto.projectId.isNotBlank()) {
-                                        val local = database.headingDao().getById(dto.id)
-                                        if (local == null || dto.updatedAt >= local.updatedAt) {
-                                            database.headingDao().upsert(dto.toEntity())
+                            dbApplyMutex.withLock {
+                                var maxTs = getLastSyncTimestamp(userId)
+                                var changed = false
+                                for (change in snapshot.documentChanges) {
+                                    runCatchingCancellable {
+                                        val dto = HeadingFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
+                                        if (dto.id.isNotBlank() && dto.projectId.isNotBlank()) {
+                                            val local = database.headingDao().getById(dto.id)
+                                            if (local == null || dto.updatedAt >= local.updatedAt) {
+                                                database.headingDao().upsert(dto.toEntity())
+                                            }
+                                            val clamped = clampRemoteTimestamp(dto.updatedAt)
+                                            if (clamped > maxTs) {
+                                                maxTs = clamped
+                                                changed = true
+                                            }
                                         }
                                     }
                                 }
+                                if (changed) saveLastSyncTimestamp(userId, maxTs)
                             }
                         }
                     } catch (_: Throwable) {}
                 }
 
             activeListeners += userDoc.collection("checklist_items")
-                .whereGreaterThan("updatedAt", sinceTimestamp)
+                .whereGreaterThan("updatedAt", queryFloor)
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
-                            for (change in snapshot.documentChanges) {
-                                runCatchingCancellable {
-                                    val dto = ChecklistItemFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
-                                    if (dto.id.isNotBlank() && dto.taskId.isNotBlank()) {
-                                        val local = database.checklistDao().getById(dto.id)
-                                        if (local == null || dto.updatedAt >= local.updatedAt) {
-                                            database.checklistDao().upsert(dto.toEntity())
+                            dbApplyMutex.withLock {
+                                var maxTs = getLastSyncTimestamp(userId)
+                                var changed = false
+                                for (change in snapshot.documentChanges) {
+                                    runCatchingCancellable {
+                                        val dto = ChecklistItemFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
+                                        if (dto.id.isNotBlank() && dto.taskId.isNotBlank()) {
+                                            val local = database.checklistDao().getById(dto.id)
+                                            if (local == null || dto.updatedAt >= local.updatedAt) {
+                                                database.checklistDao().upsert(dto.toEntity())
+                                            }
+                                            val clamped = clampRemoteTimestamp(dto.updatedAt)
+                                            if (clamped > maxTs) {
+                                                maxTs = clamped
+                                                changed = true
+                                            }
                                         }
                                     }
                                 }
+                                if (changed) saveLastSyncTimestamp(userId, maxTs)
                             }
                         }
                     } catch (_: Throwable) {}
                 }
 
             activeListeners += userDoc.collection("tags")
-                .whereGreaterThan("updatedAt", sinceTimestamp)
+                .whereGreaterThan("updatedAt", queryFloor)
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
-                            for (change in snapshot.documentChanges) {
-                                runCatchingCancellable {
-                                    val dto = TagFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
-                                    if (dto.id.isNotBlank()) {
-                                        val local = database.tagDao().getById(dto.id)
-                                        if (local == null || dto.updatedAt >= local.updatedAt) {
-                                            database.tagDao().upsert(dto.toEntity())
+                            dbApplyMutex.withLock {
+                                var maxTs = getLastSyncTimestamp(userId)
+                                var changed = false
+                                for (change in snapshot.documentChanges) {
+                                    runCatchingCancellable {
+                                        val dto = TagFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
+                                        if (dto.id.isNotBlank()) {
+                                            val local = database.tagDao().getById(dto.id)
+                                            if (local == null || dto.updatedAt >= local.updatedAt) {
+                                                database.tagDao().upsert(dto.toEntity())
+                                            }
+                                            val clamped = clampRemoteTimestamp(dto.updatedAt)
+                                            if (clamped > maxTs) {
+                                                maxTs = clamped
+                                                changed = true
+                                            }
                                         }
                                     }
                                 }
+                                if (changed) saveLastSyncTimestamp(userId, maxTs)
                             }
                         }
                     } catch (_: Throwable) {}
                 }
 
             activeListeners += userDoc.collection("attachments")
-                .whereGreaterThan("updatedAt", sinceTimestamp)
+                .whereGreaterThan("updatedAt", queryFloor)
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
-                            for (change in snapshot.documentChanges) {
-                                runCatchingCancellable {
-                                    val dto = AttachmentFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
-                                    if (dto.id.isNotBlank()) {
-                                        val local = database.attachmentDao().getById(dto.id)
-                                        if (local == null || dto.updatedAt >= local.updatedAt) {
-                                            val safeName = dto.fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(80).ifEmpty { "file" }
-                                            val relPath = dto.localRelativePath.takeIf { it.isNotBlank() } ?: "attachments/${dto.id}_${safeName}"
-                                            if (dto.isDeleted) {
-                                                deleteLocalAttachmentFile(relPath)
-                                            } else if (dto.dataBase64.isNotBlank()) {
-                                                writeAttachmentBase64(relPath, dto.dataBase64)
+                            dbApplyMutex.withLock {
+                                var maxTs = getLastSyncTimestamp(userId)
+                                var changed = false
+                                for (change in snapshot.documentChanges) {
+                                    runCatchingCancellable {
+                                        val dto = AttachmentFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
+                                        if (dto.id.isNotBlank()) {
+                                            applyRemoteAttachmentDto(dto)
+                                            val clamped = clampRemoteTimestamp(dto.updatedAt)
+                                            if (clamped > maxTs) {
+                                                maxTs = clamped
+                                                changed = true
                                             }
-                                            database.attachmentDao().upsert(dto.toEntity(relPath))
                                         }
                                     }
                                 }
+                                if (changed) saveLastSyncTimestamp(userId, maxTs)
                             }
                         }
                     } catch (_: Throwable) {}
@@ -1401,13 +1586,161 @@ class SyncRepository @Inject constructor(
     fun detachRealtimeDeltaListeners() {
         runCatching { realtimeCloudPollJob?.cancel() }
         realtimeCloudPollJob = null
-        runCatching { lanUdpListenerJob?.cancel() }
-        lanUdpListenerJob = null
-        runCatching { activeUdpSocket?.close() }
-        activeUdpSocket = null
         synchronized(activeListeners) {
             activeListeners.forEach { runCatching { it.remove() } }
             activeListeners.clear()
+        }
+    }
+
+    private fun activeLang(): String = Locale.getDefault().language.lowercase(Locale.ROOT)
+
+    private fun localizedInvalidEmailError(): String = when (activeLang()) {
+        "de" -> "Bitte gib eine gültige E-Mail-Adresse ein."
+        "fr" -> "Veuillez saisir une adresse e-mail valide."
+        "it" -> "Inserisci un indirizzo e-mail valido."
+        "es" -> "Introduce una dirección de correo electrónico válida."
+        else -> "Please enter a valid email address."
+    }
+
+    private fun localizedPasswordTooShortError(): String = when (activeLang()) {
+        "de" -> "Das Passwort muss mindestens 6 Zeichen lang sein."
+        "fr" -> "Le mot de passe doit contenir au moins 6 caractères."
+        "it" -> "La password deve contenere almeno 6 caratteri."
+        "es" -> "La contraseña debe tener al menos 6 caracteres."
+        else -> "Password must be at least 6 characters long."
+    }
+
+    private fun localizedWrongPasswordError(email: String): String = when (activeLang()) {
+        "de" -> "Falsches Passwort für $email. Tippe auf „Passwort vergessen?“, um es per E-Mail zurückzusetzen."
+        "fr" -> "Mot de passe incorrect pour $email. Utilisez « Mot de passe oublié ? » pour le réinitialiser."
+        "it" -> "Password errata per $email. Tocca «Password dimenticata?» per reimpostarla via e-mail."
+        "es" -> "Contraseña incorrecta para $email. Usa «¿Olvidaste tu contraseña?» para restablecerla."
+        else -> "Incorrect password for $email. Tap 'Forgot password?' below to reset it via email."
+    }
+
+    private fun localizedAccountAlreadyExistsError(): String = when (activeLang()) {
+        "de" -> "Dieses Konto existiert bereits. Bitte melde dich mit deinem Passwort an oder nutze „Passwort vergessen?“."
+        "fr" -> "Ce compte existe déjà. Connectez-vous avec votre mot de passe ou utilisez « Mot de passe oublié ? »."
+        "it" -> "Questo account esiste già. Accedi con la tua password o usa «Password dimenticata?»."
+        "es" -> "Esta cuenta ya existe. Inicia sesión con tu contraseña o usa «¿Olvidaste tu contraseña?»."
+        else -> "This account already exists. Please sign in with your password or use 'Forgot password?'."
+    }
+
+    private fun localizedResetEmailMissingError(): String = when (activeLang()) {
+        "de" -> "Bitte gib oben zuerst deine E-Mail-Adresse ein und tippe dann auf „Passwort zurücksetzen“."
+        "fr" -> "Veuillez d'abord saisir votre adresse e-mail ci-dessus avant de réinitialiser le mot de passe."
+        "it" -> "Inserisci prima il tuo indirizzo e-mail sopra, poi tocca «Reimposta password»."
+        "es" -> "Introduce primero tu correo electrónico arriba y luego pulsa restablecer contraseña."
+        else -> "Please enter your email address above first, then tap reset password."
+    }
+
+    private fun localizedPasswordResetSentInfo(email: String): String = when (activeLang()) {
+        "de" -> "E-Mail zum Zurücksetzen des Passworts wurde an $email gesendet. Bitte prüfe dein Postfach."
+        "fr" -> "Un e-mail de réinitialisation du mot de passe a été envoyé à $email."
+        "it" -> "E-mail di reimpostazione della password inviata a $email."
+        "es" -> "Se ha enviado un correo para restablecer la contraseña a $email."
+        else -> "Password reset email sent to $email. Please check your inbox."
+    }
+
+    private fun localizedGoogleSignInFailedError(): String = when (activeLang()) {
+        "de" -> "Google-Anmeldung fehlgeschlagen. Bitte versuche es erneut."
+        "fr" -> "Échec de la connexion Google. Veuillez réessayer."
+        "it" -> "Accesso con Google non riuscito. Riprova."
+        "es" -> "Error al iniciar sesión con Google. Inténtalo de nuevo."
+        else -> "Google sign-in failed. Please try again."
+    }
+
+    private fun localizedCloudOfflineError(): String = when (activeLang()) {
+        "de" -> "Cloud-Synchronisierung ist derzeit offline oder nicht erreichbar."
+        "fr" -> "La synchronisation Cloud est actuellement hors ligne ou inaccessible."
+        "it" -> "La sincronizzazione Cloud è attualmente offline o non raggiungibile."
+        "es" -> "La sincronización en la nube está desconectada o inaccesible."
+        else -> "Cloud sync service is currently offline or unreachable."
+    }
+
+    companion object {
+        const val MAX_INLINE_SYNC_BYTES = 700_000L
+        const val CLOCK_SKEW_OVERLAP_MS = 120_000L
+        const val MAX_FUTURE_DRIFT_MS = 60_000L
+        const val MAX_NTFY_CHUNK_BYTES = 3800
+
+        fun computeDeltaQueryFloor(lastSyncTimestamp: Long): Long =
+            maxOf(0L, lastSyncTimestamp - CLOCK_SKEW_OVERLAP_MS)
+
+        fun clampRemoteTimestamp(
+            remoteUpdatedAt: Long,
+            nowMillis: Long = System.currentTimeMillis()
+        ): Long = minOf(remoteUpdatedAt, nowMillis + MAX_FUTURE_DRIFT_MS)
+
+        fun buildSafeLocalAttachmentPath(attachmentId: String, fileName: String): String {
+            val safeId = attachmentId.trim()
+                .replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                .replace(Regex("\\.{2,}"), "_")
+                .trim('.', '_')
+                .take(64)
+                .ifEmpty { "att" }
+            val safeFileName = fileName.trim()
+                .replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                .replace(Regex("\\.{2,}"), "_")
+                .trim('.', '_')
+                .take(80)
+                .ifEmpty { "file" }
+            return "attachments/${safeId}_${safeFileName}"
+        }
+
+        fun resolveVerifiedAttachmentFile(filesDir: File, localRelativePath: String): File {
+            val rel = localRelativePath.trim()
+            if (rel.isEmpty() || rel.startsWith("/") || rel.startsWith("\\") || rel.contains('\u0000')) {
+                throw SecurityException("Invalid attachment path: $localRelativePath")
+            }
+            val allowedRoot = File(filesDir, "attachments").apply { mkdirs() }
+            val canonicalRootPrefix = allowedRoot.canonicalPath + File.separator
+            val candidate = File(filesDir, rel).canonicalFile
+            if (!candidate.path.startsWith(canonicalRootPrefix)) {
+                throw SecurityException("Path traversal blocked for attachment path: $localRelativePath")
+            }
+            candidate.parentFile?.mkdirs()
+            return candidate
+        }
+
+        fun readAttachmentBase64InRoot(
+            filesDir: File,
+            localRelativePath: String,
+            maxRawBytes: Long = MAX_INLINE_SYNC_BYTES
+        ): String {
+            if (localRelativePath.isBlank()) return ""
+            return runCatching {
+                val file = resolveVerifiedAttachmentFile(filesDir, localRelativePath)
+                if (file.exists() && file.isFile && file.length() in 1..maxRawBytes) {
+                    Base64.getEncoder().encodeToString(file.readBytes())
+                } else {
+                    ""
+                }
+            }.getOrDefault("")
+        }
+
+        fun writeAttachmentBase64InRoot(
+            filesDir: File,
+            localRelativePath: String,
+            dataBase64: String
+        ): Long {
+            if (localRelativePath.isBlank() || dataBase64.isBlank()) return 0L
+            return runCatching {
+                val file = resolveVerifiedAttachmentFile(filesDir, localRelativePath)
+                val bytes = Base64.getMimeDecoder().decode(dataBase64.trim())
+                file.writeBytes(bytes)
+                bytes.size.toLong()
+            }.getOrDefault(0L)
+        }
+
+        fun deleteAttachmentFileInRoot(filesDir: File, localRelativePath: String) {
+            if (localRelativePath.isBlank()) return
+            runCatching {
+                val file = resolveVerifiedAttachmentFile(filesDir, localRelativePath)
+                if (file.exists() && file.isFile) {
+                    file.delete()
+                }
+            }
         }
     }
 }

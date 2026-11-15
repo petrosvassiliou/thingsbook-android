@@ -594,7 +594,7 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
     if (!title.trim()) return;
     await localDb.upsertTag({
       title: title.trim(),
-      shortcut: shortcut.trim().toUpperCase().slice(0, 2) || null
+      shortcut: shortcut.trim().toUpperCase().slice(0, 1) || null
     });
     setTitle('');
     setShortcut('');
@@ -626,9 +626,9 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
             type="text"
             className="text-field"
             style={{ width: 112 }}
-            maxLength={2}
+            maxLength={1}
             value={shortcut}
-            onChange={(e) => setShortcut(e.target.value.toUpperCase())}
+            onChange={(e) => setShortcut(e.target.value.toUpperCase().slice(0, 1))}
             placeholder={t.tagsShortcutLabel}
           />
           <button type="submit" className="btn-primary" disabled={!title.trim()}>
@@ -669,7 +669,7 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
                             await localDb.upsertTag({
                               id: tg.id,
                               title: editTitle.trim(),
-                              shortcut: editShortcut.trim().toUpperCase().slice(0, 2) || null
+                              shortcut: editShortcut.trim().toUpperCase().slice(0, 1) || null
                             });
                           }
                           setEditingId(null);
@@ -683,9 +683,9 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
                       type="text"
                       className="text-field"
                       style={{ width: 72, padding: '4px 8px' }}
-                      maxLength={2}
+                      maxLength={1}
                       value={editShortcut}
-                      onChange={(e) => setEditShortcut(e.target.value.toUpperCase())}
+                      onChange={(e) => setEditShortcut(e.target.value.toUpperCase().slice(0, 1))}
                       placeholder="Key"
                       onKeyDown={async (e) => {
                         if (e.key === 'Enter') {
@@ -694,7 +694,7 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
                             await localDb.upsertTag({
                               id: tg.id,
                               title: editTitle.trim(),
-                              shortcut: editShortcut.trim().toUpperCase().slice(0, 2) || null
+                              shortcut: editShortcut.trim().toUpperCase().slice(0, 1) || null
                             });
                           }
                           setEditingId(null);
@@ -712,7 +712,7 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
                           await localDb.upsertTag({
                             id: tg.id,
                             title: editTitle.trim(),
-                            shortcut: editShortcut.trim().toUpperCase().slice(0, 2) || null
+                            shortcut: editShortcut.trim().toUpperCase().slice(0, 1) || null
                           });
                         }
                         setEditingId(null);
@@ -976,7 +976,7 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
             type="button"
             className="btn-secondary"
             onClick={async () => {
-              const ok = await sendTestChromeOsNotification(t.appName);
+              const ok = await sendTestChromeOsNotification(t.appName, prefs.language);
               onToast(ok ? '✓ Notification sent' : 'Browser notifications blocked');
             }}
           >

@@ -1,10 +1,12 @@
 package com.culturedcode.things3.ui.viewmodel
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
+import java.lang.ref.WeakReference
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
@@ -102,12 +104,7 @@ sealed interface PendingCloudAuthRequest {
         override val displayAccountLabel: String get() = email
     }
 
-    data class SignInGoogle(val optionalEmail: String?) : PendingCloudAuthRequest {
-        override val displayAccountLabel: String
-            get() = optionalEmail?.takeIf { it.isNotBlank() }.orEmpty()
-    }
-
-    data object SignInAnonymous : PendingCloudAuthRequest {
+    class SignInGoogle(val activityRef: WeakReference<Activity>) : PendingCloudAuthRequest {
         override val displayAccountLabel: String get() = ""
     }
 }
@@ -130,6 +127,31 @@ class ThingsbookViewModel @Inject constructor(
         return localizedCtx.getString(resId, *args)
     }
 
+    private fun activeLangCode(): String {
+        val localizedCtx = runCatching { ContextCompat.getContextForLanguage(appContext) }.getOrDefault(appContext)
+        val lang = runCatching { localizedCtx.resources.configuration.locales[0]?.language }.getOrNull()
+        return (lang?.takeIf { it.isNotBlank() } ?: Locale.getDefault().language)
+            .lowercase(Locale.ROOT)
+            .take(2)
+    }
+
+    private fun localizedFallbackError(
+        en: String,
+        de: String,
+        fr: String,
+        it: String,
+        es: String
+    ): String = when (activeLangCode()) {
+        "de" -> de
+        "fr" -> fr
+        "it" -> it
+        "es" -> es
+        else -> en
+    }
+
+    private fun isLockedByBiometric(): Boolean =
+        _biometricAppLockEnabled.value && !_isAppUnlocked.value
+
     private val _uiErrorMessage = MutableStateFlow<String?>(null)
     val uiErrorMessage: StateFlow<String?> = _uiErrorMessage.asStateFlow()
 
@@ -144,7 +166,13 @@ class ThingsbookViewModel @Inject constructor(
                     Log.e(TAG, "Unhandled ViewModel coroutine error", throwable)
                     _uiErrorMessage.value = throwable.localizedMessage
                         ?: throwable.message
-                        ?: "Ein unerwarteter Fehler ist aufgetreten."
+                        ?: localizedFallbackError(
+                            en = "An unexpected error occurred.",
+                            de = "Ein unerwarteter Fehler ist aufgetreten.",
+                            fr = "Une erreur inattendue s'est produite.",
+                            it = "Si è verificato un errore imprevisto.",
+                            es = "Se produjo un error inesperado."
+                        )
                 }
             }
     )
@@ -374,6 +402,9 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun handleWidgetLaunchIntent(viewName: String?, taskId: String?, quickAdd: Boolean) {
+        if (isLockedByBiometric()) {
+            return
+        }
         clearTaskSelection()
         if (viewName?.equals("VOICE_CAPTURE", ignoreCase = true) == true) {
             _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.INBOX)
@@ -490,7 +521,13 @@ class ThingsbookViewModel @Inject constructor(
             com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider.refreshAllWidgets(appContext)
         }.onFailure { err ->
             Log.w(TAG, "Failed switching language to '$languageTag'", err)
-            _uiErrorMessage.value = err.localizedMessage ?: "Sprache konnte nicht geändert werden."
+            _uiErrorMessage.value = err.localizedMessage ?: localizedFallbackError(
+                en = "Could not switch language.",
+                de = "Sprache konnte nicht geändert werden.",
+                fr = "Impossible de changer la langue.",
+                it = "Impossibile cambiare lingua.",
+                es = "No se pudo cambiar el idioma."
+            )
         }
     }
 
@@ -823,7 +860,13 @@ class ThingsbookViewModel @Inject constructor(
         if (trimmed.isEmpty()) return
         safeVmScope.launch {
             repository.createArea(trimmed).onFailure { err ->
-                _uiErrorMessage.value = err.localizedMessage ?: err.message ?: "Bereich konnte nicht erstellt werden."
+                _uiErrorMessage.value = err.localizedMessage ?: err.message ?: localizedFallbackError(
+                    en = "Could not create area.",
+                    de = "Bereich konnte nicht erstellt werden.",
+                    fr = "Impossible de créer le domaine.",
+                    it = "Impossibile creare l'area.",
+                    es = "No se pudo crear el área."
+                )
             }
         }
     }
@@ -838,7 +881,13 @@ class ThingsbookViewModel @Inject constructor(
                     _navigationTarget.value = ActiveNavigationTarget.AreaDetail(createdAreaId)
                 }
                 .onFailure { err ->
-                    _uiErrorMessage.value = err.localizedMessage ?: err.message ?: "Bereich konnte nicht erstellt werden."
+                    _uiErrorMessage.value = err.localizedMessage ?: err.message ?: localizedFallbackError(
+                        en = "Could not create area.",
+                        de = "Bereich konnte nicht erstellt werden.",
+                        fr = "Impossible de créer le domaine.",
+                        it = "Impossibile creare l'area.",
+                        es = "No se pudo crear el área."
+                    )
                 }
         }
     }
@@ -973,7 +1022,13 @@ class ThingsbookViewModel @Inject constructor(
                 throw ce
             } catch (t: Throwable) {
                 Log.w(TAG, "Gemini Magic Breakdown failed", t)
-                val msg = t.localizedMessage ?: t.message ?: "KI-Teilaufgaben konnten nicht erstellt werden."
+                val msg = t.localizedMessage ?: t.message ?: localizedFallbackError(
+                    en = "Could not generate AI subtasks.",
+                    de = "KI-Teilaufgaben konnten nicht erstellt werden.",
+                    fr = "Impossible de générer des sous-tâches IA.",
+                    it = "Impossibile generare sotto-attività IA.",
+                    es = "No se pudieron generar subtareas con IA."
+                )
                 _geminiErrorMessage.value = msg
                 _uiErrorMessage.value = msg
             } finally {
@@ -1038,7 +1093,13 @@ class ThingsbookViewModel @Inject constructor(
                 throw ce
             } catch (t: Throwable) {
                 Log.w(TAG, "Gemini Brain Dump failed", t)
-                val msg = t.localizedMessage ?: t.message ?: "Brain-Dump-Analyse fehlgeschlagen."
+                val msg = t.localizedMessage ?: t.message ?: localizedFallbackError(
+                    en = "Brain Dump analysis failed.",
+                    de = "Brain-Dump-Analyse fehlgeschlagen.",
+                    fr = "Échec de l'analyse Brain Dump.",
+                    it = "Analisi Brain Dump non riuscita.",
+                    es = "Error en el análisis de Brain Dump."
+                )
                 _geminiErrorMessage.value = msg
                 _uiErrorMessage.value = msg
             } finally {
@@ -1068,7 +1129,13 @@ class ThingsbookViewModel @Inject constructor(
                 throw ce
             } catch (t: Throwable) {
                 Log.w(TAG, "Gemini Project Architect failed", t)
-                val msg = t.localizedMessage ?: t.message ?: "Projekt-Erstellung mit Gemini fehlgeschlagen."
+                val msg = t.localizedMessage ?: t.message ?: localizedFallbackError(
+                    en = "Project creation with Gemini failed.",
+                    de = "Projekt-Erstellung mit Gemini fehlgeschlagen.",
+                    fr = "Échec de la création du projet avec Gemini.",
+                    it = "Creazione del progetto con Gemini non riuscita.",
+                    es = "Error al crear el proyecto con Gemini."
+                )
                 _geminiErrorMessage.value = msg
                 _uiErrorMessage.value = msg
             } finally {
@@ -1091,7 +1158,13 @@ class ThingsbookViewModel @Inject constructor(
                 throw ce
             } catch (t: Throwable) {
                 Log.w(TAG, "Gemini Logbook Reflection failed", t)
-                val msg = t.localizedMessage ?: t.message ?: "Logbuch-Reflexion fehlgeschlagen."
+                val msg = t.localizedMessage ?: t.message ?: localizedFallbackError(
+                    en = "Logbook reflection failed.",
+                    de = "Logbuch-Reflexion fehlgeschlagen.",
+                    fr = "Échec de la réflexion du journal.",
+                    it = "Riflessione del registro non riuscita.",
+                    es = "Error en la reflexión del registro."
+                )
                 _geminiErrorMessage.value = msg
                 _uiErrorMessage.value = msg
             } finally {
@@ -1136,35 +1209,41 @@ class ThingsbookViewModel @Inject constructor(
 
     /**
      * Multi-Device User Registration (Email & Password):
-     * If initial sample tasks are still present, asks the user first whether to merge current tasks
-     * (after deleting sample tasks) or load only account tasks.
+     * Whenever user-created local tasks exist, asks whether to merge local tasks with the cloud account
+     * or replace local data with the cloud account's tasks.
      */
     fun registerWithEmailPassword(email: String, password: String) {
         safeVmScope.launch {
-            if (email.isNotBlank() && password.isNotBlank() && repository.hasSampleTasks()) {
+            if (email.isNotBlank() && password.isNotBlank() && repository.hasLocalUserCreatedTasks()) {
                 _pendingMergeNonSampleCount.value = repository.countNonSampleTasks()
                 _pendingMergeAuthRequest.value = PendingCloudAuthRequest.RegisterEmail(email.trim(), password)
                 _isAuthModalOpen.value = false
                 return@launch
             }
-            executeCloudAuthRequestDirect(PendingCloudAuthRequest.RegisterEmail(email, password))
+            executeCloudAuthRequestDirect(
+                request = PendingCloudAuthRequest.RegisterEmail(email, password),
+                purgeSamplesBeforeDirectAuth = true
+            )
         }
     }
 
     /**
      * Multi-Device User Sign-In (Email & Password):
-     * If initial sample tasks are still present, asks the user first whether to merge current tasks
-     * (after deleting sample tasks) or load only account tasks.
+     * Whenever user-created local tasks exist, asks whether to merge local tasks with the cloud account
+     * or replace local data with the cloud account's tasks.
      */
     fun signInWithEmailPassword(email: String, password: String) {
         safeVmScope.launch {
-            if (email.isNotBlank() && password.isNotBlank() && repository.hasSampleTasks()) {
+            if (email.isNotBlank() && password.isNotBlank() && repository.hasLocalUserCreatedTasks()) {
                 _pendingMergeNonSampleCount.value = repository.countNonSampleTasks()
                 _pendingMergeAuthRequest.value = PendingCloudAuthRequest.SignInEmail(email.trim(), password)
                 _isAuthModalOpen.value = false
                 return@launch
             }
-            executeCloudAuthRequestDirect(PendingCloudAuthRequest.SignInEmail(email, password))
+            executeCloudAuthRequestDirect(
+                request = PendingCloudAuthRequest.SignInEmail(email, password),
+                purgeSamplesBeforeDirectAuth = true
+            )
         }
     }
 
@@ -1191,52 +1270,80 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     /**
-     * One-Tap Google Cloud Sign-In ("Weiter mit Google").
-     * If initial sample tasks are still present, asks the user first whether to merge current tasks
-     * (after deleting sample tasks) or load only account tasks.
+     * Cross-Platform Firebase Google OAuth Sign-In ("Sign in with Google").
+     * Authenticates into the exact same Firebase `uid` as ChromeOS & macOS.
      */
-    fun signInWithGoogleAccount(optionalEmail: String? = null) {
-        safeVmScope.launch {
-            if (repository.hasSampleTasks()) {
-                _pendingMergeNonSampleCount.value = repository.countNonSampleTasks()
-                _pendingMergeAuthRequest.value = PendingCloudAuthRequest.SignInGoogle(optionalEmail)
-                _isAuthModalOpen.value = false
-                return@launch
-            }
-            executeCloudAuthRequestDirect(PendingCloudAuthRequest.SignInGoogle(optionalEmail))
+    fun signInWithGoogleAccount(activity: Activity?) {
+        if (activity == null || activity.isFinishing || activity.isDestroyed) {
+            _authErrorMessage.value = localizedFallbackError(
+                en = "Unable to launch Google Sign-In window.",
+                de = "Google-Anmeldefenster konnte nicht geöffnet werden.",
+                fr = "Impossible d'ouvrir la fenêtre de connexion Google.",
+                it = "Impossibile aprire la finestra di accesso Google.",
+                es = "No se pudo abrir la ventana de inicio de sesión de Google."
+            )
+            return
         }
-    }
-
-    fun signInAnonymouslyAndSync() {
+        val actRef = WeakReference(activity)
         safeVmScope.launch {
-            if (repository.hasSampleTasks()) {
+            if (repository.hasLocalUserCreatedTasks()) {
                 _pendingMergeNonSampleCount.value = repository.countNonSampleTasks()
-                _pendingMergeAuthRequest.value = PendingCloudAuthRequest.SignInAnonymous
+                _pendingMergeAuthRequest.value = PendingCloudAuthRequest.SignInGoogle(actRef)
                 _isAuthModalOpen.value = false
                 return@launch
             }
-            executeCloudAuthRequestDirect(PendingCloudAuthRequest.SignInAnonymous)
+            executeCloudAuthRequestDirect(
+                request = PendingCloudAuthRequest.SignInGoogle(actRef),
+                purgeSamplesBeforeDirectAuth = true
+            )
         }
     }
 
     private suspend fun executeCloudAuthRequestDirect(
         request: PendingCloudAuthRequest,
-        reopenAuthModalOnError: Boolean = false
+        reopenAuthModalOnError: Boolean = false,
+        purgeSamplesBeforeDirectAuth: Boolean = false
     ) {
         _isSigningIn.value = true
         _authErrorMessage.value = null
         _authInfoMessage.value = null
         try {
-            if (_isLocalOnlyDbMode.value) setLocalOnlyDbMode(false)
+            if (_isLocalOnlyDbMode.value) {
+                _isLocalOnlyDbMode.value = false
+                runCatching {
+                    settingsPrefs.edit().putBoolean("local_only_db_mode", false).apply()
+                    coreSettingsPrefs.edit().putBoolean("local_only_db_mode", false).apply()
+                }
+                syncRepository.setLocalOnlyDbModePreference(false)
+            }
+            if (purgeSamplesBeforeDirectAuth && repository.hasSampleTasks()) {
+                runCatchingCancellable {
+                    repository.purgeSampleDataLocally(markRemainingDirtyForMerge = false)
+                }
+            }
             val result = when (request) {
                 is PendingCloudAuthRequest.RegisterEmail ->
                     syncRepository.registerAccount(request.email, request.password)
                 is PendingCloudAuthRequest.SignInEmail ->
                     syncRepository.signInAccount(request.email, request.password)
-                is PendingCloudAuthRequest.SignInGoogle ->
-                    syncRepository.signInInstantCloudAccount(request.optionalEmail)
-                PendingCloudAuthRequest.SignInAnonymous ->
-                    syncRepository.signInInstantCloudAccount(null)
+                is PendingCloudAuthRequest.SignInGoogle -> {
+                    val hostActivity = request.activityRef.get()
+                    if (hostActivity == null || hostActivity.isFinishing || hostActivity.isDestroyed) {
+                        Result.failure(
+                            IllegalStateException(
+                                localizedFallbackError(
+                                    en = "Unable to launch Google Sign-In window.",
+                                    de = "Google-Anmeldefenster konnte nicht geöffnet werden.",
+                                    fr = "Impossible d'ouvrir la fenêtre de connexion Google.",
+                                    it = "Impossibile aprire la finestra di accesso Google.",
+                                    es = "No se pudo abrir la ventana de inicio de sesión de Google."
+                                )
+                            )
+                        )
+                    } else {
+                        syncRepository.signInWithGoogleOAuth(hostActivity)
+                    }
+                }
             }
             result
                 .onSuccess {
@@ -1359,7 +1466,13 @@ class ThingsbookViewModel @Inject constructor(
             _dailyDigestConfig.value = reminderScheduler.getDailyDigestConfig()
         }.onFailure { err ->
             Log.w(TAG, "Failed updating daily digest config", err)
-            _uiErrorMessage.value = err.localizedMessage ?: "Benachrichtigungen konnten nicht gespeichert werden."
+            _uiErrorMessage.value = err.localizedMessage ?: localizedFallbackError(
+                en = "Could not save notification settings.",
+                de = "Benachrichtigungen konnten nicht gespeichert werden.",
+                fr = "Impossible d'enregistrer les notifications.",
+                it = "Impossibile salvare le notifiche.",
+                es = "No se pudieron guardar las notificaciones."
+            )
         }
     }
 
@@ -1368,7 +1481,13 @@ class ThingsbookViewModel @Inject constructor(
             reminderScheduler.triggerDailyDigestNotificationNow()
         }.onFailure { err ->
             Log.w(TAG, "Failed triggering test notification", err)
-            _uiErrorMessage.value = err.localizedMessage ?: "Test-Benachrichtigung fehlgeschlagen."
+            _uiErrorMessage.value = err.localizedMessage ?: localizedFallbackError(
+                en = "Test notification failed.",
+                de = "Test-Benachrichtigung fehlgeschlagen.",
+                fr = "Échec de la notification de test.",
+                it = "Notifica di prova non riuscita.",
+                es = "Error en la notificación de prueba."
+            )
         }
     }
 
@@ -1423,14 +1542,27 @@ class ThingsbookViewModel @Inject constructor(
 
     val statistics: StateFlow<ThingsbookStatistics> = combine(
         repository.observeAllTasksRaw(),
-        activeProjects,
+        repository.observeAllProjectsRaw(),
         areas,
-        allTags
-    ) { allRawTasks, projectsList, areasList, tagsList ->
+        allTags,
+        currentEpochDay
+    ) { allRawTasks, allRawProjects, areasList, tagsList, _ ->
         runCatching {
+            val inactiveOrDeletedProjectIds = allRawProjects
+                .asSequence()
+                .filter { it.isDeleted || it.status != ProjectStatus.ACTIVE }
+                .map { it.id }
+                .toSet()
+            val activeProjectsCount = allRawProjects.count { !it.isDeleted && it.status == ProjectStatus.ACTIVE }
+
             val nonDeleted = allRawTasks.filter { !it.isDeleted }
-            val deletedCount = allRawTasks.count { it.isDeleted }
-            val openTasks = nonDeleted.filter { it.status == TaskStatus.OPEN }
+            val deletedCount = allRawTasks.count {
+                it.isDeleted && (it.title.isNotEmpty() || it.notes.isNotEmpty())
+            }
+            val openTasks = nonDeleted.filter { t ->
+                t.status == TaskStatus.OPEN &&
+                    (t.projectId == null || t.projectId !in inactiveOrDeletedProjectIds)
+            }
             val completedCount = nonDeleted.count { it.status == TaskStatus.COMPLETED }
             val canceledCount = nonDeleted.count { it.status == TaskStatus.CANCELED }
 
@@ -1443,11 +1575,20 @@ class ThingsbookViewModel @Inject constructor(
             val todayCount = openTasks.count { t ->
                 t.scheduleState == ScheduleState.TODAY ||
                     t.scheduleState == ScheduleState.THIS_EVENING ||
-                    (t.whenDate != null && t.whenDate <= todayEndMillis)
+                    (t.whenDate != null && t.whenDate <= todayEndMillis) ||
+                    (t.deadline != null && t.deadline <= todayEndMillis)
             }
             val upcomingCount = openTasks.count { t ->
-                t.scheduleState == ScheduleState.UPCOMING ||
-                    (t.whenDate != null && t.whenDate > todayEndMillis)
+                val activeInToday = t.scheduleState == ScheduleState.TODAY ||
+                    t.scheduleState == ScheduleState.THIS_EVENING ||
+                    (t.whenDate != null && t.whenDate <= todayEndMillis) ||
+                    (t.deadline != null && t.deadline <= todayEndMillis)
+                !activeInToday && (
+                    t.scheduleState == ScheduleState.UPCOMING ||
+                        (t.whenDate != null && t.whenDate > todayEndMillis) ||
+                        (t.deadline != null && t.deadline > todayEndMillis) ||
+                        !t.recurrenceRuleJson.isNullOrBlank()
+                    )
             }
             val inboxCount = openTasks.count { t ->
                 t.scheduleState == ScheduleState.INBOX && t.projectId == null && t.areaId == null && t.whenDate == null
@@ -1463,7 +1604,7 @@ class ThingsbookViewModel @Inject constructor(
             }
 
             ThingsbookStatistics(
-                totalRecordsCount = allRawTasks.size,
+                totalRecordsCount = nonDeleted.size + deletedCount,
                 openTasksCount = openTasks.size,
                 todayTasksCount = todayCount,
                 upcomingTasksCount = upcomingCount,
@@ -1474,7 +1615,7 @@ class ThingsbookViewModel @Inject constructor(
                 completedTasksCount = completedCount,
                 canceledTasksCount = canceledCount,
                 deletedTasksCount = deletedCount,
-                activeProjectsCount = projectsList.size,
+                activeProjectsCount = activeProjectsCount,
                 areasCount = areasList.size,
                 tagsCount = tagsList.size
             )
@@ -1521,7 +1662,13 @@ class ThingsbookViewModel @Inject constructor(
                 }
             }.onFailure { err ->
                 Log.w(TAG, "Failed purging sample tasks", err)
-                _uiErrorMessage.value = err.localizedMessage ?: "Beispielaufgaben konnten nicht gelöscht werden."
+                _uiErrorMessage.value = err.localizedMessage ?: localizedFallbackError(
+                    en = "Could not delete sample tasks.",
+                    de = "Beispielaufgaben konnten nicht gelöscht werden.",
+                    fr = "Impossible de supprimer les tâches d'exemple.",
+                    it = "Impossibile eliminare le attività di esempio.",
+                    es = "No se pudieron eliminar las tareas de ejemplo."
+                )
             }
         }
     }
@@ -1565,9 +1712,12 @@ class ThingsbookViewModel @Inject constructor(
             settingsPrefs.edit().putBoolean("local_only_db_mode", localOnly).apply()
             coreSettingsPrefs.edit().putBoolean("local_only_db_mode", localOnly).apply()
         }
-        if (localOnly) {
-            safeVmScope.launch {
-                runCatchingCancellable { syncRepository.signOutAccount() }
+        safeVmScope.launch {
+            runCatchingCancellable {
+                syncRepository.setLocalOnlyDbModePreference(localOnly)
+                if (localOnly) {
+                    syncRepository.signOutAccount()
+                }
             }
         }
     }
@@ -1581,7 +1731,9 @@ class ThingsbookViewModel @Inject constructor(
             runCatchingCancellable {
                 repository.exportTasksToCsv()
             }.onSuccess { csv ->
-                val count = statistics.value.openTasksCount + statistics.value.completedTasksCount
+                val count = statistics.value.openTasksCount +
+                    statistics.value.completedTasksCount +
+                    statistics.value.canceledTasksCount
                 _csvStatusMessage.value = getLocalizedString(R.string.csv_status_exported, count)
                 onCsvReady(csv)
             }.onFailure { err ->
@@ -1610,7 +1762,9 @@ class ThingsbookViewModel @Inject constructor(
                     }
                 }
             }.onSuccess {
-                val totalExported = statistics.value.openTasksCount + statistics.value.completedTasksCount
+                val totalExported = statistics.value.openTasksCount +
+                    statistics.value.completedTasksCount +
+                    statistics.value.canceledTasksCount
                 _csvStatusMessage.value = getLocalizedString(R.string.csv_status_exported, totalExported)
             }.onFailure { err ->
                 Log.w(TAG, "CSV export to URI failed", err)
@@ -1903,7 +2057,7 @@ class ThingsbookViewModel @Inject constructor(
                                 if (read == -1) break
                                 total += read
                                 if (total > MAX_BACKUP_FILE_BYTES) {
-                                    throw IllegalArgumentException("Backup > 30 MB")
+                                    throw IllegalArgumentException("Backup > 80 MB")
                                 }
                                 out.write(buf, 0, read)
                             }
@@ -2127,6 +2281,7 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun dismissTopmostOverlay(): Boolean {
+        if (isLockedByBiometric()) return true
         return when {
             _uiErrorMessage.value != null -> {
                 _uiErrorMessage.value = null
@@ -2660,6 +2815,7 @@ class ThingsbookViewModel @Inject constructor(
     val quickShareDraft: StateFlow<QuickShareDraft?> = _quickShareDraft.asStateFlow()
 
     fun openQuickShareDraft(rawSubject: String?, rawText: String?) {
+        if (isLockedByBiometric()) return
         val cleanSubject = rawSubject?.trim().orEmpty()
         val cleanText = rawText?.trim().orEmpty()
         if (cleanSubject.isEmpty() && cleanText.isEmpty()) return
@@ -2703,6 +2859,7 @@ class ThingsbookViewModel @Inject constructor(
         projectId: String?,
         areaId: String?
     ) {
+        if (isLockedByBiometric()) return
         val cleanTitle = title.trim()
         if (cleanTitle.isEmpty()) return
         _quickShareDraft.value = null
@@ -2737,6 +2894,7 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun openVoiceQuickCapture() {
+        if (isLockedByBiometric()) return
         _quickShareDraft.value = QuickShareDraft(
             initialTitle = "",
             initialNotes = "",
@@ -2754,6 +2912,7 @@ class ThingsbookViewModel @Inject constructor(
         areaId: String?,
         locale: Locale = Locale.getDefault()
     ) {
+        if (isLockedByBiometric()) return
         val cleanDump = spokenDump.trim()
         if (cleanDump.isEmpty() || _isSmartParsingGemini.value) return
         safeVmScope.launch {
@@ -2825,7 +2984,13 @@ class ThingsbookViewModel @Inject constructor(
                 throw ce
             } catch (t: Throwable) {
                 Log.w(TAG, "Smart Parse Quick Capture failed", t)
-                _uiErrorMessage.value = t.localizedMessage ?: t.message ?: "Smart Parse fehlgeschlagen."
+                _uiErrorMessage.value = t.localizedMessage ?: t.message ?: localizedFallbackError(
+                    en = "Smart Parse failed.",
+                    de = "Smart Parse fehlgeschlagen.",
+                    fr = "Échec de Smart Parse.",
+                    it = "Smart Parse non riuscito.",
+                    es = "Error en Smart Parse."
+                )
             } finally {
                 _isSmartParsingGemini.value = false
             }
@@ -2853,7 +3018,13 @@ class ThingsbookViewModel @Inject constructor(
                     rawBytes = bytes
                 )
             }.onFailure { err ->
-                _uiErrorMessage.value = err.localizedMessage ?: "Anhang konnte nicht gespeichert werden."
+                _uiErrorMessage.value = err.localizedMessage ?: localizedFallbackError(
+                    en = "Could not save attachment.",
+                    de = "Anhang konnte nicht gespeichert werden.",
+                    fr = "Impossible d'enregistrer la pièce jointe.",
+                    it = "Impossibile salvare l'allegato.",
+                    es = "No se pudo guardar el archivo adjunto."
+                )
             }
         }
     }
@@ -2875,7 +3046,13 @@ class ThingsbookViewModel @Inject constructor(
                     rawBytes = bytes
                 )
             }.onFailure { err ->
-                _uiErrorMessage.value = err.localizedMessage ?: "Anhang konnte nicht gespeichert werden."
+                _uiErrorMessage.value = err.localizedMessage ?: localizedFallbackError(
+                    en = "Could not save attachment.",
+                    de = "Anhang konnte nicht gespeichert werden.",
+                    fr = "Impossible d'enregistrer la pièce jointe.",
+                    it = "Impossibile salvare l'allegato.",
+                    es = "No se pudo guardar el archivo adjunto."
+                )
             }
         }
     }
@@ -2886,7 +3063,13 @@ class ThingsbookViewModel @Inject constructor(
             runCatchingCancellable {
                 repository.softDeleteAttachment(attachmentId)
             }.onFailure { err ->
-                _uiErrorMessage.value = err.localizedMessage ?: "Anhang konnte nicht gelöscht werden."
+                _uiErrorMessage.value = err.localizedMessage ?: localizedFallbackError(
+                    en = "Could not delete attachment.",
+                    de = "Anhang konnte nicht gelöscht werden.",
+                    fr = "Impossible de supprimer la pièce jointe.",
+                    it = "Impossibile eliminare l'allegato.",
+                    es = "No se pudo eliminar el archivo adjunto."
+                )
             }
         }
     }

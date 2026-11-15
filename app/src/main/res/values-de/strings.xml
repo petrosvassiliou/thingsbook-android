@@ -182,7 +182,7 @@
     <string name="settings_close_tooltip">Einstellungen schließen</string>
     <string name="settings_db_sync_section">Datenbank &amp; Synchronisierung</string>
     <string name="settings_local_db_title">Lokale DB</string>
-    <string name="settings_local_db_desc">100% Offline auf diesem Gerät (SQLite / Room)</string>
+    <string name="settings_local_db_desc" formatted="false">100% Offline auf diesem Gerät (SQLite / Room)</string>
     <string name="settings_cloud_sync_title">Cloud-Sync</string>
     <string name="settings_cloud_sync_desc">Lokale DB + Echtzeit-Backup über alle Geräte</string>
     <string name="settings_account_status_label">Konto &amp; Cloud-Status</string>
@@ -392,4 +392,19 @@
     <string name="attachment_open_external">Öffnen / Teilen</string>
     <string name="attachment_remove">Anhang entfernen</string>
     <string name="attachment_too_large">Datei überschreitet das 5-MB-Limit.</string>
+    <string name="attachment_import_error">Die ausgewählte Datei konnte nicht gelesen oder angehängt werden.</string>
+    <string name="project_move_up">Projekt nach oben verschieben</string>
+    <string name="project_move_down">Projekt nach unten verschieben</string>
+    <string name="project_complete_tooltip">Projekt abschließen</string>
+    <string name="project_delete_tooltip">Projekt löschen</string>
+    <string name="area_move_up">Bereich nach oben verschieben</string>
+    <string name="area_move_down">Bereich nach unten verschieben</string>
+    <string name="area_delete_tooltip">Bereich löschen</string>
+    <string name="areas_manage_count_tooltip">Bereiche verwalten (%1$d/%2$d)</string>
+    <string name="sidebar_new_project_in_area">Neues Projekt in %1$s</string>
+    <string name="quick_find_clear">Suche leeren</string>
+    <string name="quick_find_empty_hint">Tippe einen Suchbegriff ein, um Aufgaben (inkl. Notizen, Datum, Bereich, Projekt, Unteraufgaben &amp; Tags), Projekte, Bereiche oder Ansichten sofort inline zu durchsuchen.</string>
+    <string name="quick_find_results_for">%1$d Ergebnisse für „%2$s“</string>
+    <string name="quick_find_badge_view">Ansicht</string>
+    <string name="quick_find_subtasks_count">☑ %1$d/%2$d Unteraufgaben</string>
 </resources>

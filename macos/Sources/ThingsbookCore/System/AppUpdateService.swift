@@ -18,10 +18,10 @@ public struct ReleaseUpdateInfo: Equatable, Sendable {
 }
 
 public enum AppUpdateService {
-    public static let currentVersion = "1.8.0+1"
-    public static let displayVersion = "1.8.0"
-    public static let currentBuildNumber = 43
-    private static let releasesEndpoint = "https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases?per_page=10"
+    public static let currentVersion = "1.8.1"
+    public static let displayVersion = "1.8.1"
+    public static let currentBuildNumber = 44
+    private static let releasesEndpoint = "https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases?per_page=15"
 
     public static func checkForUpdates(current: String = currentVersion) async throws -> ReleaseUpdateInfo? {
         guard let url = URL(string: releasesEndpoint) else { return nil }
@@ -35,44 +35,113 @@ public enum AppUpdateService {
             return nil
         }
 
-        for rel in arr {
+        return selectEligibleRelease(from: arr, current: current)
+    }
+
+    public static func selectEligibleRelease(
+        from releases: [[String: Any]],
+        current: String = currentVersion
+    ) -> ReleaseUpdateInfo? {
+        let trimmedCurrent = stripLeadingVersionPrefix(current)
+        let currentBeforePlus = String(trimmedCurrent.split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false)[0])
+        let currentAllowsPrerelease = currentBeforePlus.contains("-")
+
+        for rel in releases {
             if (rel["draft"] as? Bool) == true || (rel["prerelease"] as? Bool) == true {
                 continue
             }
-            guard let tag = rel["tag_name"] as? String else { continue }
-            let cleanRemote = tag.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
-            if isSemanticNewer(remote: cleanRemote, current: current) {
-                let assets = (rel["assets"] as? [[String: Any]]) ?? []
-                let dmgAsset = assets.first { a in
-                    let name = ((a["name"] as? String) ?? "").lowercased()
-                    return name.hasSuffix(".dmg") || (name.contains("macos") && name.hasSuffix(".zip"))
-                }
-                let downloadUrl = dmgAsset?["browser_download_url"] as? String
-                let htmlUrl = (rel["html_url"] as? String) ?? "https://github.com/petrosvassiliou/thingsbook-android/releases"
-                let body = (rel["body"] as? String) ?? ""
-                return ReleaseUpdateInfo(
-                    tagName: tag,
-                    versionString: cleanRemote,
-                    releaseNotes: body,
-                    htmlUrl: htmlUrl,
-                    dmgDownloadUrl: downloadUrl
-                )
+            guard let rawTag = rel["tag_name"] as? String else { continue }
+            let tag = rawTag.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard tag.hasPrefix("v") || tag.hasPrefix("V") else {
+                continue
             }
+
+            let cleanRemote = stripLeadingVersionPrefix(tag)
+            let remoteBeforePlus = String(cleanRemote.split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false)[0])
+            if !currentAllowsPrerelease && remoteBeforePlus.contains("-") {
+                continue
+            }
+
+            guard isSemanticNewer(remote: cleanRemote, current: current) else {
+                continue
+            }
+
+            let assets = (rel["assets"] as? [[String: Any]]) ?? []
+            let dmgAsset = assets.first { a in
+                let name = ((a["name"] as? String) ?? "").lowercased()
+                return name.hasSuffix(".dmg")
+            }
+            guard let dmgAsset,
+                  let downloadUrl = (dmgAsset["browser_download_url"] as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !downloadUrl.isEmpty else {
+                continue
+            }
+
+            let htmlUrl = (rel["html_url"] as? String) ?? "https://github.com/petrosvassiliou/thingsbook-android/releases"
+            let body = (rel["body"] as? String) ?? ""
+            return ReleaseUpdateInfo(
+                tagName: tag,
+                versionString: cleanRemote,
+                releaseNotes: body,
+                htmlUrl: htmlUrl,
+                dmgDownloadUrl: downloadUrl
+            )
         }
         return nil
     }
 
     public static func isSemanticNewer(remote: String, current: String) -> Bool {
-        let rParts = remote.split(separator: ".").map { Int($0.filter(\.isNumber)) ?? 0 }
-        let cParts = current.split(separator: ".").map { Int($0.filter(\.isNumber)) ?? 0 }
-        let count = max(rParts.count, cParts.count)
+        let rTrim = stripLeadingVersionPrefix(remote)
+        let cTrim = stripLeadingVersionPrefix(current)
+        guard !rTrim.isEmpty, !cTrim.isEmpty else { return false }
+
+        let rPlusParts = rTrim.split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false)
+        let cPlusParts = cTrim.split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false)
+        let rBeforePlus = String(rPlusParts[0])
+        let cBeforePlus = String(cPlusParts[0])
+
+        let rHasPre = rBeforePlus.contains("-")
+        let cHasPre = cBeforePlus.contains("-")
+        if !cHasPre && rHasPre {
+            return false
+        }
+
+        let rCoreStr = String(rBeforePlus.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)[0])
+        let cCoreStr = String(cBeforePlus.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)[0])
+
+        let rCore = rCoreStr.split(separator: ".").map { Int($0) ?? 0 }
+        let cCore = cCoreStr.split(separator: ".").map { Int($0) ?? 0 }
+        let count = max(max(rCore.count, cCore.count), 3)
         for i in 0..<count {
-            let rv = i < rParts.count ? rParts[i] : 0
-            let cv = i < cParts.count ? cParts[i] : 0
+            let rv = i < rCore.count ? rCore[i] : 0
+            let cv = i < cCore.count ? cCore[i] : 0
             if rv > cv { return true }
             if rv < cv { return false }
         }
-        return false
+
+        if cHasPre && !rHasPre {
+            return true
+        }
+        if cHasPre && rHasPre {
+            let rPre = String(rBeforePlus.split(separator: "-", maxSplits: 1)[1])
+            let cPre = String(cBeforePlus.split(separator: "-", maxSplits: 1)[1])
+            if rPre != cPre {
+                return rPre.localizedStandardCompare(cPre) == .orderedDescending
+            }
+        }
+
+        let rBuild = rPlusParts.count > 1 ? (Int(rPlusParts[1].prefix(while: \.isNumber)) ?? 0) : 0
+        let cBuild = cPlusParts.count > 1 ? (Int(cPlusParts[1].prefix(while: \.isNumber)) ?? 0) : 0
+        return rBuild > cBuild
+    }
+
+    private static func stripLeadingVersionPrefix(_ raw: String) -> String {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        while let first = s.first, first == "v" || first == "V" || first.isWhitespace {
+            s.removeFirst()
+        }
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     public static func openUpdatePage(_ info: ReleaseUpdateInfo) {

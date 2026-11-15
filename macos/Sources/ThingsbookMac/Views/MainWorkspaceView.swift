@@ -55,6 +55,7 @@ public struct MainWorkspaceView: View {
                 .toolbar {
                     ToolbarItem(placement: .navigation) {
                         Button {
+                            guard !store.isLocked else { return }
                             store.isQuickFindPresented = true
                         } label: {
                             HStack(spacing: 6) {
@@ -82,12 +83,14 @@ public struct MainWorkspaceView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .disabled(store.isLocked)
                         .help(store.tr("quick_find_title") + " (⌘F)")
                     }
 
                     ToolbarItemGroup(placement: .primaryAction) {
                         // Gemini Intelligence Pill
                         Button {
+                            guard !store.isLocked else { return }
                             store.geminiInitialTab = .brainDump
                             store.isGeminiSheetPresented = true
                         } label: {
@@ -106,10 +109,12 @@ public struct MainWorkspaceView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .disabled(store.isLocked)
                         .help(store.tr("gemini_hub_title") + " (⌘G)")
 
                         // Quick Entry
                         Button {
+                            guard !store.isLocked else { return }
                             store.quickEntryPrefillTitle = ""
                             store.quickEntryPrefillNotes = ""
                             store.quickEntryAutoStartVoice = false
@@ -117,10 +122,12 @@ public struct MainWorkspaceView: View {
                         } label: {
                             Image(systemName: "tray.and.arrow.down")
                         }
+                        .disabled(store.isLocked)
                         .help(store.tr("quick_share_title") + " (⇧⌘N)")
 
                         // Instant Voice Capture (v1.8)
                         Button {
+                            guard !store.isLocked else { return }
                             store.quickEntryPrefillTitle = ""
                             store.quickEntryPrefillNotes = ""
                             store.quickEntryAutoStartVoice = true
@@ -128,35 +135,43 @@ public struct MainWorkspaceView: View {
                         } label: {
                             Image(systemName: "mic")
                         }
+                        .disabled(store.isLocked)
                         .help(store.tr("voice_capture_btn") + " (⌃⇧⌘V)")
 
                         // Manage Areas
                         Button {
+                            guard !store.isLocked else { return }
                             store.isAreaManagerPresented = true
                         } label: {
                             Image(systemName: "cube")
                         }
+                        .disabled(store.isLocked)
                         .help(store.tr("areas_manage_title"))
 
                         // Manage Tags
                         Button {
+                            guard !store.isLocked else { return }
                             store.isTagManagerPresented = true
                         } label: {
                             Image(systemName: "tag")
                         }
+                        .disabled(store.isLocked)
                         .help(store.tr("tags_manage_title"))
 
                         // Notifications
                         Button {
+                            guard !store.isLocked else { return }
                             store.settingsTab = .notifications
                             store.isSettingsPresented = true
                         } label: {
                             Image(systemName: store.preferences.dailyDigestEnabled ? "bell.badge.fill" : "bell")
                         }
+                        .disabled(store.isLocked)
                         .help(store.tr("notifications_title"))
 
                         // Direct 1-Click Language Switcher with Flag Icons (matching Android)
                         Button {
+                            guard !store.isLocked else { return }
                             isLanguagePopoverOpen.toggle()
                         } label: {
                             if store.preferences.language == .system {
@@ -166,6 +181,7 @@ public struct MainWorkspaceView: View {
                                     .font(.system(size: 14.5))
                             }
                         }
+                        .disabled(store.isLocked)
                         .help(store.tr("settings_language"))
                         .popover(isPresented: $isLanguagePopoverOpen, arrowEdge: .bottom) {
                             languageSelectorPopover
@@ -173,6 +189,7 @@ public struct MainWorkspaceView: View {
 
                         // Cloud Sync Status Button
                         Button {
+                            guard !store.isLocked else { return }
                             if !store.preferences.localOnlyDbMode && store.syncSnapshot.userEmailOrId != nil {
                                 store.syncNow()
                             }
@@ -186,15 +203,18 @@ public struct MainWorkspaceView: View {
                                     .frame(width: 6, height: 6)
                             }
                         }
+                        .disabled(store.isLocked)
                         .help(syncHelpText)
 
                         // Settings
                         Button {
+                            guard !store.isLocked else { return }
                             store.settingsTab = .general
                             store.isSettingsPresented = true
                         } label: {
                             Image(systemName: "gearshape")
                         }
+                        .disabled(store.isLocked)
                         .help(store.tr("settings_title") + " (⌘,)")
                     }
                 }
@@ -544,6 +564,10 @@ public struct MainWorkspaceView: View {
         .background(
             Capsule(style: .continuous)
                 .fill(Color.black.opacity(0.86))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.75)
+                )
                 .shadow(color: .black.opacity(0.22), radius: 12, y: 4)
         )
     }
@@ -566,6 +590,10 @@ public struct MainWorkspaceView: View {
         .background(
             Capsule(style: .continuous)
                 .fill(Color.black.opacity(0.86))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.75)
+                )
                 .shadow(color: .black.opacity(0.22), radius: 12, y: 4)
         )
         .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -577,7 +605,14 @@ public struct MainWorkspaceView: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 16)
             .padding(.vertical, 9)
-            .background(Capsule().fill(Color.black.opacity(0.82)))
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.black.opacity(0.82))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.75)
+                    )
+            )
             .transition(.opacity)
     }
 

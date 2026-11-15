@@ -593,7 +593,8 @@ public enum ThingsBackupCodec {
     private static let saltBytes = 16
     private static let ivBytes = 12
     private static let gcmTagBits = 128
-    private static let maxDecompressedBytes = 120 * 1024 * 1024 // 120 MB guard (with attachments)
+    public static let maxCompressedBytes = 80 * 1024 * 1024 // 80 MB compressed guard
+    public static let maxDecompressedBytes = 120 * 1024 * 1024 // 120 MB decompressed guard (with attachments)
 
     public static func summarizePayload(_ payload: ThingsbookBackupPayload, encrypted: Bool) -> BackupSummary {
         BackupSummary(
@@ -613,8 +614,8 @@ public enum ThingsBackupCodec {
     public static func encodeBackup(
         payload: ThingsbookBackupPayload,
         password: String?,
-        appVersionName: String = "1.8.0",
-        appVersionCode: Int = 42
+        appVersionName: String = "1.8.1",
+        appVersionCode: Int = 44
     ) throws -> Data {
         let compactEncoder = JSONEncoder()
         let rawJsonData = try compactEncoder.encode(payload)
@@ -691,6 +692,9 @@ public enum ThingsBackupCodec {
         guard !rawBytes.isEmpty else {
             throw ThingsBackupError.invalidFormat("Selected backup file is empty.")
         }
+        guard rawBytes.count <= maxCompressedBytes else {
+            throw ThingsBackupError.invalidFormat("Backup file exceeds 80 MB compressed safety limit.")
+        }
         guard var text = String(data: rawBytes, encoding: .utf8) else {
             throw ThingsBackupError.invalidFormat("Backup file is not valid UTF-8.")
         }
@@ -720,6 +724,9 @@ public enum ThingsBackupCodec {
                   let decoded = Data(base64Encoded: b64, options: .ignoreUnknownCharacters) else {
                 throw ThingsBackupError.invalidFormat("Unencrypted backup file has missing or corrupt payload.")
             }
+            guard decoded.count <= maxCompressedBytes else {
+                throw ThingsBackupError.invalidFormat("Backup payload exceeds 80 MB compressed safety limit.")
+            }
             compressedBytes = decoded
         } else {
             guard let password, !password.isEmpty else {
@@ -735,6 +742,9 @@ public enum ThingsBackupCodec {
                   iv.count >= 8,
                   ctAndTag.count >= 16 else {
                 throw ThingsBackupError.invalidFormat("Missing or invalid encryption parameters in backup file.")
+            }
+            guard ctAndTag.count <= maxCompressedBytes + 64 else {
+                throw ThingsBackupError.invalidFormat("Backup payload exceeds 80 MB compressed safety limit.")
             }
 
             let iterations = min(1_000_000, max(10_000, envelope.kdfIterations ?? kdfIterations))
@@ -756,6 +766,9 @@ public enum ThingsBackupCodec {
                 compressedBytes = try AES.GCM.open(box, using: symmetricKey, authenticating: aad)
             } catch {
                 throw ThingsBackupError.invalidPassword
+            }
+            guard compressedBytes.count <= maxCompressedBytes else {
+                throw ThingsBackupError.invalidFormat("Backup payload exceeds 80 MB compressed safety limit.")
             }
         }
 
@@ -886,7 +899,7 @@ public enum ThingsBackupCodec {
                 let produced = chunkSize - Int(stream.avail_out)
                 if produced > 0 {
                     if output.count + produced > maxBytes {
-                        throw ThingsBackupError.invalidFormat("Backup exceeds 50 MB decompression safety limit.")
+                        throw ThingsBackupError.invalidFormat("Backup exceeds 120 MB decompression safety limit.")
                     }
                     output.append(buffer, count: produced)
                 }

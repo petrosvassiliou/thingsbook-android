@@ -189,7 +189,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "1.8.0"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "1.8.1"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -346,10 +346,11 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(AppLanguage.fr.flagEmoji, "🇫🇷")
         XCTAssertEqual(AppLanguage.es.flagEmoji, "🇪🇸")
 
-        // 2. Verify semantic update check upgrades 1.7.0 & 1.8.0 -> 1.8.0+1 without looping on 1.8.0+1
+        // 2. Verify semantic update check upgrades 1.7.0 & 1.8.0 -> 1.8.0+1 -> 1.8.1 without looping
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "1.8.0+1", current: "1.7.0"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "1.8.0+1", current: "1.8.0"))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "1.8.0+1", current: "1.8.0+1"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "1.8.1", current: "1.8.0+1"))
 
         // 3. Verify Firestore mixed integerValue / doubleValue / string coercion
         let intSortWrapped: [String: Any] = ["integerValue": "4"]
@@ -358,16 +359,18 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(FirebaseCloudSyncService.asDouble(FirebaseCloudSyncService.unwrapFirestoreValue(doubleSortWrapped)), 2.5)
         XCTAssertEqual(FirebaseCloudSyncService.asInt64(NSNumber(value: 1_794_736_150_463.0)), 1_794_736_150_463)
 
+        let syncTs = Int64(Date().timeIntervalSince1970 * 1000.0) - 5_000
+        let todayStart = DateEpochConverter.startOfDayMillis(for: Date())
         let parsedTask = FirebaseCloudSyncService.parseTask([
             "id": "remote-sync-task-1",
             "title": "Synced From ChromeOS",
             "notes": "Realtime delta verification",
             "status": "OPEN",
             "scheduleState": "TODAY",
-            "whenDate": Int64(1_794_700_800_000),
+            "whenDate": todayStart,
             "sortOrder": Int64(7),
-            "createdAt": Int64(1_794_736_150_000),
-            "updatedAt": Int64(1_794_736_150_463),
+            "createdAt": syncTs - 500,
+            "updatedAt": syncTs,
             "isDeleted": false,
             "tagIds": []
         ])
@@ -391,7 +394,7 @@ final class ThingsbookCoreTests: XCTestCase {
                     taskTagIdsByTaskId: [remoteItem.id: remoteTags]
                 )
             )
-            XCTAssertEqual(maxUpdatedAt, 1_794_736_150_463)
+            XCTAssertEqual(maxUpdatedAt, syncTs)
         }
         XCTAssertEqual(box.mutations, 0, "Remote delta apply must not mark local DB mutated or bounce sync")
         XCTAssertEqual(box.remoteApplies, 1, "Remote delta apply must notify UI observer immediately")
@@ -400,4 +403,473 @@ final class ThingsbookCoreTests: XCTestCase {
         let searchHits = try db.searchQuickFind(rawQuery: "ChromeOS")
         XCTAssertEqual(searchHits.tasks.map(\.id), ["remote-sync-task-1"], "FTS5 must index remotely synced tasks")
     }
+
+    // MARK: - 7. v1.8.1 AppUpdateService Beta Isolation, DMG Filtering & Version Bump
+
+    func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
+        XCTAssertEqual(AppUpdateService.currentVersion, "1.8.1")
+        XCTAssertEqual(AppUpdateService.displayVersion, "1.8.1")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 44)
+
+        // Core [major, minor, patch] + build metadata comparisons
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "1.8.1", current: "1.8.0+1"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "1.8.0+1", current: "1.8.0"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.1", current: "1.8.1"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "v2.0.0-alpha.1", current: "1.8.1"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "v2.0.0-rc.1+2", current: "1.8.1+1"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "1.8.1", current: "1.8.1"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "v1.8.2", current: "1.8.1"))
+
+        // Pre-release channel users can still upgrade to newer pre-releases or stable 2.0.0
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.2", current: "2.0.0-beta.1"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.2"))
+
+        // Release feed filtering: reject draft, prerelease, macos-build-*, v2.0.0-beta.*, and Android-only releases without .dmg
+        let mockReleases: [[String: Any]] = [
+            [
+                "tag_name": "v1.9.0",
+                "draft": true,
+                "prerelease": false,
+                "assets": [["name": "Thingsbook-1.9.0.dmg", "browser_download_url": "https://example.com/1.9.0.dmg"]]
+            ],
+            [
+                "tag_name": "v2.0.0-beta.1",
+                "draft": false,
+                "prerelease": false, // Even if someone forgot to tick GitHub's prerelease checkbox!
+                "assets": [["name": "Thingsbook-2.0.0-beta.1.dmg", "browser_download_url": "https://example.com/2.0.0-beta.1.dmg"]]
+            ],
+            [
+                "tag_name": "macos-build-99",
+                "draft": false,
+                "prerelease": false,
+                "assets": [["name": "Thingsbook-CI.dmg", "browser_download_url": "https://example.com/ci.dmg"]]
+            ],
+            [
+                "tag_name": "v1.8.3",
+                "draft": false,
+                "prerelease": false,
+                "assets": [["name": "app-release.apk", "browser_download_url": "https://example.com/app-release.apk"]]
+            ],
+            [
+                "tag_name": "v1.8.2",
+                "draft": false,
+                "prerelease": false,
+                "html_url": "https://github.com/petrosvassiliou/thingsbook-android/releases/tag/v1.8.2",
+                "body": "Bug fixes for macOS",
+                "assets": [
+                    ["name": "app-release.apk", "browser_download_url": "https://example.com/1.8.2.apk"],
+                    ["name": "Thingsbook-1.8.2-Universal.dmg", "browser_download_url": "https://example.com/Thingsbook-1.8.2.dmg"]
+                ]
+            ]
+        ]
+
+        let selected = AppUpdateService.selectEligibleRelease(from: mockReleases, current: "1.8.1")
+        XCTAssertNotNil(selected)
+        XCTAssertEqual(selected?.tagName, "v1.8.2")
+        XCTAssertEqual(selected?.versionString, "1.8.2")
+        XCTAssertEqual(selected?.dmgDownloadUrl, "https://example.com/Thingsbook-1.8.2.dmg")
+
+        // When already on 1.8.2, nothing newer with a DMG exists
+        XCTAssertNil(AppUpdateService.selectEligibleRelease(from: mockReleases, current: "1.8.2"))
+    }
+
+    // MARK: - 8. Out-of-Order Foreign Keys in Cloud Sync Deltas & .tbbackup Restore
+
+    func testOutOfOrderForeignKeysInRemoteDeltasAndBackupRestoreV181() throws {
+        XCTAssertEqual(ThingsBackupCodec.maxCompressedBytes, 80 * 1024 * 1024)
+        XCTAssertEqual(ThingsBackupCodec.maxDecompressedBytes, 120 * 1024 * 1024)
+
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let ts = Int64(Date().timeIntervalSince1970 * 1000.0) - 10_000
+
+        // 1. Out-of-order tags (grandchild -> child -> parent) AND task referencing missing/not-yet-synced project/heading
+        let grandchildTag = Tag(id: "tag-grandchild", title: "iOS", parentTagId: "tag-child", createdAt: ts, updatedAt: ts)
+        let childTag = Tag(id: "tag-child", title: "Mobile", parentTagId: "tag-root", createdAt: ts, updatedAt: ts)
+        let rootTag = Tag(id: "tag-root", title: "Engineering", parentTagId: nil, createdAt: ts, updatedAt: ts)
+
+        let orphanContainerTask = TaskItem(
+            id: "task-before-parent",
+            title: "Task Arriving Before Project Delta",
+            scheduleState: .anytime,
+            projectId: "proj-arriving-later",
+            headingId: "hdg-arriving-later",
+            areaId: "area-arriving-later",
+            createdAt: ts,
+            updatedAt: ts
+        )
+        let chkBeforeParent = ChecklistItem(
+            id: "chk-1",
+            taskId: "task-before-parent",
+            title: "Substep 1",
+            createdAt: ts,
+            updatedAt: ts
+        )
+
+        // Must succeed without SQLITE_CONSTRAINT_FOREIGNKEY because PRAGMA foreign_keys = OFF runs BEFORE BEGIN TRANSACTION
+        _ = try db.applyRemoteDeltas(
+            RemoteDeltaBatch(
+                tags: [grandchildTag, childTag, rootTag],
+                tasks: [orphanContainerTask],
+                taskTagIdsByTaskId: ["task-before-parent": ["tag-grandchild"]],
+                checklistItems: [chkBeforeParent]
+            )
+        )
+
+        let snapAfterDelta = try db.loadWorkspaceSnapshot()
+        XCTAssertEqual(snapAfterDelta.tags.count, 3)
+        XCTAssertEqual(snapAfterDelta.allOpenTasks.first?.id, "task-before-parent")
+        XCTAssertEqual(snapAfterDelta.allOpenTasks.first?.tagIds, ["tag-grandchild"])
+        XCTAssertEqual(snapAfterDelta.allOpenTasks.first?.checklistItems.count, 1)
+
+        // 2. Out-of-order .tbbackup importSnapshotReplacingAll (child tags before parent tags + full graph)
+        let backupPayload = ThingsbookBackupPayload(
+            schemaVersion: 1,
+            createdAt: ts,
+            appVersionName: "1.8.1",
+            areas: [BackupAreaDto(id: "b-area", title: "Work", sortOrder: 1, createdAt: ts, updatedAt: ts)],
+            projects: [BackupProjectDto(id: "b-proj", areaId: "b-area", title: "Q4 Ship", createdAt: ts, updatedAt: ts)],
+            headings: [BackupHeadingDto(id: "b-hdg", projectId: "b-proj", title: "Phase 1", createdAt: ts, updatedAt: ts)],
+            tasks: [
+                BackupTaskDto(
+                    id: "b-task",
+                    title: "Verify FK Restore",
+                    scheduleState: ScheduleState.anytime.rawValue,
+                    projectId: "b-proj",
+                    headingId: "b-hdg",
+                    areaId: "b-area",
+                    tagIdsJson: "[\"b-tag-leaf\"]",
+                    createdAt: ts,
+                    updatedAt: ts
+                )
+            ],
+            checklistItems: [BackupChecklistItemDto(id: "b-chk", taskId: "b-task", title: "Done", createdAt: ts, updatedAt: ts)],
+            tags: [
+                BackupTagDto(id: "b-tag-leaf", title: "Leaf", parentTagId: "b-tag-mid", createdAt: ts, updatedAt: ts),
+                BackupTagDto(id: "b-tag-mid", title: "Mid", parentTagId: "b-tag-top", createdAt: ts, updatedAt: ts),
+                BackupTagDto(id: "b-tag-top", title: "Top", parentTagId: nil, createdAt: ts, updatedAt: ts)
+            ],
+            taskTagRefs: [BackupTaskTagRefDto(taskId: "b-task", tagId: "b-tag-leaf")],
+            projectTagRefs: [BackupProjectTagRefDto(projectId: "b-proj", tagId: "b-tag-top")]
+        )
+
+        try db.importSnapshotReplacingAll(backupPayload)
+        let restored = try db.loadWorkspaceSnapshot()
+        XCTAssertEqual(restored.tags.count, 3)
+        XCTAssertEqual(restored.projects.first?.tagIds, ["b-tag-top"])
+        XCTAssertEqual(restored.allOpenTasks.first?.projectId, "b-proj")
+        XCTAssertEqual(restored.allOpenTasks.first?.headingId, "b-hdg")
+        XCTAssertEqual(restored.allOpenTasks.first?.tagIds, ["b-tag-leaf"])
+    }
+
+    // MARK: - 9. Remote Container Tombstone Detachment & Tag Delete + Same-Title Recreation
+
+    func testRemoteDeletedContainersDetachLocalTasksAndTagRecreationV181() throws {
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let area = try db.createArea(title: "Operations")
+        let proj = try db.createProject(title: "Server Migration", areaId: area.id)
+        let hdg = try db.createHeading(projectId: proj.id, title: "Cutover")
+        let task = try db.createTask(
+            title: "Verify DNS TTL",
+            scheduleState: .anytime,
+            projectId: proj.id,
+            headingId: hdg.id,
+            areaId: area.id
+        )
+
+        let remoteDeleteTs = Int64(Date().timeIntervalSince1970 * 1000.0) + 1_000
+        let deletedHeading = Heading(
+            id: hdg.id,
+            projectId: proj.id,
+            title: hdg.title,
+            sortOrder: hdg.sortOrder,
+            createdAt: hdg.createdAt,
+            updatedAt: remoteDeleteTs,
+            isDeleted: true
+        )
+        let deletedProject = Project(
+            id: proj.id,
+            areaId: area.id,
+            title: proj.title,
+            createdAt: proj.createdAt,
+            updatedAt: remoteDeleteTs,
+            isDeleted: true
+        )
+        let deletedArea = Area(
+            id: area.id,
+            title: area.title,
+            sortOrder: area.sortOrder,
+            createdAt: area.createdAt,
+            updatedAt: remoteDeleteTs,
+            isDeleted: true
+        )
+
+        _ = try db.applyRemoteDeltas(
+            RemoteDeltaBatch(
+                areas: [deletedArea],
+                projects: [deletedProject],
+                headings: [deletedHeading]
+            )
+        )
+
+        let snap = try db.loadWorkspaceSnapshot()
+        guard let survivingTask = snap.allOpenTasks.first(where: { $0.id == task.id }) else {
+            return XCTFail("Local open task must not vanish when its remote Project/Area/Heading is deleted")
+        }
+        XCTAssertNil(survivingTask.projectId)
+        XCTAssertNil(survivingTask.headingId)
+        XCTAssertNil(survivingTask.areaId)
+        XCTAssertTrue(snap.anytimeTasks.contains { $0.id == task.id })
+
+        // Partial unique tag index: delete a tag and create a new tag with the exact same title
+        let activeProj = try db.createProject(title: "Tag Host Project")
+        let tagV1 = try db.createOrUpdateTag(title: "Urgent", shortcut: "u")
+        var taggedTask = survivingTask
+        try db.updateTask(taggedTask, tagIds: [tagV1.id])
+        var updatedProj = activeProj
+        updatedProj.tagIds = [tagV1.id]
+        try db.updateProject(updatedProj)
+
+        try db.deleteTag(tagV1.id)
+        let afterTagDelete = try db.loadWorkspaceSnapshot()
+        XCTAssertTrue(afterTagDelete.tags.isEmpty)
+        XCTAssertEqual(afterTagDelete.allOpenTasks.first(where: { $0.id == task.id })?.tagIds, [], "Deleted tag ID must not resurrect via stale tag_ids_json")
+        XCTAssertEqual(afterTagDelete.projects.first(where: { $0.id == activeProj.id })?.tagIds, [], "Deleted tag ID must be scrubbed from project tagIds")
+
+        // Creating a new tag with identical title "Urgent" must succeed cleanly and keep the old tag tombstone dirty for sync
+        let tagV2 = try db.createOrUpdateTag(title: "Urgent", shortcut: "x")
+        XCTAssertNotEqual(tagV2.id, tagV1.id)
+        let afterRecreate = try db.loadWorkspaceSnapshot()
+        XCTAssertEqual(afterRecreate.tags.map(\.id), [tagV2.id])
+
+        taggedTask = afterRecreate.allOpenTasks.first(where: { $0.id == task.id })!
+        try db.updateTask(taggedTask, tagIds: [tagV2.id])
+        XCTAssertEqual(try db.loadWorkspaceSnapshot().allOpenTasks.first(where: { $0.id == task.id })?.tagIds, [tagV2.id])
+
+        let dirtyTags = try db.fetchDirtyBatch().tags
+        XCTAssertTrue(dirtyTags.contains { $0.id == tagV1.id && $0.isDeleted }, "Deleted tag tombstone must remain preserved for Cloud Sync")
+        XCTAssertTrue(dirtyTags.contains { $0.id == tagV2.id && !$0.isDeleted })
+    }
+
+    // MARK: - 10. LWW Timestamp Tie Idempotency & Fast-Clock Cursor Clamp
+
+    func testLwwTimestampTieIdempotencyAndClockSkewClampV181() throws {
+        final class SyncCounter: @unchecked Sendable {
+            var remoteCallbacks = 0
+        }
+        let counter = SyncCounter()
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        db.onRemoteSyncApplied = { counter.remoteCallbacks += 1 }
+
+        let baseTs = Int64(Date().timeIntervalSince1970 * 1000.0) - 2_000
+        let remoteTask = TaskItem(
+            id: "lww-task-1",
+            title: "Initial Remote Title",
+            scheduleState: .inbox,
+            createdAt: baseTs,
+            updatedAt: baseTs
+        )
+
+        // First apply: inserts record and notifies once
+        _ = try db.applyRemoteDeltas(RemoteDeltaBatch(tasks: [remoteTask]))
+        XCTAssertEqual(db.lastRemoteAppliedCount, 1)
+        XCTAssertEqual(counter.remoteCallbacks, 1)
+
+        // Idle 15s poll re-delivering the exact same document (remote.updatedAt == local.updatedAt): must NOT re-apply or rebuild FTS!
+        var staleTieCopy = remoteTask
+        staleTieCopy.title = "Should Not Overwrite On Timestamp Tie"
+        _ = try db.applyRemoteDeltas(RemoteDeltaBatch(tasks: [staleTieCopy]))
+        XCTAssertEqual(db.lastRemoteAppliedCount, 0)
+        XCTAssertEqual(counter.remoteCallbacks, 1)
+        XCTAssertEqual(try db.loadWorkspaceSnapshot().inboxTasks.first?.title, "Initial Remote Title")
+
+        // Strictly newer remote timestamp (> local.updatedAt) applies cleanly
+        var newerCopy = remoteTask
+        newerCopy.title = "Updated Remote Title"
+        newerCopy.updatedAt = baseTs + 500
+        _ = try db.applyRemoteDeltas(RemoteDeltaBatch(tasks: [newerCopy]))
+        XCTAssertEqual(db.lastRemoteAppliedCount, 1)
+        XCTAssertEqual(counter.remoteCallbacks, 2)
+        XCTAssertEqual(try db.loadWorkspaceSnapshot().inboxTasks.first?.title, "Updated Remote Title")
+
+        // Future peer clock (+1 hour ahead) must be clamped to <= now + 60_000ms so sync cursor is never poisoned
+        let oneHourAhead = Int64(Date().timeIntervalSince1970 * 1000.0) + 3_600_000
+        var futureTask = newerCopy
+        futureTask.id = "future-clock-task"
+        futureTask.updatedAt = oneHourAhead
+        let clampedCursor = try db.applyRemoteDeltas(RemoteDeltaBatch(tasks: [futureTask]))
+        let upperBound = Int64(Date().timeIntervalSince1970 * 1000.0) + 65_000
+        XCTAssertLessThanOrEqual(clampedCursor, upperBound, "Fast peer clock must be clamped to now + 60s")
+    }
+
+    // MARK: - 11. Trashed Projects, Detached Task Restore, Syncable Purge Tombstones & Smart View Rollover
+
+    func testTrashProjectsRestoreDetachedTasksTombstonePurgeAndSmartViewRolloverV181() throws {
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let proj = try db.createProject(title: "Redesign Website", notes: "v1.8.1 Trash Project Flow")
+        let hdg = try db.createHeading(projectId: proj.id, title: "Wireframes")
+        let taskInProj = try db.createTask(
+            title: "Export Hero SVG",
+            scheduleState: .anytime,
+            projectId: proj.id,
+            headingId: hdg.id,
+            checklistTitles: ["Check retina 2x"]
+        )
+        _ = try db.addAttachment(
+            projectId: proj.id,
+            fileName: "brief.txt",
+            mimeType: "text/plain",
+            data: Data("brief".utf8)
+        )
+
+        // 1. Soft-deleting project moves it to trashedProjects, detaches its open task, and cascades child headings/attachments
+        _ = try db.softDeleteProject(proj.id)
+        var snap = try db.loadWorkspaceSnapshot()
+        XCTAssertEqual(snap.trashedProjects.map(\.id), [proj.id])
+        XCTAssertTrue(snap.projects.isEmpty)
+        XCTAssertNil(snap.allOpenTasks.first(where: { $0.id == taskInProj.id })?.projectId)
+        XCTAssertNil(snap.allOpenTasks.first(where: { $0.id == taskInProj.id })?.headingId)
+
+        let dirtyAfterSoftDelete = try db.fetchDirtyBatch()
+        XCTAssertTrue(dirtyAfterSoftDelete.headings.contains { $0.id == hdg.id && $0.isDeleted })
+        XCTAssertTrue(dirtyAfterSoftDelete.attachments.contains { $0.projectId == proj.id && $0.isDeleted })
+
+        // 2. Restoring project from Trash restores both the project AND its detached tasks & headings!
+        try db.restoreProject(proj.id)
+        snap = try db.loadWorkspaceSnapshot()
+        XCTAssertTrue(snap.trashedProjects.isEmpty)
+        XCTAssertEqual(snap.projects.map(\.id), [proj.id])
+        XCTAssertEqual(snap.headingsByProject[proj.id]?.map(\.id), [hdg.id])
+        XCTAssertEqual(snap.allOpenTasks.first(where: { $0.id == taskInProj.id })?.projectId, proj.id)
+        XCTAssertEqual(snap.allOpenTasks.first(where: { $0.id == taskInProj.id })?.headingId, hdg.id)
+
+        // 3. Completed/Canceled projects hide their open tasks from active Smart Views
+        var completedProj = snap.projects.first!
+        completedProj.status = .completed
+        try db.updateProject(completedProj)
+        snap = try db.loadWorkspaceSnapshot()
+        XCTAssertFalse(snap.anytimeTasks.contains { $0.id == taskInProj.id }, "Tasks in completed projects must not leak into Anytime")
+        completedProj.status = .active
+        try db.updateProject(completedProj)
+
+        // 4. Permanent delete & Empty Trash keep compact dirty tombstones (preventing forceFullPull resurrection!)
+        let doomedTask = try db.createTask(title: "Secret Draft", notes: "Sensitive notes", scheduleState: .inbox)
+        try db.markDirtyBatchSynced(try db.fetchDirtyBatch())
+
+        try db.softDeleteTask(doomedTask.id)
+        try db.softDeleteProject(proj.id)
+        try db.emptyTrash()
+
+        snap = try db.loadWorkspaceSnapshot()
+        XCTAssertTrue(snap.trashedTasks.isEmpty)
+        XCTAssertTrue(snap.trashedProjects.isEmpty)
+
+        let dirtyAfterPurge = try db.fetchDirtyBatch()
+        guard let purgedTaskTombstone = dirtyAfterPurge.tasks.first(where: { $0.id == doomedTask.id }) else {
+            return XCTFail("Permanently deleted task must retain a dirty tombstone for Cloud Sync push")
+        }
+        XCTAssertTrue(purgedTaskTombstone.isDeleted)
+        XCTAssertEqual(purgedTaskTombstone.title, "")
+        XCTAssertEqual(purgedTaskTombstone.notes, "")
+
+        guard let purgedProjTombstone = dirtyAfterPurge.projects.first(where: { $0.id == proj.id }) else {
+            return XCTFail("Permanently deleted project must retain a dirty tombstone for Cloud Sync push")
+        }
+        XCTAssertTrue(purgedProjTombstone.isDeleted)
+        XCTAssertEqual(purgedProjTombstone.title, "")
+
+        // Simulate older remote copy arriving during forceFullPull: tombstone updatedAt wins so item NEVER resurrects!
+        let olderRemoteTask = TaskItem(
+            id: doomedTask.id,
+            title: "Resurrected From Stale Cloud?",
+            scheduleState: .inbox,
+            createdAt: doomedTask.createdAt,
+            updatedAt: doomedTask.updatedAt
+        )
+        _ = try db.applyRemoteDeltas(RemoteDeltaBatch(tasks: [olderRemoteTask]))
+        snap = try db.loadWorkspaceSnapshot()
+        XCTAssertFalse(snap.allOpenTasks.contains { $0.id == doomedTask.id })
+        XCTAssertTrue(snap.trashedTasks.isEmpty)
+
+        // 5. Midnight rollover rolls stale THIS_EVENING tasks and due UPCOMING projects into TODAY
+        let yesterdayMillis = DateEpochConverter.startOfDayMillis(for: Calendar.current.date(byAdding: .day, value: -1, to: Date())!)
+        let staleEvening = try db.createTask(
+            title: "Yesterday Evening Task",
+            scheduleState: .thisEvening,
+            whenDate: yesterdayMillis
+        )
+        var dueProject = try db.createProject(title: "Due Project")
+        dueProject.scheduleState = .upcoming
+        dueProject.whenDate = yesterdayMillis
+        try db.updateProject(dueProject)
+
+        let rolledCount = try db.performMidnightRollover()
+        XCTAssertGreaterThanOrEqual(rolledCount, 2)
+        snap = try db.loadWorkspaceSnapshot()
+        XCTAssertTrue(snap.todayDaytimeTasks.contains { $0.id == staleEvening.id && $0.scheduleState == .today })
+        XCTAssertFalse(snap.inboxTasks.contains { $0.id == staleEvening.id }, "Inbox bucket must be mutually exclusive with Today")
+        XCTAssertEqual(snap.projects.first(where: { $0.id == dueProject.id })?.scheduleState, .today)
+    }
+
+    // MARK: - 12. Cloud Sync Attachment Security & Firestore updateMask Preservation
+
+    func testAttachmentSecuritySanitizationAndFirestoreUpdateMaskV181() {
+        XCTAssertEqual(FirebaseCloudSyncService.maxInlineAttachmentBytes, 700_000)
+
+        // 1. Path traversal sanitization in parseAttachment
+        let maliciousRemote: [String: Any] = [
+            "id": "att-sec-1",
+            "taskId": "task-1",
+            "fileName": "invoice.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "localRelativePath": "../../../../etc/passwd",
+            "dataBase64": "JVBERi0xLjQ=",
+            "createdAt": 1_750_000_000_000,
+            "updatedAt": 1_750_000_000_000,
+            "isDeleted": false
+        ]
+        let parsedDelta = FirebaseCloudSyncService.parseAttachment(maliciousRemote)
+        XCTAssertNotNil(parsedDelta)
+        XCTAssertEqual(parsedDelta?.attachment.localRelativePath, "", "Remote localRelativePath must always be stripped to empty string")
+
+        // 2. Non-deleted attachment with missing/oversized local bytes uses updateMask EXCLUDING dataBase64
+        let oversizedAtt = TaskAttachment(
+            id: "att-large-1",
+            taskId: "task-1",
+            fileName: "highres.png",
+            mimeType: "image/png",
+            sizeBytes: 950_000,
+            localRelativePath: "attachments/att-large-1.png",
+            createdAt: 1_750_000_000_000,
+            updatedAt: 1_750_000_001_000,
+            isDeleted: false
+        )
+        let metadataOnlyWrite = FirebaseCloudSyncService.makeAttachmentWrite(
+            baseDocPrefix: "projects/demo/databases/(default)/documents/users/u1",
+            attachment: oversizedAtt,
+            inlineBase64: ""
+        )
+        let updateObj = metadataOnlyWrite["update"] as? [String: Any]
+        let fieldsObj = updateObj?["fields"] as? [String: [String: Any]]
+        let maskPaths = (metadataOnlyWrite["updateMask"] as? [String: Any])?["fieldPaths"] as? [String]
+
+        XCTAssertNil(fieldsObj?["dataBase64"], "Oversized/unavailable attachment push must NOT write empty dataBase64")
+        XCTAssertNotNil(maskPaths, "Metadata-only attachment update must specify updateMask.fieldPaths")
+        XCTAssertFalse(maskPaths?.contains("dataBase64") ?? true, "updateMask.fieldPaths must exclude dataBase64")
+        XCTAssertTrue(maskPaths?.contains("fileName") ?? false)
+        XCTAssertTrue(maskPaths?.contains("updatedAt") ?? false)
+
+        // 3. Deleted attachment explicitly clears dataBase64 = "" without restrictive mask
+        var deletedAtt = oversizedAtt
+        deletedAtt.isDeleted = true
+        let deletedWrite = FirebaseCloudSyncService.makeAttachmentWrite(
+            baseDocPrefix: "projects/demo/databases/(default)/documents/users/u1",
+            attachment: deletedAtt,
+            inlineBase64: ""
+        )
+        let delFields = (deletedWrite["update"] as? [String: Any])?["fields"] as? [String: [String: Any]]
+        XCTAssertEqual(delFields?["dataBase64"]?["stringValue"] as? String, "")
+        XCTAssertNil(deletedWrite["updateMask"])
+    }
 }
+

@@ -60,6 +60,7 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.abs
@@ -73,6 +74,26 @@ class ThingsRepository @Inject constructor(
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
+    }
+
+    private data class DetachedProjectTaskSnapshot(
+        val taskId: String,
+        val projectId: String,
+        val headingId: String?
+    )
+
+    private val lastSpawnedRecurringTaskByCompletedId = ConcurrentHashMap<String, String>()
+    private val detachedTasksByDeletedProjectId = ConcurrentHashMap<String, List<DetachedProjectTaskSnapshot>>()
+    private val cascadeDeletedChecklistsByTaskId = ConcurrentHashMap<String, List<String>>()
+
+    private fun tr(en: String, de: String, fr: String, it: String, es: String): String {
+        return when (Locale.getDefault().language.lowercase(Locale.ROOT)) {
+            "de" -> de
+            "fr" -> fr
+            "it" -> it
+            "es" -> es
+            else -> en
+        }
     }
 
     private fun endOfTodayEpochMillis(): Long {
@@ -219,6 +240,10 @@ class ThingsRepository @Inject constructor(
 
     fun observeAllTasksRaw(): Flow<List<TaskEntity>> =
         database.taskDao().observeAllTasksRaw()
+            .catch { emit(emptyList()) }
+
+    fun observeAllProjectsRaw(): Flow<List<ProjectEntity>> =
+        database.projectDao().observeAllProjectsRaw()
             .catch { emit(emptyList()) }
 
     suspend fun getTaskEntityById(taskId: String): TaskEntity? =
@@ -395,11 +420,34 @@ class ThingsRepository @Inject constructor(
         }
 
         if (existing?.status == TaskStatus.OPEN && status == TaskStatus.COMPLETED && recurrenceRule != null) {
-            spawnNextRecurrenceInstance(entity, recurrenceRule, tagIds, now)
+            spawnNextRecurrenceInstance(entity, recurrenceRule, tagIds, now)?.let { nextId ->
+                lastSpawnedRecurringTaskByCompletedId[id] = nextId
+            }
+        } else if (existing != null && existing.status != TaskStatus.OPEN && status == TaskStatus.OPEN) {
+            softDeleteSpawnedRecurrenceIfAny(id, now)
         }
 
         syncRepository.triggerBackgroundSync()
         return id
+    }
+
+    private suspend fun softDeleteSpawnedRecurrenceIfAny(completedTaskId: String, now: Long) {
+        val spawnedNextId = lastSpawnedRecurringTaskByCompletedId.remove(completedTaskId) ?: return
+        val spawnedTask = database.taskDao().getById(spawnedNextId) ?: return
+        if (!spawnedTask.isDeleted) {
+            reminderScheduler.cancelReminder(spawnedNextId)
+            database.withTransaction {
+                database.checklistDao().softDeleteByTaskId(spawnedNextId, now)
+                database.attachmentDao().softDeleteByTaskId(spawnedNextId, now)
+                database.taskDao().upsert(
+                    spawnedTask.copy(
+                        isDeleted = true,
+                        updatedAt = now,
+                        isDirty = true
+                    )
+                )
+            }
+        }
     }
 
     private suspend fun spawnNextRecurrenceInstance(
@@ -407,7 +455,7 @@ class ThingsRepository @Inject constructor(
         rule: RecurrenceRule,
         tagIds: List<String>,
         now: Long
-    ) {
+    ): String? {
         val zone = ZoneId.systemDefault()
         val safeInterval = rule.interval.coerceIn(1, 3650).toLong()
         val baseEpoch = when (rule.mode) {
@@ -453,7 +501,7 @@ class ThingsRepository @Inject constructor(
         val nextWhenEpoch = nextDate.atStartOfDay(zone).toInstant().toEpochMilli()
 
         if (rule.endDateEpochMillis != null && nextWhenEpoch > rule.endDateEpochMillis) {
-            return
+            return null
         }
 
         val nextDeadlineEpoch = if (completedTask.deadline != null && completedTask.whenDate != null) {
@@ -511,6 +559,7 @@ class ThingsRepository @Inject constructor(
             }
             database.checklistDao().upsertAll(clonedSubtasks)
         }
+        return nextTaskId
     }
 
     suspend fun updateTaskTitleAndNotes(taskId: String, newTitle: String, newNotes: String) {
@@ -635,8 +684,12 @@ class ThingsRepository @Inject constructor(
             val rule = runCatching { json.decodeFromString<RecurrenceRule>(existing.recurrenceRuleJson) }.getOrNull()
             if (rule != null) {
                 val tagIds = decodeStringList(existing.tagIdsJson)
-                spawnNextRecurrenceInstance(updated, rule, tagIds, now)
+                spawnNextRecurrenceInstance(updated, rule, tagIds, now)?.let { nextId ->
+                    lastSpawnedRecurringTaskByCompletedId[taskId] = nextId
+                }
             }
+        } else if (existing.status != TaskStatus.OPEN && newStatus == TaskStatus.OPEN) {
+            softDeleteSpawnedRecurrenceIfAny(taskId, now)
         }
 
         syncRepository.triggerBackgroundSync()
@@ -835,7 +888,7 @@ class ThingsRepository @Inject constructor(
                         createdAt = now,
                         updatedAt = now,
                         isDeleted = false,
-                        isDirty = true
+                        isDirty = false
                     ),
                     AreaEntity(
                         id = "area-home-002",
@@ -845,7 +898,7 @@ class ThingsRepository @Inject constructor(
                         createdAt = now,
                         updatedAt = now,
                         isDeleted = false,
-                        isDirty = true
+                        isDirty = false
                     )
                 )
             )
@@ -873,10 +926,32 @@ class ThingsRepository @Inject constructor(
 
     suspend fun createArea(title: String): Result<String> {
         val trimmed = title.trim()
-        if (trimmed.isEmpty()) return Result.failure(IllegalArgumentException("Bereichsname darf nicht leer sein."))
+        if (trimmed.isEmpty()) {
+            return Result.failure(
+                IllegalArgumentException(
+                    tr(
+                        en = "Area name cannot be empty.",
+                        de = "Bereichsname darf nicht leer sein.",
+                        fr = "Le nom du domaine ne peut pas être vide.",
+                        it = "Il nome dell'area non può essere vuoto.",
+                        es = "El nombre del área no puede estar vacío."
+                    )
+                )
+            )
+        }
         val activeAreas = database.areaDao().getActiveAreasList()
         if (activeAreas.size >= MAX_AREAS) {
-            return Result.failure(IllegalStateException("Maximal $MAX_AREAS Bereiche möglich."))
+            return Result.failure(
+                IllegalStateException(
+                    tr(
+                        en = "Maximum of $MAX_AREAS areas allowed.",
+                        de = "Maximal $MAX_AREAS Bereiche möglich.",
+                        fr = "Maximum de $MAX_AREAS domaines autorisés.",
+                        it = "Massimo $MAX_AREAS aree consentite.",
+                        es = "Máximo de $MAX_AREAS áreas permitidas."
+                    )
+                )
+            )
         }
         val now = System.currentTimeMillis()
         val maxSort = activeAreas.maxOfOrNull { it.sortOrder } ?: 0.0
@@ -1067,9 +1142,21 @@ class ThingsRepository @Inject constructor(
     suspend fun softDeleteProject(projectId: String) {
         val existing = database.projectDao().getById(projectId) ?: return
         val now = System.currentTimeMillis()
+        val projAttachments = database.attachmentDao().getAllByProjectId(projectId)
+        projAttachments.forEach { syncRepository.deleteLocalAttachmentFile(it.localRelativePath) }
+
         database.withTransaction {
-            database.taskDao().clearProjectFromTasks(projectId, now)
+            val openTasks = database.taskDao().getOpenTasksByProject(projectId)
+            detachedTasksByDeletedProjectId[projectId] = openTasks.map { task ->
+                DetachedProjectTaskSnapshot(
+                    taskId = task.id,
+                    projectId = projectId,
+                    headingId = task.headingId
+                )
+            }
+            database.taskDao().clearProjectFromOpenTasks(projectId, now)
             database.headingDao().softDeleteHeadingsForProject(projectId, now)
+            database.attachmentDao().softDeleteByProjectId(projectId, now)
             database.projectDao().upsert(
                 existing.copy(
                     isDeleted = true,
@@ -1312,13 +1399,21 @@ class ThingsRepository @Inject constructor(
         val existing = database.taskDao().getById(taskId) ?: return
         val now = System.currentTimeMillis()
         reminderScheduler.cancelReminder(taskId)
-        database.taskDao().upsert(
-            existing.copy(
-                isDeleted = true,
-                updatedAt = now,
-                isDirty = true
+        val taskAttachments = database.attachmentDao().getAllByTaskId(taskId)
+        taskAttachments.forEach { syncRepository.deleteLocalAttachmentFile(it.localRelativePath) }
+
+        database.withTransaction {
+            cascadeDeletedChecklistsByTaskId[taskId] = database.checklistDao().getActiveChecklistIdsByTaskId(taskId)
+            database.checklistDao().softDeleteByTaskId(taskId, now)
+            database.attachmentDao().softDeleteByTaskId(taskId, now)
+            database.taskDao().upsert(
+                existing.copy(
+                    isDeleted = true,
+                    updatedAt = now,
+                    isDirty = true
+                )
             )
-        )
+        }
         syncRepository.triggerBackgroundSync()
     }
 
@@ -1344,7 +1439,13 @@ class ThingsRepository @Inject constructor(
             updatedAt = now,
             isDirty = true
         )
-        database.taskDao().upsert(restored)
+        database.withTransaction {
+            database.taskDao().upsert(restored)
+            val checklistIdsToRestore = cascadeDeletedChecklistsByTaskId.remove(taskId).orEmpty()
+            if (checklistIdsToRestore.isNotEmpty()) {
+                database.checklistDao().restoreChecklistItemsByIds(checklistIdsToRestore, now)
+            }
+        }
         if (restored.status == TaskStatus.OPEN && restored.reminderTime != null && restored.reminderTime > now) {
             reminderScheduler.scheduleExactReminder(taskId, restored.title, restored.reminderTime)
         }
@@ -1357,6 +1458,7 @@ class ThingsRepository @Inject constructor(
         val activeArea = existing.areaId?.let { aId ->
             database.areaDao().getById(aId)?.takeIf { !it.isDeleted }
         }
+        val snapshots = detachedTasksByDeletedProjectId.remove(projectId).orEmpty()
         database.withTransaction {
             database.headingDao().restoreHeadingsForProject(projectId, now)
             database.projectDao().upsert(
@@ -1367,6 +1469,36 @@ class ThingsRepository @Inject constructor(
                     isDirty = true
                 )
             )
+            if (snapshots.isNotEmpty()) {
+                val activeHeadingIds = database.headingDao()
+                    .getHeadingsForProjectList(projectId)
+                    .mapTo(HashSet()) { it.id }
+                for (snap in snapshots) {
+                    val currentTask = database.taskDao().getById(snap.taskId) ?: continue
+                    if (!currentTask.isDeleted && currentTask.projectId == null) {
+                        val restoredHeadingId = snap.headingId?.takeIf { it in activeHeadingIds }
+                        val restoredSchedule = if (
+                            currentTask.scheduleState == ScheduleState.INBOX &&
+                            currentTask.whenDate == null &&
+                            currentTask.recurrenceRuleJson == null
+                        ) {
+                            ScheduleState.ANYTIME
+                        } else {
+                            currentTask.scheduleState
+                        }
+                        database.taskDao().upsert(
+                            currentTask.copy(
+                                projectId = projectId,
+                                headingId = restoredHeadingId,
+                                areaId = activeArea?.id ?: currentTask.areaId,
+                                scheduleState = restoredSchedule,
+                                updatedAt = now,
+                                isDirty = true
+                            )
+                        )
+                    }
+                }
+            }
         }
         syncRepository.triggerBackgroundSync()
     }
@@ -1385,12 +1517,8 @@ class ThingsRepository @Inject constructor(
         if (taskId.isNullOrBlank() && projectId.isNullOrBlank()) return null
         val now = System.currentTimeMillis()
         val id = UUID.randomUUID().toString()
-        val safeFileName = fileName.trim().ifEmpty { "attachment" }
-            .replace(Regex("[^a-zA-Z0-9._-]"), "_")
-            .take(80)
-            .ifEmpty { "file" }
-        val localRelativePath = "attachments/${id}_${safeFileName}"
-        val file = syncRepository.resolveAttachmentFile(localRelativePath)
+        val localRelativePath = syncRepository.buildSafeLocalAttachmentPath(id, fileName)
+        val file = runCatching { syncRepository.resolveAttachmentFile(localRelativePath) }.getOrNull() ?: return null
         runCatching {
             file.writeBytes(rawBytes)
         }.onFailure {
@@ -1401,7 +1529,7 @@ class ThingsRepository @Inject constructor(
             id = id,
             taskId = taskId?.takeIf { it.isNotBlank() },
             projectId = projectId?.takeIf { it.isNotBlank() },
-            fileName = fileName.trim().ifEmpty { safeFileName },
+            fileName = fileName.trim().ifEmpty { file.name },
             mimeType = mimeType.trim().ifEmpty { "application/octet-stream" },
             sizeBytes = rawBytes.size.toLong(),
             localRelativePath = localRelativePath,
@@ -1423,62 +1551,122 @@ class ThingsRepository @Inject constructor(
         syncRepository.triggerBackgroundSync()
     }
 
-    suspend fun permanentlyDeleteTask(taskId: String) {
-        reminderScheduler.cancelReminder(taskId)
-        val taskAttachments = database.attachmentDao().getForTaskSync(taskId)
+    private suspend fun purgeOrCompactTaskInternal(
+        task: TaskEntity,
+        keepSyncTombstones: Boolean,
+        now: Long
+    ) {
+        reminderScheduler.cancelReminder(task.id)
+        cascadeDeletedChecklistsByTaskId.remove(task.id)
+        val taskAttachments = database.attachmentDao().getAllByTaskId(task.id)
         taskAttachments.forEach { syncRepository.deleteLocalAttachmentFile(it.localRelativePath) }
+
+        if (keepSyncTombstones) {
+            taskAttachments.forEach { database.attachmentDao().compactTombstoneById(it.id, now) }
+            database.checklistDao().compactTombstonesByTaskId(task.id, now)
+            database.taskDao().hardDeleteTaskTagsByTaskIds(listOf(task.id))
+            database.taskDao().upsert(
+                task.copy(
+                    title = "",
+                    notes = "",
+                    tagIdsJson = "[]",
+                    reminderTime = null,
+                    isDeleted = true,
+                    updatedAt = now,
+                    isDirty = true
+                )
+            )
+        } else {
+            database.attachmentDao().hardDeleteByTaskIds(listOf(task.id))
+            database.checklistDao().hardDeleteByTaskIds(listOf(task.id))
+            database.taskDao().hardDeleteTaskTagsByTaskIds(listOf(task.id))
+            database.taskDao().hardDeleteByIds(listOf(task.id))
+        }
+    }
+
+    private suspend fun purgeOrCompactProjectInternal(
+        project: ProjectEntity,
+        keepSyncTombstones: Boolean,
+        now: Long
+    ) {
+        detachedTasksByDeletedProjectId.remove(project.id)
+        val projAttachments = database.attachmentDao().getAllByProjectId(project.id)
+        projAttachments.forEach { syncRepository.deleteLocalAttachmentFile(it.localRelativePath) }
+
+        database.taskDao().clearProjectFromOpenTasks(project.id, now)
+        if (keepSyncTombstones) {
+            projAttachments.forEach { database.attachmentDao().compactTombstoneById(it.id, now) }
+            database.headingDao().compactTombstonesByProjectId(project.id, now)
+            database.projectDao().hardDeleteProjectTagsByIds(listOf(project.id))
+            database.projectDao().upsert(
+                project.copy(
+                    title = "",
+                    notes = "",
+                    tagIdsJson = "[]",
+                    isDeleted = true,
+                    updatedAt = now,
+                    isDirty = true
+                )
+            )
+        } else {
+            database.taskDao().clearProjectFromTasks(project.id, now)
+            database.attachmentDao().hardDeleteByProjectIds(listOf(project.id))
+            database.headingDao().hardDeleteHeadingsForProjects(listOf(project.id))
+            database.projectDao().hardDeleteProjectTagsByIds(listOf(project.id))
+            database.projectDao().hardDeleteByIds(listOf(project.id))
+        }
+    }
+
+    suspend fun permanentlyDeleteTask(taskId: String) {
+        val existing = database.taskDao().getById(taskId)
+        if (existing == null) {
+            reminderScheduler.cancelReminder(taskId)
+            return
+        }
+        val now = System.currentTimeMillis()
+        val keepSyncTombstones = !syncRepository.isLocalOnlyDbModeEnabled() && syncRepository.hasActiveCloudAccount()
         database.withTransaction {
-            database.attachmentDao().hardDeleteByTaskIds(listOf(taskId))
-            database.checklistDao().hardDeleteByTaskIds(listOf(taskId))
-            database.taskDao().hardDeleteTaskTagsByTaskIds(listOf(taskId))
-            database.taskDao().hardDeleteByIds(listOf(taskId))
+            purgeOrCompactTaskInternal(existing, keepSyncTombstones, now)
+        }
+        if (keepSyncTombstones) {
+            syncRepository.triggerBackgroundSync()
         }
     }
 
     suspend fun permanentlyDeleteProject(projectId: String) {
+        val existing = database.projectDao().getById(projectId) ?: return
         val now = System.currentTimeMillis()
-        val projAttachments = database.attachmentDao().getForProjectSync(projectId)
-        projAttachments.forEach { syncRepository.deleteLocalAttachmentFile(it.localRelativePath) }
+        val keepSyncTombstones = !syncRepository.isLocalOnlyDbModeEnabled() && syncRepository.hasActiveCloudAccount()
         database.withTransaction {
-            database.attachmentDao().hardDeleteByProjectIds(listOf(projectId))
-            database.taskDao().clearProjectFromTasks(projectId, now)
-            database.headingDao().hardDeleteHeadingsForProjects(listOf(projectId))
-            database.projectDao().hardDeleteProjectTagsByIds(listOf(projectId))
-            database.projectDao().hardDeleteByIds(listOf(projectId))
+            purgeOrCompactProjectInternal(existing, keepSyncTombstones, now)
+        }
+        if (keepSyncTombstones) {
+            syncRepository.triggerBackgroundSync()
         }
     }
 
     suspend fun emptyTrash() {
         val now = System.currentTimeMillis()
+        val keepSyncTombstones = !syncRepository.isLocalOnlyDbModeEnabled() && syncRepository.hasActiveCloudAccount()
+        var changed = false
         database.withTransaction {
             val deletedTasks = database.taskDao().getDeletedTasksList()
             if (deletedTasks.isNotEmpty()) {
-                val taskIds = deletedTasks.map { it.id }
-                taskIds.forEach { tId ->
-                    reminderScheduler.cancelReminder(tId)
-                    database.attachmentDao().getForTaskSync(tId).forEach {
-                        syncRepository.deleteLocalAttachmentFile(it.localRelativePath)
-                    }
+                changed = true
+                for (task in deletedTasks) {
+                    purgeOrCompactTaskInternal(task, keepSyncTombstones, now)
                 }
-                database.attachmentDao().hardDeleteByTaskIds(taskIds)
-                database.checklistDao().hardDeleteByTaskIds(taskIds)
-                database.taskDao().hardDeleteTaskTagsByTaskIds(taskIds)
-                database.taskDao().hardDeleteByIds(taskIds)
             }
             val deletedProjects = database.projectDao().getDeletedProjectsList()
             if (deletedProjects.isNotEmpty()) {
-                val projIds = deletedProjects.map { it.id }
-                projIds.forEach { pId ->
-                    database.taskDao().clearProjectFromTasks(pId, now)
-                    database.attachmentDao().getForProjectSync(pId).forEach {
-                        syncRepository.deleteLocalAttachmentFile(it.localRelativePath)
-                    }
+                changed = true
+                for (project in deletedProjects) {
+                    purgeOrCompactProjectInternal(project, keepSyncTombstones, now)
                 }
-                database.attachmentDao().hardDeleteByProjectIds(projIds)
-                database.headingDao().hardDeleteHeadingsForProjects(projIds)
-                database.projectDao().hardDeleteProjectTagsByIds(projIds)
-                database.projectDao().hardDeleteByIds(projIds)
             }
+        }
+        if (changed && keepSyncTombstones) {
+            syncRepository.triggerBackgroundSync()
         }
     }
 
@@ -1694,7 +1882,21 @@ class ThingsRepository @Inject constructor(
         areaId: String? = null,
         headingsWithTasks: List<Pair<String, List<String>>>
     ): String {
-        val trimmedTitle = title.trim().ifEmpty { "Neues Projekt" }
+        val defaultProjTitle = tr(
+            en = "New Project",
+            de = "Neues Projekt",
+            fr = "Nouveau projet",
+            it = "Nuovo progetto",
+            es = "Nuevo proyecto"
+        )
+        val sectionPrefix = tr(
+            en = "Section",
+            de = "Abschnitt",
+            fr = "Section",
+            it = "Sezione",
+            es = "Sección"
+        )
+        val trimmedTitle = title.trim().ifEmpty { defaultProjTitle }
         val now = System.currentTimeMillis()
         val projectId = UUID.randomUUID().toString()
         val todayEpoch = LocalDate.now(ZoneId.systemDefault())
@@ -1728,7 +1930,7 @@ class ThingsRepository @Inject constructor(
                     HeadingEntity(
                         id = headingId,
                         projectId = projectId,
-                        title = headingTitle.trim().ifEmpty { "Abschnitt ${hIndex + 1}" },
+                        title = headingTitle.trim().ifEmpty { "$sectionPrefix ${hIndex + 1}" },
                         sortOrder = (hIndex + 1) * 1000.0,
                         isArchived = false,
                         createdAt = now,
@@ -1795,11 +1997,15 @@ class ThingsRepository @Inject constructor(
             val deadlineStr = t.deadline?.let { epoch ->
                 runCatching { Instant.ofEpochMilli(epoch).atZone(zone).toLocalDate().toString() }.getOrDefault("")
             } ?: ""
-            val tagsStr = item.tags.filter { !it.isDeleted }.joinToString("; ") { it.title }
-            val checklistStr = item.checklistItems
-                .filter { !it.isDeleted }
-                .sortedBy { it.sortOrder }
-                .joinToString("; ") { sub -> (if (sub.isCompleted) "[x] " else "[ ] ") + sub.title }
+            val tagsStr = CsvParserUtils.encodeSemicolonList(
+                item.tags.filter { !it.isDeleted }.map { it.title }
+            )
+            val checklistStr = CsvParserUtils.encodeSemicolonList(
+                item.checklistItems
+                    .filter { !it.isDeleted }
+                    .sortedBy { it.sortOrder }
+                    .map { sub -> (if (sub.isCompleted) "[x] " else "[ ] ") + sub.title }
+            )
 
             val row = listOf(
                 CsvParserUtils.escapeCsvField(t.title),
@@ -1953,7 +2159,7 @@ class ThingsRepository @Inject constructor(
                 // Match or create Tags inside transaction without triggering per-tag network sync
                 val tagIds = mutableListOf<String>()
                 if (rawTags.isNotEmpty()) {
-                    val tagNames = rawTags.split(";", "|").map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+                    val tagNames = CsvParserUtils.decodeSemicolonList(rawTags, allowPipeSeparator = true).distinct()
                     for (tName in tagNames) {
                         val matchTag = existingTags.firstOrNull { it.title.equals(tName, ignoreCase = true) }
                         if (matchTag != null) {
@@ -2013,7 +2219,7 @@ class ThingsRepository @Inject constructor(
                 database.taskDao().upsertTaskWithTags(taskEntity, tagIds)
 
                 if (rawChecklist.isNotEmpty()) {
-                    val subParts = rawChecklist.split(";").map { it.trim() }.filter { it.isNotEmpty() }
+                    val subParts = CsvParserUtils.decodeSemicolonList(rawChecklist)
                     val subEntities = subParts.mapIndexed { sIdx, part ->
                         val completed = part.startsWith("[x]", ignoreCase = true)
                         val cleanSubTitle = part
@@ -2066,11 +2272,13 @@ class ThingsRepository @Inject constructor(
         database.taskDao().countActiveNonSampleTasks(DatabaseSeeder.SAMPLE_TASK_IDS.toList())
     }.getOrDefault(0)
 
+    suspend fun hasLocalUserCreatedTasks(): Boolean = countNonSampleTasks() > 0
+
     /**
      * Hard-deletes all seeded initial sample tasks (and any sample checklists, headings, projects, or tags
      * that do not contain user-created tasks) locally in Room without creating `isDeleted` cloud tombstones.
      * When [markRemainingDirtyForMerge] is true, marks remaining user-created items `isDirty = true` so they
-     * merge cleanly with the user's cloud account.
+     * merge cleanly with the user's cloud account without untouched seeded areas clobbering cloud areas.
      */
     suspend fun purgeSampleDataLocally(markRemainingDirtyForMerge: Boolean = false) {
         val sampleTaskIds = DatabaseSeeder.SAMPLE_TASK_IDS.toList()
@@ -2105,10 +2313,43 @@ class ThingsRepository @Inject constructor(
             }
             if (unusedSampleTags.isNotEmpty()) {
                 database.tagDao().hardDeleteByIds(unusedSampleTags)
+                val purgedTagSet = unusedSampleTags.toHashSet()
+                val cleanedAreas = database.areaDao().getActiveAreasList().mapNotNull { area ->
+                    val existingTagIds = decodeStringList(area.tagIdsJson)
+                    val filteredTagIds = existingTagIds.filterNot { it in purgedTagSet }
+                    if (filteredTagIds.size != existingTagIds.size) {
+                        area.copy(tagIdsJson = json.encodeToString(filteredTagIds))
+                    } else {
+                        null
+                    }
+                }
+                if (cleanedAreas.isNotEmpty()) {
+                    database.areaDao().upsertAll(cleanedAreas)
+                }
             }
 
             if (markRemainingDirtyForMerge) {
-                database.areaDao().markAllActiveDirty()
+                val areasToMarkDirty = database.areaDao().getActiveAreasList().mapNotNull { area ->
+                    val isSampleArea = area.id in DatabaseSeeder.SAMPLE_AREA_IDS
+                    val defaultTitle = when (area.id) {
+                        "area-work-001" -> "Work"
+                        "area-home-002" -> "Home"
+                        else -> null
+                    }
+                    val areaTags = decodeStringList(area.tagIdsJson)
+                    val modifiedByUser = !isSampleArea ||
+                        area.isDirty ||
+                        (defaultTitle != null && area.title != defaultTitle) ||
+                        areaTags.any { it !in DatabaseSeeder.SAMPLE_TAG_IDS }
+                    if (modifiedByUser && !area.isDirty) {
+                        area.copy(isDirty = true)
+                    } else {
+                        null
+                    }
+                }
+                if (areasToMarkDirty.isNotEmpty()) {
+                    database.areaDao().upsertAll(areasToMarkDirty)
+                }
                 database.projectDao().markAllActiveDirty()
                 database.headingDao().markAllActiveDirty()
                 database.taskDao().markAllActiveDirty()
@@ -2133,6 +2374,7 @@ class ThingsRepository @Inject constructor(
 
         val existingAttachments = database.attachmentDao().getAllNonDeletedAttachmentsList()
         existingAttachments.forEach { syncRepository.deleteLocalAttachmentFile(it.localRelativePath) }
+        syncRepository.clearAllLocalAttachmentFiles()
 
         database.withTransaction {
             database.attachmentDao().hardDeleteAll()
@@ -2489,6 +2731,9 @@ class ThingsRepository @Inject constructor(
                 )
             }
 
+        // Clear existing local attachment files before writing restored backup attachments
+        syncRepository.clearAllLocalAttachmentFiles()
+
         val restoredAttachments = payload.attachments
             .filter { att ->
                 att.id.isNotBlank() &&
@@ -2497,8 +2742,7 @@ class ThingsRepository @Inject constructor(
             }
             .distinctBy { it.id }
             .map { att ->
-                val safeName = att.fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(80).ifEmpty { "file" }
-                val relPath = att.localRelativePath.takeIf { it.isNotBlank() } ?: "attachments/${att.id}_${safeName}"
+                val relPath = syncRepository.buildSafeLocalAttachmentPath(att.id, att.fileName)
                 val writtenBytes = if (att.dataBase64.isNotBlank()) {
                     syncRepository.writeAttachmentBase64(relPath, att.dataBase64)
                 } else {
@@ -2673,6 +2917,41 @@ class ThingsRepository @Inject constructor(
 }
 
 internal object CsvParserUtils {
+    fun encodeSemicolonList(items: List<String>): String {
+        return items.joinToString("; ") { item ->
+            item.replace("\\", "\\\\").replace(";", "\\;")
+        }
+    }
+
+    fun decodeSemicolonList(raw: String, allowPipeSeparator: Boolean = false): List<String> {
+        if (raw.isBlank()) return emptyList()
+        val items = mutableListOf<String>()
+        val sb = StringBuilder()
+        var i = 0
+        while (i < raw.length) {
+            val ch = raw[i]
+            if (ch == '\\' && i + 1 < raw.length) {
+                val next = raw[i + 1]
+                if (next == ';' || next == '\\' || (allowPipeSeparator && next == '|')) {
+                    sb.append(next)
+                    i += 2
+                    continue
+                }
+            }
+            if (ch == ';' || (allowPipeSeparator && ch == '|')) {
+                val token = sb.toString().trim()
+                if (token.isNotEmpty()) items.add(token)
+                sb.clear()
+            } else {
+                sb.append(ch)
+            }
+            i++
+        }
+        val tail = sb.toString().trim()
+        if (tail.isNotEmpty()) items.add(tail)
+        return items
+    }
+
     fun escapeCsvField(value: String): String {
         if (
             value.contains(",") ||
@@ -2774,7 +3053,7 @@ internal object CsvParserUtils {
             }
         }
 
-        // 3. DD/MM/YYYY or YYYY/MM/DD
+        // 3. DD/MM/YYYY, MM/DD/YYYY (when middle token > 12), or YYYY/MM/DD
         if (trimmed.contains("/")) {
             runCatching {
                 val parts = trimmed.split("/")
@@ -2787,7 +3066,11 @@ internal object CsvParserUtils {
                         LocalDate.of(y, p1, p2)
                     } else {
                         val y = normalizeCsvYear(p2) ?: return@runCatching
-                        LocalDate.of(y, p1, p0)
+                        if (p1 > 12 && p0 in 1..12) {
+                            LocalDate.of(y, p0, p1)
+                        } else {
+                            LocalDate.of(y, p1, p0)
+                        }
                     }
                     return ld.atStartOfDay(zone).toInstant().toEpochMilli()
                 }

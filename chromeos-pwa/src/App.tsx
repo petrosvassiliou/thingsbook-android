@@ -80,7 +80,11 @@ import {
   savePreferences,
   type DataSnapshot
 } from './data/localDb';
-import { checkForSwAndReleaseUpdates } from './data/pwaUpdater';
+import {
+  applyPendingSwUpdate,
+  checkForSwAndReleaseUpdates,
+  type UpdateCheckResult
+} from './data/pwaUpdater';
 import { checkDueRemindersAndDigest } from './data/reminderRuntime';
 import { TRANSLATIONS, resolveLanguage } from './i18n/translations';
 import { AttachmentsStrip } from './components/AttachmentStrip';
@@ -184,6 +188,7 @@ export const App: React.FC = () => {
   const [collapsedHeadingIds, setCollapsedHeadingIds] = useState<Set<string>>(new Set());
   const [editingHeadingId, setEditingHeadingId] = useState<string | null>(null);
   const [editingHeadingTitle, setEditingHeadingTitle] = useState('');
+  const cancelingHeadingEditRef = useRef(false);
   const [dragOverHeadingId, setDragOverHeadingId] = useState<string | null>(null);
 
   // Area inline title editing & Project area dropdown
@@ -237,7 +242,7 @@ export const App: React.FC = () => {
   const [reflectionError, setReflectionError] = useState<string | null>(null);
   const workspaceScrollRef = useRef<HTMLDivElement | null>(null);
 
-  // ChromeOS Install Prompt & Toast
+  // ChromeOS Install Prompt, Auto-Update State & Toast
   const [deferredInstallPrompt, setDeferredInstallPrompt] =
     useState<BeforeInstallPromptEvent | null>(null);
   const [isStandalonePwa, setIsStandalonePwa] = useState<boolean>(() =>
@@ -245,6 +250,7 @@ export const App: React.FC = () => {
       ? window.matchMedia('(display-mode: standalone)').matches
       : false
   );
+  const [availableUpdate, setAvailableUpdate] = useState<UpdateCheckResult | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   const lang: SupportedLang = useMemo(() => resolveLanguage(prefs.language), [prefs.language]);
@@ -264,7 +270,10 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (!undoBanner) return;
-    const timer = window.setTimeout(() => setUndoBanner(null), 5500);
+    const timer = window.setTimeout(() => {
+      setUndoBanner(null);
+      localDb.clearUndoSnapshot();
+    }, 5500);
     return () => window.clearTimeout(timer);
   }, [undoBanner]);
 
@@ -472,7 +481,11 @@ export const App: React.FC = () => {
     });
 
     if (prefs.autoCheckUpdatesEnabled) {
-      void checkForSwAndReleaseUpdates();
+      void checkForSwAndReleaseUpdates().then((res) => {
+        if (res.hasUpdate) {
+          setAvailableUpdate(res);
+        }
+      });
     }
 
     const handleBeforeInstall = (e: Event) => {
@@ -735,12 +748,12 @@ export const App: React.FC = () => {
   );
 
   const deletedTasks = useMemo(
-    () => snapshot.tasks.filter((tk) => tk.isDeleted),
+    () => snapshot.tasks.filter((tk) => tk.isDeleted && !tk.purgedFromTrash),
     [snapshot.tasks]
   );
 
   const deletedProjects = useMemo(
-    () => snapshot.projects.filter((p) => p.isDeleted),
+    () => snapshot.projects.filter((p) => p.isDeleted && !p.purgedFromTrash),
     [snapshot.projects]
   );
 
@@ -1522,15 +1535,15 @@ export const App: React.FC = () => {
             'LOGBOOK',
             'TRASH'
           ];
-          setActiveNav({ kind: 'smart', view: views[Number(lower) - 1] });
+          handleSelectNav({ kind: 'smart', view: views[Number(lower) - 1] });
           return;
         }
 
-        // Ctrl+<TagShortcut> toggles tag on expanded or selected tasks!
+        // Ctrl+<TagShortcut> toggles tag on expanded or selected tasks when not typing in an input!
         const targetIds = expandedTaskId
           ? [expandedTaskId]
           : selectedTaskIds;
-        if (targetIds.length > 0 && lower.length === 1) {
+        if (!inInput && targetIds.length > 0 && lower.length === 1) {
           const matchedTag = snapshot.tags.find(
             (tg) =>
               !tg.isDeleted &&
@@ -1580,6 +1593,7 @@ export const App: React.FC = () => {
     selectedTaskIds,
     mobileDrawerOpen,
     activeNav,
+    handleSelectNav,
     createNewTodoInCurrentContext,
     handleDuplicateTask,
     handleDuplicateProject,
@@ -2028,6 +2042,18 @@ export const App: React.FC = () => {
                 }`}
               />
             </button>
+
+            {availableUpdate?.hasUpdate && (
+              <button
+                type="button"
+                className="chip-btn active"
+                data-testid="topbar-update-available-btn"
+                title={`${t.settingsApplyUpdateBtn} (v${availableUpdate.latestVersion})`}
+                onClick={() => void applyPendingSwUpdate()}
+              >
+                <span>v{availableUpdate.latestVersion}</span>
+              </button>
+            )}
 
             {/* Pinned Far-Right Settings Icon */}
             <button
@@ -3102,6 +3128,10 @@ export const App: React.FC = () => {
                     };
 
                     const commitHeadingEdit = async () => {
+                      if (cancelingHeadingEditRef.current) {
+                        cancelingHeadingEditRef.current = false;
+                        return;
+                      }
                       const clean = editingHeadingTitle.trim();
                       if (!clean) {
                         if (!hd.title.trim()) {
@@ -3178,6 +3208,10 @@ export const App: React.FC = () => {
                                   void commitHeadingEdit();
                                 } else if (e.key === 'Escape') {
                                   e.stopPropagation();
+                                  cancelingHeadingEditRef.current = true;
+                                  window.setTimeout(() => {
+                                    cancelingHeadingEditRef.current = false;
+                                  }, 0);
                                   if (!hd.title.trim()) {
                                     void localDb.deleteHeading(hd.id);
                                   }
@@ -3595,6 +3629,8 @@ export const App: React.FC = () => {
           onRefreshCalendars={handleRefreshCalendars}
           onOpenAuthModal={() => setAuthModalOpen(true)}
           onOpenNotificationsModal={() => setNotificationsModalOpen(true)}
+          initialUpdateInfo={availableUpdate}
+          onUpdateInfoChange={setAvailableUpdate}
           onToast={showToast}
           onClose={() => setSettingsModalOpen(false)}
         />
@@ -3619,15 +3655,35 @@ export const App: React.FC = () => {
           draft={quickShareDraft}
           projects={snapshot.projects}
           areas={snapshot.areas}
+          lang={lang}
           t={t}
           onClose={() => setQuickShareDraft(null)}
-          onSmartParseWithGemini={async (rawText) => {
+          onToast={showToast}
+          onSmartParseWithGemini={async (rawText, destination) => {
             const parsed = await parseBrainDumpToTasks(rawText, lang, prefs.geminiApiKey);
             if (parsed.length === 0) return;
             const todayStart = startOfDayEpoch();
+            let lastCreatedId: string | undefined;
             for (const dto of parsed) {
-              const whenDate =
-                dto.whenDaysOffset != null ? addDaysLocal(todayStart, dto.whenDaysOffset) : null;
+              const hasExplicitContainer =
+                destination.projectId != null || destination.areaId != null;
+              const useDestSchedule =
+                !hasExplicitContainer &&
+                destination.scheduleState !== 'INBOX' &&
+                dto.scheduleState === 'TODAY' &&
+                dto.whenDaysOffset === 0;
+              const resolvedSchedule = useDestSchedule
+                ? destination.scheduleState
+                : hasExplicitContainer && dto.scheduleState === 'INBOX'
+                  ? 'ANYTIME'
+                  : dto.scheduleState;
+              const whenDate = useDestSchedule
+                ? resolvedSchedule === 'TODAY' || resolvedSchedule === 'THIS_EVENING'
+                  ? todayStart
+                  : null
+                : dto.whenDaysOffset != null
+                  ? addDaysLocal(todayStart, dto.whenDaysOffset)
+                  : null;
               const deadline =
                 dto.deadlineDaysOffset != null
                   ? addDaysLocal(todayStart, dto.deadlineDaysOffset)
@@ -3635,16 +3691,25 @@ export const App: React.FC = () => {
               const created = await localDb.upsertTask({
                 title: dto.title,
                 notes: dto.notes,
-                scheduleState: dto.scheduleState,
+                scheduleState: resolvedSchedule,
                 whenDate,
-                deadline
+                deadline,
+                projectId: destination.projectId,
+                areaId: destination.projectId ? null : destination.areaId
               });
+              lastCreatedId = created.id;
               if (dto.checklist.length > 0) {
                 await localDb.addChecklistItems(created.id, dto.checklist);
               }
             }
             setQuickShareDraft(null);
-            handleSelectNav({ kind: 'smart', view: 'TODAY' });
+            if (destination.projectId) {
+              handleSelectNav({ kind: 'project', projectId: destination.projectId }, lastCreatedId);
+            } else if (destination.areaId) {
+              handleSelectNav({ kind: 'area', areaId: destination.areaId }, lastCreatedId);
+            } else {
+              handleSelectNav({ kind: 'smart', view: 'TODAY' });
+            }
             showToast(`✨ +${parsed.length} ${t.entityTodos}`);
           }}
           onSave={async (payload) => {
@@ -3737,7 +3802,10 @@ export const App: React.FC = () => {
             setUndoBanner(null);
             void localDb.performUndo();
           }}
-          onDismiss={() => setUndoBanner(null)}
+          onDismiss={() => {
+            setUndoBanner(null);
+            localDb.clearUndoSnapshot();
+          }}
         />
       )}
 

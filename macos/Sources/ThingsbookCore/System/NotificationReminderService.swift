@@ -62,6 +62,39 @@ public final class NotificationReminderService: NSObject, UNUserNotificationCent
         }
     }
 
+    public func cancelTaskReminder(taskId: String) {
+        cancelTaskReminders(taskIds: [taskId])
+    }
+
+    public func cancelTaskReminders(taskIds: [String]) {
+        guard isAppBundleAvailable, !taskIds.isEmpty else { return }
+        let center = UNUserNotificationCenter.current()
+        let ids = taskIds.map { "tb_rem_\($0)" }
+        center.removePendingNotificationRequests(withIdentifiers: ids)
+        center.removeDeliveredNotifications(withIdentifiers: ids)
+    }
+
+    public func syncAllTaskReminders(openTasks: [TaskItem], lang: AppLanguage) {
+        guard isAppBundleAvailable else { return }
+        let center = UNUserNotificationCenter.current()
+        let validIds = Set(
+            openTasks
+                .filter { $0.status == .open && !$0.isDeleted && $0.reminderTime != nil }
+                .map { "tb_rem_\($0.id)" }
+        )
+        center.getPendingNotificationRequests { requests in
+            let staleIds = requests
+                .map(\.identifier)
+                .filter { $0.hasPrefix("tb_rem_") && !validIds.contains($0) }
+            if !staleIds.isEmpty {
+                center.removePendingNotificationRequests(withIdentifiers: staleIds)
+            }
+        }
+        for task in openTasks where task.status == .open && !task.isDeleted && task.reminderTime != nil {
+            syncTaskReminder(task, lang: lang)
+        }
+    }
+
     public func syncTaskReminder(_ task: TaskItem, lang: AppLanguage) {
         guard isAppBundleAvailable else { return }
         let center = UNUserNotificationCenter.current()
@@ -70,7 +103,10 @@ public final class NotificationReminderService: NSObject, UNUserNotificationCent
 
         guard task.status == .open,
               !task.isDeleted,
-              let remMillis = task.reminderTime else { return }
+              let remMillis = task.reminderTime else {
+            center.removeDeliveredNotifications(withIdentifiers: [reqId])
+            return
+        }
 
         let fireDate = DateEpochConverter.date(fromMillis: remMillis)
         guard fireDate.timeIntervalSinceNow > 2 else { return }

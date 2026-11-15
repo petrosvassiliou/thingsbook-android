@@ -159,10 +159,13 @@ interface ProjectDao {
     @Query("UPDATE projects SET isDirty = 1 WHERE isDeleted = 0")
     suspend fun markAllActiveDirty()
 
-    @Query("SELECT * FROM projects WHERE isDeleted = 1 ORDER BY updatedAt DESC")
+    @Query("SELECT * FROM projects")
+    fun observeAllProjectsRaw(): Flow<List<ProjectEntity>>
+
+    @Query("SELECT * FROM projects WHERE isDeleted = 1 AND (title != '' OR notes != '') ORDER BY updatedAt DESC")
     fun observeDeletedProjects(): Flow<List<ProjectEntity>>
 
-    @Query("SELECT * FROM projects WHERE isDeleted = 1 ORDER BY updatedAt DESC")
+    @Query("SELECT * FROM projects WHERE isDeleted = 1 AND (title != '' OR notes != '') ORDER BY updatedAt DESC")
     suspend fun getDeletedProjectsList(): List<ProjectEntity>
 }
 
@@ -204,8 +207,11 @@ interface HeadingDao {
     @Query("UPDATE headings SET isDeleted = 1, updatedAt = :now, isDirty = 1 WHERE projectId = :projectId AND isDeleted = 0")
     suspend fun softDeleteHeadingsForProject(projectId: String, now: Long)
 
-    @Query("UPDATE headings SET isDeleted = 0, updatedAt = :now, isDirty = 1 WHERE projectId = :projectId AND isDeleted = 1")
+    @Query("UPDATE headings SET isDeleted = 0, updatedAt = :now, isDirty = 1 WHERE projectId = :projectId AND isDeleted = 1 AND title != ''")
     suspend fun restoreHeadingsForProject(projectId: String, now: Long)
+
+    @Query("UPDATE headings SET isDeleted = 1, isDirty = 1, title = '', updatedAt = :now WHERE projectId = :projectId")
+    suspend fun compactTombstonesByProjectId(projectId: String, now: Long)
 
     @Query("DELETE FROM headings WHERE projectId IN (:projectIds)")
     suspend fun hardDeleteHeadingsForProjects(projectIds: List<String>)
@@ -365,7 +371,7 @@ interface TaskDao {
      * Full-Text Search (SQLite FTS5 with unicode61 tokenizer) for Quick Find.
      */
     @Transaction
-    @RawQuery(observedEntities = [TaskEntity::class, ChecklistItemEntity::class, TagEntity::class, TaskTagCrossRef::class])
+    @RawQuery(observedEntities = [TaskEntity::class, ChecklistItemEntity::class, TagEntity::class, TaskTagCrossRef::class, AttachmentEntity::class])
     fun searchTasksFts5(query: SupportSQLiteQuery): Flow<List<TaskWithDetails>>
 
     @RawQuery(observedEntities = [ProjectEntity::class])
@@ -410,8 +416,17 @@ interface TaskDao {
     @Query("UPDATE tasks SET areaId = NULL, updatedAt = :now, isDirty = 1 WHERE areaId = :areaId")
     suspend fun clearAreaFromTasks(areaId: String, now: Long)
 
+    @Query("SELECT * FROM tasks WHERE projectId = :projectId AND isDeleted = 0 AND status = 'OPEN'")
+    suspend fun getOpenTasksByProject(projectId: String): List<TaskEntity>
+
+    @Query("SELECT * FROM tasks WHERE projectId = :projectId")
+    suspend fun getTasksByProjectAll(projectId: String): List<TaskEntity>
+
     @Query("UPDATE tasks SET projectId = NULL, headingId = NULL, updatedAt = :now, isDirty = 1 WHERE projectId = :projectId")
     suspend fun clearProjectFromTasks(projectId: String, now: Long)
+
+    @Query("UPDATE tasks SET projectId = NULL, headingId = NULL, updatedAt = :now, isDirty = 1 WHERE projectId = :projectId AND isDeleted = 0 AND status = 'OPEN'")
+    suspend fun clearProjectFromOpenTasks(projectId: String, now: Long)
 
     @Query("UPDATE tasks SET headingId = NULL, updatedAt = :now, isDirty = 1 WHERE headingId = :headingId")
     suspend fun clearHeadingFromTasks(headingId: String, now: Long)
@@ -445,8 +460,10 @@ interface TaskDao {
         WHERE isDeleted = 0
           AND status = 'OPEN'
           AND scheduleState = 'THIS_EVENING'
-          AND whenDate IS NOT NULL
-          AND whenDate < :startOfTodayMillis
+          AND (
+              (whenDate IS NOT NULL AND whenDate < :startOfTodayMillis)
+              OR (whenDate IS NULL AND updatedAt < :startOfTodayMillis)
+          )
         """
     )
     suspend fun rolloverYesterdayEveningTasksToToday(startOfTodayMillis: Long, now: Long): Int
@@ -527,10 +544,10 @@ interface TaskDao {
     suspend fun markAllActiveDirty()
 
     @Transaction
-    @Query("SELECT * FROM tasks WHERE isDeleted = 1 ORDER BY updatedAt DESC")
+    @Query("SELECT * FROM tasks WHERE isDeleted = 1 AND (title != '' OR notes != '') ORDER BY updatedAt DESC")
     fun observeDeletedTasks(): Flow<List<TaskWithDetails>>
 
-    @Query("SELECT * FROM tasks WHERE isDeleted = 1 ORDER BY updatedAt DESC")
+    @Query("SELECT * FROM tasks WHERE isDeleted = 1 AND (title != '' OR notes != '') ORDER BY updatedAt DESC")
     suspend fun getDeletedTasksList(): List<TaskEntity>
 }
 
@@ -565,6 +582,18 @@ interface ChecklistDao {
             if (chunk.isNotEmpty()) markSynced(chunk, maxUpdatedAt)
         }
     }
+
+    @Query("SELECT id FROM checklist_items WHERE taskId = :taskId AND isDeleted = 0")
+    suspend fun getActiveChecklistIdsByTaskId(taskId: String): List<String>
+
+    @Query("UPDATE checklist_items SET isDeleted = 1, isDirty = 1, updatedAt = :now WHERE taskId = :taskId AND isDeleted = 0")
+    suspend fun softDeleteByTaskId(taskId: String, now: Long)
+
+    @Query("UPDATE checklist_items SET isDeleted = 0, isDirty = 1, updatedAt = :now WHERE id IN (:ids)")
+    suspend fun restoreChecklistItemsByIds(ids: List<String>, now: Long)
+
+    @Query("UPDATE checklist_items SET isDeleted = 1, isDirty = 1, title = '', updatedAt = :now WHERE taskId = :taskId")
+    suspend fun compactTombstonesByTaskId(taskId: String, now: Long)
 
     @Query("DELETE FROM checklist_items WHERE taskId IN (:taskIds) OR id IN (:itemIds)")
     suspend fun hardDeleteForSampleTasks(taskIds: List<String>, itemIds: List<String>)
@@ -647,6 +676,12 @@ interface AttachmentDao {
     @Query("SELECT * FROM attachments WHERE projectId = :projectId AND isDeleted = 0 ORDER BY createdAt ASC")
     suspend fun getForProjectSync(projectId: String): List<AttachmentEntity>
 
+    @Query("SELECT * FROM attachments WHERE taskId = :taskId")
+    suspend fun getAllByTaskId(taskId: String): List<AttachmentEntity>
+
+    @Query("SELECT * FROM attachments WHERE projectId = :projectId")
+    suspend fun getAllByProjectId(projectId: String): List<AttachmentEntity>
+
     @Query("SELECT * FROM attachments WHERE isDeleted = 0 ORDER BY createdAt ASC")
     suspend fun getAllNonDeletedAttachmentsList(): List<AttachmentEntity>
 
@@ -673,6 +708,15 @@ interface AttachmentDao {
 
     @Query("UPDATE attachments SET isDeleted = 1, updatedAt = :now, isDirty = 1 WHERE id = :id")
     suspend fun softDeleteById(id: String, now: Long)
+
+    @Query("UPDATE attachments SET isDeleted = 1, isDirty = 1, updatedAt = :now WHERE taskId = :taskId AND isDeleted = 0")
+    suspend fun softDeleteByTaskId(taskId: String, now: Long)
+
+    @Query("UPDATE attachments SET isDeleted = 1, isDirty = 1, updatedAt = :now WHERE projectId = :projectId AND isDeleted = 0")
+    suspend fun softDeleteByProjectId(projectId: String, now: Long)
+
+    @Query("UPDATE attachments SET isDeleted = 1, isDirty = 1, fileName = '', sizeBytes = 0, localRelativePath = '', updatedAt = :now WHERE id = :id")
+    suspend fun compactTombstoneById(id: String, now: Long)
 
     @Query("DELETE FROM attachments WHERE taskId IN (:taskIds)")
     suspend fun hardDeleteByTaskIds(taskIds: List<String>)

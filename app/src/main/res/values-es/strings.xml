@@ -182,7 +182,7 @@
     <string name="settings_close_tooltip">Cerrar ajustes</string>
     <string name="settings_db_sync_section">Base de datos y sincronización</string>
     <string name="settings_local_db_title">BD local</string>
-    <string name="settings_local_db_desc">100 % sin conexión en este dispositivo (SQLite / Room)</string>
+    <string name="settings_local_db_desc" formatted="false">100 % sin conexión en este dispositivo (SQLite / Room)</string>
     <string name="settings_cloud_sync_title">Cloud Sync</string>
     <string name="settings_cloud_sync_desc">BD local + respaldo en tiempo real en todos los dispositivos</string>
     <string name="settings_account_status_label">Cuenta y estado en la nube</string>
@@ -392,4 +392,19 @@
     <string name="attachment_open_external">Abrir / Compartir</string>
     <string name="attachment_remove">Eliminar adjunto</string>
     <string name="attachment_too_large">El archivo supera el límite de 5 MB.</string>
+    <string name="attachment_import_error">No se pudo leer ni adjuntar el archivo seleccionado.</string>
+    <string name="project_move_up">Subir proyecto</string>
+    <string name="project_move_down">Bajar proyecto</string>
+    <string name="project_complete_tooltip">Completar proyecto</string>
+    <string name="project_delete_tooltip">Eliminar proyecto</string>
+    <string name="area_move_up">Subir área</string>
+    <string name="area_move_down">Bajar área</string>
+    <string name="area_delete_tooltip">Eliminar área</string>
+    <string name="areas_manage_count_tooltip">Gestionar áreas (%1$d/%2$d)</string>
+    <string name="sidebar_new_project_in_area">Nuevo proyecto en %1$s</string>
+    <string name="quick_find_clear">Borrar búsqueda</string>
+    <string name="quick_find_empty_hint">Escribe un término para buscar al instante tareas (notas, fechas, áreas, proyectos, subtareas &amp; etiquetas), proyectos, áreas o vistas.</string>
+    <string name="quick_find_results_for">%1$d resultados para «%2$s»</string>
+    <string name="quick_find_badge_view">Vista</string>
+    <string name="quick_find_subtasks_count">☑ %1$d/%2$d subtareas</string>
 </resources>

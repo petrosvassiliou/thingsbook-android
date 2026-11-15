@@ -3,8 +3,95 @@ import type { ScheduleState, SupportedLang } from './types';
 export interface ParsedNaturalDate {
   scheduleState: ScheduleState;
   whenDateEpochMillis: number | null;
+  reminderTimeEpochMillis: number | null;
+  reminderClock: string | null;
   formattedPreview: string;
   matchedExpression: string;
+}
+
+function extractTrailingReminderTime(
+  normalizedInput: string
+): { datePart: string; hour: number; minute: number; clock: string } | null {
+  // Matches trailing time expressions across EN/DE/FR/IT/ES:
+  // e.g. "tomorrow at 9:30", "tomorrow 2:15 pm", "morgen um 14:00", "morgen um 9 uhr",
+  // "demain a 18h30", "domani alle 08:15", "manana a las 15:00", "today @ 10:00"
+  const re =
+    /^(.*?)\s+(?:@\s*|at\s+|um\s+|a\s+las\s+|alle\s+|a\s+)?(\d{1,2})(?:[:h](\d{2}))?\s*(am|pm|uhr)?$/;
+  const m = normalizedInput.match(re);
+  if (!m) return null;
+
+  const datePart = m[1].trim();
+  if (!datePart) return null;
+
+  const hasExplicitConnector =
+    /\s+(?:@|at|um|a\s+las|alle|a)\s+\d{1,2}(?:[:h]\d{2})?\s*(?:am|pm|uhr)?$/.test(
+      normalizedInput
+    );
+  const hasColonOrH = m[3] != null;
+  const hasMeridiemOrUhr = Boolean(m[4]);
+  // Avoid misinterpreting "in 3 days" or bare numbers unless time syntax is unambiguous
+  if (!hasColonOrH && !hasMeridiemOrUhr && !hasExplicitConnector) {
+    return null;
+  }
+
+  let hour = Number(m[2]);
+  const minute = m[3] != null ? Number(m[3]) : 0;
+  const suffix = m[4] || '';
+
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute < 0 || minute > 59) {
+    return null;
+  }
+
+  if (suffix === 'pm') {
+    if (hour < 1 || hour > 12) return null;
+    if (hour < 12) hour += 12;
+  } else if (suffix === 'am') {
+    if (hour < 1 || hour > 12) return null;
+    if (hour === 12) hour = 0;
+  } else if (hour < 0 || hour > 23) {
+    return null;
+  }
+
+  const clock = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  return { datePart, hour, minute, clock };
+}
+
+function attachReminderToParsedDate(
+  base: Omit<ParsedNaturalDate, 'reminderTimeEpochMillis' | 'reminderClock'>,
+  extracted: { hour: number; minute: number; clock: string } | null,
+  refMidnight: Date,
+  originalInput: string
+): ParsedNaturalDate {
+  if (!extracted) {
+    return {
+      ...base,
+      reminderTimeEpochMillis: null,
+      reminderClock: null,
+      matchedExpression: originalInput
+    };
+  }
+  const baseEpoch = base.whenDateEpochMillis ?? refMidnight.getTime();
+  const baseDay = new Date(baseEpoch);
+  const remEpoch = new Date(
+    baseDay.getFullYear(),
+    baseDay.getMonth(),
+    baseDay.getDate(),
+    extracted.hour,
+    extracted.minute,
+    0,
+    0
+  ).getTime();
+
+  return {
+    ...base,
+    whenDateEpochMillis:
+      base.whenDateEpochMillis ??
+      (base.scheduleState === 'ANYTIME' || base.scheduleState === 'SOMEDAY' ? baseEpoch : null),
+    reminderTimeEpochMillis: remEpoch,
+    reminderClock: extracted.clock,
+    formattedPreview: `${base.formattedPreview} · 🔔 ${extracted.clock}`,
+    matchedExpression: originalInput
+  };
 }
 
 const WEEKDAY_ALIASES: Record<string, number> = {
@@ -82,25 +169,12 @@ function isoDayOfWeek(d: Date): number {
   return js === 0 ? 7 : js;
 }
 
-export function parseNaturalDate(
-  rawInput: string,
-  lang: SupportedLang = 'en',
-  reference: Date = new Date()
-): ParsedNaturalDate | null {
-  const trimmed = rawInput.trim();
-  if (!trimmed) return null;
-
-  const normalized = normalizeDiacritics(trimmed.toLowerCase());
-  const refMidnight = new Date(
-    reference.getFullYear(),
-    reference.getMonth(),
-    reference.getDate(),
-    0,
-    0,
-    0,
-    0
-  );
-
+function parseCoreDatePart(
+  normalized: string,
+  trimmed: string,
+  lang: SupportedLang,
+  refMidnight: Date
+): Omit<ParsedNaturalDate, 'reminderTimeEpochMillis' | 'reminderClock'> | null {
   // 1. This Evening
   if (
     [
@@ -288,6 +362,43 @@ export function parseNaturalDate(
           matchedExpression: trimmed
         };
       }
+    }
+  }
+
+  return null;
+}
+
+export function parseNaturalDate(
+  rawInput: string,
+  lang: SupportedLang = 'en',
+  reference: Date = new Date()
+): ParsedNaturalDate | null {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+
+  const normalized = normalizeDiacritics(trimmed.toLowerCase());
+  const refMidnight = new Date(
+    reference.getFullYear(),
+    reference.getMonth(),
+    reference.getDate(),
+    0,
+    0,
+    0,
+    0
+  );
+
+  // First try exact date match without reminder suffix
+  const direct = parseCoreDatePart(normalized, trimmed, lang, refMidnight);
+  if (direct) {
+    return attachReminderToParsedDate(direct, null, refMidnight, trimmed);
+  }
+
+  // Next try stripping a trailing multilingual reminder time (e.g. "tomorrow at 9:30", "demain à 18h30")
+  const extracted = extractTrailingReminderTime(normalized);
+  if (extracted) {
+    const core = parseCoreDatePart(extracted.datePart, trimmed, lang, refMidnight);
+    if (core) {
+      return attachReminderToParsedDate(core, extracted, refMidnight, trimmed);
     }
   }
 

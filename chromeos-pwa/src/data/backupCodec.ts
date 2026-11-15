@@ -20,8 +20,8 @@ const KDF_ITERATIONS = 120_000;
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
 const GCM_TAG_BITS = 128;
-const MAX_FILE_BYTES = 80 * 1024 * 1024;
-const MAX_DECOMPRESSED_BYTES = 120 * 1024 * 1024;
+export const MAX_FILE_BYTES = 80 * 1024 * 1024;
+export const MAX_DECOMPRESSED_BYTES = 120 * 1024 * 1024;
 
 export interface ThingsbookBackupEnvelope {
   magic: string;
@@ -215,7 +215,7 @@ async function gzipDecompressBounded(compressed: Uint8Array): Promise<Uint8Array
     total += value.byteLength;
     if (total > MAX_DECOMPRESSED_BYTES) {
       await reader.cancel();
-      throw new Error('Backup exceeds 50 MB decompression safety limit.');
+      throw new Error('Backup exceeds 120 MB decompression safety limit.');
     }
     chunks.push(value);
   }
@@ -409,8 +409,8 @@ export function buildBackupPayloadFromEntities(params: {
 export async function encodeThingsBackup(
   payload: ThingsbookBackupPayload,
   password: string | null,
-  appVersionName = '1.8.0-chromeos',
-  appVersionCode = 42
+  appVersionName = '1.8.1-chromeos',
+  appVersionCode = 44
 ): Promise<Uint8Array> {
   const jsonBytes = new TextEncoder().encode(JSON.stringify(payload));
   const compressed = await gzipCompress(jsonBytes);
@@ -475,7 +475,7 @@ function parseEnvelope(rawBytes: Uint8Array): ThingsbookBackupEnvelope {
     throw new Error('The selected backup file is empty.');
   }
   if (rawBytes.byteLength > MAX_FILE_BYTES) {
-    throw new Error('Backup file exceeds 30 MB limit.');
+    throw new Error('Backup file exceeds 80 MB limit.');
   }
   const text = new TextDecoder('utf-8').decode(rawBytes).replace(/^\uFEFF/, '').trim();
   let env: ThingsbookBackupEnvelope;

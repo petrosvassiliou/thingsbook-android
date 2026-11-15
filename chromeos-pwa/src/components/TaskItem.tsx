@@ -243,6 +243,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const [titleDraft, setTitleDraft] = useState(task.title);
   const [notesDraft, setNotesDraft] = useState(task.notes);
   const [isTitleFocused, setIsTitleFocused] = useState(false);
+  const [isNotesFocused, setIsNotesFocused] = useState(false);
   const [newSubtask, setNewSubtask] = useState('');
   const [animStage, setAnimStage] = useState<'idle' | 'strike' | 'glide'>('idle');
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
@@ -257,6 +258,9 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const subtaskRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const addSubtaskInputRef = useRef<HTMLInputElement | null>(null);
   const attachmentFileInputRef = useRef<HTMLInputElement | null>(null);
+  const newSubtaskRef = useRef(newSubtask);
+  newSubtaskRef.current = newSubtask;
+  const wasExpandedRef = useRef(isExpanded);
 
   if (prevTaskId !== task.id) {
     setPrevTaskId(task.id);
@@ -273,11 +277,29 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     }
     if (prevServerNotes !== task.notes) {
       setPrevServerNotes(task.notes);
-      if (notesDraft !== task.notes) {
+      if (!isNotesFocused && notesDraft !== task.notes) {
         setNotesDraft(task.notes);
       }
     }
   }
+
+  const flushPendingSubtaskIfNeeded = () => {
+    const pending = newSubtaskRef.current.trim();
+    if (!pending) return;
+    newSubtaskRef.current = '';
+    setNewSubtask('');
+    void localDb.addChecklistItems(task.id, [pending]);
+  };
+
+  useEffect(() => {
+    if (wasExpandedRef.current && !isExpanded) {
+      flushPendingSubtaskIfNeeded();
+      setIsNotesFocused(false);
+      setIsTitleFocused(false);
+    }
+    wasExpandedRef.current = isExpanded;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isExpanded, task.id]);
 
   useEffect(() => {
     if (focusSubtaskId && subtaskRefs.current[focusSubtaskId]) {
@@ -308,6 +330,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 
   const flushDraftsIfNeeded = () => {
     if (!isExpanded) return;
+    flushPendingSubtaskIfNeeded();
     const patch: { id: string; title?: string; notes?: string } = { id: task.id };
     let changed = false;
     if (titleDraft !== task.title) {
@@ -368,6 +391,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   };
 
   const handleDoneCollapse = () => {
+    flushPendingSubtaskIfNeeded();
     const cleanTitle = titleDraft.trim();
     if (cleanTitle !== task.title || notesDraft !== task.notes) {
       void localDb.upsertTask({
@@ -621,6 +645,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             setNotesDraft(nextNotes);
             void localDb.upsertTask({ id: task.id, notes: nextNotes });
           }}
+          onFocusChange={setIsNotesFocused}
           placeholder={t.placeholderNotes}
           className="task-card-notes"
         />

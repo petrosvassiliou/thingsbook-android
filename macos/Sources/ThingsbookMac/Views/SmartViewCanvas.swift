@@ -111,9 +111,9 @@ public struct SmartViewCanvas: View {
                 .buttonStyle(.plain)
             }
 
-            if view == .trash && !store.trashedTasks.isEmpty {
+            if view == .trash && (!store.trashedTasks.isEmpty || !store.trashedProjects.isEmpty) {
                 Button(role: .destructive) {
-                    try? store.database.emptyTrash()
+                    store.emptyAllTrash()
                 } label: {
                     Label(store.tr("trash_empty_btn"), systemImage: "trash.slash")
                         .font(.system(size: 12, weight: .medium))
@@ -265,7 +265,7 @@ public struct SmartViewCanvas: View {
         let dayNum = Calendar.current.component(.day, from: date)
         let df = DateFormatter()
         df.locale = store.preferences.language.locale
-        df.dateFormat = "EEEE, d. MMMM"
+        df.setLocalizedDateFormatFromTemplate("EEEEdMMMM")
 
         return HStack(alignment: .firstTextBaseline, spacing: 9) {
             Text("\(dayNum)")
@@ -816,42 +816,96 @@ public struct SmartViewCanvas: View {
 
     @ViewBuilder
     private var trashCanvas: some View {
-        if store.trashedTasks.isEmpty {
+        if store.trashedTasks.isEmpty && store.trashedProjects.isEmpty {
             emptyPlaceholder(icon: "trash", text: store.tr("trash_empty_state"))
         } else {
-            VStack(spacing: 8) {
-                ForEach(store.trashedTasks) { task in
-                    HStack(spacing: 12) {
-                        Image(systemName: "trash")
+            VStack(alignment: .leading, spacing: 14) {
+                if !store.trashedProjects.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(store.tr("entity_projects"))
+                            .font(.system(size: 12.5, weight: .semibold))
                             .foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
-                                .font(.system(size: 14, weight: .medium))
-                            if !task.notes.isEmpty {
-                                Text(task.notes)
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-                        Spacer()
-                        Button(store.tr("trash_restore_btn")) {
-                            try? store.database.restoreTask(task.id)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                            .padding(.horizontal, 4)
 
-                        Button(role: .destructive) {
-                            try? store.database.permanentlyDeleteTask(task.id)
-                        } label: {
-                            Text(store.tr("trash_delete_forever_btn"))
+                        ForEach(store.trashedProjects) { proj in
+                            HStack(spacing: 12) {
+                                Image(systemName: "chart.pie")
+                                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(proj.title.isEmpty ? store.tr("entity_new_project") : proj.title)
+                                        .font(.system(size: 14, weight: .semibold))
+                                    if !proj.notes.isEmpty {
+                                        Text(proj.notes)
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                Spacer()
+                                Button(store.tr("trash_restore_btn")) {
+                                    store.restoreTrashedProject(proj)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+
+                                Button(role: .destructive) {
+                                    store.permanentlyDeleteProject(proj)
+                                } label: {
+                                    Text(store.tr("trash_delete_forever_btn"))
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .thingsCardSurface(cornerRadius: 10)
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .thingsCardSurface(cornerRadius: 10)
+                }
+
+                if !store.trashedTasks.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if !store.trashedProjects.isEmpty {
+                            Text(store.tr("entity_todos"))
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 4)
+                        }
+
+                        ForEach(store.trashedTasks) { task in
+                            HStack(spacing: 12) {
+                                Image(systemName: "trash")
+                                    .foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
+                                        .font(.system(size: 14, weight: .medium))
+                                    if !task.notes.isEmpty {
+                                        Text(task.notes)
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                Spacer()
+                                Button(store.tr("trash_restore_btn")) {
+                                    store.restoreTrashedTask(task.id)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+
+                                Button(role: .destructive) {
+                                    store.permanentlyDeleteTask(task.id)
+                                } label: {
+                                    Text(store.tr("trash_delete_forever_btn"))
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .thingsCardSurface(cornerRadius: 10)
+                        }
+                    }
                 }
             }
         }

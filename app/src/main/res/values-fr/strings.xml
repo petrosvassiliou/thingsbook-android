@@ -182,7 +182,7 @@
     <string name="settings_close_tooltip">Fermer les paramètres</string>
     <string name="settings_db_sync_section">Base de données et synchronisation</string>
     <string name="settings_local_db_title">BD locale</string>
-    <string name="settings_local_db_desc">100 % hors ligne sur cet appareil (SQLite / Room)</string>
+    <string name="settings_local_db_desc" formatted="false">100 % hors ligne sur cet appareil (SQLite / Room)</string>
     <string name="settings_cloud_sync_title">Cloud Sync</string>
     <string name="settings_cloud_sync_desc">BD locale + sauvegarde en temps réel sur tous les appareils</string>
     <string name="settings_account_status_label">Compte et état du Cloud</string>
@@ -392,4 +392,19 @@
     <string name="attachment_open_external">Ouvrir / Partager</string>
     <string name="attachment_remove">Supprimer la pièce jointe</string>
     <string name="attachment_too_large">Le fichier dépasse la limite de 5 Mo.</string>
+    <string name="attachment_import_error">Impossible de lire ou de joindre le fichier sélectionné.</string>
+    <string name="project_move_up">Monter le projet</string>
+    <string name="project_move_down">Descendre le projet</string>
+    <string name="project_complete_tooltip">Terminer le projet</string>
+    <string name="project_delete_tooltip">Supprimer le projet</string>
+    <string name="area_move_up">Monter le domaine</string>
+    <string name="area_move_down">Descendre le domaine</string>
+    <string name="area_delete_tooltip">Supprimer le domaine</string>
+    <string name="areas_manage_count_tooltip">Gérer les domaines (%1$d/%2$d)</string>
+    <string name="sidebar_new_project_in_area">Nouveau projet dans %1$s</string>
+    <string name="quick_find_clear">Effacer la recherche</string>
+    <string name="quick_find_empty_hint">Saisissez un terme pour rechercher instantanément des tâches (notes, dates, domaines, projets, sous-tâches &amp; tags), projets, domaines ou vues.</string>
+    <string name="quick_find_results_for">%1$d résultats pour « %2$s »</string>
+    <string name="quick_find_badge_view">Vue</string>
+    <string name="quick_find_subtasks_count">☑ %1$d/%2$d sous-tâches</string>
 </resources>

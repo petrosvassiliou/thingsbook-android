@@ -10,18 +10,70 @@ INSTALL_DIR="/Applications"
 LATEST_RELEASE_API="https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases/latest"
 RELEASES_API="https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases?per_page=15"
 
+resolve_stable_dmg_url() {
+  local json_payload="${1:-}"
+  [ -z "$json_payload" ] && return 0
+
+  if command -v osascript >/dev/null 2>&1; then
+    JSON_PAYLOAD="$json_payload" osascript -l JavaScript -e '
+      ObjC.import("Foundation");
+      const env = $.NSProcessInfo.processInfo.environment;
+      const rawObj = env.objectForKey("JSON_PAYLOAD");
+      const raw = rawObj ? ObjC.unwrap(rawObj) : "";
+      if (!raw) { ""; } else {
+        let parsed;
+        try { parsed = JSON.parse(raw); } catch (e) { parsed = null; }
+        const list = Array.isArray(parsed) ? parsed : (parsed && typeof parsed === "object" ? [parsed] : []);
+        let found = "";
+        for (const r of list) {
+          if (!r || r.draft === true || r.prerelease === true) continue;
+          const tag = String(r.tag_name || "").trim();
+          if (!/^v\d+\.\d+\.\d+(\+\d+)?$/i.test(tag)) continue;
+          const assets = Array.isArray(r.assets) ? r.assets : [];
+          const dmg = assets.find(a => a && typeof a.name === "string" && a.name.toLowerCase().endsWith(".dmg") && a.browser_download_url);
+          if (dmg) { found = String(dmg.browser_download_url).trim(); break; }
+        }
+        found;
+      }
+    ' 2>/dev/null || true
+  elif command -v python3 >/dev/null 2>&1; then
+    JSON_PAYLOAD="$json_payload" python3 -c '
+import json, os, re, sys
+raw = os.environ.get("JSON_PAYLOAD", "")
+try:
+    parsed = json.loads(raw)
+except Exception:
+    sys.exit(0)
+items = parsed if isinstance(parsed, list) else ([parsed] if isinstance(parsed, dict) else [])
+tag_re = re.compile(r"^v\d+\.\d+\.\d+(\+\d+)?$", re.IGNORECASE)
+for r in items:
+    if not isinstance(r, dict) or r.get("draft") is True or r.get("prerelease") is True:
+        continue
+    tag = str(r.get("tag_name") or "").strip()
+    if not tag_re.match(tag):
+        continue
+    for a in (r.get("assets") or []):
+        if isinstance(a, dict) and str(a.get("name") or "").lower().endswith(".dmg") and a.get("browser_download_url"):
+            print(str(a["browser_download_url"]).strip())
+            sys.exit(0)
+' 2>/dev/null || true
+  fi
+}
+
 if [ -n "${THINGSBOOK_DMG_URL:-}" ]; then
   DMG_URL="$THINGSBOOK_DMG_URL"
 else
-  echo "🔍 Locating latest $APP_NAME Universal macOS release..."
-  DMG_URL="$(curl -fsSL "$LATEST_RELEASE_API" 2>/dev/null | grep -Eo 'https://github\.com/petrosvassiliou/thingsbook-android/releases/download/[^"]+\.dmg' | head -n 1 || true)"
+  echo "🔍 Locating latest stable $APP_NAME Universal macOS release..."
+  LATEST_JSON="$(curl -fsSL -H "Accept: application/vnd.github+json" "$LATEST_RELEASE_API" 2>/dev/null || true)"
+  DMG_URL="$(resolve_stable_dmg_url "$LATEST_JSON")"
   if [ -z "$DMG_URL" ]; then
-    DMG_URL="$(curl -fsSL "$RELEASES_API" | grep -Eo 'https://github\.com/petrosvassiliou/thingsbook-android/releases/download/[^"]+\.dmg' | head -n 1 || true)"
+    RELEASES_JSON="$(curl -fsSL -H "Accept: application/vnd.github+json" "$RELEASES_API" 2>/dev/null || true)"
+    DMG_URL="$(resolve_stable_dmg_url "$RELEASES_JSON")"
   fi
 fi
 
 if [ -z "$DMG_URL" ]; then
-  echo "❌ Error: Could not locate a published macOS .dmg asset on GitHub Releases." >&2
+  echo "❌ Error: Could not locate a published stable macOS .dmg asset on GitHub Releases." >&2
   exit 1
 fi
 

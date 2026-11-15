@@ -1104,6 +1104,7 @@ private fun ExpandedTaskCardBody(
     val newChecklistFocusRequester = remember(task.id) { FocusRequester() }
     var pendingAutoFocusSubtaskId by remember(task.id) { mutableStateOf<String?>(null) }
     val tooLargeMsg = stringResource(R.string.attachment_too_large)
+    val importErrorMsg = stringResource(R.string.attachment_import_error)
     val voicePromptMsg = stringResource(R.string.voice_capture_prompt)
     val voiceUnavailableMsg = stringResource(R.string.voice_not_available)
 
@@ -1123,7 +1124,9 @@ private fun ExpandedTaskCardBody(
                     AttachmentImportOutcome.TooLarge -> {
                         onShowMessage?.invoke(tooLargeMsg)
                     }
-                    AttachmentImportOutcome.Error -> Unit
+                    AttachmentImportOutcome.Error -> {
+                        onShowMessage?.invoke(importErrorMsg)
+                    }
                 }
             }
         }

@@ -516,6 +516,7 @@ data class AttachmentFirestoreDto(
     val fileName: String = "",
     val mimeType: String = "",
     val sizeBytes: Long = 0L,
+    val sortOrder: Double = 0.0,
     val localRelativePath: String = "",
     val dataBase64: String = "",
     val createdAt: Long = 0L,
@@ -543,7 +544,8 @@ data class AttachmentFirestoreDto(
         "fileName" to fileName,
         "mimeType" to mimeType,
         "sizeBytes" to sizeBytes,
-        "localRelativePath" to localRelativePath,
+        "sortOrder" to sortOrder.finiteOrZero(),
+        "localRelativePath" to "",
         "dataBase64" to dataBase64,
         "createdAt" to createdAt,
         "updatedAt" to updatedAt,
@@ -558,7 +560,8 @@ data class AttachmentFirestoreDto(
             fileName = entity.fileName,
             mimeType = entity.mimeType,
             sizeBytes = entity.sizeBytes,
-            localRelativePath = entity.localRelativePath,
+            sortOrder = entity.createdAt.toDouble().finiteOrZero(),
+            localRelativePath = "",
             dataBase64 = dataBase64,
             createdAt = entity.createdAt,
             updatedAt = entity.updatedAt,
@@ -570,9 +573,8 @@ data class AttachmentFirestoreDto(
             val id = (map["id"] as? String)?.trim() ?: return null
             if (id.isEmpty()) return null
             val fileName = map["fileName"] as? String ?: "attachment"
-            val safeName = fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(80).ifEmpty { "file" }
-            val relPath = (map["localRelativePath"] as? String)?.takeIf { it.isNotBlank() }
-                ?: "attachments/${id}_${safeName}"
+            val createdAt = (map["createdAt"] as? Number)?.toLong() ?: 0L
+            val sortOrder = ((map["sortOrder"] as? Number)?.toDouble() ?: createdAt.toDouble()).finiteOrZero()
             return AttachmentFirestoreDto(
                 id = id,
                 taskId = (map["taskId"] as? String)?.takeIf { it.isNotBlank() },
@@ -580,13 +582,18 @@ data class AttachmentFirestoreDto(
                 fileName = fileName,
                 mimeType = map["mimeType"] as? String ?: "application/octet-stream",
                 sizeBytes = (map["sizeBytes"] as? Number)?.toLong() ?: 0L,
-                localRelativePath = relPath,
+                sortOrder = sortOrder,
+                localRelativePath = "",
                 dataBase64 = map["dataBase64"] as? String ?: "",
-                createdAt = (map["createdAt"] as? Number)?.toLong() ?: 0L,
+                createdAt = createdAt,
                 updatedAt = (map["updatedAt"] as? Number)?.toLong() ?: 0L,
                 isDeleted = map["isDeleted"] as? Boolean ?: false
             )
         }
     }
 }
+
+fun AttachmentEntity.toFirestoreDto(dataBase64: String = ""): AttachmentFirestoreDto =
+    AttachmentFirestoreDto.fromEntity(this, dataBase64)
+
 

@@ -31,7 +31,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.datastore.preferences.core.edit
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.culturedcode.things3.data.repository.SYNC_KEY_LOCAL_ONLY_DB_MODE
+import com.culturedcode.things3.data.repository.syncDataStore
 import com.culturedcode.things3.ui.components.SmartViewType
 import com.culturedcode.things3.ui.components.ThingsTooltipHostBox
 import com.culturedcode.things3.ui.screens.ThingsSmartViewScreen
@@ -39,9 +42,11 @@ import com.culturedcode.things3.ui.theme.Things3Theme
 import com.culturedcode.things3.ui.viewmodel.ThingsbookViewModel
 import com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.runBlocking
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.lang.ref.WeakReference
+import java.util.Locale
 
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
@@ -118,7 +123,11 @@ class MainActivity : AppCompatActivity() {
                                         "NEW_TODO" -> viewModel.handleWidgetLaunchIntent("INBOX", null, true)
                                         "TODAY" -> viewModel.selectSmartView(SmartViewType.TODAY)
                                         "INBOX" -> viewModel.selectSmartView(SmartViewType.INBOX)
-                                        "QUICK_FIND" -> viewModel.setQuickFindOpen(true)
+                                        "QUICK_FIND" -> {
+                                            if (!viewModel.biometricAppLockEnabled.value || viewModel.isAppUnlocked.value) {
+                                                viewModel.setQuickFindOpen(true)
+                                            }
+                                        }
                                         "VOICE_CAPTURE" -> viewModel.openVoiceQuickCapture()
                                     }
                                     currentIntent.removeExtra("extra_shortcut_action")
@@ -165,6 +174,54 @@ class MainActivity : AppCompatActivity() {
             val dp = resources.displayMetrics.density
             fun Int.dp(): Int = (this * dp).toInt()
 
+            val lang = runCatching {
+                ContextCompat.getContextForLanguage(this).resources.configuration.locales[0]?.language
+            }.getOrNull()?.takeIf { it.isNotBlank() }?.lowercase(Locale.ROOT)?.take(2)
+                ?: Locale.getDefault().language.lowercase(Locale.ROOT).take(2)
+
+            val safeTitle = when (lang) {
+                "de" -> "Thingsbook — Sicherheitsmodus aktiv"
+                "fr" -> "Thingsbook — Mode sans échec actif"
+                "it" -> "Thingsbook — Modalità provvisoria attiva"
+                "es" -> "Thingsbook — Modo seguro activo"
+                else -> "Thingsbook — Safe Mode Active"
+            }
+            val safeSubtitle = when (lang) {
+                "de" -> "Ein Laufzeitfehler wurde abgefangen, damit die App nicht abstürzt. Deine Aufgaben in der Datenbank sind sicher."
+                "fr" -> "Une erreur d'exécution a été interceptée pour éviter un plantage. Vos tâches dans la base de données sont en sécurité."
+                "it" -> "È stato intercettato un errore di esecuzione per evitare l'arresto dell'app. Le tue attività nel database sono al sicuro."
+                "es" -> "Se interceptó un error en tiempo de ejecución para evitar un cierre inesperado. Tus tareas en la base de datos están seguras."
+                else -> "A runtime error was caught to prevent a crash. Your tasks in the database are safe."
+            }
+            val reloadBtnLabel = when (lang) {
+                "de" -> "🔄 Oberfläche neu starten (ohne Datenverlust)"
+                "fr" -> "🔄 Redémarrer l'interface (sans perte de données)"
+                "it" -> "🔄 Riavvia l'interfaccia (senza perdita di dati)"
+                "es" -> "🔄 Reiniciar la interfaz (sin pérdida de datos)"
+                else -> "🔄 Restart Interface (no data loss)"
+            }
+            val localModeBtnLabel = when (lang) {
+                "de" -> "🛠️ Auf Lokalen Modus umschalten & starten"
+                "fr" -> "🛠️ Basculer en mode local et démarrer"
+                "it" -> "🛠️ Passa alla modalità locale e avvia"
+                "es" -> "🛠️ Cambiar a modo local e iniciar"
+                else -> "🛠️ Switch to Local-Only Mode & Launch"
+            }
+            val copyBtnLabel = when (lang) {
+                "de" -> "📋 Fehlerdetails in Zwischenablage kopieren"
+                "fr" -> "📋 Copier les détails de l'erreur"
+                "it" -> "📋 Copia dettagli errore negli appunti"
+                "es" -> "📋 Copiar detalles del error al portapapeles"
+                else -> "📋 Copy Error Details to Clipboard"
+            }
+            val copiedToastLabel = when (lang) {
+                "de" -> "Fehlerbericht kopiert!"
+                "fr" -> "Rapport d'erreur copié !"
+                "it" -> "Report dell'errore copiato!"
+                "es" -> "¡Informe de error copiado!"
+                else -> "Crash report copied!"
+            }
+
             val sw = StringWriter()
             throwable.printStackTrace(PrintWriter(sw))
             val traceText = CrashGuardian.lastCaughtCrashTrace ?: sw.toString()
@@ -180,7 +237,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             val titleView = TextView(this).apply {
-                text = "Thingsbook — Sicherheitsmodus aktiv"
+                text = safeTitle
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
                 setTypeface(typeface, Typeface.BOLD)
                 setTextColor(Color.parseColor("#1A1D21"))
@@ -188,7 +245,7 @@ class MainActivity : AppCompatActivity() {
             root.addView(titleView)
 
             val subtitleView = TextView(this).apply {
-                text = "Ein Laufzeitfehler wurde abgefangen, damit die App nicht abstürzt. Deine Aufgaben in der Datenbank sind sicher."
+                text = safeSubtitle
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
                 setTextColor(Color.parseColor("#5D6573"))
                 setPadding(0, 8.dp(), 0, 16.dp())
@@ -200,7 +257,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             val reloadBtn = Button(this).apply {
-                text = "🔄 Oberfläche neu starten (ohne Datenverlust)"
+                text = reloadBtnLabel
                 isAllCaps = false
                 setTextColor(Color.WHITE)
                 background = GradientDrawable().apply {
@@ -222,7 +279,7 @@ class MainActivity : AppCompatActivity() {
             )
 
             val repairSyncBtn = Button(this).apply {
-                text = "🛠️ Auf Lokalen Modus umschalten & starten"
+                text = localModeBtnLabel
                 isAllCaps = false
                 setTextColor(Color.parseColor("#1A1D21"))
                 background = GradientDrawable().apply {
@@ -240,6 +297,11 @@ class MainActivity : AppCompatActivity() {
                             .edit()
                             .putBoolean("local_only_db_mode", true)
                             .commit()
+                        runBlocking {
+                            applicationContext.syncDataStore.edit { prefs ->
+                                prefs[SYNC_KEY_LOCAL_ONLY_DB_MODE] = true
+                            }
+                        }
                     }
                     CrashGuardian.clearCrashLog(applicationContext)
                     recreate()
@@ -254,7 +316,7 @@ class MainActivity : AppCompatActivity() {
             )
 
             val copyBtn = Button(this).apply {
-                text = "📋 Fehlerdetails in Zwischenablage kopieren"
+                text = copyBtnLabel
                 isAllCaps = false
                 setTextColor(Color.parseColor("#2B7BF6"))
                 background = GradientDrawable().apply {
@@ -267,7 +329,7 @@ class MainActivity : AppCompatActivity() {
                     runCatching {
                         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                         cm?.setPrimaryClip(ClipData.newPlainText("Thingsbook Crash Report", traceText))
-                        Toast.makeText(this@MainActivity, "Fehlerbericht kopiert!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, copiedToastLabel, Toast.LENGTH_SHORT).show()
                     }
                 }
             }

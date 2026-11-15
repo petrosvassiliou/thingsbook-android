@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Download,
   ExternalLink,
@@ -12,9 +12,11 @@ import {
 } from 'lucide-react';
 import type { AttachmentRecord } from '../domain/types';
 import { localDb } from '../data/localDb';
+import { estimateBase64DecodedBytes } from '../data/syncUtils';
 import type { TranslationStrings } from '../i18n/translations';
 
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024; // 5 MB
+const TARGET_INLINE_IMAGE_BYTES = 680_000;
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -32,6 +34,21 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
   }
   return btoa(binary);
+}
+
+function base64ToBlob(base64: string, mimeType: string): Blob | null {
+  if (!base64) return null;
+  try {
+    const clean = base64.replace(/\s+/g, '');
+    const binary = atob(clean);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new Blob([bytes], { type: mimeType || 'application/octet-stream' });
+  } catch {
+    return null;
+  }
 }
 
 async function compressImageIfNeeded(
@@ -54,10 +71,9 @@ async function compressImageIfNeeded(
         }, reject);
       };
       img.onload = () => {
-        const maxDim = 1600;
         const w = img.naturalWidth || img.width;
         const h = img.naturalHeight || img.height;
-        if (w <= maxDim && h <= maxDim && file.size <= 900 * 1024) {
+        if (w <= 1600 && h <= 1600 && file.size <= TARGET_INLINE_IMAGE_BYTES) {
           const commaIdx = dataUrl.indexOf(',');
           const rawB64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : '';
           resolve({
@@ -67,12 +83,8 @@ async function compressImageIfNeeded(
           });
           return;
         }
-        const scale = Math.min(1, maxDim / Math.max(w, h));
-        const targetW = Math.max(1, Math.round(w * scale));
-        const targetH = Math.max(1, Math.round(h * scale));
+
         const canvas = document.createElement('canvas');
-        canvas.width = targetW;
-        canvas.height = targetH;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
           const commaIdx = dataUrl.indexOf(',');
@@ -83,15 +95,42 @@ async function compressImageIfNeeded(
           });
           return;
         }
-        ctx.drawImage(img, 0, 0, targetW, targetH);
-        const compressedUrl = canvas.toDataURL('image/jpeg', 0.82);
-        const commaIdx = compressedUrl.indexOf(',');
-        const b64 = commaIdx >= 0 ? compressedUrl.slice(commaIdx + 1) : '';
-        const approxBytes = Math.floor((b64.length * 3) / 4);
+
+        // Iteratively compress across quality steps (0.82 -> 0.68 -> 0.54) and dimension caps
+        // so camera/gallery photos fit reliably under 680 KB for inline Cloud Sync.
+        const maxDimensions = [1600, 1280, 960];
+        const qualitySteps = [0.82, 0.68, 0.54];
+        let bestB64 = '';
+        let bestBytes = Number.POSITIVE_INFINITY;
+
+        outer: for (let dIdx = 0; dIdx < maxDimensions.length; dIdx++) {
+          const dimCap = maxDimensions[dIdx];
+          const scale = Math.min(1, dimCap / Math.max(w, h));
+          const targetW = Math.max(1, Math.round(w * scale));
+          const targetH = Math.max(1, Math.round(h * scale));
+          canvas.width = targetW;
+          canvas.height = targetH;
+          ctx.clearRect(0, 0, targetW, targetH);
+          ctx.drawImage(img, 0, 0, targetW, targetH);
+
+          const qualitiesToTry = dIdx === 0 ? qualitySteps : [0.54];
+          for (const quality of qualitiesToTry) {
+            const compressedUrl = canvas.toDataURL('image/jpeg', quality);
+            const commaIdx = compressedUrl.indexOf(',');
+            const b64 = commaIdx >= 0 ? compressedUrl.slice(commaIdx + 1) : '';
+            const decodedBytes = estimateBase64DecodedBytes(b64);
+            bestB64 = b64;
+            bestBytes = decodedBytes;
+            if (decodedBytes <= TARGET_INLINE_IMAGE_BYTES) {
+              break outer;
+            }
+          }
+        }
+
         resolve({
-          dataBase64: b64,
+          dataBase64: bestB64,
           mimeType: 'image/jpeg',
-          sizeBytes: approxBytes
+          sizeBytes: Number.isFinite(bestBytes) ? bestBytes : 0
         });
       };
       img.src = dataUrl;
@@ -154,13 +193,58 @@ export const AttachmentPreviewModal: React.FC<{
   onDelete: (id: string) => void;
 }> = ({ attachment, t, onClose, onDelete }) => {
   const [zoom, setZoom] = useState(1);
-  const dataUri = `data:${attachment.mimeType || 'application/octet-stream'};base64,${attachment.dataBase64}`;
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const isImage = attachment.mimeType.startsWith('image/');
-  const isPdf = attachment.mimeType === 'application/pdf' || attachment.fileName.toLowerCase().endsWith('.pdf');
+  const isPdf =
+    attachment.mimeType === 'application/pdf' ||
+    attachment.fileName.toLowerCase().endsWith('.pdf');
+
+  const resolvedMime = isPdf
+    ? 'application/pdf'
+    : attachment.mimeType || 'application/octet-stream';
+
+  const fallbackDataUri = useMemo(
+    () => `data:${resolvedMime};base64,${attachment.dataBase64}`,
+    [resolvedMime, attachment.dataBase64]
+  );
+
+  useEffect(() => {
+    const blob = base64ToBlob(attachment.dataBase64, resolvedMime);
+    if (!blob) {
+      setBlobUrl(null);
+      return;
+    }
+    const objectUrl = URL.createObjectURL(blob);
+    setBlobUrl(objectUrl);
+    return () => {
+      URL.revokeObjectURL(objectUrl);
+    };
+  }, [attachment.dataBase64, resolvedMime]);
 
   const handleDownload = () => {
+    if (blobUrl) {
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = attachment.fileName || 'attachment';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+    const blob = base64ToBlob(attachment.dataBase64, resolvedMime);
+    if (blob) {
+      const tempUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = tempUrl;
+      link.download = attachment.fileName || 'attachment';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.setTimeout(() => URL.revokeObjectURL(tempUrl), 1000);
+      return;
+    }
     const link = document.createElement('a');
-    link.href = dataUri;
+    link.href = fallbackDataUri;
     link.download = attachment.fileName || 'attachment';
     document.body.appendChild(link);
     link.click();
@@ -272,7 +356,7 @@ export const AttachmentPreviewModal: React.FC<{
         >
           {isImage ? (
             <img
-              src={dataUri}
+              src={blobUrl || fallbackDataUri}
               alt={attachment.fileName}
               style={{
                 maxWidth: zoom === 1 ? '100%' : 'none',
@@ -285,17 +369,19 @@ export const AttachmentPreviewModal: React.FC<{
               }}
             />
           ) : isPdf ? (
-            <iframe
-              src={dataUri}
-              title={attachment.fileName}
-              style={{
-                width: '100%',
-                height: '65vh',
-                border: 'none',
-                borderRadius: 8,
-                background: '#fff'
-              }}
-            />
+            blobUrl ? (
+              <iframe
+                src={blobUrl}
+                title={attachment.fileName}
+                style={{
+                  width: '100%',
+                  height: '65vh',
+                  border: 'none',
+                  borderRadius: 8,
+                  background: '#fff'
+                }}
+              />
+            ) : null
           ) : (
             <div
               style={{

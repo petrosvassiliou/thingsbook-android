@@ -182,7 +182,7 @@
     <string name="settings_close_tooltip">Close Settings</string>
     <string name="settings_db_sync_section">Database &amp; Synchronization</string>
     <string name="settings_local_db_title">Local DB</string>
-    <string name="settings_local_db_desc">100% offline on this device (SQLite / Room)</string>
+    <string name="settings_local_db_desc" formatted="false">100% offline on this device (SQLite / Room)</string>
     <string name="settings_cloud_sync_title">Cloud Sync</string>
     <string name="settings_cloud_sync_desc">Local DB + real-time backup across all devices</string>
     <string name="settings_account_status_label">Account &amp; Cloud Status</string>
@@ -392,4 +392,19 @@
     <string name="attachment_open_external">Open / Share</string>
     <string name="attachment_remove">Remove Attachment</string>
     <string name="attachment_too_large">File exceeds the 5 MB limit.</string>
+    <string name="attachment_import_error">Could not read or attach the selected file.</string>
+    <string name="project_move_up">Move project up</string>
+    <string name="project_move_down">Move project down</string>
+    <string name="project_complete_tooltip">Complete project</string>
+    <string name="project_delete_tooltip">Delete project</string>
+    <string name="area_move_up">Move area up</string>
+    <string name="area_move_down">Move area down</string>
+    <string name="area_delete_tooltip">Delete area</string>
+    <string name="areas_manage_count_tooltip">Manage Areas (%1$d/%2$d)</string>
+    <string name="sidebar_new_project_in_area">New Project in %1$s</string>
+    <string name="quick_find_clear">Clear search</string>
+    <string name="quick_find_empty_hint">Type a search term to instantly search To-Dos (including notes, dates, areas, projects, checklist items &amp; tags), Projects, Areas, or Views inline.</string>
+    <string name="quick_find_results_for">%1$d results for “%2$s”</string>
+    <string name="quick_find_badge_view">View</string>
+    <string name="quick_find_subtasks_count">☑ %1$d/%2$d checklist items</string>
 </resources>

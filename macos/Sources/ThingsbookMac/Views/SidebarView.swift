@@ -53,7 +53,7 @@ public struct SidebarView: View {
                         .padding(.horizontal, 10)
 
                     smartViewRow(.logbook, count: 0)
-                    smartViewRow(.trash, count: store.trashedTasks.count)
+                    smartViewRow(.trash, count: store.trashedTasks.count + store.trashedProjects.count)
 
                     // Standalone Projects
                     if !store.standaloneActiveProjects.isEmpty {

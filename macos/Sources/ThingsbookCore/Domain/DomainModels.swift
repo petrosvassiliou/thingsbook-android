@@ -475,6 +475,7 @@ public struct DetachedTaskPlacement: Equatable, Hashable, Sendable {
 public enum UndoActionKind: Equatable, Sendable {
     case taskCompleted(taskId: String, title: String, spawnedRecurringTaskId: String?)
     case taskDeleted(taskId: String, title: String)
+    case tasksDeleted([String])
     case projectDeleted(projectId: String, title: String, previousTaskProjects: [String: DetachedTaskPlacement])
 }
 

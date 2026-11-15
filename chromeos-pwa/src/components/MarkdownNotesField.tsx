@@ -186,13 +186,15 @@ export const MarkdownNotesField: React.FC<{
   rows?: number;
   className?: string;
   showDetectedLinks?: boolean;
+  onFocusChange?: (focused: boolean) => void;
 }> = ({
   value,
   onChange,
   placeholder = 'Notes',
   rows = 2,
   className = 'task-notes-editor',
-  showDetectedLinks = true
+  showDetectedLinks = true,
+  onFocusChange
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -205,10 +207,18 @@ export const MarkdownNotesField: React.FC<{
     }
   }, [isEditing]);
 
+  useEffect(() => {
+    return () => {
+      onFocusChange?.(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const insertSnippet = (prefix: string, suffix = '') => {
     const el = textareaRef.current;
     if (!el) {
       onChange(`${value}${value && !value.endsWith('\n') ? '\n' : ''}${prefix}${suffix}`);
+      onFocusChange?.(true);
       setIsEditing(true);
       return;
     }
@@ -294,7 +304,13 @@ export const MarkdownNotesField: React.FC<{
               type="button"
               className={`md-fmt-btn preview-toggle ${showFormattedPreview ? 'active' : ''}`}
               title={showFormattedPreview ? 'Edit Markdown' : 'Preview Markdown'}
-              onClick={() => setIsEditing((prev) => !prev)}
+              onClick={() =>
+                setIsEditing((prev) => {
+                  const next = !prev;
+                  onFocusChange?.(next);
+                  return next;
+                })
+              }
             >
               {showFormattedPreview ? <Edit3 size={11} /> : <Eye size={11} />}
             </button>
@@ -306,7 +322,10 @@ export const MarkdownNotesField: React.FC<{
         <FormattedMarkdownText
           text={value}
           onToggleCheckboxLine={handleToggleCheckboxLine}
-          onActivateEdit={() => setIsEditing(true)}
+          onActivateEdit={() => {
+            onFocusChange?.(true);
+            setIsEditing(true);
+          }}
         />
       ) : (
         <textarea
@@ -315,8 +334,14 @@ export const MarkdownNotesField: React.FC<{
           placeholder={placeholder}
           value={value}
           rows={Math.max(rows, Math.min(10, value.split('\n').length))}
-          onFocus={() => setIsEditing(true)}
-          onBlur={() => setIsEditing(false)}
+          onFocus={() => {
+            setIsEditing(true);
+            onFocusChange?.(true);
+          }}
+          onBlur={() => {
+            setIsEditing(false);
+            onFocusChange?.(false);
+          }}
           onChange={(e) => onChange(e.target.value)}
         />
       )}

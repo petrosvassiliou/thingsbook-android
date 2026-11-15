@@ -44,7 +44,17 @@ import {
   getFirestoreInstance,
   getGoogleCalendarAuthInstance
 } from './firebaseClient';
-import { loadPreferences, localDb } from './localDb';
+import { loadPreferences, localDb, savePreferences } from './localDb';
+import {
+  ATTACHMENT_BACKFILL_STORAGE_PREFIX,
+  ATTACHMENT_BATCH_CHUNK_SIZE,
+  METADATA_BATCH_CHUNK_SIZE,
+  attachmentToFirestoreMap,
+  buildBoundedNtfyRelayPayload,
+  chunkItems,
+  clampRemoteCursorTimestamp,
+  computeEffectivePullCursor
+} from './syncUtils';
 
 function extractAuthErrorCode(err: unknown): string {
   const code = (err as { code?: unknown })?.code;
@@ -200,7 +210,7 @@ function areaFromFirestoreMap(map: Record<string, unknown>): AreaRecord | null {
 }
 
 function projectToFirestoreMap(project: ProjectRecord): Record<string, unknown> {
-  return {
+  const map: Record<string, unknown> = {
     id: project.id,
     areaId: project.areaId ?? null,
     title: project.title,
@@ -216,6 +226,10 @@ function projectToFirestoreMap(project: ProjectRecord): Record<string, unknown> 
     updatedAt: Math.trunc(finiteNumber(project.updatedAt)),
     isDeleted: Boolean(project.isDeleted)
   };
+  if (project.purgedFromTrash) {
+    map.purgedFromTrash = true;
+  }
+  return map;
 }
 
 function projectFromFirestoreMap(map: Record<string, unknown>): ProjectRecord | null {
@@ -239,7 +253,8 @@ function projectFromFirestoreMap(map: Record<string, unknown>): ProjectRecord | 
     createdAt: Math.trunc(finiteNumber(map.createdAt)),
     updatedAt: Math.trunc(finiteNumber(map.updatedAt)),
     isDeleted: Boolean(map.isDeleted),
-    isDirty: false
+    isDirty: false,
+    purgedFromTrash: Boolean(map.purgedFromTrash)
   };
 }
 
@@ -274,7 +289,7 @@ function headingFromFirestoreMap(map: Record<string, unknown>): HeadingRecord | 
 }
 
 function taskToFirestoreMap(task: TaskRecord): Record<string, unknown> {
-  return {
+  const map: Record<string, unknown> = {
     id: task.id,
     title: task.title,
     notes: task.notes || '',
@@ -294,6 +309,10 @@ function taskToFirestoreMap(task: TaskRecord): Record<string, unknown> {
     updatedAt: Math.trunc(finiteNumber(task.updatedAt)),
     isDeleted: Boolean(task.isDeleted)
   };
+  if (task.purgedFromTrash) {
+    map.purgedFromTrash = true;
+  }
+  return map;
 }
 
 function taskFromFirestoreMap(map: Record<string, unknown>): TaskRecord | null {
@@ -321,7 +340,8 @@ function taskFromFirestoreMap(map: Record<string, unknown>): TaskRecord | null {
     createdAt: Math.trunc(finiteNumber(map.createdAt)),
     updatedAt: Math.trunc(finiteNumber(map.updatedAt)),
     isDeleted: Boolean(map.isDeleted),
-    isDirty: false
+    isDirty: false,
+    purgedFromTrash: Boolean(map.purgedFromTrash)
   };
 }
 
@@ -352,23 +372,6 @@ function checklistFromFirestoreMap(map: Record<string, unknown>): ChecklistItemR
     updatedAt: Math.trunc(finiteNumber(map.updatedAt)),
     isDeleted: Boolean(map.isDeleted),
     isDirty: false
-  };
-}
-
-function attachmentToFirestoreMap(att: AttachmentRecord): Record<string, unknown> {
-  return {
-    id: att.id,
-    taskId: att.taskId ?? null,
-    projectId: att.projectId ?? null,
-    fileName: att.fileName,
-    mimeType: att.mimeType,
-    sizeBytes: Math.trunc(finiteNumber(att.sizeBytes)),
-    localRelativePath: '',
-    dataBase64: att.dataBase64 || '',
-    sortOrder: finiteNumber(att.sortOrder),
-    createdAt: Math.trunc(finiteNumber(att.createdAt)),
-    updatedAt: Math.trunc(finiteNumber(att.updatedAt)),
-    isDeleted: Boolean(att.isDeleted)
   };
 }
 
@@ -403,8 +406,12 @@ class ThingsCloudSyncService {
   private listeners = new Set<SyncListener>();
   private firestoreUnsubs: FirestoreUnsubscribe[] = [];
   private authUnsub: AuthUnsubscribe | null = null;
+  private boundAuthInstance: Auth | null = null;
+  private listenersRegistered = false;
   private debounceTimer: number | null = null;
   private isSyncingPromise: Promise<void> | null = null;
+  private pendingResyncRequested = false;
+  private pendingForceFullPull = false;
   private authFlowInProgress = false;
   private state: CloudSyncSnapshot = {
     status: 'OFFLINE',
@@ -472,12 +479,14 @@ class ThingsCloudSyncService {
   private getLastSyncTs(userId: string): number {
     const raw = localStorage.getItem(`${LAST_SYNC_PREFIX}${userId}`);
     const parsed = raw ? Number(raw) : 0;
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+    return clampRemoteCursorTimestamp(parsed, Date.now());
   }
 
   private setLastSyncTs(userId: string, ts: number) {
-    localStorage.setItem(`${LAST_SYNC_PREFIX}${userId}`, String(Math.trunc(ts)));
-    this.emit({ lastSyncedAt: Math.trunc(ts) });
+    const clamped = ts > 0 ? clampRemoteCursorTimestamp(ts, Date.now()) : 0;
+    localStorage.setItem(`${LAST_SYNC_PREFIX}${userId}`, String(Math.trunc(clamped)));
+    this.emit({ lastSyncedAt: Math.trunc(clamped) });
   }
 
   private isLocalOnly(): boolean {
@@ -485,8 +494,18 @@ class ThingsCloudSyncService {
   }
 
   async initializeSession(): Promise<void> {
-    if (this.authUnsub) return;
     const auth = getFirebaseAuthInstance();
+    if (this.authUnsub && this.boundAuthInstance === auth) return;
+    if (this.authUnsub) {
+      try {
+        this.authUnsub();
+      } catch {
+        // ignore
+      }
+      this.authUnsub = null;
+    }
+    this.boundAuthInstance = auth;
+
     this.authUnsub = onAuthStateChanged(auth, async (user) => {
       if (user && !user.email?.endsWith('@thingsbook.app')) {
         if (this.authFlowInProgress) {
@@ -538,14 +557,17 @@ class ThingsCloudSyncService {
       }
     });
 
-    window.addEventListener('online', () => {
-      if (!this.isLocalOnly() && this.state.userId) {
-        this.triggerBackgroundSync(250);
-      }
-    });
-    window.addEventListener('offline', () => {
-      this.emit({ status: 'OFFLINE' });
-    });
+    if (!this.listenersRegistered && typeof window !== 'undefined') {
+      this.listenersRegistered = true;
+      window.addEventListener('online', () => {
+        if (!this.isLocalOnly() && this.state.userId) {
+          this.triggerBackgroundSync(250);
+        }
+      });
+      window.addEventListener('offline', () => {
+        this.emit({ status: 'OFFLINE' });
+      });
+    }
   }
 
   onDatabaseModeChanged(localOnly: boolean) {
@@ -553,7 +575,8 @@ class ThingsCloudSyncService {
       this.detachRealtimeListeners();
       this.emit({ status: 'OFFLINE' });
     } else if (this.state.userId) {
-      void this.syncBidirectionalDeltas();
+      const forceFull = this.getLastSyncTs(this.state.userId) === 0;
+      void this.syncBidirectionalDeltas(forceFull);
       this.attachRealtimeListeners(this.state.userId);
     }
   }
@@ -586,6 +609,9 @@ class ThingsCloudSyncService {
     mergeLocalTasks: boolean
   ): Promise<void> {
     await this.prepareLocalDataBeforeLogin(mergeLocalTasks);
+    if (this.isLocalOnly()) {
+      savePreferences({ ...loadPreferences(), localOnlyDbMode: false });
+    }
     this.savePersistedMeta({
       userId: uid,
       email: emailOrId,
@@ -895,6 +921,7 @@ class ThingsCloudSyncService {
   // ==================== Bidirectional Delta Sync ====================
 
   async syncBidirectionalDeltas(forceFullPull = false): Promise<void> {
+    void this.initializeSession();
     if (this.isLocalOnly()) {
       this.emit({ status: 'OFFLINE' });
       return;
@@ -904,12 +931,32 @@ class ThingsCloudSyncService {
       return;
     }
     if (this.isSyncingPromise) {
+      this.pendingResyncRequested = true;
+      if (forceFullPull) {
+        this.pendingForceFullPull = true;
+      }
       return this.isSyncingPromise;
     }
 
-    this.isSyncingPromise = this.runSyncInternal(forceFullPull).finally(() => {
-      this.isSyncingPromise = null;
-    });
+    this.isSyncingPromise = (async () => {
+      let nextForceFull = forceFullPull;
+      try {
+        while (true) {
+          this.pendingResyncRequested = false;
+          this.pendingForceFullPull = false;
+          await this.runSyncInternal(nextForceFull);
+          if (!this.pendingResyncRequested || this.isLocalOnly() || !navigator.onLine) {
+            this.pendingResyncRequested = false;
+            this.pendingForceFullPull = false;
+            break;
+          }
+          nextForceFull = this.pendingForceFullPull;
+        }
+      } finally {
+        this.isSyncingPromise = null;
+      }
+    })();
+
     return this.isSyncingPromise;
   }
 
@@ -926,19 +973,23 @@ class ThingsCloudSyncService {
     try {
       const lastSync = forceFullPull ? 0 : this.getLastSyncTs(userId);
 
-      // 1. Pull remote deltas first on initial full pull so cloud wins if newer, or push dirty first
-      await this.pushDirtyRecordsToFirestore(userId);
-      const pulledMax = await this.pullDeltaRecordsFromFirestore(userId, lastSync);
+      const relayPushMaps = await this.pushDirtyRecordsToFirestore(userId);
+      const rawPulledMax = await this.pullDeltaRecordsFromFirestore(userId, lastSync);
+      const pulledMax = clampRemoteCursorTimestamp(rawPulledMax, Date.now());
 
-      // Optional secondary relay push/pull via ntfy topic if persisted
       const meta = this.loadPersistedMeta();
       if (meta?.channelTopic) {
-        await this.syncSecondaryNtfyRelay(userId, meta.channelTopic, meta.deviceId, lastSync).catch(
-          () => undefined
-        );
+        await this.syncSecondaryNtfyRelay(
+          userId,
+          meta.channelTopic,
+          meta.deviceId,
+          lastSync,
+          relayPushMaps
+        ).catch(() => undefined);
       }
 
-      const nextSyncTs = pulledMax > lastSync ? pulledMax : lastSync === 0 ? Date.now() : lastSync;
+      const nextSyncTs =
+        pulledMax > lastSync ? pulledMax : lastSync === 0 ? Date.now() : lastSync;
       this.setLastSyncTs(userId, nextSyncTs);
       this.emit({ status: 'SYNCED', errorMessage: null });
     } catch (err: unknown) {
@@ -947,46 +998,74 @@ class ThingsCloudSyncService {
     }
   }
 
-  private async pushDirtyRecordsToFirestore(userId: string): Promise<void> {
+  private async pushDirtyRecordsToFirestore(userId: string): Promise<{
+    tags: Record<string, unknown>[];
+    areas: Record<string, unknown>[];
+    projects: Record<string, unknown>[];
+    headings: Record<string, unknown>[];
+    tasks: Record<string, unknown>[];
+    checklistItems: Record<string, unknown>[];
+    attachments: Record<string, unknown>[];
+  } | null> {
     const dirty = await localDb.getDirtyEntities();
-    const ops: Array<{ col: string; id: string; data: Record<string, unknown> }> = [];
+    const metadataOps: Array<{ col: string; id: string; data: Record<string, unknown> }> = [];
 
-    for (const tag of dirty.tags) {
-      ops.push({ col: 'tags', id: tag.id, data: tagToFirestoreMap(tag) });
+    const tagMaps = dirty.tags.map(tagToFirestoreMap);
+    const areaMaps = dirty.areas.map(areaToFirestoreMap);
+    const projectMaps = dirty.projects.map(projectToFirestoreMap);
+    const headingMaps = dirty.headings.map(headingToFirestoreMap);
+    const taskMaps = dirty.tasks.map(taskToFirestoreMap);
+    const checklistMaps = dirty.checklistItems.map(checklistToFirestoreMap);
+    const attachmentMaps = dirty.attachments.map(attachmentToFirestoreMap);
+
+    for (let i = 0; i < dirty.tags.length; i++) {
+      metadataOps.push({ col: 'tags', id: dirty.tags[i].id, data: tagMaps[i] });
     }
-    for (const area of dirty.areas) {
-      ops.push({ col: 'areas', id: area.id, data: areaToFirestoreMap(area) });
+    for (let i = 0; i < dirty.areas.length; i++) {
+      metadataOps.push({ col: 'areas', id: dirty.areas[i].id, data: areaMaps[i] });
     }
-    for (const proj of dirty.projects) {
-      ops.push({ col: 'projects', id: proj.id, data: projectToFirestoreMap(proj) });
+    for (let i = 0; i < dirty.projects.length; i++) {
+      metadataOps.push({ col: 'projects', id: dirty.projects[i].id, data: projectMaps[i] });
     }
-    for (const head of dirty.headings) {
-      ops.push({ col: 'headings', id: head.id, data: headingToFirestoreMap(head) });
+    for (let i = 0; i < dirty.headings.length; i++) {
+      metadataOps.push({ col: 'headings', id: dirty.headings[i].id, data: headingMaps[i] });
     }
-    for (const task of dirty.tasks) {
-      ops.push({ col: 'tasks', id: task.id, data: taskToFirestoreMap(task) });
+    for (let i = 0; i < dirty.tasks.length; i++) {
+      metadataOps.push({ col: 'tasks', id: dirty.tasks[i].id, data: taskMaps[i] });
     }
-    for (const chk of dirty.checklistItems) {
-      ops.push({ col: 'checklist_items', id: chk.id, data: checklistToFirestoreMap(chk) });
-    }
-    for (const att of dirty.attachments) {
-      // Firestore document size limit is 1 MiB (~700 KB binary before Base64)
-      if (att.isDeleted || att.sizeBytes <= 700_000) {
-        ops.push({ col: 'attachments', id: att.id, data: attachmentToFirestoreMap(att) });
-      }
+    for (let i = 0; i < dirty.checklistItems.length; i++) {
+      metadataOps.push({
+        col: 'checklist_items',
+        id: dirty.checklistItems[i].id,
+        data: checklistMaps[i]
+      });
     }
 
-    if (ops.length === 0 && dirty.attachments.length === 0) return;
+    if (metadataOps.length === 0 && dirty.attachments.length === 0) return null;
 
-    if (ops.length > 0) {
-      const db = getFirestoreInstance();
-      const CHUNK = 450;
-      for (let i = 0; i < ops.length; i += CHUNK) {
-        const slice = ops.slice(i, i + CHUNK);
+    const db = getFirestoreInstance();
+
+    if (metadataOps.length > 0) {
+      for (const slice of chunkItems(metadataOps, METADATA_BATCH_CHUNK_SIZE)) {
         const batch = writeBatch(db);
         for (const op of slice) {
           const ref = doc(db, 'users', userId, op.col, op.id);
           batch.set(ref, op.data, { merge: true });
+        }
+        await batch.commit();
+      }
+    }
+
+    if (dirty.attachments.length > 0) {
+      const attachmentPairs = dirty.attachments.map((att, idx) => ({
+        id: att.id,
+        data: attachmentMaps[idx]
+      }));
+      for (const attChunk of chunkItems(attachmentPairs, ATTACHMENT_BATCH_CHUNK_SIZE)) {
+        const batch = writeBatch(db);
+        for (const item of attChunk) {
+          const ref = doc(db, 'users', userId, 'attachments', item.id);
+          batch.set(ref, item.data, { merge: true });
         }
         await batch.commit();
       }
@@ -1010,26 +1089,46 @@ class ThingsCloudSyncService {
         maxUpdatedAt: maxOf(dirty.attachments)
       }
     });
+
+    return {
+      tags: tagMaps,
+      areas: areaMaps,
+      projects: projectMaps,
+      headings: headingMaps,
+      tasks: taskMaps,
+      checklistItems: checklistMaps,
+      attachments: attachmentMaps
+    };
   }
 
-  private async pullDeltaRecordsFromFirestore(userId: string, sinceTimestamp: number): Promise<number> {
+  private async pullDeltaRecordsFromFirestore(
+    userId: string,
+    sinceTimestamp: number
+  ): Promise<number> {
     const db = getFirestoreInstance();
-    const fetchCollection = async (colName: string): Promise<Record<string, unknown>[]> => {
+    const effectiveSince = computeEffectivePullCursor(sinceTimestamp);
+    const backfillKey = `${ATTACHMENT_BACKFILL_STORAGE_PREFIX}${userId}`;
+    const needsAttachmentBackfill = localStorage.getItem(backfillKey) !== '1';
+
+    const fetchCollection = async (
+      colName: string,
+      colSince: number
+    ): Promise<Record<string, unknown>[]> => {
       const colRef = collection(db, 'users', userId, colName);
-      const q = sinceTimestamp > 0 ? query(colRef, where('updatedAt', '>', sinceTimestamp)) : colRef;
+      const q = colSince > 0 ? query(colRef, where('updatedAt', '>', colSince)) : colRef;
       const snap = await getDocs(q);
       return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     };
 
     const [rawTags, rawAreas, rawProjects, rawHeadings, rawTasks, rawChecklists, rawAttachments] =
       await Promise.all([
-        fetchCollection('tags'),
-        fetchCollection('areas'),
-        fetchCollection('projects'),
-        fetchCollection('headings'),
-        fetchCollection('tasks'),
-        fetchCollection('checklist_items'),
-        fetchCollection('attachments')
+        fetchCollection('tags', effectiveSince),
+        fetchCollection('areas', effectiveSince),
+        fetchCollection('projects', effectiveSince),
+        fetchCollection('headings', effectiveSince),
+        fetchCollection('tasks', effectiveSince),
+        fetchCollection('checklist_items', effectiveSince),
+        fetchCollection('attachments', needsAttachmentBackfill ? 0 : effectiveSince)
       ]);
 
     const tags = rawTags.map(tagFromFirestoreMap).filter((x): x is TagRecord => x !== null);
@@ -1057,10 +1156,13 @@ class ThingsCloudSyncService {
       checklistItems.length === 0 &&
       attachments.length === 0
     ) {
+      if (needsAttachmentBackfill) {
+        localStorage.setItem(backfillKey, '1');
+      }
       return sinceTimestamp;
     }
 
-    return localDb.applyRemoteDeltas({
+    const appliedMax = await localDb.applyRemoteDeltas({
       tags,
       areas,
       projects,
@@ -1069,6 +1171,12 @@ class ThingsCloudSyncService {
       checklistItems,
       attachments
     });
+
+    if (needsAttachmentBackfill) {
+      localStorage.setItem(backfillKey, '1');
+    }
+
+    return clampRemoteCursorTimestamp(appliedMax, Date.now());
   }
 
   private attachRealtimeListeners(userId: string) {
@@ -1087,15 +1195,20 @@ class ThingsCloudSyncService {
     ] as const;
 
     for (const colName of collections) {
-      const since = Math.max(0, this.getLastSyncTs(userId) - 60_000);
+      const since = computeEffectivePullCursor(this.getLastSyncTs(userId));
       const colRef = collection(db, 'users', userId, colName);
       const q = since > 0 ? query(colRef, where('updatedAt', '>', since)) : colRef;
 
       const unsub = onSnapshot(
         q,
         async (snapshot) => {
-          if (snapshot.metadata.hasPendingWrites) return;
-          const changed = snapshot.docChanges().filter((c) => c.type === 'added' || c.type === 'modified');
+          const changed = snapshot
+            .docChanges()
+            .filter(
+              (c) =>
+                !c.doc.metadata.hasPendingWrites &&
+                (c.type === 'added' || c.type === 'modified')
+            );
           if (changed.length === 0) return;
 
           const docs = changed.map((c) => ({ id: c.doc.id, ...c.doc.data() }));
@@ -1135,8 +1248,9 @@ class ThingsCloudSyncService {
             });
           }
 
-          if (maxTs > this.getLastSyncTs(userId)) {
-            this.setLastSyncTs(userId, maxTs);
+          const clampedMax = clampRemoteCursorTimestamp(maxTs, Date.now());
+          if (clampedMax > this.getLastSyncTs(userId)) {
+            this.setLastSyncTs(userId, clampedMax);
           }
           this.emit({ status: 'SYNCED' });
         },
@@ -1163,30 +1277,85 @@ class ThingsCloudSyncService {
     userId: string,
     channelTopic: string,
     localDeviceId: string,
-    sinceTimestamp: number
+    sinceTimestamp: number,
+    pushedDirtyMaps: {
+      tags: Record<string, unknown>[];
+      areas: Record<string, unknown>[];
+      projects: Record<string, unknown>[];
+      headings: Record<string, unknown>[];
+      tasks: Record<string, unknown>[];
+      checklistItems: Record<string, unknown>[];
+      attachments: Record<string, unknown>[];
+    } | null
   ): Promise<void> {
-    const res = await fetch(`https://ntfy.sh/${encodeURIComponent(channelTopic)}/json?poll=1&since=24h`, {
-      method: 'GET',
-      signal: AbortSignal.timeout(3500)
-    });
+    if (pushedDirtyMaps) {
+      const payload = buildBoundedNtfyRelayPayload({
+        userId,
+        deviceId: localDeviceId,
+        batchTimestamp: Date.now(),
+        tags: pushedDirtyMaps.tags,
+        areas: pushedDirtyMaps.areas,
+        projects: pushedDirtyMaps.projects,
+        headings: pushedDirtyMaps.headings,
+        tasks: pushedDirtyMaps.tasks,
+        checklistItems: pushedDirtyMaps.checklistItems,
+        attachments: pushedDirtyMaps.attachments
+      });
+      if (payload !== null) {
+        await fetch(`https://ntfy.sh/${encodeURIComponent(channelTopic)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+          signal: AbortSignal.timeout(3500)
+        }).catch(() => undefined);
+      }
+    }
+
+    const sinceStorageKey = `thingsbook_ntfy_since_${channelTopic}`;
+    const lastMsgId = localStorage.getItem(sinceStorageKey) || '24h';
+
+    const res = await fetch(
+      `https://ntfy.sh/${encodeURIComponent(channelTopic)}/json?poll=1&since=${encodeURIComponent(lastMsgId)}`,
+      {
+        method: 'GET',
+        signal: AbortSignal.timeout(3500)
+      }
+    );
     if (!res.ok) return;
     const text = await res.text();
-    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+    const lines = text
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
+    let newestMsgId: string | null = null;
+
     for (const line of lines) {
       try {
         const env = JSON.parse(line);
+        if (typeof env?.id === 'string' && env.id.trim().length > 0) {
+          newestMsgId = env.id.trim();
+        }
         if (env?.event !== 'message' || typeof env?.message !== 'string') continue;
         const batch = JSON.parse(env.message);
         if (batch?.userId !== userId) continue;
-        if (batch?.deviceId === localDeviceId && sinceTimestamp > 0 && batch.batchTimestamp <= sinceTimestamp) {
+        if (batch?.deviceId === localDeviceId) continue;
+        if (
+          sinceTimestamp > 0 &&
+          typeof batch?.batchTimestamp === 'number' &&
+          batch.batchTimestamp <= computeEffectivePullCursor(sinceTimestamp)
+        ) {
           continue;
         }
         await localDb.applyRemoteDeltas({
           tags: Array.isArray(batch.tags)
-            ? batch.tags.map(tagFromFirestoreMap).filter((x: TagRecord | null): x is TagRecord => x !== null)
+            ? batch.tags
+                .map(tagFromFirestoreMap)
+                .filter((x: TagRecord | null): x is TagRecord => x !== null)
             : undefined,
           areas: Array.isArray(batch.areas)
-            ? batch.areas.map(areaFromFirestoreMap).filter((x: AreaRecord | null): x is AreaRecord => x !== null)
+            ? batch.areas
+                .map(areaFromFirestoreMap)
+                .filter((x: AreaRecord | null): x is AreaRecord => x !== null)
             : undefined,
           projects: Array.isArray(batch.projects)
             ? batch.projects
@@ -1199,7 +1368,9 @@ class ThingsCloudSyncService {
                 .filter((x: HeadingRecord | null): x is HeadingRecord => x !== null)
             : undefined,
           tasks: Array.isArray(batch.tasks)
-            ? batch.tasks.map(taskFromFirestoreMap).filter((x: TaskRecord | null): x is TaskRecord => x !== null)
+            ? batch.tasks
+                .map(taskFromFirestoreMap)
+                .filter((x: TaskRecord | null): x is TaskRecord => x !== null)
             : undefined,
           checklistItems: Array.isArray(batch.checklistItems)
             ? batch.checklistItems
@@ -1215,6 +1386,10 @@ class ThingsCloudSyncService {
       } catch {
         // skip malformed relay message
       }
+    }
+
+    if (newestMsgId) {
+      localStorage.setItem(sinceStorageKey, newestMsgId);
     }
   }
 }

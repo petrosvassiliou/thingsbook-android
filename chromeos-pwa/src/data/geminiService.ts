@@ -356,87 +356,211 @@ function offlineLocalizedBrainDumpParser(raw: string): BrainDumpTaskDto[] {
 
 function offlineLocalizedProjectBlueprint(goal: string, lang: SupportedLang): ProjectBlueprintResponse {
   const cleanGoal = goal || 'Thingsbook Project';
-  if (lang === 'de') {
-    return {
-      projectTitle: cleanGoal,
-      projectNotes: 'Von Thingsbook Gemini strukturierter GTD-Projektplan.',
-      headings: [
-        {
-          title: '1. Konzeption & Vorbereitung',
-          tasks: [
-            `Ziele und Erfolgskriterien für „${cleanGoal}“ festlegen`,
-            'Zeitplan, Budget und Meilensteine skizzieren',
-            'Wichtigste Ressourcen und Ansprechpartner sammeln'
-          ]
-        },
-        {
-          title: '2. Fokus-Umsetzung',
-          tasks: [
-            'Kernaufgaben mit höchster Hebelwirkung bearbeiten',
-            'Ersten Prototyp oder Entwurf fertigstellen',
-            'Zwischenergebnisse prüfen und feinschleifen'
-          ]
-        },
-        {
-          title: '3. Abschluss & Review',
-          tasks: [
-            'Finale Qualitätskontrolle durchführen',
-            'Projekt live schalten / übergeben',
-            'Learnings im Thingsbook Logbuch festhalten'
-          ]
-        }
-      ]
-    };
+  switch (lang) {
+    case 'de':
+      return {
+        projectTitle: cleanGoal,
+        projectNotes: 'Von Thingsbook Gemini strukturierter GTD-Projektplan.',
+        headings: [
+          {
+            title: '1. Konzeption & Vorbereitung',
+            tasks: [
+              `Ziele und Erfolgskriterien für „${cleanGoal}“ festlegen`,
+              'Zeitplan, Budget und Meilensteine skizzieren',
+              'Wichtigste Ressourcen und Ansprechpartner sammeln'
+            ]
+          },
+          {
+            title: '2. Fokus-Umsetzung',
+            tasks: [
+              'Kernaufgaben mit höchster Hebelwirkung bearbeiten',
+              'Ersten Prototyp oder Entwurf fertigstellen',
+              'Zwischenergebnisse prüfen und feinschleifen'
+            ]
+          },
+          {
+            title: '3. Abschluss & Review',
+            tasks: [
+              'Finale Qualitätskontrolle durchführen',
+              'Projekt live schalten / übergeben',
+              'Learnings im Thingsbook Logbuch festhalten'
+            ]
+          }
+        ]
+      };
+    case 'fr':
+      return {
+        projectTitle: cleanGoal,
+        projectNotes: 'Plan de projet GTD structuré calmement par Thingsbook Gemini.',
+        headings: [
+          {
+            title: '1. Cadrage & Préparation',
+            tasks: [
+              `Définir des critères de réussite clairs pour « ${cleanGoal} »`,
+              'Rassembler les ressources essentielles, le calendrier et les notes',
+              'Planifier le premier jalon à fort impact'
+            ]
+          },
+          {
+            title: '2. Exécution Concentrée',
+            tasks: [
+              'Réaliser les livrables principaux lors de blocs de concentration',
+              'Évaluer la progression à mi-parcours et affiner le périmètre',
+              'Soigner les détails clés et les cas particuliers'
+            ]
+          },
+          {
+            title: '3. Revue Finale & Lancement',
+            tasks: [
+              'Vérifier la liste de contrôle qualité finale',
+              'Livrer le résultat et valider son achèvement',
+              'Archiver le projet terminé dans le Journal Thingsbook'
+            ]
+          }
+        ]
+      };
+    case 'it':
+      return {
+        projectTitle: cleanGoal,
+        projectNotes: 'Piano di progetto GTD strutturato con calma da Thingsbook Gemini.',
+        headings: [
+          {
+            title: '1. Analisi & Preparazione',
+            tasks: [
+              `Definire chiari criteri di successo per «${cleanGoal}»`,
+              'Raccogliere risorse essenziali, tempistiche e note',
+              'Pianificare il primo traguardo ad alto impatto'
+            ]
+          },
+          {
+            title: '2. Esecuzione Focalizzata',
+            tasks: [
+              'Completare le attività principali in blocchi di concentrazione',
+              'Verificare i progressi intermedi e rifinire gli obiettivi',
+              'Curare i dettagli principali e i casi limite'
+            ]
+          },
+          {
+            title: '3. Revisione Finale & Consegna',
+            tasks: [
+              'Eseguire la lista di controllo qualità finale',
+              'Consegnare il risultato e celebrare il completamento',
+              'Archiviare il progetto completato nel Registro Thingsbook'
+            ]
+          }
+        ]
+      };
+    case 'es':
+      return {
+        projectTitle: cleanGoal,
+        projectNotes: 'Plan de proyecto GTD estructurado con calma por Thingsbook Gemini.',
+        headings: [
+          {
+            title: '1. Definición & Preparación',
+            tasks: [
+              `Definir criterios claros de éxito para «${cleanGoal}»`,
+              'Reunir recursos esenciales, cronograma y notas',
+              'Programar el primer hito de alto impacto'
+            ]
+          },
+          {
+            title: '2. Ejecución Enfocada',
+            tasks: [
+              'Completar los entregables clave en bloques de enfoque',
+              'Revisar el avance intermedio y ajustar el alcance',
+              'Pulir detalles importantes y casos especiales'
+            ]
+          },
+          {
+            title: '3. Revisión Final & Cierre',
+            tasks: [
+              'Realizar la revisión final de calidad',
+              'Entregar el resultado y celebrar la finalización',
+              'Archivar el proyecto completado en el Registro de Thingsbook'
+            ]
+          }
+        ]
+      };
+    default:
+      return {
+        projectTitle: cleanGoal,
+        projectNotes: 'Calm GTD project blueprint structured by Thingsbook Gemini.',
+        headings: [
+          {
+            title: '1. Discovery & Preparation',
+            tasks: [
+              `Define clear success criteria for "${cleanGoal}"`,
+              'Gather essential resources, timeline, and notes',
+              'Schedule the first high-leverage milestone'
+            ]
+          },
+          {
+            title: '2. Deep Execution',
+            tasks: [
+              'Complete core deliverables during focus blocks',
+              'Review mid-project progress and refine scope',
+              'Polish key details and edge cases'
+            ]
+          },
+          {
+            title: '3. Final Review & Launch',
+            tasks: [
+              'Run final quality checklist',
+              'Deliver outcome and celebrate completion',
+              'Archive completed project in Thingsbook Logbook'
+            ]
+          }
+        ]
+      };
   }
-  return {
-    projectTitle: cleanGoal,
-    projectNotes: 'Calm GTD project blueprint structured by Thingsbook Gemini.',
-    headings: [
-      {
-        title: '1. Discovery & Preparation',
-        tasks: [
-          `Define clear success criteria for "${cleanGoal}"`,
-          'Gather essential resources, timeline, and notes',
-          'Schedule the first high-leverage milestone'
-        ]
-      },
-      {
-        title: '2. Deep Execution',
-        tasks: [
-          'Complete core deliverables during focus blocks',
-          'Review mid-project progress and refine scope',
-          'Polish key details and edge cases'
-        ]
-      },
-      {
-        title: '3. Final Review & Launch',
-        tasks: [
-          'Run final quality checklist',
-          'Deliver outcome and celebrate completion',
-          'Archive completed project in Thingsbook Logbook'
-        ]
-      }
-    ]
-  };
 }
 
 function offlineLocalizedLogbookReflection(count: number, lang: SupportedLang): LogbookReviewResponse {
-  if (lang === 'de') {
-    return {
-      summaryParagraph: `Du hast ${count} Aufgaben ruhig und fokussiert abgeschlossen. Dein Thingsbook-Workflow zeigt klare Struktur zwischen Projekten und täglichen Prioritäten.`,
-      suggestedFocusTasks: [
-        'Wichtigste offene Aufgabe in „Heute“ als Erstes abschließen',
-        'Eingang (Inbox) in 2 Minuten auf null bringen',
-        'Einen entspannten Punkt für „Heute Abend“ einplanen'
-      ]
-    };
+  switch (lang) {
+    case 'de':
+      return {
+        summaryParagraph: `Du hast ${count} Aufgaben ruhig und fokussiert abgeschlossen. Dein Thingsbook-Workflow zeigt klare Struktur zwischen Projekten und täglichen Prioritäten.`,
+        suggestedFocusTasks: [
+          'Wichtigste offene Aufgabe in „Heute“ als Erstes abschließen',
+          'Eingang (Inbox) in 2 Minuten auf null bringen',
+          'Einen entspannten Punkt für „Heute Abend“ einplanen'
+        ]
+      };
+    case 'fr':
+      return {
+        summaryParagraph: `Vous avez terminé ${count} tâches avec calme et régularité dans votre Journal. Votre rythme entre projets clés et priorités quotidiennes est équilibré.`,
+        suggestedFocusTasks: [
+          'Terminer votre tâche prioritaire n°1 dans Aujourd’hui',
+          'Traiter les éléments restants de la Boîte de réception',
+          'Prévoir un point serein pour Ce soir'
+        ]
+      };
+    case 'it':
+      return {
+        summaryParagraph: `Hai completato con calma ${count} attività nel tuo Registro. Il tuo ritmo tra progetti principali e blocchi di concentrazione giornalieri è costante ed equilibrato.`,
+        suggestedFocusTasks: [
+          'Completare la tua attività prioritaria n. 1 in Oggi',
+          'Portare a zero gli elementi rimasti in Entrata',
+          'Pianificare un momento tranquillo per Stasera'
+        ]
+      };
+    case 'es':
+      return {
+        summaryParagraph: `Has completado con calma ${count} tareas en tu Registro. Tu ritmo entre proyectos principales y bloques de enfoque diario es constante y equilibrado.`,
+        suggestedFocusTasks: [
+          'Completar tu tarea prioritaria n.º 1 en Hoy',
+          'Procesar los elementos pendientes de Entrada hasta dejarla en cero',
+          'Reservar una tarea tranquila para Esta noche'
+        ]
+      };
+    default:
+      return {
+        summaryParagraph: `You have calmly completed ${count} To-Dos in your Logbook. Your momentum across core projects and daily focus blocks is steady and well-balanced.`,
+        suggestedFocusTasks: [
+          'Complete your #1 high-leverage To-Do in Today',
+          'Process any remaining Inbox items to zero',
+          'Set aside one calm reflection item for This Evening'
+        ]
+      };
   }
-  return {
-    summaryParagraph: `You have calmly completed ${count} To-Dos in your Logbook. Your momentum across core projects and daily focus blocks is steady and well-balanced.`,
-    suggestedFocusTasks: [
-      'Complete your #1 high-leverage To-Do in Today',
-      'Process any remaining Inbox items to zero',
-      'Set aside one calm reflection item for This Evening'
-    ]
-  };
 }

@@ -136,7 +136,7 @@ class ThingsbookGeminiService @Inject constructor() {
             Return ONLY valid JSON matching: {"items": ["Step 1", "Step 2", "Step 3", "Step 4"]}
         """.trimIndent()
 
-        val rawJson = callGeminiJson(prompt)
+        val rawJson = callGeminiJson(prompt, locale)
         if (!rawJson.isNullOrBlank()) {
             val parsed = runCatching {
                 json.decodeFromString<GeminiChecklistResponse>(extractJsonObject(rawJson))
@@ -176,7 +176,7 @@ class ThingsbookGeminiService @Inject constructor() {
             {"tasks": [{"title": "...", "notes": "...", "scheduleState": "TODAY", "whenDaysOffset": 0, "deadlineDaysOffset": null, "checklist": []}]}
         """.trimIndent()
 
-        val rawJson = callGeminiJson(prompt)
+        val rawJson = callGeminiJson(prompt, locale)
         if (!rawJson.isNullOrBlank()) {
             val parsed = runCatching {
                 json.decodeFromString<GeminiBrainDumpResponse>(extractJsonObject(rawJson))
@@ -214,7 +214,7 @@ class ThingsbookGeminiService @Inject constructor() {
             }
         """.trimIndent()
 
-        val rawJson = callGeminiJson(prompt)
+        val rawJson = callGeminiJson(prompt, locale)
         if (!rawJson.isNullOrBlank()) {
             val parsed = runCatching {
                 json.decodeFromString<GeminiProjectBlueprintResponse>(extractJsonObject(rawJson))
@@ -245,7 +245,7 @@ class ThingsbookGeminiService @Inject constructor() {
             {"summaryParagraph": "...", "suggestedFocusTasks": ["...", "...", "..."]}
         """.trimIndent()
 
-        val rawJson = callGeminiJson(prompt)
+        val rawJson = callGeminiJson(prompt, locale)
         if (!rawJson.isNullOrBlank()) {
             val parsed = runCatching {
                 json.decodeFromString<GeminiLogbookReviewResponse>(extractJsonObject(rawJson))
@@ -258,11 +258,11 @@ class ThingsbookGeminiService @Inject constructor() {
         offlineLocalizedLogbookReflection(completedTaskTitles, locale)
     }
 
-    private suspend fun callGeminiJson(prompt: String): String? {
+    private suspend fun callGeminiJson(prompt: String, locale: Locale = Locale.getDefault()): String? {
         // 1. If user supplied a direct Gemini Developer API key in Settings, call REST endpoint
         val key = customApiKey.trim()
         if (key.isNotEmpty()) {
-            val restResult = runCatchingCancellable { callGeminiRestApi(key, prompt) }
+            val restResult = runCatchingCancellable { callGeminiRestApi(key, prompt, locale) }
                 .getOrElse { err ->
                     if (err is GeminiApiException) throw err
                     null
@@ -283,7 +283,28 @@ class ThingsbookGeminiService @Inject constructor() {
         }.getOrNull()
     }
 
-    private fun callGeminiRestApi(apiKey: String, prompt: String): String? {
+    private fun localizedGeminiHttpError(code: Int, locale: Locale): String {
+        val lang = locale.language.lowercase(Locale.ROOT).take(2)
+        return if (code == 429) {
+            when (lang) {
+                "de" -> "Gemini API Rate-Limit erreicht (HTTP 429)."
+                "fr" -> "Limite de requêtes de l'API Gemini atteinte (HTTP 429)."
+                "it" -> "Limite di richieste API Gemini raggiunto (HTTP 429)."
+                "es" -> "Límite de solicitudes de la API de Gemini alcanzado (HTTP 429)."
+                else -> "Gemini API rate limit reached (HTTP 429)."
+            }
+        } else {
+            when (lang) {
+                "de" -> "Gemini API-Schlüssel ungültig oder abgelehnt (HTTP $code)."
+                "fr" -> "Clé API Gemini invalide ou refusée (HTTP $code)."
+                "it" -> "Chiave API Gemini non valida o rifiutata (HTTP $code)."
+                "es" -> "Clave de API de Gemini no válida o rechazada (HTTP $code)."
+                else -> "Gemini API key invalid or rejected (HTTP $code)."
+            }
+        }
+    }
+
+    private fun callGeminiRestApi(apiKey: String, prompt: String, locale: Locale): String? {
         val endpoint = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent")
         val conn = (endpoint.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -306,12 +327,7 @@ class ThingsbookGeminiService @Inject constructor() {
             val code = conn.responseCode
             if (code !in 200..299) {
                 if (code == 400 || code == 401 || code == 403 || code == 429) {
-                    val hint = if (code == 429) {
-                        "Gemini API Rate-Limit erreicht (HTTP 429)."
-                    } else {
-                        "Gemini API-Schlüssel ungültig oder abgelehnt (HTTP $code)."
-                    }
-                    throw GeminiApiException(hint, code)
+                    throw GeminiApiException(localizedGeminiHttpError(code, locale), code)
                 }
                 return null
             }

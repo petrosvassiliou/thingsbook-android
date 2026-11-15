@@ -1054,7 +1054,6 @@ public struct ManageAreasSheetView: View {
                 Button(store.tr("action_done")) {
                     dismiss()
                 }
-                .keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)
@@ -1216,7 +1215,6 @@ public struct ManageTagsSheetView: View {
                 Button(store.tr("action_done")) {
                     dismiss()
                 }
-                .keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)

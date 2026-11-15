@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets
 import java.security.GeneralSecurityException
 import java.security.SecureRandom
 import java.util.Base64
+import java.util.Locale
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 import javax.crypto.AEADBadTagException
@@ -212,7 +213,7 @@ sealed interface BackupInspectionResult {
  * Self-contained Backup Encoder/Decoder with optional strong Password Encryption:
  * - Key Derivation: `PBKDF2WithHmacSHA256` (120,000 iterations, 128-bit random salt, 256-bit AES key)
  * - Authenticated Encryption: `AES/GCM/NoPadding` (96-bit random IV, 128-bit authentication tag, AAD header binding)
- * - Payload Compression: GZIP with strict 50 MB decompression bound against Zip-Bomb / OOM inputs.
+ * - Payload Compression: GZIP with strict 120 MB decompression bound against Zip-Bomb / OOM inputs.
  */
 object ThingsBackupCodec {
     const val BACKUP_MAGIC = "THINGSBOOK_BACKUP_V1"
@@ -224,9 +225,19 @@ object ThingsBackupCodec {
     private const val SALT_BYTES = 16
     private const val IV_BYTES = 12
     private const val GCM_TAG_BITS = 128
-    private const val MAX_DECOMPRESSED_BYTES = 50 * 1024 * 1024 // 50 MB guard
+    const val MAX_DECOMPRESSED_BYTES = 120 * 1024 * 1024 // 120 MB guard
 
     private val secureRandom = SecureRandom()
+
+    private fun tr(en: String, de: String, fr: String, it: String, es: String): String {
+        return when (Locale.getDefault().language.lowercase(Locale.ROOT)) {
+            "de" -> de
+            "fr" -> fr
+            "it" -> it
+            "es" -> es
+            else -> en
+        }
+    }
 
     val json = Json {
         ignoreUnknownKeys = true
@@ -334,29 +345,64 @@ object ThingsBackupCodec {
 
     private fun parseAndValidateEnvelope(rawBytes: ByteArray): ThingsbookBackupEnvelope {
         if (rawBytes.isEmpty()) {
-            throw InvalidBackupFormatException("Die ausgewählte Backup-Datei ist leer.")
+            throw InvalidBackupFormatException(
+                tr(
+                    en = "The selected backup file is empty.",
+                    de = "Die ausgewählte Backup-Datei ist leer.",
+                    fr = "Le fichier de sauvegarde sélectionné est vide.",
+                    it = "Il file di backup selezionato è vuoto.",
+                    es = "El archivo de copia de seguridad seleccionado está vacío."
+                )
+            )
         }
         val text = try {
             String(rawBytes, StandardCharsets.UTF_8).removePrefix("\uFEFF").trim()
         } catch (t: Throwable) {
-            throw InvalidBackupFormatException("Die Datei konnte nicht gelesen werden.", t)
+            throw InvalidBackupFormatException(
+                tr(
+                    en = "Could not read the backup file.",
+                    de = "Die Datei konnte nicht gelesen werden.",
+                    fr = "Impossible de lire le fichier de sauvegarde.",
+                    it = "Impossibile leggere il file di backup.",
+                    es = "No se pudo leer el archivo de copia de seguridad."
+                ),
+                t
+            )
         }
         val envelope = try {
             json.decodeFromString<ThingsbookBackupEnvelope>(text)
         } catch (t: Throwable) {
             throw InvalidBackupFormatException(
-                "Ungültiges Dateiformat: Dies ist keine gültige Thingsbook-Backup-Datei.",
+                tr(
+                    en = "Invalid file format: This is not a valid Thingsbook backup file.",
+                    de = "Ungültiges Dateiformat: Dies ist keine gültige Thingsbook-Backup-Datei.",
+                    fr = "Format de fichier invalide : ce n'est pas un fichier de sauvegarde Thingsbook valide.",
+                    it = "Formato file non valido: non è un file di backup Thingsbook valido.",
+                    es = "Formato de archivo no válido: no es un archivo de copia de seguridad válido de Thingsbook."
+                ),
                 t
             )
         }
         if (envelope.magic != BACKUP_MAGIC) {
             throw InvalidBackupFormatException(
-                "Unbekannte Backup-Kennung (${envelope.magic}). Bitte wähle eine gültige Thingsbook-Backup-Datei."
+                tr(
+                    en = "Unknown backup header (${envelope.magic}). Please choose a valid Thingsbook backup file.",
+                    de = "Unbekannte Backup-Kennung (${envelope.magic}). Bitte wähle eine gültige Thingsbook-Backup-Datei.",
+                    fr = "En-tête de sauvegarde inconnu (${envelope.magic}). Veuillez choisir un fichier Thingsbook valide.",
+                    it = "Intestazione di backup sconosciuta (${envelope.magic}). Seleziona un file di backup Thingsbook valido.",
+                    es = "Encabezado de copia desconocido (${envelope.magic}). Elige un archivo válido de Thingsbook."
+                )
             )
         }
         if (envelope.formatVersion < 1 || envelope.formatVersion > FORMAT_VERSION) {
             throw InvalidBackupFormatException(
-                "Diese Backup-Datei stammt aus einer neueren Version (Format v${envelope.formatVersion}) und kann nicht gelesen werden."
+                tr(
+                    en = "This backup file was created with a newer format (v${envelope.formatVersion}) and cannot be opened.",
+                    de = "Diese Backup-Datei stammt aus einer neueren Version (Format v${envelope.formatVersion}) und kann nicht gelesen werden.",
+                    fr = "Cette sauvegarde provient d'une version plus récente (format v${envelope.formatVersion}) et ne peut pas être lue.",
+                    it = "Questo backup proviene da una versione più recente (formato v${envelope.formatVersion}) e non può essere letto.",
+                    es = "Esta copia proviene de una versión más reciente (formato v${envelope.formatVersion}) y no se puede abrir."
+                )
             )
         }
         return envelope
@@ -368,24 +414,72 @@ object ThingsBackupCodec {
     ): ThingsbookBackupPayload {
         val compressedBytes = if (!envelope.encrypted) {
             val b64 = envelope.payloadGzipBase64?.takeIf { it.isNotBlank() }
-                ?: throw InvalidBackupFormatException("Die unverschlüsselte Backup-Datei enthält keine Nutzdaten.")
-            decodeBase64Safe(b64, "Nutzdaten")
+                ?: throw InvalidBackupFormatException(
+                    tr(
+                        en = "The unencrypted backup file contains no payload data.",
+                        de = "Die unverschlüsselte Backup-Datei enthält keine Nutzdaten.",
+                        fr = "Le fichier de sauvegarde non chiffré ne contient aucune donnée.",
+                        it = "Il file di backup non crittografato non contiene dati.",
+                        es = "El archivo de copia de seguridad sin cifrar no contiene datos."
+                    )
+                )
+            decodeBase64Safe(b64, "Payload")
         } else {
             if (password == null || password.isEmpty()) {
-                throw BackupPasswordRequiredException("Diese Backup-Datei ist passwortgeschützt. Bitte gib das Passwort ein.")
+                throw BackupPasswordRequiredException(
+                    tr(
+                        en = "This backup file is password-protected. Please enter the password.",
+                        de = "Diese Backup-Datei ist passwortgeschützt. Bitte gib das Passwort ein.",
+                        fr = "Ce fichier de sauvegarde est protégé par mot de passe. Veuillez saisir le mot de passe.",
+                        it = "Questo file di backup è protetto da password. Inserisci la password.",
+                        es = "Este archivo de copia de seguridad está protegido con contraseña. Introduce la contraseña."
+                    )
+                )
             }
             val saltB64 = envelope.saltBase64?.takeIf { it.isNotBlank() }
-                ?: throw InvalidBackupFormatException("Verschlüsselungs-Salt fehlt in der Backup-Datei.")
+                ?: throw InvalidBackupFormatException(
+                    tr(
+                        en = "Encryption salt is missing in backup file.",
+                        de = "Verschlüsselungs-Salt fehlt in der Backup-Datei.",
+                        fr = "Sel de chiffrement manquant dans la sauvegarde.",
+                        it = "Salt di crittografia mancante nel file di backup.",
+                        es = "Falta la sal de cifrado en el archivo de copia de seguridad."
+                    )
+                )
             val ivB64 = envelope.ivBase64?.takeIf { it.isNotBlank() }
-                ?: throw InvalidBackupFormatException("Verschlüsselungs-IV fehlt in der Backup-Datei.")
+                ?: throw InvalidBackupFormatException(
+                    tr(
+                        en = "Encryption IV is missing in backup file.",
+                        de = "Verschlüsselungs-IV fehlt in der Backup-Datei.",
+                        fr = "IV de chiffrement manquant dans la sauvegarde.",
+                        it = "IV di crittografia mancante nel file di backup.",
+                        es = "Falta el IV de cifrado en el archivo de copia de seguridad."
+                    )
+                )
             val ctB64 = envelope.ciphertextBase64?.takeIf { it.isNotBlank() }
-                ?: throw InvalidBackupFormatException("Verschlüsselte Daten fehlen in der Backup-Datei.")
+                ?: throw InvalidBackupFormatException(
+                    tr(
+                        en = "Encrypted ciphertext is missing in backup file.",
+                        de = "Verschlüsselte Daten fehlen in der Backup-Datei.",
+                        fr = "Données chiffrées manquantes dans la sauvegarde.",
+                        it = "Dati crittografati mancanti nel file di backup.",
+                        es = "Faltan los datos cifrados en el archivo de copia de seguridad."
+                    )
+                )
 
             val salt = decodeBase64Safe(saltB64, "Salt")
             val iv = decodeBase64Safe(ivB64, "IV")
             val ciphertext = decodeBase64Safe(ctB64, "Ciphertext")
             if (salt.size < 8 || iv.size < 8) {
-                throw InvalidBackupFormatException("Ungültige Verschlüsselungsparameter in der Backup-Datei.")
+                throw InvalidBackupFormatException(
+                    tr(
+                        en = "Invalid encryption parameters in backup file.",
+                        de = "Ungültige Verschlüsselungsparameter in der Backup-Datei.",
+                        fr = "Paramètres de chiffrement invalides dans la sauvegarde.",
+                        it = "Parametri di crittografia non validi nel file di backup.",
+                        es = "Parámetros de cifrado no válidos en el archivo de copia de seguridad."
+                    )
+                )
             }
             val iterations = (envelope.kdfIterations ?: KDF_ITERATIONS).coerceIn(10_000, 1_000_000)
             val tagBits = (envelope.gcmTagBits ?: GCM_TAG_BITS).let { if (it in setOf(96, 104, 112, 120, 128)) it else GCM_TAG_BITS }
@@ -399,12 +493,24 @@ object ThingsBackupCodec {
                 cipher.doFinal(ciphertext)
             } catch (badTag: AEADBadTagException) {
                 throw InvalidBackupPasswordException(
-                    "Falsches Passwort oder manipulierte Backup-Datei. Bitte überprüfe das eingegebene Passwort.",
+                    tr(
+                        en = "Incorrect password or tampered backup file. Please check your password.",
+                        de = "Falsches Passwort oder manipulierte Backup-Datei. Bitte überprüfe das eingegebene Passwort.",
+                        fr = "Mot de passe incorrect ou sauvegarde altérée. Veuillez vérifier le mot de passe.",
+                        it = "Password errata o file di backup manomesso. Verifica la password.",
+                        es = "Contraseña incorrecta o copia de seguridad alterada. Verifica la contraseña."
+                    ),
                     badTag
                 )
             } catch (sec: GeneralSecurityException) {
                 throw InvalidBackupPasswordException(
-                    "Entschlüsselung fehlgeschlagen — das Passwort ist falsch oder die Datei ist beschädigt.",
+                    tr(
+                        en = "Decryption failed — the password is incorrect or the file is corrupted.",
+                        de = "Entschlüsselung fehlgeschlagen — das Passwort ist falsch oder die Datei ist beschädigt.",
+                        fr = "Échec du déchiffrement — mot de passe incorrect ou fichier corrompu.",
+                        it = "Decrittografia non riuscita — password errata o file danneggiato.",
+                        es = "Error de descifrado: contraseña incorrecta o archivo dañado."
+                    ),
                     sec
                 )
             } finally {
@@ -414,15 +520,35 @@ object ThingsBackupCodec {
 
         val decompressedBytes = try {
             gzipDecompressBounded(compressedBytes, MAX_DECOMPRESSED_BYTES)
+        } catch (e: InvalidBackupFormatException) {
+            throw e
         } catch (t: Throwable) {
-            throw InvalidBackupFormatException("Backup-Inhalt konnte nicht entpackt werden (Datei beschädigt).", t)
+            throw InvalidBackupFormatException(
+                tr(
+                    en = "Could not decompress backup payload (corrupted file).",
+                    de = "Backup-Inhalt konnte nicht entpackt werden (Datei beschädigt).",
+                    fr = "Impossible de décompresser la sauvegarde (fichier corrompu).",
+                    it = "Impossibile decomprimere il backup (file danneggiato).",
+                    es = "No se pudo descomprimir la copia de seguridad (archivo dañado)."
+                ),
+                t
+            )
         }
 
         return try {
             val payloadJson = String(decompressedBytes, StandardCharsets.UTF_8)
             json.decodeFromString<ThingsbookBackupPayload>(payloadJson)
         } catch (t: Throwable) {
-            throw InvalidBackupFormatException("Backup-Datenstruktur ist ungültig oder beschädigt.", t)
+            throw InvalidBackupFormatException(
+                tr(
+                    en = "Backup data structure is invalid or corrupted.",
+                    de = "Backup-Datenstruktur ist ungültig oder beschädigt.",
+                    fr = "La structure des données de sauvegarde est invalide ou corrompue.",
+                    it = "La struttura dei dati di backup non è valida o è danneggiata.",
+                    es = "La estructura de datos de la copia de seguridad no es válida o está dañada."
+                ),
+                t
+            )
         }
     }
 
@@ -443,7 +569,16 @@ object ThingsBackupCodec {
         try {
             Base64.getMimeDecoder().decode(input.trim())
         } catch (t: Throwable) {
-            throw InvalidBackupFormatException("Ungültige Base64-Kodierung ($label) in der Backup-Datei.", t)
+            throw InvalidBackupFormatException(
+                tr(
+                    en = "Invalid Base64 encoding ($label) in backup file.",
+                    de = "Ungültige Base64-Kodierung ($label) in der Backup-Datei.",
+                    fr = "Encodage Base64 invalide ($label) dans la sauvegarde.",
+                    it = "Codifica Base64 non valida ($label) nel file di backup.",
+                    es = "Codificación Base64 no válida ($label) en la copia de seguridad."
+                ),
+                t
+            )
         }
 
     private fun gzipCompress(data: ByteArray): ByteArray {
@@ -464,7 +599,15 @@ object ThingsBackupCodec {
                 if (read == -1) break
                 totalRead += read
                 if (totalRead > maxBytes) {
-                    throw InvalidBackupFormatException("Backup-Datei überschreitet das Sicherheitslimit von 50 MB.")
+                    throw InvalidBackupFormatException(
+                        tr(
+                            en = "Backup file exceeds the 120 MB safety limit.",
+                            de = "Backup-Datei überschreitet das Sicherheitslimit von 120 MB.",
+                            fr = "Le fichier de sauvegarde dépasse la limite de sécurité de 120 Mo.",
+                            it = "Il file di backup supera il limite di sicurezza di 120 MB.",
+                            es = "El archivo de copia de seguridad supera el límite de seguridad de 120 MB."
+                        )
+                    )
                 }
                 out.write(buffer, 0, read)
             }

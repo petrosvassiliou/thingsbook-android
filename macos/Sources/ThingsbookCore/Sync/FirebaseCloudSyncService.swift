@@ -104,6 +104,12 @@ public actor FirebaseCloudSyncService {
     private var isSyncing = false
     private var pendingResyncRequested = false
     private var pendingForceFullPull = false
+    private var pendingPullBeforePush = false
+
+    public static let maxInlineAttachmentBytes = 700_000
+    public static func attachmentBackfillDefaultsKey(uid: String) -> String {
+        "thingsbook.sync.attBackfillV1.\(uid)"
+    }
 
     private static let keychainAccount = "firebase_auth_session_v1"
     private static let lastSyncCursorPrefix = "thingsbook_macos_last_sync_ts_"
@@ -372,6 +378,7 @@ public actor FirebaseCloudSyncService {
         authSession = nil
         pendingResyncRequested = false
         pendingForceFullPull = false
+        pendingPullBeforePush = false
         KeychainStore.delete(account: Self.keychainAccount)
         updateSnapshot(CloudSyncSnapshot(status: .offline, userEmailOrId: nil, userId: nil, lastSyncedAt: 0, errorMessage: nil))
     }
@@ -416,13 +423,38 @@ public actor FirebaseCloudSyncService {
         )
 
         if !localOnlyMode {
-            await syncBidirectionalDeltas(forceFullPull: true, localOnlyMode: false)
+            // Pull remote changes BEFORE pushing local dirty records on login (matching Android)
+            await syncBidirectionalDeltas(forceFullPull: true, pullBeforePush: true, localOnlyMode: false)
+        }
+    }
+
+    /// Best-effort quick push of local dirty records used when the app is terminating.
+    public func pushDirtyOnlyIfSignedIn(localOnlyMode: Bool) async {
+        guard !localOnlyMode, let current = authSession else { return }
+        do {
+            let dirty = try database.fetchDirtyBatch()
+            let hasAny = !dirty.tags.isEmpty || !dirty.areas.isEmpty || !dirty.projects.isEmpty
+                || !dirty.headings.isEmpty || !dirty.tasks.isEmpty || !dirty.checklistItems.isEmpty
+                || !dirty.attachments.isEmpty
+            guard hasAny else { return }
+            let validToken = try await validIdToken()
+            let config = FirebaseConfig.loadActive()
+            if !current.channelTopic.isEmpty {
+                await pushDirtyBatchToNtfyRelay(dirty: dirty, uid: current.uid, topic: current.channelTopic, deviceId: current.deviceId)
+            }
+            try await pushDirtyBatchToFirestore(dirty: dirty, uid: current.uid, idToken: validToken, projectId: config.projectId)
+        } catch {
+            // Best-effort termination push; dirty flags remain intact on failure for next launch.
         }
     }
 
     // MARK: - Bidirectional Firestore v1 + Secondary ntfy.sh Delta Sync
 
-    public func syncBidirectionalDeltas(forceFullPull: Bool = false, localOnlyMode: Bool) async {
+    public func syncBidirectionalDeltas(
+        forceFullPull: Bool = false,
+        pullBeforePush: Bool = false,
+        localOnlyMode: Bool
+    ) async {
         if localOnlyMode {
             updateSnapshot(patchStatus: .offline, error: nil)
             return
@@ -434,15 +466,20 @@ public actor FirebaseCloudSyncService {
             if forceFullPull {
                 pendingForceFullPull = true
             }
+            if pullBeforePush {
+                pendingPullBeforePush = true
+            }
             return
         }
 
         isSyncing = true
         var runForceFull = forceFullPull
+        var runPullFirst = pullBeforePush
 
         while true {
             pendingResyncRequested = false
             pendingForceFullPull = false
+            pendingPullBeforePush = false
 
             guard let current = authSession else { break }
             updateSnapshot(patchStatus: .syncing, error: nil)
@@ -453,30 +490,57 @@ public actor FirebaseCloudSyncService {
                 let cursor = runForceFull ? 0 : loadLastSyncCursor(uid: current.uid)
                 let safeQuerySince = runForceFull ? 0 : max(0, cursor - Self.clockSkewOverlapMillis)
 
-                // 1. Push local dirty batch to secondary ntfy.sh relay + primary Firestore
-                let dirty = try database.fetchDirtyBatch()
-                if !current.channelTopic.isEmpty {
-                    await pushDirtyBatchToNtfyRelay(dirty: dirty, uid: current.uid, topic: current.channelTopic, deviceId: current.deviceId)
-                }
-                try await pushDirtyBatchToFirestore(dirty: dirty, uid: current.uid, idToken: validToken, projectId: config.projectId)
-
-                // 2. Pull remote deltas from primary Firestore + secondary ntfy.sh relay
-                let firestoreMax = try await pullDeltasFromFirestore(
-                    uid: current.uid,
-                    idToken: validToken,
-                    projectId: config.projectId,
-                    sinceTimestamp: safeQuerySince
-                )
-
+                var firestoreMax: Int64 = 0
                 var ntfyMax: Int64 = 0
-                if !current.channelTopic.isEmpty {
-                    ntfyMax = (try? await pollSecondaryNtfyRelay(
+
+                if runPullFirst {
+                    // 1. Pull remote deltas FIRST on sign-in so newer cloud records reconcile before local dirty push
+                    firestoreMax = try await pullDeltasFromFirestore(
                         uid: current.uid,
-                        topic: current.channelTopic,
-                        deviceId: current.deviceId,
-                        sinceTimestamp: safeQuerySince,
-                        fetchAllHistory: runForceFull
-                    )) ?? 0
+                        idToken: validToken,
+                        projectId: config.projectId,
+                        sinceTimestamp: safeQuerySince
+                    )
+                    if !current.channelTopic.isEmpty {
+                        ntfyMax = (try? await pollSecondaryNtfyRelay(
+                            uid: current.uid,
+                            topic: current.channelTopic,
+                            deviceId: current.deviceId,
+                            sinceTimestamp: safeQuerySince,
+                            fetchAllHistory: runForceFull
+                        )) ?? 0
+                    }
+
+                    // 2. Push remaining local dirty records to secondary ntfy.sh relay + primary Firestore
+                    let dirty = try database.fetchDirtyBatch()
+                    if !current.channelTopic.isEmpty {
+                        await pushDirtyBatchToNtfyRelay(dirty: dirty, uid: current.uid, topic: current.channelTopic, deviceId: current.deviceId)
+                    }
+                    try await pushDirtyBatchToFirestore(dirty: dirty, uid: current.uid, idToken: validToken, projectId: config.projectId)
+                } else {
+                    // 1. Push local dirty batch to secondary ntfy.sh relay + primary Firestore
+                    let dirty = try database.fetchDirtyBatch()
+                    if !current.channelTopic.isEmpty {
+                        await pushDirtyBatchToNtfyRelay(dirty: dirty, uid: current.uid, topic: current.channelTopic, deviceId: current.deviceId)
+                    }
+                    try await pushDirtyBatchToFirestore(dirty: dirty, uid: current.uid, idToken: validToken, projectId: config.projectId)
+
+                    // 2. Pull remote deltas from primary Firestore + secondary ntfy.sh relay
+                    firestoreMax = try await pullDeltasFromFirestore(
+                        uid: current.uid,
+                        idToken: validToken,
+                        projectId: config.projectId,
+                        sinceTimestamp: safeQuerySince
+                    )
+                    if !current.channelTopic.isEmpty {
+                        ntfyMax = (try? await pollSecondaryNtfyRelay(
+                            uid: current.uid,
+                            topic: current.channelTopic,
+                            deviceId: current.deviceId,
+                            sinceTimestamp: safeQuerySince,
+                            fetchAllHistory: runForceFull
+                        )) ?? 0
+                    }
                 }
 
                 // Promote any due UPCOMING tasks pulled from remote into TODAY cleanly
@@ -511,6 +575,7 @@ public actor FirebaseCloudSyncService {
 
             if pendingResyncRequested && !localOnlyMode {
                 runForceFull = pendingForceFullPull
+                runPullFirst = pendingPullBeforePush
                 continue
             }
             break
@@ -524,59 +589,59 @@ public actor FirebaseCloudSyncService {
         let baseDocPrefix = "projects/\(projectId)/databases/(default)/documents/users/\(uid)"
 
         for tag in dirty.tags {
-            writes.append(makeUpdateWrite(path: "\(baseDocPrefix)/tags/\(tag.id)", fields: [
-                "id": fsString(tag.id),
-                "title": fsString(tag.title),
-                "parentTagId": fsNullableString(tag.parentTagId),
-                "shortcut": fsNullableString(tag.shortcut),
-                "sortOrder": fsDouble(tag.sortOrder),
-                "createdAt": fsInt(tag.createdAt),
-                "updatedAt": fsInt(tag.updatedAt),
-                "isDeleted": fsBool(tag.isDeleted)
+            writes.append(Self.makeUpdateWrite(path: "\(baseDocPrefix)/tags/\(tag.id)", fields: [
+                "id": Self.fsString(tag.id),
+                "title": Self.fsString(tag.title),
+                "parentTagId": Self.fsNullableString(tag.parentTagId),
+                "shortcut": Self.fsNullableString(tag.shortcut),
+                "sortOrder": Self.fsDouble(tag.sortOrder),
+                "createdAt": Self.fsInt(tag.createdAt),
+                "updatedAt": Self.fsInt(tag.updatedAt),
+                "isDeleted": Self.fsBool(tag.isDeleted)
             ]))
         }
 
         for area in dirty.areas {
-            writes.append(makeUpdateWrite(path: "\(baseDocPrefix)/areas/\(area.id)", fields: [
-                "id": fsString(area.id),
-                "title": fsString(area.title),
-                "sortOrder": fsDouble(area.sortOrder),
-                "tagIds": fsStringArray(area.tagIds),
-                "createdAt": fsInt(area.createdAt),
-                "updatedAt": fsInt(area.updatedAt),
-                "isDeleted": fsBool(area.isDeleted)
+            writes.append(Self.makeUpdateWrite(path: "\(baseDocPrefix)/areas/\(area.id)", fields: [
+                "id": Self.fsString(area.id),
+                "title": Self.fsString(area.title),
+                "sortOrder": Self.fsDouble(area.sortOrder),
+                "tagIds": Self.fsStringArray(area.tagIds),
+                "createdAt": Self.fsInt(area.createdAt),
+                "updatedAt": Self.fsInt(area.updatedAt),
+                "isDeleted": Self.fsBool(area.isDeleted)
             ]))
         }
 
         for proj in dirty.projects {
-            writes.append(makeUpdateWrite(path: "\(baseDocPrefix)/projects/\(proj.id)", fields: [
-                "id": fsString(proj.id),
-                "areaId": fsNullableString(proj.areaId),
-                "title": fsString(proj.title),
-                "notes": fsString(proj.notes),
-                "status": fsString(proj.status.rawValue),
-                "scheduleState": fsString(proj.scheduleState.rawValue),
-                "whenDate": fsNullableInt(proj.whenDate),
-                "deadline": fsNullableInt(proj.deadline),
-                "completedAt": fsNullableInt(proj.completedAt),
-                "sortOrder": fsDouble(proj.sortOrder),
-                "tagIds": fsStringArray(proj.tagIds),
-                "createdAt": fsInt(proj.createdAt),
-                "updatedAt": fsInt(proj.updatedAt),
-                "isDeleted": fsBool(proj.isDeleted)
+            writes.append(Self.makeUpdateWrite(path: "\(baseDocPrefix)/projects/\(proj.id)", fields: [
+                "id": Self.fsString(proj.id),
+                "areaId": Self.fsNullableString(proj.areaId),
+                "title": Self.fsString(proj.title),
+                "notes": Self.fsString(proj.notes),
+                "status": Self.fsString(proj.status.rawValue),
+                "scheduleState": Self.fsString(proj.scheduleState.rawValue),
+                "whenDate": Self.fsNullableInt(proj.whenDate),
+                "deadline": Self.fsNullableInt(proj.deadline),
+                "completedAt": Self.fsNullableInt(proj.completedAt),
+                "sortOrder": Self.fsDouble(proj.sortOrder),
+                "tagIds": Self.fsStringArray(proj.tagIds),
+                "createdAt": Self.fsInt(proj.createdAt),
+                "updatedAt": Self.fsInt(proj.updatedAt),
+                "isDeleted": Self.fsBool(proj.isDeleted)
             ]))
         }
 
         for head in dirty.headings {
-            writes.append(makeUpdateWrite(path: "\(baseDocPrefix)/headings/\(head.id)", fields: [
-                "id": fsString(head.id),
-                "projectId": fsString(head.projectId),
-                "title": fsString(head.title),
-                "sortOrder": fsDouble(head.sortOrder),
-                "isArchived": fsBool(head.isArchived),
-                "createdAt": fsInt(head.createdAt),
-                "updatedAt": fsInt(head.updatedAt),
-                "isDeleted": fsBool(head.isDeleted)
+            writes.append(Self.makeUpdateWrite(path: "\(baseDocPrefix)/headings/\(head.id)", fields: [
+                "id": Self.fsString(head.id),
+                "projectId": Self.fsString(head.projectId),
+                "title": Self.fsString(head.title),
+                "sortOrder": Self.fsDouble(head.sortOrder),
+                "isArchived": Self.fsBool(head.isArchived),
+                "createdAt": Self.fsInt(head.createdAt),
+                "updatedAt": Self.fsInt(head.updatedAt),
+                "isDeleted": Self.fsBool(head.isDeleted)
             ]))
         }
 
@@ -586,38 +651,38 @@ public actor FirebaseCloudSyncService {
                 guard let d = try? jsonEncoder.encode($0) else { return nil }
                 return String(data: d, encoding: .utf8)
             }
-            writes.append(makeUpdateWrite(path: "\(baseDocPrefix)/tasks/\(task.id)", fields: [
-                "id": fsString(task.id),
-                "title": fsString(task.title),
-                "notes": fsString(task.notes),
-                "status": fsString(task.status.rawValue),
-                "scheduleState": fsString(task.scheduleState.rawValue),
-                "whenDate": fsNullableInt(task.whenDate),
-                "deadline": fsNullableInt(task.deadline),
-                "reminderTime": fsNullableInt(task.reminderTime),
-                "completedAt": fsNullableInt(task.completedAt),
-                "projectId": fsNullableString(task.projectId),
-                "headingId": fsNullableString(task.headingId),
-                "areaId": fsNullableString(task.areaId),
-                "recurrenceRule": fsNullableString(recString),
-                "sortOrder": fsDouble(task.sortOrder),
-                "tagIds": fsStringArray(task.tagIds),
-                "createdAt": fsInt(task.createdAt),
-                "updatedAt": fsInt(task.updatedAt),
-                "isDeleted": fsBool(task.isDeleted)
+            writes.append(Self.makeUpdateWrite(path: "\(baseDocPrefix)/tasks/\(task.id)", fields: [
+                "id": Self.fsString(task.id),
+                "title": Self.fsString(task.title),
+                "notes": Self.fsString(task.notes),
+                "status": Self.fsString(task.status.rawValue),
+                "scheduleState": Self.fsString(task.scheduleState.rawValue),
+                "whenDate": Self.fsNullableInt(task.whenDate),
+                "deadline": Self.fsNullableInt(task.deadline),
+                "reminderTime": Self.fsNullableInt(task.reminderTime),
+                "completedAt": Self.fsNullableInt(task.completedAt),
+                "projectId": Self.fsNullableString(task.projectId),
+                "headingId": Self.fsNullableString(task.headingId),
+                "areaId": Self.fsNullableString(task.areaId),
+                "recurrenceRule": Self.fsNullableString(recString),
+                "sortOrder": Self.fsDouble(task.sortOrder),
+                "tagIds": Self.fsStringArray(task.tagIds),
+                "createdAt": Self.fsInt(task.createdAt),
+                "updatedAt": Self.fsInt(task.updatedAt),
+                "isDeleted": Self.fsBool(task.isDeleted)
             ]))
         }
 
         for chk in dirty.checklistItems {
-            writes.append(makeUpdateWrite(path: "\(baseDocPrefix)/checklist_items/\(chk.id)", fields: [
-                "id": fsString(chk.id),
-                "taskId": fsString(chk.taskId),
-                "title": fsString(chk.title),
-                "isCompleted": fsBool(chk.isCompleted),
-                "sortOrder": fsDouble(chk.sortOrder),
-                "createdAt": fsInt(chk.createdAt),
-                "updatedAt": fsInt(chk.updatedAt),
-                "isDeleted": fsBool(chk.isDeleted)
+            writes.append(Self.makeUpdateWrite(path: "\(baseDocPrefix)/checklist_items/\(chk.id)", fields: [
+                "id": Self.fsString(chk.id),
+                "taskId": Self.fsString(chk.taskId),
+                "title": Self.fsString(chk.title),
+                "isCompleted": Self.fsBool(chk.isCompleted),
+                "sortOrder": Self.fsDouble(chk.sortOrder),
+                "createdAt": Self.fsInt(chk.createdAt),
+                "updatedAt": Self.fsInt(chk.updatedAt),
+                "isDeleted": Self.fsBool(chk.isDeleted)
             ]))
         }
 
@@ -636,6 +701,9 @@ public actor FirebaseCloudSyncService {
                 req.httpBody = try JSONSerialization.data(withJSONObject: ["writes": slice])
                 let (data, res) = try await session.data(for: req)
                 if let http = res as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                    if http.statusCode == 401 {
+                        invalidateCachedIdTokenExpiry()
+                    }
                     throw CloudSyncError.networkFailure(extractFirebaseError(from: data) ?? "Firestore commit failed (HTTP \(http.statusCode)).")
                 }
                 idx += chunkSize
@@ -643,24 +711,10 @@ public actor FirebaseCloudSyncService {
         }
 
         if !dirty.attachments.isEmpty {
-            let maxInlineAttachmentBytes = 550 * 1024
             var attWrites: [[String: Any]] = []
             for att in dirty.attachments {
-                let inlineB64 = att.isDeleted ? "" : database.readAttachmentBase64(att, maxRawBytes: maxInlineAttachmentBytes)
-                attWrites.append(makeUpdateWrite(path: "\(baseDocPrefix)/attachments/\(att.id)", fields: [
-                    "id": fsString(att.id),
-                    "taskId": fsNullableString(att.taskId),
-                    "projectId": fsNullableString(att.projectId),
-                    "fileName": fsString(att.fileName),
-                    "mimeType": fsString(att.mimeType),
-                    "sizeBytes": fsInt(att.sizeBytes),
-                    "localRelativePath": fsString(""),
-                    "dataBase64": fsString(inlineB64),
-                    "sortOrder": fsDouble(Double(att.createdAt)),
-                    "createdAt": fsInt(att.createdAt),
-                    "updatedAt": fsInt(att.updatedAt),
-                    "isDeleted": fsBool(att.isDeleted)
-                ]))
+                let inlineB64 = att.isDeleted ? "" : database.readAttachmentBase64(att, maxRawBytes: Self.maxInlineAttachmentBytes)
+                attWrites.append(Self.makeAttachmentWrite(baseDocPrefix: baseDocPrefix, attachment: att, inlineBase64: inlineB64))
             }
             let attChunkSize = 8
             var attIdx = 0
@@ -673,6 +727,9 @@ public actor FirebaseCloudSyncService {
                 req.httpBody = try JSONSerialization.data(withJSONObject: ["writes": slice])
                 let (data, res) = try await session.data(for: req)
                 if let http = res as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                    if http.statusCode == 401 {
+                        invalidateCachedIdTokenExpiry()
+                    }
                     throw CloudSyncError.networkFailure(extractFirebaseError(from: data) ?? "Firestore attachment commit failed (HTTP \(http.statusCode)).")
                 }
                 attIdx += attChunkSize
@@ -859,13 +916,17 @@ public actor FirebaseCloudSyncService {
     }
 
     private func pullDeltasFromFirestore(uid: String, idToken: String, projectId: String, sinceTimestamp: Int64) async throws -> Int64 {
+        let attBackfillKey = Self.attachmentBackfillDefaultsKey(uid: uid)
+        let needsAttBackfill = !UserDefaults.standard.bool(forKey: attBackfillKey)
+        let attSince: Int64 = needsAttBackfill ? 0 : sinceTimestamp
+
         async let rawTags = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "tags", since: sinceTimestamp)
         async let rawAreas = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "areas", since: sinceTimestamp)
         async let rawProjects = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "projects", since: sinceTimestamp)
         async let rawHeadings = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "headings", since: sinceTimestamp)
         async let rawTasks = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "tasks", since: sinceTimestamp)
         async let rawChecklists = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "checklist_items", since: sinceTimestamp)
-        async let rawAttachments = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "attachments", since: sinceTimestamp)
+        async let rawAttachments = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "attachments", since: attSince)
 
         let (tagMaps, areaMaps, projMaps, headMaps, taskMaps, chkMaps, attMaps) = try await (
             rawTags, rawAreas, rawProjects, rawHeadings, rawTasks, rawChecklists, rawAttachments
@@ -885,6 +946,9 @@ public actor FirebaseCloudSyncService {
         let attachments = attMaps.compactMap(Self.parseAttachment)
 
         if tags.isEmpty && areas.isEmpty && projects.isEmpty && headings.isEmpty && tasks.isEmpty && checklists.isEmpty && attachments.isEmpty {
+            if needsAttBackfill {
+                UserDefaults.standard.set(true, forKey: attBackfillKey)
+            }
             return sinceTimestamp
         }
 
@@ -898,7 +962,11 @@ public actor FirebaseCloudSyncService {
             checklistItems: checklists,
             attachments: attachments
         )
-        return try database.applyRemoteDeltas(batch)
+        let appliedMax = try database.applyRemoteDeltas(batch)
+        if needsAttBackfill {
+            UserDefaults.standard.set(true, forKey: attBackfillKey)
+        }
+        return appliedMax
     }
 
     private func queryCollection(
@@ -930,6 +998,9 @@ public actor FirebaseCloudSyncService {
 
         let (data, res) = try await session.data(for: req)
         if let http = res as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            if http.statusCode == 401 {
+                invalidateCachedIdTokenExpiry()
+            }
             throw CloudSyncError.networkFailure(extractFirebaseError(from: data) ?? "Firestore query failed (HTTP \(http.statusCode)).")
         }
 
@@ -1189,6 +1260,9 @@ public actor FirebaseCloudSyncService {
         if now < current.expiresAtMillis && !current.idToken.isEmpty {
             return current.idToken
         }
+        guard !current.refreshToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw CloudSyncError.invalidCredentials("Cloud session expired. Please sign out and sign in with Google or Email.")
+        }
 
         let config = FirebaseConfig.loadActive()
         let url = URL(string: "https://securetoken.googleapis.com/v1/token?key=\(config.apiKey)")!
@@ -1200,7 +1274,19 @@ public actor FirebaseCloudSyncService {
 
         let (data, res) = try await session.data(for: req)
         if let http = res as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw CloudSyncError.invalidCredentials("Cloud session expired. Please sign out and sign in with Google or Email.")
+            // Only clear refreshToken on permanent HTTP 400 auth errors (INVALID_REFRESH_TOKEN / TOKEN_EXPIRED / USER_DISABLED),
+            // NEVER on transient 5xx / 429 / gateway errors.
+            if http.statusCode == 400 {
+                current.idToken = ""
+                current.refreshToken = ""
+                current.expiresAtMillis = 0
+                self.authSession = current
+                persistAuthSession(current)
+                throw CloudSyncError.invalidCredentials("Cloud session expired. Please sign out and sign in with Google or Email.")
+            }
+            throw CloudSyncError.networkFailure(
+                extractFirebaseError(from: data) ?? "Temporary token refresh failure (HTTP \(http.statusCode))."
+            )
         }
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let newIdToken = obj["id_token"] as? String else {
@@ -1214,6 +1300,13 @@ public actor FirebaseCloudSyncService {
         self.authSession = current
         persistAuthSession(current)
         return newIdToken
+    }
+
+    private func invalidateCachedIdTokenExpiry() {
+        guard var current = authSession else { return }
+        current.expiresAtMillis = 0
+        self.authSession = current
+        persistAuthSession(current)
     }
 
     private func persistAuthSession(_ s: PersistedAuthSession) {
@@ -1264,29 +1357,75 @@ public actor FirebaseCloudSyncService {
 
     // MARK: - Firestore Value Marshaling
 
-    private func fsString(_ v: String) -> [String: Any] { ["stringValue": v] }
-    private func fsNullableString(_ v: String?) -> [String: Any] {
+    private static func fsString(_ v: String) -> [String: Any] { ["stringValue": v] }
+    private static func fsNullableString(_ v: String?) -> [String: Any] {
         guard let v, !v.isEmpty else { return ["nullValue": NSNull()] }
         return ["stringValue": v]
     }
-    private func fsInt(_ v: Int64) -> [String: Any] { ["integerValue": String(v)] }
-    private func fsNullableInt(_ v: Int64?) -> [String: Any] {
+    private static func fsInt(_ v: Int64) -> [String: Any] { ["integerValue": String(v)] }
+    private static func fsNullableInt(_ v: Int64?) -> [String: Any] {
         guard let v else { return ["nullValue": NSNull()] }
         return ["integerValue": String(v)]
     }
-    private func fsDouble(_ v: Double) -> [String: Any] { ["doubleValue": v] }
-    private func fsBool(_ v: Bool) -> [String: Any] { ["booleanValue": v] }
-    private func fsStringArray(_ arr: [String]) -> [String: Any] {
+    private static func fsDouble(_ v: Double) -> [String: Any] { ["doubleValue": v] }
+    private static func fsBool(_ v: Bool) -> [String: Any] { ["booleanValue": v] }
+    private static func fsStringArray(_ arr: [String]) -> [String: Any] {
         ["arrayValue": ["values": arr.map { ["stringValue": $0] }]]
     }
 
-    private func makeUpdateWrite(path: String, fields: [String: [String: Any]]) -> [String: Any] {
-        [
+    public static func makeUpdateWrite(
+        path: String,
+        fields: [String: [String: Any]],
+        updateMaskFieldPaths: [String]? = nil
+    ) -> [String: Any] {
+        var write: [String: Any] = [
             "update": [
                 "name": path,
                 "fields": fields
             ]
         ]
+        if let mask = updateMaskFieldPaths {
+            write["updateMask"] = ["fieldPaths": mask]
+        }
+        return write
+    }
+
+    public static func makeAttachmentWrite(
+        baseDocPrefix: String,
+        attachment att: TaskAttachment,
+        inlineBase64 inlineB64: String
+    ) -> [String: Any] {
+        var fields: [String: [String: Any]] = [
+            "id": fsString(att.id),
+            "taskId": fsNullableString(att.taskId),
+            "projectId": fsNullableString(att.projectId),
+            "fileName": fsString(att.fileName),
+            "mimeType": fsString(att.mimeType),
+            "sizeBytes": fsInt(att.sizeBytes),
+            "localRelativePath": fsString(""),
+            "sortOrder": fsDouble(Double(att.createdAt)),
+            "createdAt": fsInt(att.createdAt),
+            "updatedAt": fsInt(att.updatedAt),
+            "isDeleted": fsBool(att.isDeleted)
+        ]
+        if att.isDeleted {
+            fields["dataBase64"] = fsString("")
+            return makeUpdateWrite(path: "\(baseDocPrefix)/attachments/\(att.id)", fields: fields)
+        } else if !inlineB64.isEmpty {
+            fields["dataBase64"] = fsString(inlineB64)
+            return makeUpdateWrite(path: "\(baseDocPrefix)/attachments/\(att.id)", fields: fields)
+        } else {
+            // Raw bytes > 700_000 or unavailable locally: update metadata fields ONLY so existing Firestore dataBase64 is never wiped!
+            let metadataFieldPaths = [
+                "id", "taskId", "projectId", "fileName", "mimeType",
+                "sizeBytes", "localRelativePath", "sortOrder", "createdAt", "updatedAt", "isDeleted"
+            ]
+            return makeUpdateWrite(
+                path: "\(baseDocPrefix)/attachments/\(att.id)",
+                fields: fields,
+                updateMaskFieldPaths: metadataFieldPaths
+            )
+        }
     }
 
     public static func unwrapFirestoreValue(_ wrapper: [String: Any]) -> Any? {
@@ -1454,6 +1593,7 @@ public actor FirebaseCloudSyncService {
 
     public static func parseAttachment(_ map: [String: Any]) -> RemoteAttachmentDelta? {
         guard let id = asString(map["id"]) else { return nil }
+        // Security: never trust remote `localRelativePath` strings from peers so path traversal outside `attachments/` is impossible.
         let att = TaskAttachment(
             id: id,
             taskId: asString(map["taskId"]),
@@ -1461,7 +1601,7 @@ public actor FirebaseCloudSyncService {
             fileName: (map["fileName"] as? String) ?? "attachment",
             mimeType: (map["mimeType"] as? String) ?? "application/octet-stream",
             sizeBytes: asInt64(map["sizeBytes"]) ?? 0,
-            localRelativePath: (map["localRelativePath"] as? String) ?? "",
+            localRelativePath: "",
             createdAt: asInt64(map["createdAt"]) ?? 0,
             updatedAt: asInt64(map["updatedAt"]) ?? 0,
             isDeleted: asBool(map["isDeleted"])

@@ -102,12 +102,17 @@ object AppUpdateParser {
     }
 
     /**
-     * Compares two semantic version strings (e.g. "1.6.9" vs "1.6.10", "v1.6.11" vs "1.7.0", "1.7.0-beta.1" vs "1.7.0").
+     * Compares two semantic version strings (e.g. "1.6.9" vs "1.6.10", "v1.8.0+1" vs "1.8.0", "1.7.0-beta.1" vs "1.7.0").
      * Returns > 0 if [v1] > [v2], < 0 if [v1] < [v2], and 0 if equal.
      */
     fun compareVersions(v1: String, v2: String): Int {
-        val clean1 = normalizeVersion(v1).substringBefore('+')
-        val clean2 = normalizeVersion(v2).substringBefore('+')
+        val norm1 = normalizeVersion(v1)
+        val norm2 = normalizeVersion(v2)
+
+        val clean1 = norm1.substringBefore('+')
+        val clean2 = norm2.substringBefore('+')
+        val build1 = norm1.substringAfter('+', missingDelimiterValue = "").trim()
+        val build2 = norm2.substringAfter('+', missingDelimiterValue = "").trim()
 
         val core1 = clean1.substringBefore('-')
         val core2 = clean2.substringBefore('-')
@@ -116,7 +121,7 @@ object AppUpdateParser {
 
         val nums1 = core1.split('.').map { it.filter(Char::isDigit).toIntOrNull() ?: 0 }
         val nums2 = core2.split('.').map { it.filter(Char::isDigit).toIntOrNull() ?: 0 }
-        val maxLen = maxOf(nums1.size, nums2.size)
+        val maxLen = maxOf(nums1.size, nums2.size).coerceAtLeast(3)
 
         for (i in 0 until maxLen) {
             val n1 = nums1.getOrElse(i) { 0 }
@@ -124,26 +129,61 @@ object AppUpdateParser {
             if (n1 != n2) return n1.compareTo(n2)
         }
 
+        if (pre1.isNotEmpty() || pre2.isNotEmpty()) {
+            return when {
+                pre1.isEmpty() -> 1  // Final release > pre-release
+                pre2.isEmpty() -> -1
+                else -> compareDotSeparatedTokens(pre1, pre2)
+            }
+        }
+
         return when {
-            pre1.isEmpty() && pre2.isEmpty() -> 0
-            pre1.isEmpty() -> 1  // Final release > pre-release
-            pre2.isEmpty() -> -1
-            else -> pre1.compareTo(pre2, ignoreCase = true)
+            build1.isEmpty() && build2.isEmpty() -> 0
+            build1.isNotEmpty() && build2.isEmpty() -> 1
+            build1.isEmpty() && build2.isNotEmpty() -> -1
+            else -> compareDotSeparatedTokens(build1, build2)
         }
     }
 
+    private fun compareDotSeparatedTokens(a: String, b: String): Int {
+        val partsA = a.split('.')
+        val partsB = b.split('.')
+        val minLen = minOf(partsA.size, partsB.size)
+        for (i in 0 until minLen) {
+            val segA = partsA[i]
+            val segB = partsB[i]
+            val numA = segA.toLongOrNull()
+            val numB = segB.toLongOrNull()
+            val cmp = when {
+                numA != null && numB != null -> numA.compareTo(numB)
+                else -> segA.compareTo(segB, ignoreCase = true)
+            }
+            if (cmp != 0) return cmp
+        }
+        return partsA.size.compareTo(partsB.size)
+    }
+
     fun isNewerVersion(currentVersion: String, candidateVersion: String): Boolean {
+        val normalizedCurrent = normalizeVersion(currentVersion)
         val normalizedCandidate = normalizeVersion(candidateVersion)
         if (normalizedCandidate.isBlank() || !normalizedCandidate.first().isDigit()) return false
-        return compareVersions(normalizedCandidate, currentVersion) > 0
+        if (!normalizedCurrent.substringBefore('+').contains('-') &&
+            normalizedCandidate.substringBefore('+').contains('-')
+        ) {
+            return false
+        }
+        return compareVersions(normalizedCandidate, normalizedCurrent) > 0
     }
 
     fun buildDefaultRawApkUrl(cleanVersion: String): String {
-        return "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/raw/main/Thingsbook-v$cleanVersion-full.apk"
+        return "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases/download/v$cleanVersion/Thingsbook-v$cleanVersion-GTD-Full.apk"
     }
 
     fun parseGitHubReleaseJson(rawJson: String): AppReleaseInfo {
         val dto = json.decodeFromString<GitHubReleaseDto>(rawJson)
+        if (dto.draft || dto.prerelease) {
+            throw IllegalArgumentException("Skipping draft or pre-release")
+        }
         val cleanVersion = normalizeVersion(dto.tag_name)
         require(cleanVersion.isNotBlank() && cleanVersion.first().isDigit()) {
             "Invalid release tag '${dto.tag_name}'"
@@ -186,6 +226,9 @@ object AppUpdateParser {
         require(cleanVersion.isNotBlank() && cleanVersion.first().isDigit()) {
             "Invalid fallback version '$versionMatch'"
         }
+        if (cleanVersion.substringBefore('+').contains('-')) {
+            throw IOException("Skipping pre-release fallback version")
+        }
 
         val readmeApkUrl = readmeMarkdown?.let { apkUrlInTextRegex.find(it)?.value }
         val apkUrl = readmeApkUrl ?: buildDefaultRawApkUrl(cleanVersion)
@@ -220,7 +263,9 @@ object AppUpdateParser {
                 continue
             }
             if (skipDownloadSection) continue
-            if (trimmed.contains("-full.apk") && trimmed.contains("https://")) continue
+            if ((trimmed.contains("-full.apk", ignoreCase = true) || trimmed.contains("-gtd-full.apk", ignoreCase = true)) &&
+                trimmed.contains("https://", ignoreCase = true)
+            ) continue
 
             val cleanedLine = trimmed
                 .replace(Regex("""\*\*([^*]+)\*\*"""), "$1")
@@ -314,13 +359,16 @@ class AppUpdateManager @Inject constructor(
         }
     }
 
-    private fun openConnectionFollowingRedirects(
+    internal fun openConnectionFollowingRedirects(
         initialUrl: String,
         acceptHeader: String,
         connectTimeoutMs: Int,
         readTimeoutMs: Int
     ): HttpURLConnection {
         var currentUrl = URL(initialUrl)
+        if (!currentUrl.protocol.equals("https", ignoreCase = true)) {
+            throw IOException("Refusing non-HTTPS update URL: ${currentUrl.protocol}")
+        }
         repeat(MAX_REDIRECT_HOPS) {
             val conn = (currentUrl.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
@@ -338,7 +386,11 @@ class AppUpdateManager @Inject constructor(
                 if (location.isNullOrBlank()) {
                     throw IOException("Redirect HTTP $code without Location header")
                 }
-                currentUrl = URL(currentUrl, location)
+                val nextUrl = URL(currentUrl, location)
+                if (!nextUrl.protocol.equals("https", ignoreCase = true)) {
+                    throw IOException("Refusing non-HTTPS redirect URL: ${nextUrl.protocol}")
+                }
+                currentUrl = nextUrl
             } else {
                 return conn
             }

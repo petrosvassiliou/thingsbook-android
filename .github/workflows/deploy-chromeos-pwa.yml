@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - 'beta*'
     paths:
       - 'chromeos-pwa/**'
       - 'firebase.json'
@@ -20,17 +21,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 22
+      - name: Setup Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: chromeos-pwa/package-lock.json
 
-      - name: Install dependencies & build ChromeOS PWA
+      - name: Install dependencies, run QA tests & build ChromeOS PWA
         working-directory: chromeos-pwa
         run: |
           npm ci
+          npm test
           npm run build
 
       - name: Upload ChromeOS PWA build artifact
@@ -39,11 +41,21 @@ jobs:
           name: thingsbook-chromeos-pwa-dist
           path: chromeos-pwa/dist
 
-      - name: Deploy to Firebase Hosting (thingsbook-prod)
-        if: env.FIREBASE_SERVICE_ACCOUNT != ''
+      - name: Deploy Stable to Firebase Hosting Live Channel (thingsbook-prod)
+        if: env.FIREBASE_SERVICE_ACCOUNT != '' && github.ref == 'refs/heads/main'
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_THINGSBOOK_PROD }}
           channelId: live
+          projectId: thingsbook-prod
+
+      - name: Deploy Beta to Isolated Firebase Preview Channel (beta)
+        if: env.FIREBASE_SERVICE_ACCOUNT != '' && github.ref != 'refs/heads/main'
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_THINGSBOOK_PROD }}
+          channelId: beta
+          expires: 30d
           projectId: thingsbook-prod

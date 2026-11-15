@@ -84,10 +84,51 @@ public struct WorkspaceSnapshot: Sendable {
     public var somedayTasks: [TaskItem]
     public var logbookTasks: [TaskItem]
     public var trashedTasks: [TaskItem]
+    public var trashedProjects: [Project]
     public var allOpenTasks: [TaskItem]
     public var statistics: DatabaseStatistics
     public var hasSampleTasks: Bool
     public var hasNonSampleUserTasks: Bool
+
+    public init(
+        areas: [Area],
+        projects: [Project],
+        headingsByProject: [String: [Heading]],
+        projectAttachments: [String: [TaskAttachment]],
+        tags: [Tag],
+        inboxTasks: [TaskItem],
+        todayDaytimeTasks: [TaskItem],
+        thisEveningTasks: [TaskItem],
+        upcomingTasks: [TaskItem],
+        anytimeTasks: [TaskItem],
+        somedayTasks: [TaskItem],
+        logbookTasks: [TaskItem],
+        trashedTasks: [TaskItem],
+        trashedProjects: [Project] = [],
+        allOpenTasks: [TaskItem],
+        statistics: DatabaseStatistics,
+        hasSampleTasks: Bool,
+        hasNonSampleUserTasks: Bool
+    ) {
+        self.areas = areas
+        self.projects = projects
+        self.headingsByProject = headingsByProject
+        self.projectAttachments = projectAttachments
+        self.tags = tags
+        self.inboxTasks = inboxTasks
+        self.todayDaytimeTasks = todayDaytimeTasks
+        self.thisEveningTasks = thisEveningTasks
+        self.upcomingTasks = upcomingTasks
+        self.anytimeTasks = anytimeTasks
+        self.somedayTasks = somedayTasks
+        self.logbookTasks = logbookTasks
+        self.trashedTasks = trashedTasks
+        self.trashedProjects = trashedProjects
+        self.allOpenTasks = allOpenTasks
+        self.statistics = statistics
+        self.hasSampleTasks = hasSampleTasks
+        self.hasNonSampleUserTasks = hasNonSampleUserTasks
+    }
 }
 
 public final class ThingsSQLiteDatabase: @unchecked Sendable {
@@ -100,6 +141,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     private let ownsTempAttachmentsDir: Bool
     public var onMutation: (@Sendable () -> Void)?
     public var onRemoteSyncApplied: (@Sendable () -> Void)?
+    public private(set) var lastRemoteAppliedCount: Int = 0
 
     public static func defaultDatabaseURL() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -187,6 +229,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             is_deleted INTEGER NOT NULL DEFAULT 0,
+            is_purged INTEGER NOT NULL DEFAULT 0,
             is_dirty INTEGER NOT NULL DEFAULT 1
         );
         CREATE INDEX IF NOT EXISTS idx_projects_area ON projects(area_id);
@@ -224,6 +267,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             is_deleted INTEGER NOT NULL DEFAULT 0,
+            is_purged INTEGER NOT NULL DEFAULT 0,
             is_dirty INTEGER NOT NULL DEFAULT 1
         );
         CREATE INDEX IF NOT EXISTS idx_tasks_sched_status ON tasks(schedule_state, status, sort_order);
@@ -257,7 +301,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             is_deleted INTEGER NOT NULL DEFAULT 0,
             is_dirty INTEGER NOT NULL DEFAULT 1
         );
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_title ON tags(title);
+        DROP INDEX IF EXISTS idx_tags_title;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_title_active ON tags(title) WHERE is_deleted = 0;
 
         CREATE TABLE IF NOT EXISTS task_tags (
             task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -290,7 +335,18 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         CREATE INDEX IF NOT EXISTS idx_attachments_project ON attachments(project_id);
         CREATE INDEX IF NOT EXISTS idx_attachments_updated ON attachments(updated_at);
         CREATE INDEX IF NOT EXISTS idx_attachments_dirty ON attachments(is_dirty);
+
+        CREATE TABLE IF NOT EXISTS detached_project_tasks (
+            project_id TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            heading_id TEXT,
+            PRIMARY KEY (project_id, task_id)
+        );
         """)
+
+        // Safe v1.8.1 column migrations for pre-existing databases
+        try? execLocked("ALTER TABLE tasks ADD COLUMN is_purged INTEGER NOT NULL DEFAULT 0;")
+        try? execLocked("ALTER TABLE projects ADD COLUMN is_purged INTEGER NOT NULL DEFAULT 0;")
 
         try installFts5Locked()
     }
@@ -500,6 +556,9 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             let tags = try fetchActiveTagsLocked()
             let tagsById = Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0) })
             let projects = try fetchActiveProjectsLocked()
+            let trashedProjects = try fetchProjectsWhereLocked("p.is_deleted = 1 AND p.is_purged = 0")
+                .sorted { $0.updatedAt > $1.updatedAt }
+            let inactiveOrDeletedProjectIds = try fetchInactiveOrDeletedProjectIdsLocked()
             let headings = try fetchAllActiveHeadingsLocked()
             let headingsByProject = Dictionary(grouping: headings, by: \.projectId)
 
@@ -515,7 +574,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             }()
 
             let allTasks = try fetchTasksWhereLocked(
-                whereClause: "1 = 1",
+                whereClause: "is_purged = 0",
                 bind: { _ in },
                 orderBy: "sort_order ASC, created_at ASC",
                 tagsById: tagsById,
@@ -545,23 +604,28 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 }
                 allOpen.append(t)
 
+                let belongsToInactiveOrTrashedProject = t.projectId.map { inactiveOrDeletedProjectIds.contains($0) } ?? false
+
                 if t.scheduleState == .inbox {
-                    inbox.append(t)
-                }
-                if t.scheduleState == .thisEvening {
-                    thisEvening.append(t)
-                } else if t.scheduleState == .today || (t.whenDate != nil && t.whenDate! <= endOfToday) {
-                    todayDaytime.append(t)
-                }
-                if (t.scheduleState == .upcoming && (t.whenDate == nil || t.whenDate! >= startOfTomorrow))
-                    || (t.whenDate != nil && t.whenDate! >= startOfTomorrow) {
-                    upcoming.append(t)
-                }
-                if t.scheduleState == .anytime || t.scheduleState == .today || t.scheduleState == .thisEvening {
-                    anytime.append(t)
-                }
-                if t.scheduleState == .someday {
-                    someday.append(t)
+                    if !belongsToInactiveOrTrashedProject {
+                        inbox.append(t)
+                    }
+                } else if !belongsToInactiveOrTrashedProject {
+                    if t.scheduleState == .thisEvening {
+                        thisEvening.append(t)
+                    } else if t.scheduleState == .today || (t.whenDate != nil && t.whenDate! <= endOfToday) {
+                        todayDaytime.append(t)
+                    }
+                    if (t.scheduleState == .upcoming && (t.whenDate == nil || t.whenDate! >= startOfTomorrow))
+                        || (t.whenDate != nil && t.whenDate! >= startOfTomorrow) {
+                        upcoming.append(t)
+                    }
+                    if t.scheduleState == .anytime || t.scheduleState == .today || t.scheduleState == .thisEvening {
+                        anytime.append(t)
+                    }
+                    if t.scheduleState == .someday {
+                        someday.append(t)
+                    }
                 }
             }
 
@@ -601,6 +665,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 somedayTasks: someday,
                 logbookTasks: logbook,
                 trashedTasks: trashed,
+                trashedProjects: trashedProjects,
                 allOpenTasks: allOpen,
                 statistics: stats,
                 hasSampleTasks: hasSample,
@@ -616,9 +681,11 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         return try queue.sync {
             let tags = try fetchActiveTagsLocked()
             let tagsById = Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0) })
+            let activeTagIds = Set(tags.map(\.id))
             let checklistsByTask = try fetchAllActiveChecklistItemsByTaskLocked()
             let (attachmentsByTask, _) = try fetchAllActiveAttachmentsGroupedLocked()
             let tagIdsByTask = try fetchAllTaskTagIdsLocked()
+            let projectTagIdsByProject = try fetchAllProjectTagIdsLocked()
 
             let taskStmt = try prepareLocked("""
                 SELECT t.id, t.title, t.notes, t.status, t.schedule_state, t.when_date, t.deadline,
@@ -662,7 +729,13 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
             var matchedProjects: [Project] = []
             while sqlite3_step(projStmt) == SQLITE_ROW {
-                matchedProjects.append(readProjectRowLocked(projStmt))
+                matchedProjects.append(
+                    readProjectRowLocked(
+                        projStmt,
+                        activeTagIds: activeTagIds,
+                        projectTagIdsByProject: projectTagIdsByProject
+                    )
+                )
             }
 
             return (matchedTasks, matchedProjects)
@@ -709,15 +782,47 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     SET schedule_state = 'TODAY', when_date = ?, updated_at = ?, is_dirty = 1
                     WHERE status = 'OPEN' AND is_deleted = 0
                       AND schedule_state = 'THIS_EVENING'
-                      AND when_date IS NOT NULL AND when_date < ?;
+                      AND ((when_date IS NOT NULL AND when_date < ?) OR (when_date IS NULL AND updated_at < ?));
                 """)
                 defer { sqlite3_finalize(stmt2) }
                 bindInt64(stmt2, 1, sodToday)
                 bindInt64(stmt2, 2, now)
                 bindInt64(stmt2, 3, sodToday)
+                bindInt64(stmt2, 4, sodToday)
                 if sqlite3_step(stmt2) == SQLITE_DONE {
                     total += Int(sqlite3_changes(db))
                 }
+
+                let stmt3 = try prepareLocked("""
+                    UPDATE projects
+                    SET schedule_state = 'TODAY', updated_at = ?, is_dirty = 1
+                    WHERE status = 'ACTIVE' AND is_deleted = 0
+                      AND schedule_state = 'UPCOMING'
+                      AND when_date IS NOT NULL AND when_date <= ?;
+                """)
+                defer { sqlite3_finalize(stmt3) }
+                bindInt64(stmt3, 1, now)
+                bindInt64(stmt3, 2, endOfToday)
+                if sqlite3_step(stmt3) == SQLITE_DONE {
+                    total += Int(sqlite3_changes(db))
+                }
+
+                let stmt4 = try prepareLocked("""
+                    UPDATE projects
+                    SET schedule_state = 'TODAY', when_date = ?, updated_at = ?, is_dirty = 1
+                    WHERE status = 'ACTIVE' AND is_deleted = 0
+                      AND schedule_state = 'THIS_EVENING'
+                      AND ((when_date IS NOT NULL AND when_date < ?) OR (when_date IS NULL AND updated_at < ?));
+                """)
+                defer { sqlite3_finalize(stmt4) }
+                bindInt64(stmt4, 1, sodToday)
+                bindInt64(stmt4, 2, now)
+                bindInt64(stmt4, 3, sodToday)
+                bindInt64(stmt4, 4, sodToday)
+                if sqlite3_step(stmt4) == SQLITE_DONE {
+                    total += Int(sqlite3_changes(db))
+                }
+
                 return total
             }
         }
@@ -933,11 +1038,29 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     public func softDeleteTask(_ taskId: String) throws {
         try queue.sync {
             let now = nowMillis()
-            let stmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, updated_at = ?, is_dirty = 1 WHERE id = ?;")
-            defer { sqlite3_finalize(stmt) }
-            bindInt64(stmt, 1, now)
-            bindText(stmt, 2, taskId)
-            _ = sqlite3_step(stmt)
+            try inTransactionLocked {
+                let escaped = taskId.replacingOccurrences(of: "'", with: "''")
+                let atts = (try? fetchAttachmentsWhereLocked("task_id = '\(escaped)' AND is_deleted = 0")) ?? []
+                for var att in atts {
+                    deleteAttachmentFileLocked(relativePath: att.localRelativePath)
+                    att.localRelativePath = ""
+                    att.isDeleted = true
+                    att.updatedAt = now
+                    try upsertAttachmentLocked(att, isDirty: true)
+                }
+
+                let chkStmt = try prepareLocked("UPDATE checklist_items SET is_deleted = 1, updated_at = ?, is_dirty = 1 WHERE task_id = ? AND is_deleted = 0;")
+                defer { sqlite3_finalize(chkStmt) }
+                bindInt64(chkStmt, 1, now)
+                bindText(chkStmt, 2, taskId)
+                _ = sqlite3_step(chkStmt)
+
+                let stmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 0, updated_at = ?, is_dirty = 1 WHERE id = ?;")
+                defer { sqlite3_finalize(stmt) }
+                bindInt64(stmt, 1, now)
+                bindText(stmt, 2, taskId)
+                _ = sqlite3_step(stmt)
+            }
         }
         notifyMutation()
     }
@@ -945,32 +1068,38 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     public func restoreTask(_ taskId: String) throws {
         try queue.sync {
             let now = nowMillis()
-            let stmt = try prepareLocked("UPDATE tasks SET is_deleted = 0, updated_at = ?, is_dirty = 1 WHERE id = ?;")
-            defer { sqlite3_finalize(stmt) }
-            bindInt64(stmt, 1, now)
-            bindText(stmt, 2, taskId)
-            _ = sqlite3_step(stmt)
+            try inTransactionLocked {
+                let stmt = try prepareLocked("UPDATE tasks SET is_deleted = 0, is_purged = 0, updated_at = ?, is_dirty = 1 WHERE id = ?;")
+                defer { sqlite3_finalize(stmt) }
+                bindInt64(stmt, 1, now)
+                bindText(stmt, 2, taskId)
+                _ = sqlite3_step(stmt)
+
+                let chkStmt = try prepareLocked("UPDATE checklist_items SET is_deleted = 0, updated_at = ?, is_dirty = 1 WHERE task_id = ? AND is_deleted = 1 AND title != '';")
+                defer { sqlite3_finalize(chkStmt) }
+                bindInt64(chkStmt, 1, now)
+                bindText(chkStmt, 2, taskId)
+                _ = sqlite3_step(chkStmt)
+            }
         }
         notifyMutation()
     }
 
     public func permanentlyDeleteTask(_ taskId: String) throws {
         try queue.sync {
+            let now = nowMillis()
             try inTransactionLocked {
-                let escaped = taskId.replacingOccurrences(of: "'", with: "''")
-                let atts = (try? fetchAttachmentsWhereLocked("task_id = '\(escaped)'")) ?? []
-                let now = nowMillis()
-                for var att in atts {
-                    deleteAttachmentFileLocked(relativePath: att.localRelativePath)
-                    att.localRelativePath = ""
-                    att.isDeleted = true
-                    att.updatedAt = now
-                    try upsertAttachmentLocked(att, isDirty: true)
-                }
-                let stmt = try prepareLocked("DELETE FROM tasks WHERE id = ?;")
-                defer { sqlite3_finalize(stmt) }
-                bindText(stmt, 1, taskId)
-                _ = sqlite3_step(stmt)
+                try purgeTaskToTombstoneLocked(taskId: taskId, now: now)
+            }
+        }
+        notifyMutation()
+    }
+
+    public func permanentlyDeleteProject(_ projectId: String) throws {
+        try queue.sync {
+            let now = nowMillis()
+            try inTransactionLocked {
+                try purgeProjectToTombstoneLocked(projectId: projectId, now: now)
             }
         }
         notifyMutation()
@@ -978,20 +1107,99 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
     public func emptyTrash() throws {
         try queue.sync {
+            let now = nowMillis()
             try inTransactionLocked {
-                let atts = (try? fetchAttachmentsWhereLocked("task_id IN (SELECT id FROM tasks WHERE is_deleted = 1)")) ?? []
-                let now = nowMillis()
-                for var att in atts {
-                    deleteAttachmentFileLocked(relativePath: att.localRelativePath)
-                    att.localRelativePath = ""
-                    att.isDeleted = true
-                    att.updatedAt = now
-                    try upsertAttachmentLocked(att, isDirty: true)
+                var taskIds: [String] = []
+                let tq = try prepareLocked("SELECT id FROM tasks WHERE is_deleted = 1 AND is_purged = 0;")
+                defer { sqlite3_finalize(tq) }
+                while sqlite3_step(tq) == SQLITE_ROW {
+                    if let tid = colString(tq, 0) { taskIds.append(tid) }
                 }
-                try execLocked("DELETE FROM tasks WHERE is_deleted = 1;")
+                for tid in taskIds {
+                    try purgeTaskToTombstoneLocked(taskId: tid, now: now)
+                }
+
+                var projIds: [String] = []
+                let pq = try prepareLocked("SELECT id FROM projects WHERE is_deleted = 1 AND is_purged = 0;")
+                defer { sqlite3_finalize(pq) }
+                while sqlite3_step(pq) == SQLITE_ROW {
+                    if let pid = colString(pq, 0) { projIds.append(pid) }
+                }
+                for pid in projIds {
+                    try purgeProjectToTombstoneLocked(projectId: pid, now: now)
+                }
             }
         }
         notifyMutation()
+    }
+
+    private func purgeTaskToTombstoneLocked(taskId: String, now: Int64) throws {
+        let escaped = taskId.replacingOccurrences(of: "'", with: "''")
+        let atts = (try? fetchAttachmentsWhereLocked("task_id = '\(escaped)'")) ?? []
+        for var att in atts {
+            deleteAttachmentFileLocked(relativePath: att.localRelativePath)
+            att.localRelativePath = ""
+            att.isDeleted = true
+            att.updatedAt = now
+            try upsertAttachmentLocked(att, isDirty: true)
+        }
+
+        let chkStmt = try prepareLocked("UPDATE checklist_items SET title = '', is_deleted = 1, updated_at = ?, is_dirty = 1 WHERE task_id = ?;")
+        defer { sqlite3_finalize(chkStmt) }
+        bindInt64(chkStmt, 1, now)
+        bindText(chkStmt, 2, taskId)
+        _ = sqlite3_step(chkStmt)
+
+        let ttStmt = try prepareLocked("DELETE FROM task_tags WHERE task_id = ?;")
+        defer { sqlite3_finalize(ttStmt) }
+        bindText(ttStmt, 1, taskId)
+        _ = sqlite3_step(ttStmt)
+
+        let stmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 1, is_dirty = 1, title = '', notes = '', tag_ids_json = '[]', updated_at = ? WHERE id = ?;")
+        defer { sqlite3_finalize(stmt) }
+        bindInt64(stmt, 1, now)
+        bindText(stmt, 2, taskId)
+        _ = sqlite3_step(stmt)
+    }
+
+    private func purgeProjectToTombstoneLocked(projectId: String, now: Int64) throws {
+        let escaped = projectId.replacingOccurrences(of: "'", with: "''")
+        let atts = (try? fetchAttachmentsWhereLocked("project_id = '\(escaped)'")) ?? []
+        for var att in atts {
+            deleteAttachmentFileLocked(relativePath: att.localRelativePath)
+            att.localRelativePath = ""
+            att.isDeleted = true
+            att.updatedAt = now
+            try upsertAttachmentLocked(att, isDirty: true)
+        }
+
+        let detachStmt = try prepareLocked("UPDATE tasks SET project_id = NULL, heading_id = NULL, updated_at = ?, is_dirty = 1 WHERE project_id = ? AND is_deleted = 0;")
+        defer { sqlite3_finalize(detachStmt) }
+        bindInt64(detachStmt, 1, now)
+        bindText(detachStmt, 2, projectId)
+        _ = sqlite3_step(detachStmt)
+
+        let hdgStmt = try prepareLocked("UPDATE headings SET title = '', is_deleted = 1, updated_at = ?, is_dirty = 1 WHERE project_id = ?;")
+        defer { sqlite3_finalize(hdgStmt) }
+        bindInt64(hdgStmt, 1, now)
+        bindText(hdgStmt, 2, projectId)
+        _ = sqlite3_step(hdgStmt)
+
+        let ptStmt = try prepareLocked("DELETE FROM project_tags WHERE project_id = ?;")
+        defer { sqlite3_finalize(ptStmt) }
+        bindText(ptStmt, 1, projectId)
+        _ = sqlite3_step(ptStmt)
+
+        let dpStmt = try prepareLocked("DELETE FROM detached_project_tasks WHERE project_id = ?;")
+        defer { sqlite3_finalize(dpStmt) }
+        bindText(dpStmt, 1, projectId)
+        _ = sqlite3_step(dpStmt)
+
+        let stmt = try prepareLocked("UPDATE projects SET is_deleted = 1, is_purged = 1, is_dirty = 1, title = '', notes = '', tag_ids_json = '[]', updated_at = ? WHERE id = ?;")
+        defer { sqlite3_finalize(stmt) }
+        bindInt64(stmt, 1, now)
+        bindText(stmt, 2, projectId)
+        _ = sqlite3_step(stmt)
     }
 
     @discardableResult
@@ -1370,7 +1578,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         notifyMutation()
     }
 
-    /// Soft-deletes project and detaches its open tasks so they aren't lost; returns detached task map for Undo.
+    /// Soft-deletes project, cascades to headings/attachments, and detaches its open tasks so they aren't lost; returns detached task map for Undo.
+    @discardableResult
     public func softDeleteProject(_ projectId: String) throws -> [String: DetachedTaskPlacement] {
         let detached = try queue.sync { () -> [String: DetachedTaskPlacement] in
             let now = nowMillis()
@@ -1385,13 +1594,46 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     }
                 }
 
-                let detachStmt = try prepareLocked("UPDATE tasks SET project_id = NULL, heading_id = NULL, updated_at = ?, is_dirty = 1 WHERE project_id = ?;")
+                let clearDetachedStmt = try prepareLocked("DELETE FROM detached_project_tasks WHERE project_id = ?;")
+                defer { sqlite3_finalize(clearDetachedStmt) }
+                bindText(clearDetachedStmt, 1, projectId)
+                _ = sqlite3_step(clearDetachedStmt)
+
+                for (tid, placement) in previousMap {
+                    let saveStmt = try prepareLocked("""
+                        INSERT OR REPLACE INTO detached_project_tasks (project_id, task_id, heading_id)
+                        VALUES (?, ?, ?);
+                    """)
+                    defer { sqlite3_finalize(saveStmt) }
+                    bindText(saveStmt, 1, projectId)
+                    bindText(saveStmt, 2, tid)
+                    bindText(saveStmt, 3, placement.headingId)
+                    _ = sqlite3_step(saveStmt)
+                }
+
+                let detachStmt = try prepareLocked("UPDATE tasks SET project_id = NULL, heading_id = NULL, updated_at = ?, is_dirty = 1 WHERE project_id = ? AND is_deleted = 0;")
                 defer { sqlite3_finalize(detachStmt) }
                 bindInt64(detachStmt, 1, now)
                 bindText(detachStmt, 2, projectId)
                 _ = sqlite3_step(detachStmt)
 
-                let delStmt = try prepareLocked("UPDATE projects SET is_deleted = 1, updated_at = ?, is_dirty = 1 WHERE id = ?;")
+                let hdgStmt = try prepareLocked("UPDATE headings SET is_deleted = 1, updated_at = ?, is_dirty = 1 WHERE project_id = ? AND is_deleted = 0;")
+                defer { sqlite3_finalize(hdgStmt) }
+                bindInt64(hdgStmt, 1, now)
+                bindText(hdgStmt, 2, projectId)
+                _ = sqlite3_step(hdgStmt)
+
+                let escaped = projectId.replacingOccurrences(of: "'", with: "''")
+                let atts = (try? fetchAttachmentsWhereLocked("project_id = '\(escaped)' AND is_deleted = 0")) ?? []
+                for var att in atts {
+                    deleteAttachmentFileLocked(relativePath: att.localRelativePath)
+                    att.localRelativePath = ""
+                    att.isDeleted = true
+                    att.updatedAt = now
+                    try upsertAttachmentLocked(att, isDirty: true)
+                }
+
+                let delStmt = try prepareLocked("UPDATE projects SET is_deleted = 1, is_purged = 0, updated_at = ?, is_dirty = 1 WHERE id = ?;")
                 defer { sqlite3_finalize(delStmt) }
                 bindInt64(delStmt, 1, now)
                 bindText(delStmt, 2, projectId)
@@ -1404,25 +1646,53 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         return detached
     }
 
-    public func restoreDeletedProject(projectId: String, previousTasks: [String: DetachedTaskPlacement]) throws {
+    public func restoreProject(_ projectId: String) throws {
+        try restoreDeletedProject(projectId: projectId, previousTasks: [:])
+    }
+
+    public func restoreDeletedProject(projectId: String, previousTasks: [String: DetachedTaskPlacement] = [:]) throws {
         try queue.sync {
             let now = nowMillis()
             try inTransactionLocked {
-                let s1 = try prepareLocked("UPDATE projects SET is_deleted = 0, updated_at = ?, is_dirty = 1 WHERE id = ?;")
+                let s1 = try prepareLocked("UPDATE projects SET is_deleted = 0, is_purged = 0, updated_at = ?, is_dirty = 1 WHERE id = ?;")
                 defer { sqlite3_finalize(s1) }
                 bindInt64(s1, 1, now)
                 bindText(s1, 2, projectId)
                 _ = sqlite3_step(s1)
 
+                let hdgStmt = try prepareLocked("UPDATE headings SET is_deleted = 0, updated_at = ?, is_dirty = 1 WHERE project_id = ? AND is_deleted = 1 AND title != '';")
+                defer { sqlite3_finalize(hdgStmt) }
+                bindInt64(hdgStmt, 1, now)
+                bindText(hdgStmt, 2, projectId)
+                _ = sqlite3_step(hdgStmt)
+
+                var mergedPlacements: [String: DetachedTaskPlacement] = [:]
+                let q = try prepareLocked("SELECT task_id, heading_id FROM detached_project_tasks WHERE project_id = ?;")
+                defer { sqlite3_finalize(q) }
+                bindText(q, 1, projectId)
+                while sqlite3_step(q) == SQLITE_ROW {
+                    if let tid = colString(q, 0) {
+                        mergedPlacements[tid] = DetachedTaskPlacement(projectId: projectId, headingId: colString(q, 1))
+                    }
+                }
                 for (tid, refs) in previousTasks {
-                    let s2 = try prepareLocked("UPDATE tasks SET project_id = ?, heading_id = ?, updated_at = ?, is_dirty = 1 WHERE id = ?;")
+                    mergedPlacements[tid] = refs
+                }
+
+                for (tid, refs) in mergedPlacements {
+                    let s2 = try prepareLocked("UPDATE tasks SET project_id = ?, heading_id = ?, updated_at = ?, is_dirty = 1 WHERE id = ? AND is_deleted = 0 AND project_id IS NULL;")
                     defer { sqlite3_finalize(s2) }
-                    bindText(s2, 1, refs.projectId)
+                    bindText(s2, 1, refs.projectId ?? projectId)
                     bindText(s2, 2, refs.headingId)
                     bindInt64(s2, 3, now)
                     bindText(s2, 4, tid)
                     _ = sqlite3_step(s2)
                 }
+
+                let clearDetachedStmt = try prepareLocked("DELETE FROM detached_project_tasks WHERE project_id = ?;")
+                defer { sqlite3_finalize(clearDetachedStmt) }
+                bindText(clearDetachedStmt, 1, projectId)
+                _ = sqlite3_step(clearDetachedStmt)
             }
         }
         notifyMutation()
@@ -1611,15 +1881,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         try queue.sync {
             let now = nowMillis()
             try inTransactionLocked {
-                let s1 = try prepareLocked("DELETE FROM task_tags WHERE tag_id = ?;")
-                defer { sqlite3_finalize(s1) }
-                bindText(s1, 1, tagId)
-                _ = sqlite3_step(s1)
-
-                let s2 = try prepareLocked("DELETE FROM project_tags WHERE tag_id = ?;")
-                defer { sqlite3_finalize(s2) }
-                bindText(s2, 1, tagId)
-                _ = sqlite3_step(s2)
+                try cleanDeletedTagReferencesLocked(tagId: tagId, now: now, markParentsDirty: true)
 
                 let s3 = try prepareLocked("UPDATE tags SET is_deleted = 1, updated_at = ?, is_dirty = 1 WHERE id = ?;")
                 defer { sqlite3_finalize(s3) }
@@ -1629,6 +1891,68 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             }
         }
         notifyMutation()
+    }
+
+    private func cleanDeletedTagReferencesLocked(tagId: String, now: Int64, markParentsDirty: Bool) throws {
+        let s1 = try prepareLocked("DELETE FROM task_tags WHERE tag_id = ?;")
+        defer { sqlite3_finalize(s1) }
+        bindText(s1, 1, tagId)
+        _ = sqlite3_step(s1)
+
+        let s2 = try prepareLocked("DELETE FROM project_tags WHERE tag_id = ?;")
+        defer { sqlite3_finalize(s2) }
+        bindText(s2, 1, tagId)
+        _ = sqlite3_step(s2)
+
+        if markParentsDirty {
+            let childStmt = try prepareLocked("UPDATE tags SET parent_tag_id = NULL, updated_at = ?, is_dirty = 1 WHERE parent_tag_id = ? AND is_deleted = 0;")
+            defer { sqlite3_finalize(childStmt) }
+            bindInt64(childStmt, 1, now)
+            bindText(childStmt, 2, tagId)
+            _ = sqlite3_step(childStmt)
+        } else {
+            let childStmt = try prepareLocked("UPDATE tags SET parent_tag_id = NULL WHERE parent_tag_id = ?;")
+            defer { sqlite3_finalize(childStmt) }
+            bindText(childStmt, 1, tagId)
+            _ = sqlite3_step(childStmt)
+        }
+
+        for table in ["tasks", "projects", "areas"] {
+            try removeTagIdFromJsonColumnLocked(table: table, tagId: tagId, now: now, markDirty: markParentsDirty)
+        }
+    }
+
+    private func removeTagIdFromJsonColumnLocked(table: String, tagId: String, now: Int64, markDirty: Bool) throws {
+        let selectStmt = try prepareLocked("SELECT id, tag_ids_json FROM \(table) WHERE tag_ids_json LIKE ?;")
+        defer { sqlite3_finalize(selectStmt) }
+        bindText(selectStmt, 1, "%\(tagId)%")
+
+        var updates: [(id: String, json: String)] = []
+        while sqlite3_step(selectStmt) == SQLITE_ROW {
+            guard let rowId = colString(selectStmt, 0) else { continue }
+            let existing = decodeStringArray(colString(selectStmt, 1))
+            let filtered = existing.filter { $0 != tagId }
+            if filtered.count != existing.count {
+                updates.append((rowId, encodeStringArray(filtered)))
+            }
+        }
+
+        for item in updates {
+            if markDirty {
+                let upd = try prepareLocked("UPDATE \(table) SET tag_ids_json = ?, updated_at = ?, is_dirty = 1 WHERE id = ?;")
+                defer { sqlite3_finalize(upd) }
+                bindText(upd, 1, item.json)
+                bindInt64(upd, 2, now)
+                bindText(upd, 3, item.id)
+                _ = sqlite3_step(upd)
+            } else {
+                let upd = try prepareLocked("UPDATE \(table) SET tag_ids_json = ? WHERE id = ?;")
+                defer { sqlite3_finalize(upd) }
+                bindText(upd, 1, item.json)
+                bindText(upd, 2, item.id)
+                _ = sqlite3_step(upd)
+            }
+        }
     }
 
     // MARK: - Sample Data Purge & Account Prep
@@ -1679,12 +2003,15 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
     public func purgeAllLocalDataBeforeAccountPull() throws {
         try queue.sync {
+            try execLocked("PRAGMA foreign_keys = OFF;")
+            defer { try? execLocked("PRAGMA foreign_keys = ON;") }
             try inTransactionLocked {
                 let existingAtts = (try? fetchAttachmentsWhereLocked("1 = 1")) ?? []
                 for att in existingAtts {
                     deleteAttachmentFileLocked(relativePath: att.localRelativePath)
                 }
                 try execLocked("""
+                    DELETE FROM detached_project_tasks;
                     DELETE FROM attachments;
                     DELETE FROM checklist_items;
                     DELETE FROM task_tags;
@@ -1838,7 +2165,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
     // MARK: - Full `.tbbackup` Export & Atomic Restore
 
-    public func buildBackupPayload(preferences: AppPreferences, appVersionName: String = "1.8.0") throws -> ThingsbookBackupPayload {
+    public func buildBackupPayload(preferences: AppPreferences, appVersionName: String = "1.8.1") throws -> ThingsbookBackupPayload {
         try queue.sync {
             let now = nowMillis()
             let areas = try fetchActiveAreasLocked().map {
@@ -2005,18 +2332,24 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         }
     }
 
+    public func importSnapshotReplacingAll(_ payload: ThingsbookBackupPayload) throws {
+        try restoreBackupPayload(payload)
+    }
+
     public func restoreBackupPayload(_ payload: ThingsbookBackupPayload) throws {
         try queue.sync {
-            try inTransactionLocked {
-                try execLocked("PRAGMA foreign_keys = OFF;")
-                defer { try? execLocked("PRAGMA foreign_keys = ON;") }
+            // SQLite ignores PRAGMA foreign_keys = OFF inside an active transaction — must execute BEFORE BEGIN.
+            try execLocked("PRAGMA foreign_keys = OFF;")
+            defer { try? execLocked("PRAGMA foreign_keys = ON;") }
 
+            try inTransactionLocked {
                 let existingAtts = (try? fetchAttachmentsWhereLocked("1 = 1")) ?? []
                 for att in existingAtts {
                     deleteAttachmentFileLocked(relativePath: att.localRelativePath)
                 }
 
                 try execLocked("""
+                    DELETE FROM detached_project_tasks;
                     DELETE FROM attachments;
                     DELETE FROM checklist_items;
                     DELETE FROM task_tags;
@@ -2034,7 +2367,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 let validHeadingIds = Set(payload.headings.map(\.id))
                 let validTaskIds = Set(payload.tasks.map(\.id))
 
-                for dto in payload.tags {
+                let orderedTags = Self.sortParentFirst(payload.tags, idOf: \.id, parentIdOf: \.parentTagId)
+                for dto in orderedTags {
                     let parent = dto.parentTagId.flatMap { validTagIds.contains($0) ? $0 : nil }
                     let tag = Tag(
                         id: dto.id,
@@ -2219,39 +2553,60 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     @discardableResult
     public func applyRemoteDeltas(_ deltas: RemoteDeltaBatch) throws -> Int64 {
         var maxTimestamp: Int64 = 0
-        var appliedAny = false
+        var appliedCount = 0
+        var clampedMax: Int64 = 0
 
         try queue.sync {
-            try inTransactionLocked {
-                try execLocked("PRAGMA foreign_keys = OFF;")
-                defer { try? execLocked("PRAGMA foreign_keys = ON;") }
+            // SQLite ignores PRAGMA foreign_keys = OFF inside an active transaction — must execute BEFORE BEGIN.
+            try execLocked("PRAGMA foreign_keys = OFF;")
+            defer { try? execLocked("PRAGMA foreign_keys = ON;") }
 
-                for remote in deltas.tags {
+            try inTransactionLocked {
+                let orderedTags = Self.sortParentFirst(deltas.tags, idOf: \.id, parentIdOf: \.parentTagId)
+                for remote in orderedTags {
                     maxTimestamp = max(maxTimestamp, remote.updatedAt)
                     if shouldApplyRemoteLocked(table: "tags", id: remote.id, remoteUpdatedAt: remote.updatedAt) {
                         try upsertTagLocked(remote, isDirty: false)
-                        appliedAny = true
+                        if remote.isDeleted {
+                            try cleanDeletedTagReferencesLocked(tagId: remote.id, now: remote.updatedAt, markParentsDirty: false)
+                        }
+                        appliedCount += 1
                     }
                 }
                 for remote in deltas.areas {
                     maxTimestamp = max(maxTimestamp, remote.updatedAt)
                     if shouldApplyRemoteLocked(table: "areas", id: remote.id, remoteUpdatedAt: remote.updatedAt) {
                         try upsertAreaLocked(remote, isDirty: false)
-                        appliedAny = true
+                        appliedCount += 1
+                        if remote.isDeleted {
+                            appliedCount += try detachLocalChildrenForDeletedAreaLocked(areaId: remote.id)
+                        }
+                    } else if remote.isDeleted {
+                        appliedCount += try detachLocalChildrenForDeletedAreaLocked(areaId: remote.id)
                     }
                 }
                 for remote in deltas.projects {
                     maxTimestamp = max(maxTimestamp, remote.updatedAt)
                     if shouldApplyRemoteLocked(table: "projects", id: remote.id, remoteUpdatedAt: remote.updatedAt) {
                         try upsertProjectLocked(remote, isDirty: false)
-                        appliedAny = true
+                        appliedCount += 1
+                        if remote.isDeleted {
+                            appliedCount += try detachLocalChildrenForDeletedProjectLocked(projectId: remote.id)
+                        }
+                    } else if remote.isDeleted {
+                        appliedCount += try detachLocalChildrenForDeletedProjectLocked(projectId: remote.id)
                     }
                 }
                 for remote in deltas.headings {
                     maxTimestamp = max(maxTimestamp, remote.updatedAt)
                     if shouldApplyRemoteLocked(table: "headings", id: remote.id, remoteUpdatedAt: remote.updatedAt) {
                         try upsertHeadingLocked(remote, isDirty: false)
-                        appliedAny = true
+                        appliedCount += 1
+                        if remote.isDeleted {
+                            appliedCount += try detachLocalChildrenForDeletedHeadingLocked(headingId: remote.id)
+                        }
+                    } else if remote.isDeleted {
+                        appliedCount += try detachLocalChildrenForDeletedHeadingLocked(headingId: remote.id)
                     }
                 }
                 for remote in deltas.tasks {
@@ -2259,14 +2614,17 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     if shouldApplyRemoteLocked(table: "tasks", id: remote.id, remoteUpdatedAt: remote.updatedAt) {
                         let tagIds = deltas.taskTagIdsByTaskId[remote.id] ?? remote.tagIds
                         try upsertTaskLocked(remote, tagIds: tagIds, isDirty: false)
-                        appliedAny = true
+                        appliedCount += 1
                     }
                 }
+                // Also detach any newly-arrived tasks referencing containers tombstoned locally or in this batch
+                appliedCount += try detachChildrenOfDeletedContainersLocked()
+
                 for remote in deltas.checklistItems {
                     maxTimestamp = max(maxTimestamp, remote.updatedAt)
                     if shouldApplyRemoteLocked(table: "checklist_items", id: remote.id, remoteUpdatedAt: remote.updatedAt) {
                         try upsertChecklistItemLocked(remote, isDirty: false)
-                        appliedAny = true
+                        appliedCount += 1
                     }
                 }
                 for remoteDelta in deltas.attachments {
@@ -2287,32 +2645,129 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                             att.localRelativePath = existingPath
                         }
                         try upsertAttachmentLocked(att, isDirty: false)
-                        appliedAny = true
+                        appliedCount += 1
                     }
                 }
             }
-            if appliedAny {
+            if appliedCount > 0 {
                 rebuildFtsLocked()
             }
+            self.lastRemoteAppliedCount = appliedCount
+            let maxAllowed = nowMillis() + 60_000
+            clampedMax = maxTimestamp > 0 ? min(maxTimestamp, maxAllowed) : 0
         }
 
-        if appliedAny {
+        if appliedCount > 0 {
             if let onRemoteSyncApplied {
                 onRemoteSyncApplied()
             } else {
                 notifyMutation()
             }
         }
-        return maxTimestamp
+        return clampedMax
+    }
+
+    private static func sortParentFirst<T>(
+        _ items: [T],
+        idOf: (T) -> String,
+        parentIdOf: (T) -> String?
+    ) -> [T] {
+        guard items.count > 1 else { return items }
+        let batchIds = Set(items.map(idOf))
+        var emittedIds = Set<String>()
+        var remaining = items
+        var ordered: [T] = []
+        ordered.reserveCapacity(items.count)
+
+        while !remaining.isEmpty {
+            var nextRemaining: [T] = []
+            var progressed = false
+            for item in remaining {
+                let parentId = parentIdOf(item)
+                if parentId == nil || !batchIds.contains(parentId!) || emittedIds.contains(parentId!) {
+                    ordered.append(item)
+                    emittedIds.insert(idOf(item))
+                    progressed = true
+                } else {
+                    nextRemaining.append(item)
+                }
+            }
+            if !progressed {
+                ordered.append(contentsOf: nextRemaining)
+                break
+            }
+            remaining = nextRemaining
+        }
+        return ordered
+    }
+
+    private func detachLocalChildrenForDeletedAreaLocked(areaId: String) throws -> Int {
+        var changes = 0
+        let s1 = try prepareLocked("UPDATE projects SET area_id = NULL WHERE area_id = ?;")
+        defer { sqlite3_finalize(s1) }
+        bindText(s1, 1, areaId)
+        if sqlite3_step(s1) == SQLITE_DONE {
+            changes += Int(sqlite3_changes(db))
+        }
+
+        let s2 = try prepareLocked("UPDATE tasks SET area_id = NULL WHERE area_id = ?;")
+        defer { sqlite3_finalize(s2) }
+        bindText(s2, 1, areaId)
+        if sqlite3_step(s2) == SQLITE_DONE {
+            changes += Int(sqlite3_changes(db))
+        }
+        return changes
+    }
+
+    private func detachLocalChildrenForDeletedProjectLocked(projectId: String) throws -> Int {
+        let s = try prepareLocked("UPDATE tasks SET project_id = NULL, heading_id = NULL WHERE project_id = ? AND is_deleted = 0;")
+        defer { sqlite3_finalize(s) }
+        bindText(s, 1, projectId)
+        if sqlite3_step(s) == SQLITE_DONE {
+            return Int(sqlite3_changes(db))
+        }
+        return 0
+    }
+
+    private func detachLocalChildrenForDeletedHeadingLocked(headingId: String) throws -> Int {
+        let s = try prepareLocked("UPDATE tasks SET heading_id = NULL WHERE heading_id = ? AND is_deleted = 0;")
+        defer { sqlite3_finalize(s) }
+        bindText(s, 1, headingId)
+        if sqlite3_step(s) == SQLITE_DONE {
+            return Int(sqlite3_changes(db))
+        }
+        return 0
+    }
+
+    private func detachChildrenOfDeletedContainersLocked() throws -> Int {
+        var changes = 0
+        let queries = [
+            "UPDATE projects SET area_id = NULL WHERE area_id IS NOT NULL AND area_id IN (SELECT id FROM areas WHERE is_deleted = 1);",
+            "UPDATE tasks SET area_id = NULL WHERE area_id IS NOT NULL AND area_id IN (SELECT id FROM areas WHERE is_deleted = 1);",
+            "UPDATE tasks SET project_id = NULL, heading_id = NULL WHERE is_deleted = 0 AND project_id IS NOT NULL AND project_id IN (SELECT id FROM projects WHERE is_deleted = 1);",
+            "UPDATE tasks SET heading_id = NULL WHERE is_deleted = 0 AND heading_id IS NOT NULL AND heading_id IN (SELECT id FROM headings WHERE is_deleted = 1);"
+        ]
+        for sql in queries {
+            let stmt = try prepareLocked(sql)
+            defer { sqlite3_finalize(stmt) }
+            if sqlite3_step(stmt) == SQLITE_DONE {
+                changes += Int(sqlite3_changes(db))
+            }
+        }
+        return changes
     }
 
     private func shouldApplyRemoteLocked(table: String, id: String, remoteUpdatedAt: Int64) -> Bool {
-        guard let stmt = try? prepareLocked("SELECT updated_at FROM \(table) WHERE id = ?;") else { return true }
+        guard let stmt = try? prepareLocked("SELECT updated_at, is_dirty FROM \(table) WHERE id = ?;") else { return true }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, 1, id)
         if sqlite3_step(stmt) == SQLITE_ROW {
             let localUpdated = sqlite3_column_int64(stmt, 0)
-            return remoteUpdatedAt >= localUpdated
+            let localIsDirty = sqlite3_column_int(stmt, 1) != 0
+            if localIsDirty {
+                return remoteUpdatedAt > localUpdated
+            }
+            return remoteUpdatedAt > localUpdated
         }
         return true
     }
@@ -2329,13 +2784,25 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     }
 
     private func upsertTagLocked(_ tag: Tag, isDirty: Bool) throws {
-        // Resolve unique title collisions peacefully
-        let conflictStmt = try prepareLocked("SELECT id FROM tags WHERE title = ? AND id != ?;")
-        defer { sqlite3_finalize(conflictStmt) }
-        bindText(conflictStmt, 1, tag.title)
-        bindText(conflictStmt, 2, tag.id)
-        if sqlite3_step(conflictStmt) == SQLITE_ROW, let oldId = colString(conflictStmt, 0) {
-            try deleteByIdLocked(table: "tags", id: oldId)
+        // Only resolve collisions among active (is_deleted = 0) tags; preserve soft-deleted tombstones!
+        if !tag.isDeleted {
+            let conflictStmt = try prepareLocked("SELECT id FROM tags WHERE title = ? AND id != ? AND is_deleted = 0;")
+            defer { sqlite3_finalize(conflictStmt) }
+            bindText(conflictStmt, 1, tag.title)
+            bindText(conflictStmt, 2, tag.id)
+            var conflictingIds: [String] = []
+            while sqlite3_step(conflictStmt) == SQLITE_ROW {
+                if let oldId = colString(conflictStmt, 0) {
+                    conflictingIds.append(oldId)
+                }
+            }
+            for oldId in conflictingIds {
+                let markDeletedStmt = try prepareLocked("UPDATE tags SET is_deleted = 1, updated_at = ?, is_dirty = 1 WHERE id = ?;")
+                defer { sqlite3_finalize(markDeletedStmt) }
+                bindInt64(markDeletedStmt, 1, tag.updatedAt)
+                bindText(markDeletedStmt, 2, oldId)
+                _ = sqlite3_step(markDeletedStmt)
+            }
         }
 
         let stmt = try prepareLocked("""
@@ -2392,11 +2859,13 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     }
 
     private func upsertProjectLocked(_ project: Project, isDirty: Bool) throws {
+        let uniqueTags = Array(Set(project.tagIds))
+        let isPurgedTombstone = project.isDeleted && project.title.isEmpty && project.notes.isEmpty
         let stmt = try prepareLocked("""
             INSERT INTO projects (
                 id, area_id, title, notes, status, schedule_state, when_date, deadline,
-                completed_at, sort_order, tag_ids_json, created_at, updated_at, is_deleted, is_dirty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                completed_at, sort_order, tag_ids_json, created_at, updated_at, is_deleted, is_purged, is_dirty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 area_id = excluded.area_id,
                 title = excluded.title,
@@ -2410,6 +2879,11 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 tag_ids_json = excluded.tag_ids_json,
                 updated_at = excluded.updated_at,
                 is_deleted = excluded.is_deleted,
+                is_purged = CASE
+                    WHEN excluded.is_deleted = 0 THEN 0
+                    WHEN excluded.is_purged = 1 THEN 1
+                    ELSE projects.is_purged
+                END,
                 is_dirty = excluded.is_dirty;
         """)
         defer { sqlite3_finalize(stmt) }
@@ -2423,11 +2897,12 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         bindInt64(stmt, 8, project.deadline)
         bindInt64(stmt, 9, project.completedAt)
         sqlite3_bind_double(stmt, 10, project.sortOrder)
-        bindText(stmt, 11, encodeStringArray(project.tagIds))
+        bindText(stmt, 11, encodeStringArray(uniqueTags))
         bindInt64(stmt, 12, project.createdAt)
         bindInt64(stmt, 13, project.updatedAt)
         bindBool(stmt, 14, project.isDeleted)
-        bindBool(stmt, 15, isDirty)
+        bindBool(stmt, 15, isPurgedTombstone)
+        bindBool(stmt, 16, isDirty)
         if sqlite3_step(stmt) != SQLITE_DONE {
             throw ThingsDatabaseError.sqlError(currentErrorMessageLocked())
         }
@@ -2437,12 +2912,14 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         bindText(clearStmt, 1, project.id)
         _ = sqlite3_step(clearStmt)
 
-        for tagId in Set(project.tagIds) {
-            let refStmt = try prepareLocked("INSERT OR IGNORE INTO project_tags (project_id, tag_id) VALUES (?, ?);")
-            defer { sqlite3_finalize(refStmt) }
-            bindText(refStmt, 1, project.id)
-            bindText(refStmt, 2, tagId)
-            _ = sqlite3_step(refStmt)
+        if !project.isDeleted {
+            for tagId in uniqueTags {
+                let refStmt = try prepareLocked("INSERT OR IGNORE INTO project_tags (project_id, tag_id) VALUES (?, ?);")
+                defer { sqlite3_finalize(refStmt) }
+                bindText(refStmt, 1, project.id)
+                bindText(refStmt, 2, tagId)
+                _ = sqlite3_step(refStmt)
+            }
         }
     }
 
@@ -2475,13 +2952,14 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     }
 
     private func upsertTaskLocked(_ task: TaskItem, tagIds: [String], isDirty: Bool) throws {
-        let uniqueTags = Array(Set(tagIds))
+        let uniqueTags = task.isDeleted ? [] : Array(Set(tagIds))
+        let isPurgedTombstone = task.isDeleted && task.title.isEmpty && task.notes.isEmpty
         let stmt = try prepareLocked("""
             INSERT INTO tasks (
                 id, title, notes, status, schedule_state, when_date, deadline, reminder_time,
                 completed_at, project_id, heading_id, area_id, recurrence_rule, sort_order,
-                tag_ids_json, created_at, updated_at, is_deleted, is_dirty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                tag_ids_json, created_at, updated_at, is_deleted, is_purged, is_dirty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 notes = excluded.notes,
@@ -2499,6 +2977,11 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 tag_ids_json = excluded.tag_ids_json,
                 updated_at = excluded.updated_at,
                 is_deleted = excluded.is_deleted,
+                is_purged = CASE
+                    WHEN excluded.is_deleted = 0 THEN 0
+                    WHEN excluded.is_purged = 1 THEN 1
+                    ELSE tasks.is_purged
+                END,
                 is_dirty = excluded.is_dirty;
         """)
         defer { sqlite3_finalize(stmt) }
@@ -2520,7 +3003,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         bindInt64(stmt, 16, task.createdAt)
         bindInt64(stmt, 17, task.updatedAt)
         bindBool(stmt, 18, task.isDeleted)
-        bindBool(stmt, 19, isDirty)
+        bindBool(stmt, 19, isPurgedTombstone)
+        bindBool(stmt, 20, isDirty)
         if sqlite3_step(stmt) != SQLITE_DONE {
             throw ThingsDatabaseError.sqlError(currentErrorMessageLocked())
         }
@@ -2572,6 +3056,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     }
 
     private func fetchAreasWhereLocked(_ whereClause: String) throws -> [Area] {
+        let activeTagIds = Set((try fetchActiveTagsLocked()).map(\.id))
         let stmt = try prepareLocked("""
             SELECT id, title, sort_order, tag_ids_json, created_at, updated_at, is_deleted
             FROM areas WHERE \(whereClause) ORDER BY sort_order ASC;
@@ -2579,15 +3064,17 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         defer { sqlite3_finalize(stmt) }
         var out: [Area] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
+            let isDeleted = colBool(stmt, 6)
+            let decodedTags = decodeStringArray(colString(stmt, 3)).filter { activeTagIds.contains($0) }
             out.append(
                 Area(
                     id: colString(stmt, 0) ?? "",
                     title: colString(stmt, 1) ?? "",
                     sortOrder: sqlite3_column_double(stmt, 2),
-                    tagIds: decodeStringArray(colString(stmt, 3)),
+                    tagIds: isDeleted ? [] : decodedTags,
                     createdAt: sqlite3_column_int64(stmt, 4),
                     updatedAt: sqlite3_column_int64(stmt, 5),
-                    isDeleted: colBool(stmt, 6)
+                    isDeleted: isDeleted
                 )
             )
         }
@@ -2632,7 +3119,21 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         try fetchProjectsWhereLocked("p.is_deleted = 0")
     }
 
+    private func fetchInactiveOrDeletedProjectIdsLocked() throws -> Set<String> {
+        let stmt = try prepareLocked("SELECT id FROM projects WHERE is_deleted = 1 OR status != 'ACTIVE';")
+        defer { sqlite3_finalize(stmt) }
+        var ids = Set<String>()
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let pid = colString(stmt, 0) {
+                ids.insert(pid)
+            }
+        }
+        return ids
+    }
+
     private func fetchProjectByIdLocked(_ id: String) throws -> Project? {
+        let activeTagIds = Set((try fetchActiveTagsLocked()).map(\.id))
+        let projectTagIdsByProject = try fetchAllProjectTagIdsLocked()
         let stmt = try prepareLocked("""
             SELECT p.id, p.area_id, p.title, p.notes, p.status, p.schedule_state, p.when_date,
                    p.deadline, p.completed_at, p.sort_order, p.tag_ids_json, p.created_at, p.updated_at, p.is_deleted,
@@ -2643,12 +3144,18 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, 1, id)
         if sqlite3_step(stmt) == SQLITE_ROW {
-            return readProjectRowLocked(stmt)
+            return readProjectRowLocked(
+                stmt,
+                activeTagIds: activeTagIds,
+                projectTagIdsByProject: projectTagIdsByProject
+            )
         }
         return nil
     }
 
     private func fetchProjectsWhereLocked(_ whereClause: String) throws -> [Project] {
+        let activeTagIds = Set((try fetchActiveTagsLocked()).map(\.id))
+        let projectTagIdsByProject = try fetchAllProjectTagIdsLocked()
         let stmt = try prepareLocked("""
             SELECT p.id, p.area_id, p.title, p.notes, p.status, p.schedule_state, p.when_date,
                    p.deadline, p.completed_at, p.sort_order, p.tag_ids_json, p.created_at, p.updated_at, p.is_deleted,
@@ -2659,14 +3166,36 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         defer { sqlite3_finalize(stmt) }
         var out: [Project] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
-            out.append(readProjectRowLocked(stmt))
+            out.append(
+                readProjectRowLocked(
+                    stmt,
+                    activeTagIds: activeTagIds,
+                    projectTagIdsByProject: projectTagIdsByProject
+                )
+            )
         }
         return out
     }
 
-    private func readProjectRowLocked(_ stmt: OpaquePointer) -> Project {
-        Project(
-            id: colString(stmt, 0) ?? "",
+    private func readProjectRowLocked(
+        _ stmt: OpaquePointer,
+        activeTagIds: Set<String>? = nil,
+        projectTagIdsByProject: [String: [String]]? = nil
+    ) -> Project {
+        let id = colString(stmt, 0) ?? ""
+        let isDeleted = colBool(stmt, 13)
+        let refTagIds = projectTagIdsByProject?[id] ?? []
+        let resolvedTagIds: [String]
+        if isDeleted {
+            resolvedTagIds = []
+        } else if let activeTagIds {
+            resolvedTagIds = refTagIds.filter { activeTagIds.contains($0) }
+        } else {
+            resolvedTagIds = refTagIds
+        }
+
+        return Project(
+            id: id,
             areaId: colString(stmt, 1),
             title: colString(stmt, 2) ?? "",
             notes: colString(stmt, 3) ?? "",
@@ -2676,12 +3205,12 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             deadline: colInt64(stmt, 7),
             completedAt: colInt64(stmt, 8),
             sortOrder: sqlite3_column_double(stmt, 9),
-            tagIds: decodeStringArray(colString(stmt, 10)),
+            tagIds: resolvedTagIds,
             totalTaskCount: Int(sqlite3_column_int(stmt, 14)),
             completedTaskCount: Int(sqlite3_column_int(stmt, 15)),
             createdAt: sqlite3_column_int64(stmt, 11),
             updatedAt: sqlite3_column_int64(stmt, 12),
-            isDeleted: colBool(stmt, 13)
+            isDeleted: isDeleted
         )
     }
 
@@ -2829,6 +3358,18 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         return map
     }
 
+    private func fetchAllProjectTagIdsLocked() throws -> [String: [String]] {
+        let stmt = try prepareLocked("SELECT project_id, tag_id FROM project_tags;")
+        defer { sqlite3_finalize(stmt) }
+        var map: [String: [String]] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let pid = colString(stmt, 0), let tgid = colString(stmt, 1) {
+                map[pid, default: []].append(tgid)
+            }
+        }
+        return map
+    }
+
     private func fetchTaskByIdLocked(_ id: String) throws -> TaskItem? {
         let escapedId = id.replacingOccurrences(of: "'", with: "''")
         let tags = try fetchActiveTagsLocked()
@@ -2890,10 +3431,9 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         attachmentsByTask: [String: [TaskAttachment]] = [:]
     ) -> TaskItem {
         let id = colString(stmt, 0) ?? ""
-        let jsonTagIds = decodeStringArray(colString(stmt, 14))
-        let refTagIds = tagIdsByTask[id] ?? []
-        let combinedIds = refTagIds.isEmpty ? jsonTagIds : Array(Set(refTagIds + jsonTagIds))
-        let resolvedTags = combinedIds.compactMap { tagsById[$0] }.sorted { $0.sortOrder < $1.sortOrder }
+        let isDeleted = colBool(stmt, 17)
+        let refTagIds = isDeleted ? [] : (tagIdsByTask[id] ?? [])
+        let resolvedTags = refTagIds.compactMap { tagsById[$0] }.sorted { $0.sortOrder < $1.sortOrder }
 
         return TaskItem(
             id: id,
@@ -2915,7 +3455,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             attachments: attachmentsByTask[id] ?? [],
             createdAt: sqlite3_column_int64(stmt, 15),
             updatedAt: sqlite3_column_int64(stmt, 16),
-            isDeleted: colBool(stmt, 17)
+            isDeleted: isDeleted
         )
     }
 
@@ -2932,19 +3472,20 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
         let openTasks = scalar("SELECT COUNT(*) FROM tasks WHERE status = 'OPEN' AND is_deleted = 0;")
         let completedTasks = scalar("SELECT COUNT(*) FROM tasks WHERE status = 'COMPLETED' AND is_deleted = 0;")
-        let deletedTasks = scalar("SELECT COUNT(*) FROM tasks WHERE is_deleted = 1;")
+        let deletedTasks = scalar("SELECT COUNT(*) FROM tasks WHERE is_deleted = 1 AND is_purged = 0;")
         let canceledTasks = scalar("SELECT COUNT(*) FROM tasks WHERE status = 'CANCELED' AND is_deleted = 0;")
         let todayActive = scalar("""
             SELECT COUNT(*) FROM tasks
             WHERE status = 'OPEN' AND is_deleted = 0
+              AND (project_id IS NULL OR project_id NOT IN (SELECT id FROM projects WHERE is_deleted = 1 OR status != 'ACTIVE'))
               AND (schedule_state IN ('TODAY', 'THIS_EVENING') OR (when_date IS NOT NULL AND when_date <= ?));
         """, endOfToday)
         let recurring = scalar("SELECT COUNT(*) FROM tasks WHERE status = 'OPEN' AND is_deleted = 0 AND recurrence_rule IS NOT NULL AND recurrence_rule != '';")
         let activeProjects = scalar("SELECT COUNT(*) FROM projects WHERE status = 'ACTIVE' AND is_deleted = 0;")
         let savedTags = scalar("SELECT COUNT(*) FROM tags WHERE is_deleted = 0;")
         let totalRecords =
-            scalar("SELECT COUNT(*) FROM tasks;") +
-            scalar("SELECT COUNT(*) FROM projects;") +
+            scalar("SELECT COUNT(*) FROM tasks WHERE is_purged = 0;") +
+            scalar("SELECT COUNT(*) FROM projects WHERE is_purged = 0;") +
             scalar("SELECT COUNT(*) FROM areas;") +
             scalar("SELECT COUNT(*) FROM headings;") +
             scalar("SELECT COUNT(*) FROM checklist_items;") +

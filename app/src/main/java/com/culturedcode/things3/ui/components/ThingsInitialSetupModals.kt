@@ -188,6 +188,7 @@ fun ThingsInitialSetupBanner(
 fun SampleTasksAccountMergeDialog(
     accountLabel: String?,
     nonSampleTaskCount: Int,
+    hasSampleTasks: Boolean = true,
     onConfirmMergeWithAccount: () -> Unit,
     onConfirmReplaceWithAccountOnly: () -> Unit,
     onCancel: () -> Unit
@@ -260,11 +261,13 @@ fun SampleTasksAccountMergeDialog(
                     }
                 }
 
-                Text(
-                    text = stringResource(R.string.merge_dialog_desc),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.secondaryText
-                )
+                if (hasSampleTasks) {
+                    Text(
+                        text = stringResource(R.string.merge_dialog_desc),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.secondaryText
+                    )
+                }
 
                 val detailHint = if (nonSampleTaskCount > 0) {
                     stringResource(R.string.merge_dialog_hint_with_tasks, nonSampleTaskCount, displayAccount)

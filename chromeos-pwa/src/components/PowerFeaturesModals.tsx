@@ -30,6 +30,7 @@ import type {
   ProjectRecord,
   QuickShareDraft,
   ScheduleState,
+  SupportedLang,
   TaskRecord
 } from '../domain/types';
 import type { TranslationStrings } from '../i18n/translations';
@@ -39,6 +40,14 @@ import {
   sha256Hex,
   verifyPlatformWebAuthnCredential
 } from '../domain/powerUtils';
+
+const SPEECH_BCP47_BY_LANG: Record<SupportedLang, string> = {
+  en: 'en-US',
+  de: 'de-DE',
+  fr: 'fr-FR',
+  it: 'it-IT',
+  es: 'es-ES'
+};
 
 interface SpeechRecognitionAlternativeLike {
   transcript: string;
@@ -75,12 +84,20 @@ function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
 
 // ==================== 1. Quick Share / Save to Thingsbook Modal ====================
 
+export interface SmartParseDestination {
+  projectId: string | null;
+  areaId: string | null;
+  scheduleState: ScheduleState;
+}
+
 export const QuickShareModal: React.FC<{
   draft: QuickShareDraft;
   projects: ProjectRecord[];
   areas: AreaRecord[];
+  lang?: SupportedLang;
   t: TranslationStrings;
   onClose: () => void;
+  onToast?: (msg: string) => void;
   onSave: (payload: {
     title: string;
     notes: string;
@@ -88,8 +105,21 @@ export const QuickShareModal: React.FC<{
     projectId: string | null;
     areaId: string | null;
   }) => void;
-  onSmartParseWithGemini?: (rawText: string) => Promise<void>;
-}> = ({ draft, projects, areas, t, onClose, onSave, onSmartParseWithGemini }) => {
+  onSmartParseWithGemini?: (
+    rawText: string,
+    destination: SmartParseDestination
+  ) => Promise<void>;
+}> = ({
+  draft,
+  projects,
+  areas,
+  lang = 'en',
+  t,
+  onClose,
+  onToast,
+  onSave,
+  onSmartParseWithGemini
+}) => {
   const [title, setTitle] = useState(draft.initialTitle);
   const [notes, setNotes] = useState(draft.initialNotes);
   const [scheduleState, setScheduleState] = useState<ScheduleState>('INBOX');
@@ -97,7 +127,10 @@ export const QuickShareModal: React.FC<{
   const [areaId, setAreaId] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [isSmartParsing, setIsSmartParsing] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const titleRef = useRef(title);
+  titleRef.current = title;
 
   const toggleVoiceDictation = () => {
     if (isListening && recognitionRef.current) {
@@ -111,18 +144,19 @@ export const QuickShareModal: React.FC<{
       const rec = new Ctor();
       rec.continuous = false;
       rec.interimResults = false;
-      rec.lang = typeof navigator !== 'undefined' ? navigator.language || 'en-US' : 'en-US';
+      rec.lang = SPEECH_BCP47_BY_LANG[lang] || 'en-US';
       rec.onresult = (ev) => {
         const transcript = Array.from(ev.results)
           .map((r) => r[0]?.transcript || '')
           .join(' ')
           .trim();
-        if (transcript) {
-          setTitle((prev) => {
-            if (!prev.trim()) return transcript;
-            setNotes((n) => (n.trim() ? `${n}\n${transcript}` : transcript));
-            return prev;
-          });
+        if (!transcript) return;
+        // Compute outside state updaters so React 19 StrictMode never double-appends to notes
+        if (!titleRef.current.trim()) {
+          titleRef.current = transcript;
+          setTitle(transcript);
+        } else {
+          setNotes((n) => (n.trim() ? `${n}\n${transcript}` : transcript));
         }
       };
       rec.onerror = () => setIsListening(false);
@@ -241,7 +275,11 @@ export const QuickShareModal: React.FC<{
                 placeholder={isListening ? t.voiceListeningHint : t.placeholderTodoTitle}
                 value={title}
                 autoFocus
-                onChange={(e) => setTitle(e.target.value)}
+                onChange={(e) => {
+                  titleRef.current = e.target.value;
+                  setTitle(e.target.value);
+                  if (parseError) setParseError(null);
+                }}
               />
               {onSmartParseWithGemini && combinedText.length >= 6 && (
                 <button
@@ -252,8 +290,17 @@ export const QuickShareModal: React.FC<{
                   onClick={async () => {
                     if (isSmartParsing) return;
                     setIsSmartParsing(true);
+                    setParseError(null);
                     try {
-                      await onSmartParseWithGemini(combinedText);
+                      await onSmartParseWithGemini(combinedText, {
+                        projectId,
+                        areaId,
+                        scheduleState
+                      });
+                    } catch (err) {
+                      const msg = err instanceof Error ? err.message : 'Smart Parse failed';
+                      setParseError(msg);
+                      onToast?.(`⚠️ ${msg}`);
                     } finally {
                       setIsSmartParsing(false);
                     }
@@ -266,10 +313,17 @@ export const QuickShareModal: React.FC<{
               )}
             </div>
 
+            {parseError && (
+              <div style={{ fontSize: 12.2, color: 'var(--deadline-red)' }}>{parseError}</div>
+            )}
+
             <div className="quick-share-notes-box">
               <MarkdownNotesField
                 value={notes}
-                onChange={setNotes}
+                onChange={(next) => {
+                  setNotes(next);
+                  if (parseError) setParseError(null);
+                }}
                 placeholder={t.placeholderNotes}
                 rows={3}
                 className="task-card-notes"

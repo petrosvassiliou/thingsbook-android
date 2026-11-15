@@ -47,6 +47,14 @@
         { "fieldPath": "updatedAt", "order": "ASCENDING" },
         { "fieldPath": "sortOrder", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "attachments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "updatedAt", "order": "ASCENDING" },
+        { "fieldPath": "sortOrder", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [
@@ -92,6 +100,14 @@
     },
     {
       "collectionGroup": "tags",
+      "fieldPath": "updatedAt",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION" }
+      ]
+    },
+    {
+      "collectionGroup": "attachments",
       "fieldPath": "updatedAt",
       "indexes": [
         { "order": "ASCENDING", "queryScope": "COLLECTION" },

@@ -32,6 +32,10 @@ public struct TaskRowCardView: View {
         store.selectedTaskIds.contains(task.id)
     }
 
+    private var latestTask: TaskItem {
+        (store.allOpenTasks + store.logbookTasks + store.trashedTasks).first(where: { $0.id == task.id }) ?? task
+    }
+
     public init(store: ThingsbookStore, task: TaskItem, showContextSubtitle: Bool = true) {
         self.store = store
         self.task = task
@@ -54,7 +58,7 @@ public struct TaskRowCardView: View {
         }
         .onDisappear {
             draftSaveTask?.cancel()
-            commitDraftEditsIfNeeded()
+            commitDraftEditsIfNeeded(commitPendingChecklist: true)
         }
         .onChange(of: task.title) { _, newValue in
             if !isExpanded && draftTitle != newValue {
@@ -79,14 +83,14 @@ public struct TaskRowCardView: View {
         .onChange(of: isExpanded) { _, expanded in
             if expanded {
                 syncDrafts()
-                isEditingNotes = task.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                if task.title.isEmpty {
+                isEditingNotes = latestTask.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                if latestTask.title.isEmpty {
                     isTitleFocused = true
                 }
             } else {
                 draftSaveTask?.cancel()
                 rowVoiceController.stopRecording()
-                commitDraftEditsIfNeeded()
+                commitDraftEditsIfNeeded(commitPendingChecklist: true)
             }
         }
     }
@@ -99,8 +103,8 @@ public struct TaskRowCardView: View {
                 status: task.status,
                 isSomeday: task.scheduleState == .someday,
                 helpText: store.tr("macos_checkbox_help"),
-                onToggleComplete: { store.toggleTaskCompletion(task) },
-                onCancelTask: { store.cancelTask(task) }
+                onToggleComplete: { store.toggleTaskCompletion(latestTask) },
+                onCancelTask: { store.cancelTask(latestTask) }
             )
 
             VStack(alignment: .leading, spacing: 2.5) {
@@ -258,12 +262,12 @@ public struct TaskRowCardView: View {
                     isSomeday: task.scheduleState == .someday,
                     helpText: store.tr("macos_checkbox_help"),
                     onToggleComplete: {
-                        commitDraftEditsIfNeeded()
-                        store.toggleTaskCompletion(task)
+                        commitDraftEditsIfNeeded(commitPendingChecklist: true)
+                        store.toggleTaskCompletion(latestTask)
                     },
                     onCancelTask: {
-                        commitDraftEditsIfNeeded()
-                        store.cancelTask(task)
+                        commitDraftEditsIfNeeded(commitPendingChecklist: true)
+                        store.cancelTask(latestTask)
                     }
                 )
 
@@ -272,7 +276,7 @@ public struct TaskRowCardView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .focused($isTitleFocused)
                     .onSubmit {
-                        commitDraftEditsIfNeeded()
+                        commitDraftEditsIfNeeded(commitPendingChecklist: true)
                         withAnimation(.spring(response: 0.25, dampingFraction: 0.86)) {
                             store.expandedTaskId = nil
                         }
@@ -554,11 +558,11 @@ public struct TaskRowCardView: View {
                 .popover(isPresented: $isWhenPopoverOpen) {
                     WhenPopoverView(
                         store: store,
-                        currentSchedule: task.scheduleState,
-                        currentWhenMillis: task.whenDate,
-                        currentReminderMillis: task.reminderTime
+                        currentSchedule: latestTask.scheduleState,
+                        currentWhenMillis: latestTask.whenDate,
+                        currentReminderMillis: latestTask.reminderTime
                     ) { resolved in
-                        var copy = task
+                        var copy = latestTask
                         copy.title = draftTitle
                         copy.notes = draftNotes
                         copy.scheduleState = resolved.scheduleState
@@ -578,8 +582,8 @@ public struct TaskRowCardView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .popover(isPresented: $isRepeatPopoverOpen) {
-                    RepeatEditorPopoverView(store: store, currentRule: task.recurrenceRule) { newRule in
-                        var copy = task
+                    RepeatEditorPopoverView(store: store, currentRule: latestTask.recurrenceRule) { newRule in
+                        var copy = latestTask
                         copy.title = draftTitle
                         copy.notes = draftNotes
                         copy.recurrenceRule = newRule
@@ -601,8 +605,8 @@ public struct TaskRowCardView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .popover(isPresented: $isMovePopoverOpen) {
-                    MoveDestinationPopoverView(store: store, task: task) { projId, headId, areaId, schedOverride in
-                        var copy = task
+                    MoveDestinationPopoverView(store: store, task: latestTask) { projId, headId, areaId, schedOverride in
+                        var copy = latestTask
                         copy.title = draftTitle
                         copy.notes = draftNotes
                         copy.projectId = projId
@@ -625,11 +629,12 @@ public struct TaskRowCardView: View {
                 .popover(isPresented: $isTagPopoverOpen) {
                     TagPickerPopoverView(
                         store: store,
-                        selectedTagIds: Set(task.tagIds),
+                        selectedTagIds: Set(latestTask.tagIds),
                         onToggleTag: { tagId in
-                            var tids = Set(task.tagIds)
+                            let base = latestTask
+                            var tids = Set(base.tagIds)
                             if tids.contains(tagId) { tids.remove(tagId) } else { tids.insert(tagId) }
-                            var copy = task
+                            var copy = base
                             copy.title = draftTitle
                             copy.notes = draftNotes
                             store.updateTask(copy, tagIds: Array(tids))
@@ -647,8 +652,8 @@ public struct TaskRowCardView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .popover(isPresented: $isDeadlinePopoverOpen) {
-                    DeadlinePopoverView(store: store, currentDeadlineMillis: task.deadline) { dl in
-                        var copy = task
+                    DeadlinePopoverView(store: store, currentDeadlineMillis: latestTask.deadline) { dl in
+                        var copy = latestTask
                         copy.title = draftTitle
                         copy.notes = draftNotes
                         copy.deadline = dl
@@ -668,7 +673,7 @@ public struct TaskRowCardView: View {
 
                 Button {
                     commitDraftEditsIfNeeded()
-                    store.startFocusTimer(for: task)
+                    store.startFocusTimer(for: latestTask)
                 } label: {
                     Image(systemName: "timer")
                         .foregroundStyle(ThingsMacPalette.accentBlue)
@@ -677,7 +682,7 @@ public struct TaskRowCardView: View {
                 .buttonStyle(.borderless)
 
                 Button {
-                    commitDraftEditsIfNeeded()
+                    commitDraftEditsIfNeeded(commitPendingChecklist: true)
                     _ = try? store.database.duplicateTask(task.id)
                 } label: {
                     Image(systemName: "plus.square.on.square")
@@ -687,7 +692,8 @@ public struct TaskRowCardView: View {
                 .buttonStyle(.borderless)
 
                 Button(role: .destructive) {
-                    store.deleteTask(task)
+                    draftSaveTask?.cancel()
+                    store.deleteTask(latestTask)
                 } label: {
                     Image(systemName: "trash")
                         .foregroundStyle(ThingsMacPalette.deadlineCrimson)
@@ -698,7 +704,7 @@ public struct TaskRowCardView: View {
                 Spacer()
 
                 Button {
-                    commitDraftEditsIfNeeded()
+                    commitDraftEditsIfNeeded(commitPendingChecklist: true)
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.86)) {
                         store.expandedTaskId = nil
                     }
@@ -733,26 +739,26 @@ public struct TaskRowCardView: View {
     @ViewBuilder
     private var taskContextMenu: some View {
         Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
-            store.toggleTaskCompletion(task)
+            store.toggleTaskCompletion(latestTask)
         }
         Button(task.status == .canceled ? store.tr("action_reopen_todo") : store.tr("action_cancel_todo")) {
-            store.cancelTask(task)
+            store.cancelTask(latestTask)
         }
         Divider()
         Button(store.tr("view_today")) {
-            var copy = task
+            var copy = latestTask
             copy.scheduleState = .today
             copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
             store.updateTask(copy)
         }
         Button(store.tr("view_this_evening")) {
-            var copy = task
+            var copy = latestTask
             copy.scheduleState = .thisEvening
             copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
             store.updateTask(copy)
         }
         Button(store.tr("view_someday")) {
-            var copy = task
+            var copy = latestTask
             copy.scheduleState = .someday
             copy.whenDate = nil
             store.updateTask(copy)
@@ -762,7 +768,7 @@ public struct TaskRowCardView: View {
             store.pickAndAttachFiles(taskId: task.id)
         }
         Button(store.tr("action_focus_timer")) {
-            store.startFocusTimer(for: task)
+            store.startFocusTimer(for: latestTask)
         }
         Button(store.tr("action_duplicate_todo")) {
             _ = try? store.database.duplicateTask(task.id)
@@ -772,15 +778,16 @@ public struct TaskRowCardView: View {
         }
         Divider()
         Button(role: .destructive) {
-            store.deleteTask(task)
+            store.deleteTask(latestTask)
         } label: {
             Text(store.tr("action_delete"))
         }
     }
 
     private func syncDrafts() {
-        draftTitle = task.title
-        draftNotes = task.notes
+        let base = latestTask
+        draftTitle = base.title
+        draftNotes = base.notes
     }
 
     private func scheduleDraftAutoSave() {
@@ -792,19 +799,28 @@ public struct TaskRowCardView: View {
         }
     }
 
-    private func commitDraftEditsIfNeeded() {
-        if draftTitle != task.title || draftNotes != task.notes {
-            var copy = task
+    private func commitDraftEditsIfNeeded(commitPendingChecklist: Bool = false) {
+        let base = latestTask
+        if draftTitle != base.title || draftNotes != base.notes {
+            var copy = base
             copy.title = draftTitle
             copy.notes = draftNotes
             store.updateTask(copy)
+        }
+        if commitPendingChecklist {
+            let pending = newChecklistTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !pending.isEmpty {
+                _ = try? store.database.addChecklistItem(taskId: task.id, title: pending)
+                newChecklistTitle = ""
+            }
         }
     }
 
     private func runMagicBreakdown() {
         commitDraftEditsIfNeeded()
         isGeneratingChecklist = true
-        let titleToBreak = draftTitle.isEmpty ? task.title : draftTitle
+        let base = latestTask
+        let titleToBreak = draftTitle.isEmpty ? base.title : draftTitle
         let notesToBreak = draftNotes
         Task {
             do {
@@ -903,12 +919,25 @@ private struct ChecklistItemRowView: View {
     @State private var text: String = ""
     @State private var saveTask: Task<Void, Never>?
 
+    private var latestParentChecklistItems: [ChecklistItem] {
+        (store.allOpenTasks + store.logbookTasks + store.trashedTasks)
+            .first(where: { $0.id == item.taskId })?
+            .checklistItems ?? allItems
+    }
+
+    private var latestItem: ChecklistItem {
+        latestParentChecklistItems.first(where: { $0.id == item.id }) ?? item
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             Button {
                 saveTask?.cancel()
-                commitTitle()
-                var copy = item
+                var copy = latestItem
+                let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !clean.isEmpty {
+                    copy.title = clean
+                }
                 copy.isCompleted.toggle()
                 try? store.database.updateChecklistItem(copy)
             } label: {
@@ -934,7 +963,7 @@ private struct ChecklistItemRowView: View {
                 Button {
                     saveTask?.cancel()
                     commitTitle()
-                    store.moveChecklistItem(item, in: allItems, direction: -1)
+                    store.moveChecklistItem(latestItem, in: latestParentChecklistItems, direction: -1)
                 } label: {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 9.5, weight: .semibold))
@@ -946,7 +975,7 @@ private struct ChecklistItemRowView: View {
                 Button {
                     saveTask?.cancel()
                     commitTitle()
-                    store.moveChecklistItem(item, in: allItems, direction: 1)
+                    store.moveChecklistItem(latestItem, in: latestParentChecklistItems, direction: 1)
                 } label: {
                     Image(systemName: "arrow.down")
                         .font(.system(size: 9.5, weight: .semibold))
@@ -968,7 +997,7 @@ private struct ChecklistItemRowView: View {
             }
         }
         .padding(.vertical, 2)
-        .onAppear { text = item.title }
+        .onAppear { text = latestItem.title }
         .onDisappear {
             saveTask?.cancel()
             commitTitle()
@@ -987,9 +1016,10 @@ private struct ChecklistItemRowView: View {
     }
 
     private func commitTitle() {
+        let current = latestItem
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty, clean != item.title else { return }
-        var copy = item
+        guard !clean.isEmpty, clean != current.title else { return }
+        var copy = current
         copy.title = clean
         try? store.database.updateChecklistItem(copy)
     }

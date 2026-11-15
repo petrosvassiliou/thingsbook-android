@@ -1,9 +1,8 @@
 package com.culturedcode.things3.ui.components
 
-import android.accounts.AccountManager
 import android.app.Activity
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -47,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -58,6 +58,12 @@ import com.culturedcode.things3.R
 import com.culturedcode.things3.data.repository.CloudSyncStatus
 import com.culturedcode.things3.ui.theme.ThingsTheme
 
+internal tailrec fun Context.findHostActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findHostActivity()
+    else -> null
+}
+
 @Composable
 fun ThingsAuthAndSyncModal(
     syncStatus: CloudSyncStatus,
@@ -68,31 +74,17 @@ fun ThingsAuthAndSyncModal(
     onRegisterEmailPassword: (String, String) -> Unit,
     onSignInEmailPassword: (String, String) -> Unit,
     onResetPassword: (String) -> Unit = {},
-    onSignInWithGoogle: (String) -> Unit,
+    onSignInWithGoogle: (Activity?) -> Unit,
     onSignOut: () -> Unit,
     onTriggerDeltaSyncNow: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
+    val context = LocalContext.current
 
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-
-    // Native Android System Google Account Picker ("com.google")
-    val googleAccountPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { activityResult ->
-        if (activityResult.resultCode == Activity.RESULT_OK) {
-            val pickedEmail = activityResult.data
-                ?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
-                ?.trim()
-            if (!pickedEmail.isNullOrBlank()) {
-                email = pickedEmail
-                onSignInWithGoogle(pickedEmail)
-            }
-        }
-    }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -346,21 +338,7 @@ fun ThingsAuthAndSyncModal(
                     Button(
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            runCatching {
-                                @Suppress("DEPRECATION")
-                                val chooseIntent = AccountManager.newChooseAccountIntent(
-                                    null,
-                                    null,
-                                    arrayOf("com.google"),
-                                    null,
-                                    null,
-                                    null,
-                                    null
-                                )
-                                googleAccountPickerLauncher.launch(chooseIntent)
-                            }.onFailure {
-                                onSignInWithGoogle(email.trim())
-                            }
+                            onSignInWithGoogle(context.findHostActivity())
                         },
                         enabled = !isSigningIn,
                         colors = ButtonDefaults.buttonColors(containerColor = colors.primaryText),

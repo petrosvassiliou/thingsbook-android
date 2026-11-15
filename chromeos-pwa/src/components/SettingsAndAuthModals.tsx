@@ -465,6 +465,8 @@ interface SettingsModalProps {
   onRefreshCalendars: () => Promise<void>;
   onOpenAuthModal: () => void;
   onOpenNotificationsModal: () => void;
+  initialUpdateInfo?: UpdateCheckResult | null;
+  onUpdateInfoChange?: (info: UpdateCheckResult | null) => void;
   onToast: (msg: string) => void;
   onClose: () => void;
 }
@@ -489,6 +491,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onRefreshCalendars,
   onOpenAuthModal,
   onOpenNotificationsModal,
+  initialUpdateInfo = null,
+  onUpdateInfoChange,
   onToast,
   onClose
 }) => {
@@ -499,7 +503,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     inspection: BackupInspection;
   } | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
-  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(initialUpdateInfo);
   const [connectingGcal, setConnectingGcal] = useState(false);
 
   const backupInputRef = useRef<HTMLInputElement | null>(null);
@@ -532,36 +536,50 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const handleExportCsv = (shareMode: boolean) => {
-    const csv = localDb.exportCsv();
-    const d = new Date();
-    const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
-      d.getDate()
-    ).padStart(2, '0')}`;
-    const filename = `thingsbook-export-${stamp}.csv`;
-    const file = new File(['\uFEFF' + csv], filename, { type: 'text/csv;charset=utf-8' });
+  const handleExportCsv = async (shareMode: boolean) => {
+    try {
+      const csv = localDb.exportCsv();
+      const d = new Date();
+      const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+        d.getDate()
+      ).padStart(2, '0')}`;
+      const filename = `thingsbook-export-${stamp}.csv`;
+      const file = new File(['\uFEFF' + csv], filename, { type: 'text/csv;charset=utf-8' });
 
-    if (shareMode && navigator.share && navigator.canShare?.({ files: [file] })) {
-      void navigator.share({ title: filename, files: [file] });
-      return;
+      if (shareMode && navigator.share && navigator.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({ title: filename, files: [file] });
+          return;
+        } catch {
+          // Fall back to direct file download if share sheet was canceled or unavailable
+        }
+      }
+
+      const url = URL.createObjectURL(file);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      onToast(`✓ ${filename}`);
+    } catch (err) {
+      onToast(`⚠️ ${err instanceof Error ? err.message : 'CSV export failed'}`);
     }
-
-    const url = URL.createObjectURL(file);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-    onToast(`✓ ${filename}`);
   };
 
   const handleImportCsvFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const text = await file.text();
-    const count = await localDb.importCsv(text);
-    onToast(`✓ Imported ${count} ${t.entityTodos}`);
+    try {
+      const text = await file.text();
+      const count = await localDb.importCsv(text);
+      onToast(`✓ Imported ${count} ${t.entityTodos}`);
+    } catch (err) {
+      onToast(`⚠️ ${err instanceof Error ? err.message : 'Invalid CSV file'}`);
+    }
   };
 
   const handleSearchUpdates = async () => {
@@ -569,6 +587,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     try {
       const res = await checkForSwAndReleaseUpdates(APP_VERSION);
       setUpdateInfo(res);
+      onUpdateInfoChange?.(res.hasUpdate ? res : null);
     } finally {
       setCheckingUpdate(false);
     }
@@ -1557,7 +1576,6 @@ export const AuthSyncModal: React.FC<AuthSyncModalProps> = ({
   const executeAuth = async (action: PendingAuthAction, mergeLocalTasks: boolean) => {
     setBusy(true);
     setError(null);
-    onEnableCloudMode();
     try {
       let signedInAs = '';
       if (action === 'register') {
@@ -1575,6 +1593,7 @@ export const AuthSyncModal: React.FC<AuthSyncModalProps> = ({
       } else {
         signedInAs = await cloudSync.signInInstantEmail(email, mergeLocalTasks);
       }
+      onEnableCloudMode();
       setShowGooglePasswordRecovery(false);
       onToast(`✓ ${signedInAs}`);
       onClose();

@@ -7,6 +7,7 @@ public struct QuickEntrySheetView: View {
     public var isMenuBarPopover: Bool = false
     public var onSaved: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openWindow) private var openWindow
 
     @StateObject private var voiceController = MacVoiceDictationController()
     @State private var title: String = ""
@@ -203,6 +204,7 @@ public struct QuickEntrySheetView: View {
                     }
                 } else {
                     Button(store.tr("macos_menubar_open_app")) {
+                        openWindow(id: "main")
                         NSApplication.shared.activate(ignoringOtherApps: true)
                     }
                     .font(.system(size: 12))
@@ -229,12 +231,28 @@ public struct QuickEntrySheetView: View {
             if !isMenuBarPopover {
                 title = store.quickEntryPrefillTitle
                 notes = store.quickEntryPrefillNotes
+                switch store.selectedDestination {
+                case .project(let pid) where activeProjects.contains(where: { $0.id == pid }):
+                    selectedDestKey = "proj:\(pid)"
+                case .area(let aid) where store.areas.contains(where: { $0.id == aid }):
+                    selectedDestKey = "area:\(aid)"
+                case .smartView(.today):
+                    selectedDestKey = "today"
+                case .smartView(.anytime):
+                    selectedDestKey = "anytime"
+                case .smartView(.someday):
+                    selectedDestKey = "someday"
+                default:
+                    selectedDestKey = "inbox"
+                }
                 if store.quickEntryAutoStartVoice {
                     store.quickEntryAutoStartVoice = false
                     toggleDictation()
                 }
-            } else if store.preferences.menuBarSelectedProjectId != nil {
+            } else if let savedProj = store.preferences.menuBarSelectedProjectId,
+                      activeProjects.contains(where: { $0.id == savedProj }) {
                 menuBarTab = "project"
+                selectedDestKey = "proj:\(savedProj)"
             }
             titleFocused = true
         }
@@ -371,6 +389,8 @@ public struct QuickEntrySheetView: View {
                 if count > 0 {
                     title = ""
                     notes = ""
+                    hasDeadline = false
+                    deadlineDate = Date()
                     store.quickEntryPrefillTitle = ""
                     store.quickEntryPrefillNotes = ""
                     onSaved?()
@@ -391,6 +411,8 @@ public struct QuickEntrySheetView: View {
         store.quickCaptureTask(title: cleanTitle, notes: notes, destination: resolvedDestination, deadline: dl)
         title = ""
         notes = ""
+        hasDeadline = false
+        deadlineDate = Date()
         store.quickEntryPrefillTitle = ""
         store.quickEntryPrefillNotes = ""
         onSaved?()

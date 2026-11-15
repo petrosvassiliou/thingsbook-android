@@ -215,6 +215,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.activity.result.PickVisualMediaRequest
 import com.culturedcode.things3.domain.model.TaskAttachment
 import com.culturedcode.things3.ui.components.TaskAttachmentsStrip
+import com.culturedcode.things3.ui.components.processCapturedPhotoBitmap
 import com.culturedcode.things3.ui.components.processPickedAttachmentUri
 import kotlinx.coroutines.launch
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -408,6 +409,7 @@ fun ThingsSmartViewScreen(
 
     val context = LocalContext.current
     val currentHardwareShortcutHandler by rememberUpdatedState<(android.view.KeyEvent) -> Boolean> { nativeEvent ->
+        if (biometricAppLockEnabled && !isAppUnlocked) return@rememberUpdatedState false
         val ctrlOrMeta = nativeEvent.isCtrlPressed || nativeEvent.isMetaPressed
         when {
             ctrlOrMeta && nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_N -> {
@@ -520,6 +522,7 @@ fun ThingsSmartViewScreen(
             .fillMaxSize()
             .background(colors.canvasBackground)
             .onPreviewKeyEvent { event ->
+                if (biometricAppLockEnabled && !isAppUnlocked) return@onPreviewKeyEvent false
                 if (event.type == KeyEventType.KeyDown) {
                     val ctrlOrMeta = event.isCtrlPressed || event.isMetaPressed
                     when {
@@ -622,13 +625,14 @@ fun ThingsSmartViewScreen(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = {
-                    if (expandedTaskId != null) {
+                    if (!(biometricAppLockEnabled && !isAppUnlocked) && expandedTaskId != null) {
                         viewModel.collapseExpandedTask()
                     }
                 }
             )
             // Swipe down gesture on any list opens Quick Find inline immediately
-            .pointerInput(Unit) {
+            .pointerInput(biometricAppLockEnabled, isAppUnlocked) {
+                if (biometricAppLockEnabled && !isAppUnlocked) return@pointerInput
                 var accumulatedPull = 0f
                 detectVerticalDragGestures(
                     onDragStart = { accumulatedPull = 0f },
@@ -966,25 +970,27 @@ fun ThingsSmartViewScreen(
             }
         }
 
-        ThingsModalsOverlay(
-            viewModel = viewModel,
-            areas = areas,
-            activeProjects = activeProjects,
-            allTags = allTags,
-            allVisibleViewTasks = allVisibleViewTasks,
-            activeLocale = activeLocale,
-            showBatchMoveDialog = showBatchMoveDialog,
-            onDismissBatchMoveDialog = { showBatchMoveDialog = false },
-            showCreateProjectDialog = showCreateProjectDialog,
-            editingProject = editingProject,
-            projectDialogPreselectedAreaId = projectDialogPreselectedAreaId,
-            onDismissCreateProjectDialog = {
-                showCreateProjectDialog = false
-                editingProject = null
-            },
-            showEmptyTrashConfirmDialog = showEmptyTrashConfirmDialog,
-            onDismissEmptyTrashConfirmDialog = { showEmptyTrashConfirmDialog = false }
-        )
+        if (!(biometricAppLockEnabled && !isAppUnlocked)) {
+            ThingsModalsOverlay(
+                viewModel = viewModel,
+                areas = areas,
+                activeProjects = activeProjects,
+                allTags = allTags,
+                allVisibleViewTasks = allVisibleViewTasks,
+                activeLocale = activeLocale,
+                showBatchMoveDialog = showBatchMoveDialog,
+                onDismissBatchMoveDialog = { showBatchMoveDialog = false },
+                showCreateProjectDialog = showCreateProjectDialog,
+                editingProject = editingProject,
+                projectDialogPreselectedAreaId = projectDialogPreselectedAreaId,
+                onDismissCreateProjectDialog = {
+                    showCreateProjectDialog = false
+                    editingProject = null
+                },
+                showEmptyTrashConfirmDialog = showEmptyTrashConfirmDialog,
+                onDismissEmptyTrashConfirmDialog = { showEmptyTrashConfirmDialog = false }
+            )
+        }
 
         if (biometricAppLockEnabled && !isAppUnlocked) {
             ThingsBiometricLockOverlay(
@@ -2514,11 +2520,12 @@ private fun ThingsModalsOverlay(
         statistics = statistics
     )
 
-    // Initial Setup Account Merge Prompt (shown BEFORE syncing whenever sample tasks still exist!)
+    // Initial Setup Account Merge Prompt (shown BEFORE syncing whenever local user tasks exist!)
     pendingMergeAuthRequest?.let { pendingReq ->
         SampleTasksAccountMergeDialog(
             accountLabel = pendingReq.displayAccountLabel,
             nonSampleTaskCount = pendingMergeNonSampleCount,
+            hasSampleTasks = hasSampleTasks,
             onConfirmMergeWithAccount = {
                 viewModel.confirmAccountSetupMerge(mergeCurrentTasks = true)
             },
@@ -2569,7 +2576,7 @@ private fun ThingsModalsOverlay(
             onRegisterEmailPassword = { email, pw -> viewModel.registerWithEmailPassword(email, pw) },
             onSignInEmailPassword = { email, pw -> viewModel.signInWithEmailPassword(email, pw) },
             onResetPassword = { email -> viewModel.sendPasswordReset(email) },
-            onSignInWithGoogle = { enteredEmail -> viewModel.signInWithGoogleAccount(enteredEmail) },
+            onSignInWithGoogle = { activity -> viewModel.signInWithGoogleAccount(activity) },
             onSignOut = { viewModel.signOutCloud() },
             onTriggerDeltaSyncNow = { viewModel.triggerManualCloudSync() },
             onDismiss = { viewModel.setAuthModalOpen(false) }
@@ -3544,6 +3551,7 @@ private fun ViewTitleHeader(
     var showProjectAreaMenu by remember(currentProject?.id) { mutableStateOf(false) }
     var showProjectAttachMenu by remember(currentProject?.id) { mutableStateOf(false) }
     val tooLargeMsg = stringResource(R.string.attachment_too_large)
+    val attachmentImportErrorMsg = stringResource(R.string.attachment_import_error)
 
     val projectFilePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -3561,7 +3569,7 @@ private fun ViewTitleHeader(
                         )
                     }
                     AttachmentImportOutcome.TooLarge -> onShowMessage(tooLargeMsg)
-                    AttachmentImportOutcome.Error -> onShowMessage(tooLargeMsg)
+                    AttachmentImportOutcome.Error -> onShowMessage(attachmentImportErrorMsg)
                 }
             }
         }
@@ -3583,8 +3591,37 @@ private fun ViewTitleHeader(
                         )
                     }
                     AttachmentImportOutcome.TooLarge -> onShowMessage(tooLargeMsg)
-                    AttachmentImportOutcome.Error -> onShowMessage(tooLargeMsg)
+                    AttachmentImportOutcome.Error -> onShowMessage(attachmentImportErrorMsg)
                 }
+            }
+        }
+    }
+
+    val projectCameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap ->
+        val proj = currentProject ?: return@rememberLauncherForActivityResult
+        if (bitmap != null) {
+            val processed = processCapturedPhotoBitmap(bitmap)
+            onAddProjectAttachment(
+                proj.id,
+                processed.fileName,
+                processed.mimeType,
+                processed.bytes
+            )
+        }
+    }
+
+    val launchProjectCamera: () -> Unit = {
+        val launchedCamera = runCatching {
+            projectCameraLauncher.launch(null)
+            true
+        }.getOrDefault(false)
+        if (!launchedCamera) {
+            runCatching {
+                projectPhotoPickerLauncher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                )
             }
         }
     }
@@ -3732,14 +3769,14 @@ private fun ViewTitleHeader(
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     if (projIdx > 0) {
-                        ThingsHoverTooltip(text = "Projekt nach oben verschieben") {
+                        ThingsHoverTooltip(text = stringResource(R.string.project_move_up)) {
                             IconButton(
                                 onClick = { onMoveProject(currentProject.id, true) },
                                 modifier = Modifier.size(30.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.ArrowUpward,
-                                    contentDescription = stringResource(R.string.action_move),
+                                    contentDescription = stringResource(R.string.project_move_up),
                                     tint = colors.secondaryText,
                                     modifier = Modifier.size(16.dp)
                                 )
@@ -3747,14 +3784,14 @@ private fun ViewTitleHeader(
                         }
                     }
                     if (projIdx != -1 && projIdx < projects.lastIndex) {
-                        ThingsHoverTooltip(text = "Projekt nach unten verschieben") {
+                        ThingsHoverTooltip(text = stringResource(R.string.project_move_down)) {
                             IconButton(
                                 onClick = { onMoveProject(currentProject.id, false) },
                                 modifier = Modifier.size(30.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.ArrowDownward,
-                                    contentDescription = stringResource(R.string.action_move),
+                                    contentDescription = stringResource(R.string.project_move_down),
                                     tint = colors.secondaryText,
                                     modifier = Modifier.size(16.dp)
                                 )
@@ -3787,27 +3824,27 @@ private fun ViewTitleHeader(
                             )
                         }
                     }
-                    ThingsHoverTooltip(text = "Projekt abschließen") {
+                    ThingsHoverTooltip(text = stringResource(R.string.project_complete_tooltip)) {
                         IconButton(
                             onClick = { onCompleteProject(currentProject.id) },
                             modifier = Modifier.size(30.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.CheckCircleOutline,
-                                contentDescription = stringResource(R.string.action_complete),
+                                contentDescription = stringResource(R.string.project_complete_tooltip),
                                 tint = colors.logbookGreen,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
                     }
-                    ThingsHoverTooltip(text = "Projekt löschen") {
+                    ThingsHoverTooltip(text = stringResource(R.string.project_delete_tooltip)) {
                         IconButton(
                             onClick = { onDeleteProject(currentProject.id) },
                             modifier = Modifier.size(30.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.DeleteOutline,
-                                contentDescription = stringResource(R.string.action_delete),
+                                contentDescription = stringResource(R.string.project_delete_tooltip),
                                 tint = colors.deadlineUrgentRed,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -3821,14 +3858,14 @@ private fun ViewTitleHeader(
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     if (areaIdx > 0) {
-                        ThingsHoverTooltip(text = "Bereich nach oben verschieben") {
+                        ThingsHoverTooltip(text = stringResource(R.string.area_move_up)) {
                             IconButton(
                                 onClick = { onMoveArea(currentArea.id, true) },
                                 modifier = Modifier.size(30.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.ArrowUpward,
-                                    contentDescription = stringResource(R.string.action_move),
+                                    contentDescription = stringResource(R.string.area_move_up),
                                     tint = colors.secondaryText,
                                     modifier = Modifier.size(16.dp)
                                 )
@@ -3836,14 +3873,14 @@ private fun ViewTitleHeader(
                         }
                     }
                     if (areaIdx != -1 && areaIdx < areas.lastIndex) {
-                        ThingsHoverTooltip(text = "Bereich nach unten verschieben") {
+                        ThingsHoverTooltip(text = stringResource(R.string.area_move_down)) {
                             IconButton(
                                 onClick = { onMoveArea(currentArea.id, false) },
                                 modifier = Modifier.size(30.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.ArrowDownward,
-                                    contentDescription = stringResource(R.string.action_move),
+                                    contentDescription = stringResource(R.string.area_move_down),
                                     tint = colors.secondaryText,
                                     modifier = Modifier.size(16.dp)
                                 )
@@ -3869,14 +3906,14 @@ private fun ViewTitleHeader(
                             )
                         }
                     }
-                    ThingsHoverTooltip(text = "Bereich löschen") {
+                    ThingsHoverTooltip(text = stringResource(R.string.area_delete_tooltip)) {
                         IconButton(
                             onClick = { onDeleteArea(currentArea.id) },
                             modifier = Modifier.size(30.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.DeleteOutline,
-                                contentDescription = stringResource(R.string.action_delete),
+                                contentDescription = stringResource(R.string.area_delete_tooltip),
                                 tint = colors.deadlineUrgentRed,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -3906,13 +3943,7 @@ private fun ViewTitleHeader(
                     onAttachFileClick = {
                         runCatching { projectFilePickerLauncher.launch(arrayOf("*/*")) }
                     },
-                    onTakePhotoClick = {
-                        runCatching {
-                            projectPhotoPickerLauncher.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
-                        }
-                    }
+                    onTakePhotoClick = launchProjectCamera
                 )
             }
 
@@ -4006,11 +4037,7 @@ private fun ViewTitleHeader(
                             text = { Text(stringResource(R.string.action_take_photo)) },
                             onClick = {
                                 showProjectAttachMenu = false
-                                runCatching {
-                                    projectPhotoPickerLauncher.launch(
-                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                    )
-                                }
+                                launchProjectCamera()
                             }
                         )
                         DropdownMenuItem(
@@ -4332,7 +4359,7 @@ private fun InlineQuickFindSection(
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.Close,
-                                    contentDescription = "Suche leeren",
+                                    contentDescription = stringResource(R.string.quick_find_clear),
                                     tint = colors.secondaryText,
                                     modifier = Modifier.size(16.dp)
                                 )
@@ -4375,7 +4402,7 @@ private fun InlineQuickFindSection(
             if (query.isBlank()) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Tippe einen Suchbegriff ein, um Aufgaben (inkl. Notizen, Datum, Bereich, Projekt, Unteraufgaben & Tags), Projekte, Bereiche oder Ansichten sofort inline zu durchsuchen.",
+                    text = stringResource(R.string.quick_find_empty_hint),
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.secondaryText
                 )
@@ -4383,7 +4410,7 @@ private fun InlineQuickFindSection(
                 Spacer(modifier = Modifier.height(10.dp))
                 val totalHits = matchingViews.size + matchingAreas.size + projectResults.size + taskResults.size
                 Text(
-                    text = "$totalHits Ergebnisse für „$query“",
+                    text = stringResource(R.string.quick_find_results_for, totalHits, query),
                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                     color = colors.thingsBlue
                 )
@@ -4416,7 +4443,7 @@ private fun InlineQuickFindSection(
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                     color = colors.primaryText
                                 )
-                                ThingsTagPill(title = "Ansicht")
+                                ThingsTagPill(title = stringResource(R.string.quick_find_badge_view))
                             }
                         }
                     }
@@ -4506,14 +4533,14 @@ private fun InlineQuickFindSection(
                         val taskProject = allProjects.find { it.id == task.projectId }
                         val taskArea = areas.find { it.id == (taskProject?.areaId ?: task.areaId) }
                         val scheduleLabel = when {
-                            task.status == TaskStatus.COMPLETED -> "✅ Erledigt"
-                            task.status == TaskStatus.CANCELED -> "✕ Abgebrochen"
-                            task.scheduleState == ScheduleState.TODAY -> "★ Heute"
-                            task.scheduleState == ScheduleState.THIS_EVENING -> "🌙 Heute Abend"
-                            task.scheduleState == ScheduleState.UPCOMING -> "📅 Geplant"
-                            task.scheduleState == ScheduleState.INBOX -> "📥 Eingang"
-                            task.scheduleState == ScheduleState.SOMEDAY -> "📦 Irgendwann"
-                            else -> "🗂 Jederzeit"
+                            task.status == TaskStatus.COMPLETED -> "✅ ${stringResource(R.string.settings_stat_completed)}"
+                            task.status == TaskStatus.CANCELED -> "✕ ${stringResource(R.string.settings_stat_canceled)}"
+                            task.scheduleState == ScheduleState.TODAY -> "★ ${stringResource(R.string.view_today)}"
+                            task.scheduleState == ScheduleState.THIS_EVENING -> "🌙 ${stringResource(R.string.view_this_evening)}"
+                            task.scheduleState == ScheduleState.UPCOMING -> "📅 ${stringResource(R.string.view_upcoming)}"
+                            task.scheduleState == ScheduleState.INBOX -> "📥 ${stringResource(R.string.view_inbox)}"
+                            task.scheduleState == ScheduleState.SOMEDAY -> "📦 ${stringResource(R.string.view_someday)}"
+                            else -> "🗂 ${stringResource(R.string.view_anytime)}"
                         }
 
                         Surface(
@@ -4537,7 +4564,7 @@ private fun InlineQuickFindSection(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text(
-                                        text = task.title.ifBlank { "(Ohne Titel)" },
+                                        text = task.title.ifBlank { stringResource(R.string.calendar_untitled_event) },
                                         style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
                                         color = colors.primaryText,
                                         modifier = Modifier.weight(1f),
@@ -4587,7 +4614,13 @@ private fun InlineQuickFindSection(
 
                                     if (task.checklistItems.isNotEmpty()) {
                                         val doneCount = task.checklistItems.count { it.isCompleted }
-                                        ThingsTagPill(title = "☑ $doneCount/${task.checklistItems.size} Unteraufgaben")
+                                        ThingsTagPill(
+                                            title = stringResource(
+                                                R.string.quick_find_subtasks_count,
+                                                doneCount,
+                                                task.checklistItems.size
+                                            )
+                                        )
                                     }
 
                                     task.tags.forEach { tag ->
@@ -4765,7 +4798,9 @@ private fun ThingsChromebookSidebar(
                                 )
                             )
                         }
-                        ThingsHoverTooltip(text = "${stringResource(R.string.entity_new_project)} in ${area.title}") {
+                        ThingsHoverTooltip(
+                            text = stringResource(R.string.sidebar_new_project_in_area, area.title)
+                        ) {
                             IconButton(
                                 onClick = { onCreateNewProject(area.id) },
                                 modifier = Modifier.size(22.dp)
@@ -4901,7 +4936,13 @@ private fun ThingsChromebookSidebar(
                 }
             }
 
-            ThingsHoverTooltip(text = "Bereiche verwalten (${areas.size}/${ThingsRepository.MAX_AREAS})") {
+            ThingsHoverTooltip(
+                text = stringResource(
+                    R.string.areas_manage_count_tooltip,
+                    areas.size,
+                    ThingsRepository.MAX_AREAS
+                )
+            ) {
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))

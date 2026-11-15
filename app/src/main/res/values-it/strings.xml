@@ -182,7 +182,7 @@
     <string name="settings_close_tooltip">Chiudi impostazioni</string>
     <string name="settings_db_sync_section">Database e sincronizzazione</string>
     <string name="settings_local_db_title">DB locale</string>
-    <string name="settings_local_db_desc">100% offline su questo dispositivo (SQLite / Room)</string>
+    <string name="settings_local_db_desc" formatted="false">100% offline su questo dispositivo (SQLite / Room)</string>
     <string name="settings_cloud_sync_title">Cloud Sync</string>
     <string name="settings_cloud_sync_desc">DB locale + backup in tempo reale su tutti i dispositivi</string>
     <string name="settings_account_status_label">Account e stato Cloud</string>
@@ -392,4 +392,19 @@
     <string name="attachment_open_external">Apri / Condividi</string>
     <string name="attachment_remove">Rimuovi allegato</string>
     <string name="attachment_too_large">Il file supera il limite di 5 MB.</string>
+    <string name="attachment_import_error">Impossibile leggere o allegare il file selezionato.</string>
+    <string name="project_move_up">Sposta progetto in alto</string>
+    <string name="project_move_down">Sposta progetto in basso</string>
+    <string name="project_complete_tooltip">Completa progetto</string>
+    <string name="project_delete_tooltip">Elimina progetto</string>
+    <string name="area_move_up">Sposta area in alto</string>
+    <string name="area_move_down">Sposta area in basso</string>
+    <string name="area_delete_tooltip">Elimina area</string>
+    <string name="areas_manage_count_tooltip">Gestisci aree (%1$d/%2$d)</string>
+    <string name="sidebar_new_project_in_area">Nuovo progetto in %1$s</string>
+    <string name="quick_find_clear">Cancella ricerca</string>
+    <string name="quick_find_empty_hint">Digita un termine per cercare istantaneamente attività (note, date, aree, progetti, sotto-attività &amp; tag), progetti, aree o viste.</string>
+    <string name="quick_find_results_for">%1$d risultati per «%2$s»</string>
+    <string name="quick_find_badge_view">Vista</string>
+    <string name="quick_find_subtasks_count">☑ %1$d/%2$d sotto-attività</string>
 </resources>

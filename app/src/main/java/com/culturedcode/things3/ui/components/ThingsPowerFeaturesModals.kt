@@ -83,6 +83,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.culturedcode.things3.R
 import com.culturedcode.things3.domain.model.Area
 import com.culturedcode.things3.domain.model.Project
@@ -829,48 +830,58 @@ fun ThingsBiometricLockOverlay(
         triggerUnlock()
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colors.canvasBackground)
-            .clickable(enabled = true, onClick = {}),
-        contentAlignment = Alignment.Center
+    Dialog(
+        onDismissRequest = {},
+        properties = DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.padding(32.dp)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(colors.canvasBackground)
+                .clickable(enabled = true, onClick = {}),
+            contentAlignment = Alignment.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(CircleShape)
-                    .background(colors.thingsBlue.copy(alpha = 0.14f)),
-                contentAlignment = Alignment.Center
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.padding(32.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Outlined.Lock,
-                    contentDescription = promptTitle,
-                    tint = colors.thingsBlue,
-                    modifier = Modifier.size(32.dp)
-                )
-            }
-            Text(
-                text = promptTitle,
-                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                color = colors.primaryText
-            )
-            Text(
-                text = promptSubtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.secondaryText
-            )
-            OutlinedButton(onClick = triggerUnlock) {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(CircleShape)
+                        .background(colors.thingsBlue.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Lock,
+                        contentDescription = promptTitle,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
                 Text(
-                    text = stringResource(R.string.app_lock_unlock_btn),
-                    color = colors.thingsBlue,
-                    fontWeight = FontWeight.SemiBold
+                    text = promptTitle,
+                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                    color = colors.primaryText
                 )
+                Text(
+                    text = promptSubtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.secondaryText
+                )
+                OutlinedButton(onClick = triggerUnlock) {
+                    Text(
+                        text = stringResource(R.string.app_lock_unlock_btn),
+                        color = colors.thingsBlue,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
         }
     }

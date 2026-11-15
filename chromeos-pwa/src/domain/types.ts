@@ -1,5 +1,5 @@
-export const APP_VERSION = '1.8.0';
-export const APP_BUILD_CODE = 42;
+export const APP_VERSION = '1.8.1';
+export const APP_BUILD_CODE = 44;
 export const MAX_AREAS = 8;
 
 export type ScheduleState =
@@ -50,6 +50,13 @@ export interface AreaRecord {
   isDirty: boolean;
 }
 
+export interface DetachedProjectTaskSnapshot {
+  id: string;
+  projectId: string | null;
+  headingId: string | null;
+  areaId: string | null;
+}
+
 export interface ProjectRecord {
   id: string;
   areaId: string | null;
@@ -66,6 +73,8 @@ export interface ProjectRecord {
   updatedAt: number;
   isDeleted: boolean;
   isDirty: boolean;
+  purgedFromTrash?: boolean;
+  detachedTaskSnapshots?: DetachedProjectTaskSnapshot[];
 }
 
 export interface HeadingRecord {
@@ -100,6 +109,7 @@ export interface TaskRecord {
   updatedAt: number;
   isDeleted: boolean;
   isDirty: boolean;
+  purgedFromTrash?: boolean;
 }
 
 export interface ChecklistItemRecord {

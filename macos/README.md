@@ -1,12 +1,12 @@
-# Thingsbook for macOS (`macos/` — `v1.8.0`, Build `42`)
+# Thingsbook for macOS (`macos/` — `v1.8.1`, Build `44`)
 
-**100% Native Swift + SwiftUI + AppKit GTD Desktop App for macOS 14+ (Sonoma, Sequoia & Tahoe)** — engineered in strict feature, version, localization, cloud-sync, and `.tbbackup` binary parity with Thingsbook for Android & ChromeOS (`main`, `v1.8.0`).
+**100% Native Swift + SwiftUI + AppKit GTD Desktop App for macOS 14+ (Sonoma, Sequoia & Tahoe)** — engineered in strict feature, version, localization, cloud-sync, and `.tbbackup` binary parity with Thingsbook for Android & ChromeOS (`main`, `v1.8.1`).
 
 ---
 
-## Instant 1-Command Install / Seamless Upgrade from `v1.7.0` (No Gatekeeper Prompts)
+## Instant 1-Command Install / Seamless Upgrade (`v1.7.0` / `v1.8.0` → `v1.8.1`, No Gatekeeper Prompts)
 
-Install or upgrade `Thingsbook.app` (`v1.7.0 → v1.8.0`) into `/Applications` on any Apple Silicon or Intel Mac with one Terminal command:
+Install or upgrade `Thingsbook.app` (`v1.7.0` / `v1.8.0` → `v1.8.1`) into `/Applications` on any Apple Silicon or Intel Mac with one Terminal command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/main/macos/install.sh | bash
@@ -16,8 +16,10 @@ curl -fsSL https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/
 
 ---
 
-## What’s New in `v1.8.0` (Build `42`)
+## What’s New in `v1.8.1` (Build `44`) & `v1.8.0`
 
+- **Cloud Sync & SQLite Reliability Hardening (`v1.8.1`):** Pre-transaction `PRAGMA foreign_keys = OFF` for out-of-order sync deltas & `.tbbackup` restores, syncable purge tombstones so permanently deleted items never resurrect on full pull, automatic local task detachment when remote projects/areas/headings are deleted, partial active tag index (`idx_tags_title_active`), Firestore `updateMask` preservation for attachments (`700 KB` inline ceiling), and beta-isolated update & DMG installer checks.
+- **macOS Desktop Polish (`v1.8.1`):** Trashed Projects in Trash with full Restore (including detached tasks) & Permanent Delete, first-responder text-editing guards for `⌘⌫` and single-key shortcuts, Touch ID App Lock protection across `MenuBarExtra` & toolbar actions, multi-select & recurring-task Undo (`⌘Z`), and localized Upcoming headers.
 - **Native Voice-to-Task Dictation (`SFSpeechRecognizer` + `AVAudioEngine`) & 1-Tap "✨ Smart Parse with Gemini":** Start live dictation via the toolbar mic button, Quick Entry (`⌃⇧⌘V`), Magic Plus (`+`), Dock Menu, `thingsbook://voice`, or inline on any expanded task card — and convert multi-item spoken brain dumps into structured GTD tasks with Gemini in one click.
 - **Menu Bar Extra (`MenuBarExtra`) Today & Project Mode:** Switch between *Today* and any active *Project* right in the macOS status bar popover with persistent selection and instant Quick/Voice Capture.
 - **Rich Task & Project Attachments (`PDFKit` + Zoomable Image Viewer):** Attach images, PDFs, or files (`⇧⌘A`, paperclip button, or Finder drag-and-drop onto expanded task cards), with automatic `1440px` JPEG downscaling (`5 MB` cap), `📎` row count badges, inline thumbnail strips, in-app zoomable image & native `PDFKit` PDF preview, `.tbbackup` inclusion, and Firestore Cloud Sync.
@@ -59,7 +61,7 @@ cd macos && swift test
 ./macos/scripts/build-dmg.sh
 ```
 
-The universal installer disk image is output to `macos/dist/Thingsbook-macOS-v1.8.0-Universal.dmg`.
+The universal installer disk image is output to `macos/dist/Thingsbook-macOS-v1.8.1-Universal.dmg`.
 
 ---
 

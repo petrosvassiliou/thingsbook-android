@@ -207,7 +207,7 @@ public struct WeeklyReviewSheetView: View {
                         .controlSize(.small)
 
                         Button(role: .destructive) {
-                            store.deleteTasksWithUndo([task.id])
+                            store.deleteTask(task)
                         } label: {
                             Image(systemName: "trash")
                                 .font(.system(size: 11.5))
@@ -415,7 +415,7 @@ public struct WeeklyReviewSheetView: View {
                         scheduleTask(task, to: .anytime, daysOffset: nil)
                     }
                     Button(role: .destructive) {
-                        store.deleteTasksWithUndo([task.id])
+                        store.deleteTask(task)
                     } label: {
                         Image(systemName: "trash")
                             .font(.system(size: 11.5))

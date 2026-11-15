@@ -1615,16 +1615,8 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 15. v2.0.0-beta.7 Cross-Device Project Review Sync & Monotonic lastReviewedAt Merge
 
     func testCrossDeviceProjectReviewSyncAndMonotonicMergeV200Beta7() throws {
-        let fm = FileManager.default
-        let dirA = fm.temporaryDirectory.appendingPathComponent("tb-rev-sync-a-\(UUID().uuidString)", isDirectory: true)
-        let dirB = fm.temporaryDirectory.appendingPathComponent("tb-rev-sync-b-\(UUID().uuidString)", isDirectory: true)
-        defer {
-            try? fm.removeItem(at: dirA)
-            try? fm.removeItem(at: dirB)
-        }
-
-        let dbDeviceA = try ThingsSQLiteDatabase(directoryURL: dirA, seedIfEmpty: false)
-        let dbDeviceB = try ThingsSQLiteDatabase(directoryURL: dirB, seedIfEmpty: false)
+        let dbDeviceA = try ThingsSQLiteDatabase(path: ":memory:")
+        let dbDeviceB = try ThingsSQLiteDatabase(path: ":memory:")
 
         // 1. Newly created project on macOS initializes non-nil lastReviewedAt (matching Android & ChromeOS)
         let newlyCreated = try dbDeviceA.createProject(title: "Fresh Launch Plan")

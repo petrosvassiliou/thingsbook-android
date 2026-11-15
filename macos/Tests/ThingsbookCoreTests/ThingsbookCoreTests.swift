@@ -190,7 +190,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.4"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.5"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -405,12 +405,12 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(searchHits.tasks.map(\.id), ["remote-sync-task-1"], "FTS5 must index remotely synced tasks")
     }
 
-    // MARK: - 7. v2.0.0-beta.4 AppUpdateService Beta Channel, Stable Isolation & Version Bump
+    // MARK: - 7. v2.0.0-beta.5 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.4")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.4")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 48)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.5")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.5")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 49)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
 
         // Core [major, minor, patch] + build metadata comparisons on stable channel (includeBeta inferred false for 1.8.1)
@@ -432,8 +432,9 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.2", current: "2.0.0-beta.1"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.3", current: "2.0.0-beta.2"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.4", current: "2.0.0-beta.3"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.10", current: "2.0.0-beta.4"))
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.4", current: "2.0.0-beta.10"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.5", current: "2.0.0-beta.4"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.10", current: "2.0.0-beta.5"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.5", current: "2.0.0-beta.10"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.1"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.99"))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.99", current: "2.0.0", includeBeta: true))
@@ -1500,6 +1501,112 @@ final class ThingsbookCoreTests: XCTestCase {
             XCTAssertTrue(formattedTitle.contains("Roadmap"))
             let formattedBody = ThingsStrings.shared.format("project_delete_prompt_tasks_body", lang: lang, 5)
             XCTAssertTrue(formattedBody.contains("5"))
+        }
+    }
+
+    // MARK: - 14. v2.0.0-beta.5 macOS In-App Automatic Updater (Zero-DMG Staging, Validation & Atomic Swap)
+
+    func testMacInAppAutoUpdaterTargetResolutionValidationAndAtomicSwapScript() throws {
+        // 1. Target destination resolution
+        XCTAssertEqual(
+            AppUpdateService.resolveInstallTargetAppURL(bundleURL: URL(fileURLWithPath: "/Applications/Thingsbook.app")).path,
+            "/Applications/Thingsbook.app"
+        )
+        XCTAssertEqual(
+            AppUpdateService.resolveInstallTargetAppURL(bundleURL: URL(fileURLWithPath: "/Users/petros/Applications/Thingsbook.app/Contents/MacOS/Thingsbook")).path,
+            "/Users/petros/Applications/Thingsbook.app"
+        )
+        XCTAssertEqual(
+            AppUpdateService.resolveInstallTargetAppURL(bundleURL: URL(fileURLWithPath: "/Volumes/Thingsbook/Thingsbook.app")).path,
+            "/Applications/Thingsbook.app",
+            "Launching from a mounted read-only DMG must redirect updates to /Applications/Thingsbook.app"
+        )
+        XCTAssertEqual(
+            AppUpdateService.resolveInstallTargetAppURL(bundleURL: URL(fileURLWithPath: "/private/var/folders/ab/cd/T/AppTranslocation/UUID/d/Thingsbook.app")).path,
+            "/Applications/Thingsbook.app",
+            "Gatekeeper AppTranslocation paths must redirect updates to /Applications/Thingsbook.app"
+        )
+        XCTAssertEqual(
+            AppUpdateService.resolveInstallTargetAppURL(bundleURL: URL(fileURLWithPath: "/usr/local/bin/thingsbook-cli")).path,
+            "/Applications/Thingsbook.app"
+        )
+
+        // 2. Extracted .app bundle validation (CFBundleIdentifier + executable permissions)
+        let fm = FileManager.default
+        let tempRoot = fm.temporaryDirectory.appendingPathComponent("tb-updater-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: tempRoot) }
+
+        let mockApp = tempRoot.appendingPathComponent("Thingsbook.app", isDirectory: true)
+        let contentsDir = mockApp.appendingPathComponent("Contents", isDirectory: true)
+        let macOSDir = contentsDir.appendingPathComponent("MacOS", isDirectory: true)
+        try fm.createDirectory(at: macOSDir, withIntermediateDirectories: true)
+
+        let validPlist: [String: Any] = [
+            "CFBundleIdentifier": "com.thingsbook.macos",
+            "CFBundleExecutable": "Thingsbook",
+            "CFBundleShortVersionString": "2.0.0-beta.5"
+        ]
+        let plistData = try PropertyListSerialization.data(fromPropertyList: validPlist, format: .xml, options: 0)
+        try plistData.write(to: contentsDir.appendingPathComponent("Info.plist"))
+
+        // Missing executable -> throws invalidAppBundle
+        XCTAssertThrowsError(try AppUpdateService.validateExtractedAppBundle(at: mockApp))
+
+        // Create executable binary with +x permission -> passes validation
+        let execURL = macOSDir.appendingPathComponent("Thingsbook")
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: execURL)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: execURL.path)
+        XCTAssertNoThrow(try AppUpdateService.validateExtractedAppBundle(at: mockApp))
+
+        // Wrong bundle identifier -> throws invalidAppBundle
+        XCTAssertThrowsError(
+            try AppUpdateService.validateExtractedAppBundle(
+                at: mockApp,
+                expectedBundleIdentifier: "com.other.bundle"
+            )
+        )
+
+        // 3. Atomic swap, rollback, and relaunch shell script generation (non-admin & admin paths + single-quote safety)
+        let userScript = AppUpdateService.buildAtomicSwapAndRelaunchScript(
+            oldPID: 42424,
+            stagedAppPath: "/var/folders/tmp/Petros's Stage/Thingsbook.app",
+            targetAppPath: "/Users/petros/Applications/Thingsbook.app",
+            stagingRootPath: "/var/folders/tmp/Petros's Stage",
+            requiresAdmin: false
+        )
+        XCTAssertTrue(userScript.contains("OLD_PID=42424"))
+        XCTAssertTrue(userScript.contains("'Petros'\\''s Stage"))
+        XCTAssertTrue(userScript.contains("rollback-Thingsbook.app"))
+        XCTAssertTrue(userScript.contains("/usr/bin/ditto \"$STAGED_APP\" \"$TARGET_APP\""))
+        XCTAssertTrue(userScript.contains("/usr/bin/xattr -cr \"$TARGET_APP\""))
+        XCTAssertTrue(userScript.contains("/usr/bin/open \"$TARGET_APP\""))
+
+        let adminScript = AppUpdateService.buildAtomicSwapAndRelaunchScript(
+            oldPID: 51515,
+            stagedAppPath: "/tmp/stage/Thingsbook.app",
+            targetAppPath: "/Applications/Thingsbook.app",
+            stagingRootPath: "/tmp/stage",
+            requiresAdmin: true
+        )
+        XCTAssertTrue(adminScript.contains("/usr/bin/osascript -e"))
+        XCTAssertTrue(adminScript.contains("with administrator privileges"))
+        XCTAssertTrue(adminScript.contains("/usr/bin/open \"$TARGET_APP\""))
+
+        // 4. Verify all 4 new macOS in-app auto-updater localization keys across all 5 languages
+        let updaterKeys = [
+            "macos_updates_auto_desc",
+            "macos_updates_install_relaunch_btn",
+            "macos_updates_extracting",
+            "macos_updates_installing_relaunching"
+        ]
+        for lang in [AppLanguage.en, .de, .fr, .it, .es] {
+            for key in updaterKeys {
+                let text = ThingsStrings.shared.text(key, lang: lang)
+                XCTAssertFalse(text.isEmpty, "Missing \(key) in \(lang.rawValue)")
+                XCTAssertNotEqual(text, key, "Untranslated \(key) in \(lang.rawValue)")
+            }
+            XCTAssertTrue(ThingsStrings.shared.format("macos_updates_extracting", lang: lang, "2.0.0-beta.5").contains("2.0.0-beta.5"))
+            XCTAssertTrue(ThingsStrings.shared.format("macos_updates_installing_relaunching", lang: lang, "2.0.0-beta.5").contains("2.0.0-beta.5"))
         }
     }
 }

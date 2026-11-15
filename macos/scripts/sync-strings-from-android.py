@@ -102,6 +102,10 @@ MACOS_EXTRA_STRINGS = {
         "macos_attachment_preview_title": "Attachment Preview",
         "macos_attachment_quicklook": "Show in Finder",
         "macos_smart_parsed_toast": "Imported %1$d To-Dos with Gemini",
+        "macos_updates_auto_desc": "Automatically checks for updates and downloads them in the background — no manual DMG needed",
+        "macos_updates_install_relaunch_btn": "Install & Relaunch",
+        "macos_updates_extracting": "Preparing update v%1$s…",
+        "macos_updates_installing_relaunching": "Installing v%1$s and relaunching Thingsbook…",
     },
     "de": {
         "macos_menubar_quick_entry": "Schnelleingabe…",
@@ -179,6 +183,10 @@ MACOS_EXTRA_STRINGS = {
         "macos_attachment_preview_title": "Anhang-Vorschau",
         "macos_attachment_quicklook": "Im Finder zeigen",
         "macos_smart_parsed_toast": "%1$d Aufgaben mit Gemini importiert",
+        "macos_updates_auto_desc": "Sucht automatisch nach Updates und lädt sie im Hintergrund – kein manueller DMG-Download nötig",
+        "macos_updates_install_relaunch_btn": "Installieren & neu starten",
+        "macos_updates_extracting": "Update v%1$s wird vorbereitet…",
+        "macos_updates_installing_relaunching": "v%1$s wird installiert und Thingsbook neu gestartet…",
     },
     "fr": {
         "macos_menubar_quick_entry": "Saisie rapide…",
@@ -256,6 +264,10 @@ MACOS_EXTRA_STRINGS = {
         "macos_attachment_preview_title": "Aperçu de la pièce jointe",
         "macos_attachment_quicklook": "Afficher dans le Finder",
         "macos_smart_parsed_toast": "%1$d tâches importées avec Gemini",
+        "macos_updates_auto_desc": "Vérifie et télécharge automatiquement les mises à jour en arrière-plan, sans fichier DMG manuel",
+        "macos_updates_install_relaunch_btn": "Installer et relancer",
+        "macos_updates_extracting": "Préparation de la mise à jour v%1$s…",
+        "macos_updates_installing_relaunching": "Installation de v%1$s et relance de Thingsbook…",
     },
     "it": {
         "macos_menubar_quick_entry": "Inserimento rapido…",
@@ -333,6 +345,10 @@ MACOS_EXTRA_STRINGS = {
         "macos_attachment_preview_title": "Anteprima allegato",
         "macos_attachment_quicklook": "Mostra nel Finder",
         "macos_smart_parsed_toast": "Importate %1$d attività con Gemini",
+        "macos_updates_auto_desc": "Controlla e scarica automaticamente gli aggiornamenti in background senza file DMG manuale",
+        "macos_updates_install_relaunch_btn": "Installa e riavvia",
+        "macos_updates_extracting": "Preparazione aggiornamento v%1$s…",
+        "macos_updates_installing_relaunching": "Installazione di v%1$s e riavvio di Thingsbook…",
     },
     "es": {
         "macos_menubar_quick_entry": "Entrada rápida…",
@@ -410,6 +426,10 @@ MACOS_EXTRA_STRINGS = {
         "macos_attachment_preview_title": "Vista previa del adjunto",
         "macos_attachment_quicklook": "Mostrar en el Finder",
         "macos_smart_parsed_toast": "Se importaron %1$d tareas con Gemini",
+        "macos_updates_auto_desc": "Busca y descarga actualizaciones automáticamente en segundo plano sin descargar archivos DMG",
+        "macos_updates_install_relaunch_btn": "Instalar y reiniciar",
+        "macos_updates_extracting": "Preparando actualización v%1$s…",
+        "macos_updates_installing_relaunching": "Instalando v%1$s y reiniciando Thingsbook…",
     },
 }
 

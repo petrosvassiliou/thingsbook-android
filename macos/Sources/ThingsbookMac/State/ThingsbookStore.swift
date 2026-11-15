@@ -115,6 +115,7 @@ public final class ThingsbookStore: ObservableObject {
     @Published public var availableCalendars: [MacCalendarInfo] = []
     @Published public var isLocked = false
     @Published public var availableUpdate: ReleaseUpdateInfo? = nil
+    @Published public var updatePhase: MacInAppUpdatePhase = .idle
     @Published public var toastMessage: String? = nil
 
     // Backup password prompt state
@@ -146,6 +147,9 @@ public final class ThingsbookStore: ObservableObject {
     private var midnightTimer: Timer?
     private var syncDebounceTask: Task<Void, Never>?
     private var backgroundSyncTask: Task<Void, Never>?
+    private var updateDownloadTask: Task<Void, Never>?
+    private var backgroundUpdateCheckTask: Task<Void, Never>?
+    private var installImmediatelyWhenStaged = false
     private var appActivationObserver: NSObjectProtocol?
     private var workspaceWakeObserver: NSObjectProtocol?
     private var appTerminateObserver: NSObjectProtocol?
@@ -193,6 +197,7 @@ public final class ThingsbookStore: ObservableObject {
 
         setupMidnightObserver()
         setupCloudSyncLifecycleObservers()
+        setupBackgroundUpdateObserver()
 
         Task {
             await cloudSync.setObserver { [weak self] snap in
@@ -1090,8 +1095,146 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func checkForAppUpdatesSilently() async {
-        if let info = try? await AppUpdateService.checkForUpdates(includeBeta: preferences.includeBetaUpdates) {
-            self.availableUpdate = info
+        guard let info = try? await AppUpdateService.checkForUpdates(includeBeta: preferences.includeBetaUpdates) else {
+            return
+        }
+        self.availableUpdate = info
+        if preferences.autoUpdateCheckEnabled && Self.isRunningFromAppBundle {
+            stageUpdateIfNeeded(info, installWhenReady: false)
+        }
+    }
+
+    public func performManualUpdateCheck() async -> ReleaseUpdateInfo? {
+        let found = try? await AppUpdateService.checkForUpdates(includeBeta: preferences.includeBetaUpdates)
+        self.availableUpdate = found
+        if let found {
+            if preferences.autoUpdateCheckEnabled && Self.isRunningFromAppBundle {
+                stageUpdateIfNeeded(found, installWhenReady: false)
+            }
+        } else {
+            installImmediatelyWhenStaged = false
+            updateDownloadTask?.cancel()
+            updateDownloadTask = nil
+            cleanupStagedUpdateDirectoryIfNeeded(except: nil)
+            updatePhase = .idle
+        }
+        return found
+    }
+
+    public func installAvailableUpdateNow() {
+        guard let info = availableUpdate else { return }
+
+        if case .readyToInstall(let v, let stagedAppPath, let stagingRootPath) = updatePhase,
+           v == info.versionString,
+           FileManager.default.fileExists(atPath: stagedAppPath) {
+            installImmediatelyWhenStaged = false
+            updatePhase = .installingAndRelaunching(version: v)
+            do {
+                try AppUpdateService.installStagedUpdateAndRelaunch(
+                    stagedAppURL: URL(fileURLWithPath: stagedAppPath),
+                    stagingRootURL: URL(fileURLWithPath: stagingRootPath)
+                )
+            } catch {
+                updatePhase = .failed(message: error.localizedDescription)
+            }
+            return
+        }
+
+        switch updatePhase {
+        case .downloading(let v, _), .extracting(let v):
+            if v == info.versionString {
+                installImmediatelyWhenStaged = true
+                return
+            }
+        case .installingAndRelaunching:
+            return
+        default:
+            break
+        }
+
+        stageUpdateIfNeeded(info, installWhenReady: true)
+    }
+
+    private static var isRunningFromAppBundle: Bool {
+        Bundle.main.bundleURL.pathExtension.lowercased() == "app"
+    }
+
+    private func stageUpdateIfNeeded(_ info: ReleaseUpdateInfo, installWhenReady: Bool) {
+        if installWhenReady {
+            installImmediatelyWhenStaged = true
+        }
+
+        if case .readyToInstall(let v, let stagedAppPath, _) = updatePhase,
+           v == info.versionString,
+           FileManager.default.fileExists(atPath: stagedAppPath) {
+            if installImmediatelyWhenStaged {
+                installImmediatelyWhenStaged = false
+                installAvailableUpdateNow()
+            }
+            return
+        }
+
+        switch updatePhase {
+        case .downloading(let v, _), .extracting(let v), .installingAndRelaunching(let v):
+            if v == info.versionString {
+                return
+            }
+        default:
+            break
+        }
+
+        updateDownloadTask?.cancel()
+        cleanupStagedUpdateDirectoryIfNeeded(except: nil)
+
+        updateDownloadTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let (stagedAppURL, stagingRootURL) = try await AppUpdateService.downloadAndStageUpdate(info) { [weak self] phase in
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        self.updatePhase = phase
+                    }
+                }
+                guard !Task.isCancelled else {
+                    try? FileManager.default.removeItem(at: stagingRootURL)
+                    return
+                }
+                self.updatePhase = .readyToInstall(
+                    version: info.versionString,
+                    stagedAppPath: stagedAppURL.path,
+                    stagingRootPath: stagingRootURL.path
+                )
+                if self.installImmediatelyWhenStaged {
+                    self.installImmediatelyWhenStaged = false
+                    self.installAvailableUpdateNow()
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.installImmediatelyWhenStaged = false
+                self.updatePhase = .failed(message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func cleanupStagedUpdateDirectoryIfNeeded(except keepRootPath: String?) {
+        if case .readyToInstall(_, _, let stagingRootPath) = updatePhase,
+           stagingRootPath != keepRootPath {
+            try? FileManager.default.removeItem(atPath: stagingRootPath)
+        }
+    }
+
+    private func setupBackgroundUpdateObserver() {
+        backgroundUpdateCheckTask?.cancel()
+        backgroundUpdateCheckTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 4 * 3_600 * 1_000_000_000)
+                guard !Task.isCancelled, let self else { break }
+                let autoEnabled = await MainActor.run { self.preferences.autoUpdateCheckEnabled }
+                guard autoEnabled else { continue }
+                await self.checkForAppUpdatesSilently()
+            }
         }
     }
 

@@ -23,6 +23,10 @@ public struct MainWorkspaceView: View {
             } detail: {
                 ZStack(alignment: .bottom) {
                     VStack(spacing: 0) {
+                        Rectangle()
+                            .fill(Color(nsColor: .separatorColor).opacity(0.65))
+                            .frame(height: 1)
+
                         if let focus = store.focusTimer {
                             focusTimerBanner(focus)
                                 .padding(.horizontal, 36)
@@ -30,8 +34,13 @@ public struct MainWorkspaceView: View {
                                 .padding(.bottom, 4)
                         }
                         SmartViewCanvas(store: store)
+                            .clipped()
                     }
-                    .background(ThingsMacPalette.canvasBackground)
+                    .background(
+                        ThingsMacPalette.canvasBackground
+                            .ignoresSafeArea(.container, edges: .top)
+                    )
+                    .background(MacWindowTitlebarConfigurator())
 
                     // Bottom Overlays: Multi-select bar, Undo Banner, Toast & Magic Plus Button
                     HStack(alignment: .bottom, spacing: 14) {
@@ -52,6 +61,7 @@ public struct MainWorkspaceView: View {
                     .padding(.horizontal, 28)
                     .padding(.bottom, 22)
                 }
+                .toolbarBackground(.hidden, for: .windowToolbar)
                 .toolbar {
                     ToolbarItem(placement: .navigation) {
                         Button {
@@ -840,3 +850,36 @@ public struct MainWorkspaceView: View {
         }
     }
 }
+
+private struct MacWindowTitlebarConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        TitlebarSyncNSView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? TitlebarSyncNSView)?.applyWindowStyle()
+    }
+
+    private final class TitlebarSyncNSView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            applyWindowStyle()
+        }
+
+        override func layout() {
+            super.layout()
+            applyWindowStyle()
+        }
+
+        func applyWindowStyle() {
+            guard let window else { return }
+            if !window.titlebarAppearsTransparent {
+                window.titlebarAppearsTransparent = true
+            }
+            if window.titlebarSeparatorStyle != .none {
+                window.titlebarSeparatorStyle = .none
+            }
+        }
+    }
+}
+

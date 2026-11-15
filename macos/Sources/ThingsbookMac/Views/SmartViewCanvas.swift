@@ -1172,26 +1172,98 @@ public struct SmartViewCanvas: View {
     }
 
     private func updateAvailableBanner(_ info: ReleaseUpdateInfo) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "arrow.down.circle.fill")
-                .font(.system(size: 20))
-                .foregroundStyle(ThingsMacPalette.logbookGreen)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(store.trf("update_banner_title", info.versionString))
-                    .font(.system(size: 13, weight: .semibold))
-                Text(store.tr("settings_updates_auto_desc"))
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(.secondary)
+        let isReady: Bool = {
+            if case .readyToInstall(let v, _, _) = store.updatePhase {
+                return v == info.versionString
             }
-            Spacer()
-            Button(store.tr("update_banner_action_btn")) {
-                AppUpdateService.openUpdatePage(info)
+            return false
+        }()
+        let isBusy: Bool = {
+            switch store.updatePhase {
+            case .downloading, .extracting, .installingAndRelaunching:
+                return true
+            default:
+                return false
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
+        }()
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Image(systemName: isReady ? "checkmark.circle.fill" : "arrow.down.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(ThingsMacPalette.logbookGreen)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(store.trf("update_banner_title", info.versionString))
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(updateBannerSubtitle(for: info))
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    store.installAvailableUpdateNow()
+                } label: {
+                    HStack(spacing: 6) {
+                        if isBusy {
+                            ProgressView().controlSize(.small)
+                        }
+                        Text(
+                            store.tr(
+                                isReady
+                                    ? "macos_updates_install_relaunch_btn"
+                                    : "update_banner_action_btn"
+                            )
+                        )
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(
+                    {
+                        if case .installingAndRelaunching = store.updatePhase { return true }
+                        return false
+                    }()
+                )
+            }
+
+            if case .downloading(_, let progress) = store.updatePhase {
+                if let progress {
+                    ProgressView(value: progress)
+                        .progressViewStyle(.linear)
+                } else {
+                    ProgressView()
+                        .progressViewStyle(.linear)
+                }
+            } else if case .extracting = store.updatePhase {
+                ProgressView()
+                    .progressViewStyle(.linear)
+            } else if case .installingAndRelaunching = store.updatePhase {
+                ProgressView()
+                    .progressViewStyle(.linear)
+            }
         }
         .padding(13)
         .thingsCardSurface(cornerRadius: 12)
+    }
+
+    private func updateBannerSubtitle(for info: ReleaseUpdateInfo) -> String {
+        switch store.updatePhase {
+        case .downloading(let v, let progress):
+            if let progress {
+                return store.trf("settings_updates_downloading", v, Int((progress * 100.0).rounded()))
+            }
+            return store.trf("settings_updates_downloading_indeterminate", v)
+        case .extracting(let v):
+            return store.trf("macos_updates_extracting", v)
+        case .readyToInstall(let v, _, _):
+            return store.trf("settings_updates_ready_title", v)
+        case .installingAndRelaunching(let v):
+            return store.trf("macos_updates_installing_relaunching", v)
+        case .failed(let message):
+            return store.trf("settings_updates_download_failed", message)
+        default:
+            return store.tr("macos_updates_auto_desc")
+        }
     }
 
     private func emptyPlaceholder(icon: String, text: String) -> some View {

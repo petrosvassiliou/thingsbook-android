@@ -1032,7 +1032,7 @@ public struct SettingsWindowView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(store.tr("settings_updates_auto_title"))
                             .font(.system(size: 13, weight: .medium))
-                        Text(store.tr("settings_updates_auto_desc"))
+                        Text(store.tr("macos_updates_auto_desc"))
                             .font(.system(size: 11.5))
                             .foregroundStyle(.secondary)
                     }
@@ -1064,12 +1064,10 @@ public struct SettingsWindowView: View {
                     Button {
                         isCheckingUpdate = true
                         updateStatusText = store.tr("settings_updates_checking")
-                        let includeBeta = store.preferences.includeBetaUpdates
                         Task {
-                            let found = try? await AppUpdateService.checkForUpdates(includeBeta: includeBeta)
+                            let found = await store.performManualUpdateCheck()
                             await MainActor.run {
                                 isCheckingUpdate = false
-                                store.availableUpdate = found
                                 if let found {
                                     updateStatusText = store.trf(
                                         "settings_updates_available_title",
@@ -1092,12 +1090,51 @@ public struct SettingsWindowView: View {
                             Text(store.tr("settings_updates_search_btn"))
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
                     .disabled(isCheckingUpdate)
 
                     if let found = store.availableUpdate {
+                        let isReady: Bool = {
+                            if case .readyToInstall(let v, _, _) = store.updatePhase {
+                                return v == found.versionString
+                            }
+                            return false
+                        }()
+                        let isBusy: Bool = {
+                            switch store.updatePhase {
+                            case .downloading, .extracting, .installingAndRelaunching:
+                                return true
+                            default:
+                                return false
+                            }
+                        }()
+
+                        Button {
+                            store.installAvailableUpdateNow()
+                        } label: {
+                            HStack(spacing: 6) {
+                                if isBusy {
+                                    ProgressView().controlSize(.small)
+                                }
+                                Text(
+                                    store.tr(
+                                        isReady
+                                            ? "macos_updates_install_relaunch_btn"
+                                            : "settings_updates_download_install_btn"
+                                    )
+                                )
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(
+                            {
+                                if case .installingAndRelaunching = store.updatePhase { return true }
+                                return false
+                            }()
+                        )
+
                         Button(store.tr("settings_updates_open_github_btn")) {
-                            AppUpdateService.openUpdatePage(found)
+                            AppUpdateService.openReleaseNotesPage(found)
                         }
                         .buttonStyle(.bordered)
                     } else {
@@ -1110,7 +1147,41 @@ public struct SettingsWindowView: View {
                     }
                 }
 
-                if let updateStatusText {
+                if case .downloading(let v, let progress) = store.updatePhase {
+                    if let progress {
+                        ProgressView(value: progress)
+                            .progressViewStyle(.linear)
+                        Text(store.trf("settings_updates_downloading", v, Int((progress * 100.0).rounded())))
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ProgressView()
+                            .progressViewStyle(.linear)
+                        Text(store.trf("settings_updates_downloading_indeterminate", v))
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                } else if case .extracting(let v) = store.updatePhase {
+                    ProgressView()
+                        .progressViewStyle(.linear)
+                    Text(store.trf("macos_updates_extracting", v))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                } else if case .installingAndRelaunching(let v) = store.updatePhase {
+                    ProgressView()
+                        .progressViewStyle(.linear)
+                    Text(store.trf("macos_updates_installing_relaunching", v))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                } else if case .readyToInstall(let v, _, _) = store.updatePhase {
+                    Text(store.trf("settings_updates_ready_title", v))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(ThingsMacPalette.logbookGreen)
+                } else if case .failed(let message) = store.updatePhase {
+                    Text(store.trf("settings_updates_download_failed", message))
+                        .font(.system(size: 12))
+                        .foregroundStyle(ThingsMacPalette.deadlineCrimson)
+                } else if let updateStatusText {
                     Text(updateStatusText)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)

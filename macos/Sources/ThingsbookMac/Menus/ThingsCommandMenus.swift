@@ -23,6 +23,18 @@ public struct ThingsCommandMenus: Commands {
     }
 
     public var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button(store.tr("settings_updates_search_btn") + "…") {
+                guard !store.isLocked else { return }
+                store.settingsTab = .about
+                store.isSettingsPresented = true
+                Task {
+                    _ = await store.performManualUpdateCheck()
+                }
+            }
+            .disabled(store.isLocked)
+        }
+
         CommandGroup(replacing: .newItem) {
             Button(store.tr("entity_new_todo")) {
                 guard !store.isLocked else { return }

@@ -596,168 +596,834 @@ public struct ProjectTemplate: Identifiable, Codable, Equatable, Hashable, Senda
         set { blueprintJson = newValue.toJSONString() }
     }
 
-    public static let builtInStarterTemplates: [ProjectTemplate] = [
-        ProjectTemplate(
-            id: "starter-trip-packing",
-            title: "Trip & Packing",
-            notes: "Calm pre-departure checklist, bookings, and travel essentials.",
-            blueprintJson: ProjectTemplateBlueprint(
-                unheadedTasks: [
-                    TemplateTaskSpec(
-                        title: "Confirm flights, hotel & local transit passes",
-                        checklistItems: ["Save boarding passes offline", "Share itinerary with family"],
-                        durationMinutes: 30
-                    )
-                ],
-                headings: [
-                    TemplateHeadingSpec(
-                        title: "Documents & Tech",
-                        tasks: [
+    public static var builtInStarterTemplates: [ProjectTemplate] {
+        builtInStarterTemplates(for: "en")
+    }
+
+    public static func builtInStarterTemplates(for languageCode: String) -> [ProjectTemplate] {
+        let normalized = String(languageCode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().prefix(2))
+        switch normalized {
+        case "de":
+            return [
+                ProjectTemplate(
+                    id: "starter-trip-packing",
+                    title: "Reise & Packliste",
+                    notes: "Entspannte Checkliste vor der Abreise, Buchungen und Reiseutensilien.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        unheadedTasks: [
                             TemplateTaskSpec(
-                                title: "Pack passport, ID, cards & travel insurance",
-                                checklistItems: ["Passport / ID valid 6+ months", "Credit card travel notice"],
-                                durationMinutes: 15
-                            ),
-                            TemplateTaskSpec(
-                                title: "Pack chargers, power bank & travel adapter",
-                                checklistItems: ["USB-C laptop & phone cables", "Noise-canceling headphones"],
-                                durationMinutes: 15
-                            )
-                        ]
-                    ),
-                    TemplateHeadingSpec(
-                        title: "Home Before Leaving",
-                        tasks: [
-                            TemplateTaskSpec(
-                                title: "Prep home for departure",
-                                checklistItems: ["Empty fridge & take out trash", "Unplug non-essential appliances", "Lock windows & set thermostat"],
-                                durationMinutes: 20
-                            )
-                        ]
-                    )
-                ]
-            ).toJSONString(),
-            sortOrder: 10
-        ),
-        ProjectTemplate(
-            id: "starter-product-launch",
-            title: "Product Launch",
-            notes: "End-to-end milestone plan from QA freeze to announcement.",
-            blueprintJson: ProjectTemplateBlueprint(
-                headings: [
-                    TemplateHeadingSpec(
-                        title: "1. Quality & Readiness",
-                        tasks: [
-                            TemplateTaskSpec(
-                                title: "Run full regression & upgrade migration suite",
-                                checklistItems: ["Fresh install verification", "Upgrade from prior stable release", "Cloud sync smoke test"],
-                                durationMinutes: 60
-                            ),
-                            TemplateTaskSpec(
-                                title: "Finalize release notes & screenshots",
-                                checklistItems: ["Highlight top 3 user benefits", "Verify dark & light mode visuals"],
-                                durationMinutes: 45
-                            )
-                        ]
-                    ),
-                    TemplateHeadingSpec(
-                        title: "2. Distribution & Comms",
-                        tasks: [
-                            TemplateTaskSpec(
-                                title: "Tag release & verify build artifacts",
-                                checklistItems: ["Signed Universal DMG & APK", "SHA-256 checksums verified"],
-                                durationMinutes: 30
-                            ),
-                            TemplateTaskSpec(
-                                title: "Publish announcement & monitor feedback",
-                                checklistItems: ["Post changelog", "Triage first-day feedback"],
-                                durationMinutes: 45
-                            )
-                        ]
-                    )
-                ]
-            ).toJSONString(),
-            sortOrder: 20
-        ),
-        ProjectTemplate(
-            id: "starter-client-onboarding",
-            title: "Client Onboarding",
-            notes: "Structured kickoff workflow for new client engagements.",
-            blueprintJson: ProjectTemplateBlueprint(
-                headings: [
-                    TemplateHeadingSpec(
-                        title: "Kickoff & Access",
-                        tasks: [
-                            TemplateTaskSpec(
-                                title: "Execute agreement & set up shared workspace",
-                                checklistItems: ["Countersigned SOW / NDA", "Create shared folder & communication channel"],
-                                durationMinutes: 30
-                            ),
-                            TemplateTaskSpec(
-                                title: "Host alignment kickoff call",
-                                checklistItems: ["Confirm success metrics", "Agree on weekly cadence & stakeholders"],
-                                durationMinutes: 45
-                            )
-                        ]
-                    ),
-                    TemplateHeadingSpec(
-                        title: "First 30-Day Milestones",
-                        tasks: [
-                            TemplateTaskSpec(
-                                title: "Deliver initial roadmap & quick-win deliverable",
-                                checklistItems: ["Draft milestone timeline", "Review first deliverable with client"],
-                                durationMinutes: 60
-                            )
-                        ]
-                    )
-                ]
-            ).toJSONString(),
-            sortOrder: 30
-        ),
-        ProjectTemplate(
-            id: "starter-weekly-sprint",
-            title: "Weekly Sprint",
-            notes: "Focused 5-day execution sprint with clear outcomes and Friday retro.",
-            blueprintJson: ProjectTemplateBlueprint(
-                headings: [
-                    TemplateHeadingSpec(
-                        title: "Sprint Goals",
-                        tasks: [
-                            TemplateTaskSpec(
-                                title: "Define top 3 outcomes for the week",
-                                checklistItems: ["Outcome #1", "Outcome #2", "Outcome #3"],
+                                title: "Flüge, Hotel & Nahverkehrstickets bestätigen",
+                                checklistItems: ["Bordkarten offline speichern", "Reiseplan mit der Familie teilen"],
                                 durationMinutes: 30
                             )
-                        ]
-                    ),
-                    TemplateHeadingSpec(
-                        title: "Deep Work Blocks",
-                        tasks: [
-                            TemplateTaskSpec(
-                                title: "Core Deliverable #1",
-                                durationMinutes: 90
+                        ],
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "Dokumente & Technik",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Reisepass, Ausweis, Karten & Reiseversicherung einpacken",
+                                        checklistItems: ["Reisepass / Ausweis noch mind. 6 Monate gültig", "Kreditkarte für Auslandsreise freischalten"],
+                                        durationMinutes: 15
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Ladegeräte, Powerbank & Reiseadapter einpacken",
+                                        checklistItems: ["USB-C-Kabel für Laptop & Smartphone", "Kopfhörer mit Geräuschunterdrückung"],
+                                        durationMinutes: 15
+                                    )
+                                ]
                             ),
-                            TemplateTaskSpec(
-                                title: "Core Deliverable #2",
-                                durationMinutes: 90
+                            TemplateHeadingSpec(
+                                title: "Zuhause vor der Abreise",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Wohnung für die Abreise vorbereiten",
+                                        checklistItems: ["Kühlschrank leeren & Müll rausbringen", "Nicht benötigte Geräte vom Strom trennen", "Fenster schließen & Heizung regeln"],
+                                        durationMinutes: 20
+                                    )
+                                ]
                             )
                         ]
-                    ),
-                    TemplateHeadingSpec(
-                        title: "Wrap-Up & Retro",
-                        tasks: [
+                    ).toJSONString(),
+                    sortOrder: 10
+                ),
+                ProjectTemplate(
+                    id: "starter-product-launch",
+                    title: "Produkt-Launch",
+                    notes: "Durchgängiger Meilensteinplan vom QA-Abschluss bis zur Ankündigung.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "1. Qualität & Startbereitschaft",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Vollständige Regressions- & Upgrade-Tests durchführen",
+                                        checklistItems: ["Neuinstallation prüfen", "Upgrade von vorheriger stabiler Version testen", "Cloud-Sync-Kurztest durchführen"],
+                                        durationMinutes: 60
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Versionshinweise & Screenshots fertigstellen",
+                                        checklistItems: ["Die 3 wichtigsten Vorteile hervorheben", "Darstellung im Dunkel- & Hellmodus prüfen"],
+                                        durationMinutes: 45
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "2. Verteilung & Kommunikation",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Release taggen & Build-Artefakte prüfen",
+                                        checklistItems: ["Signiertes Universal-DMG & APK", "SHA-256-Prüfsummen verifiziert"],
+                                        durationMinutes: 30
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Ankündigung veröffentlichen & Feedback beobachten",
+                                        checklistItems: ["Changelog veröffentlichen", "Rückmeldungen am ersten Tag sichten"],
+                                        durationMinutes: 45
+                                    )
+                                ]
+                            )
+                        ]
+                    ).toJSONString(),
+                    sortOrder: 20
+                ),
+                ProjectTemplate(
+                    id: "starter-client-onboarding",
+                    title: "Kunden-Onboarding",
+                    notes: "Strukturierter Kick-off-Ablauf für neue Kundenprojekte.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "Kick-off & Zugänge",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Vertrag abschließen & gemeinsamen Arbeitsbereich einrichten",
+                                        checklistItems: ["Gegengezeichnetes Angebot / NDA", "Gemeinsamen Ordner & Kommunikationskanal anlegen"],
+                                        durationMinutes: 30
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Kick-off-Gespräch zur Abstimmung durchführen",
+                                        checklistItems: ["Erfolgskriterien bestätigen", "Wöchentlichen Rhythmus & Ansprechpartner abstimmen"],
+                                        durationMinutes: 45
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "Meilensteine der ersten 30 Tage",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Erste Roadmap & schnelles Startergebnis liefern",
+                                        checklistItems: ["Meilenstein-Zeitplan entwerfen", "Erstes Ergebnis gemeinsam mit dem Kunden besprechen"],
+                                        durationMinutes: 60
+                                    )
+                                ]
+                            )
+                        ]
+                    ).toJSONString(),
+                    sortOrder: 30
+                ),
+                ProjectTemplate(
+                    id: "starter-weekly-sprint",
+                    title: "Wochensprint",
+                    notes: "Fokussierter 5-Tage-Sprint mit klaren Ergebnissen und Freitags-Retrospektive.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "Sprint-Ziele",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Die 3 wichtigsten Ergebnisse der Woche festlegen",
+                                        checklistItems: ["Ergebnis Nr. 1", "Ergebnis Nr. 2", "Ergebnis Nr. 3"],
+                                        durationMinutes: 30
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "Fokusblöcke (Deep Work)",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Kernergebnis Nr. 1",
+                                        durationMinutes: 90
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Kernergebnis Nr. 2",
+                                        durationMinutes: 90
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "Abschluss & Retrospektive",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Fortschritt präsentieren & Freitags-Wochenrückblick durchführen",
+                                        checklistItems: ["Abgeschlossene Arbeit ausliefern", "Erkenntnisse & offene Punkte festhalten"],
+                                        durationMinutes: 30
+                                    )
+                                ]
+                            )
+                        ]
+                    ).toJSONString(),
+                    sortOrder: 40
+                )
+            ]
+
+        case "fr":
+            return [
+                ProjectTemplate(
+                    id: "starter-trip-packing",
+                    title: "Voyage & Bagages",
+                    notes: "Liste sereine avant le départ, réservations et essentiels de voyage.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        unheadedTasks: [
                             TemplateTaskSpec(
-                                title: "Demo progress & run Friday Weekly Review",
-                                checklistItems: ["Ship completed work", "Capture lessons & carry-overs"],
+                                title: "Confirmer les vols, l'hôtel et les titres de transport",
+                                checklistItems: ["Enregistrer les cartes d'embarquement hors ligne", "Partager l'itinéraire avec les proches"],
                                 durationMinutes: 30
                             )
+                        ],
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "Documents & Électronique",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Préparer passeport, pièce d'identité, cartes et assurance voyage",
+                                        checklistItems: ["Passeport / pièce d'identité valide 6+ mois", "Activer l'option voyage de la carte bancaire"],
+                                        durationMinutes: 15
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Emporter chargeurs, batterie externe et adaptateur",
+                                        checklistItems: ["Câbles USB-C pour ordinateur et téléphone", "Casque à réduction de bruit"],
+                                        durationMinutes: 15
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "Maison avant le départ",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Préparer le logement avant de partir",
+                                        checklistItems: ["Vider le réfrigérateur et sortir les poubelles", "Débrancher les appareils non essentiels", "Fermer les fenêtres et régler le chauffage"],
+                                        durationMinutes: 20
+                                    )
+                                ]
+                            )
                         ]
-                    )
-                ]
-            ).toJSONString(),
-            sortOrder: 40
-        )
-    ]
+                    ).toJSONString(),
+                    sortOrder: 10
+                ),
+                ProjectTemplate(
+                    id: "starter-product-launch",
+                    title: "Lancement de produit",
+                    notes: "Plan complet par étapes, de la validation QA jusqu'à l'annonce officielle.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "1. Qualité & Préparation",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Exécuter la suite complète de tests de non-régression et de migration",
+                                        checklistItems: ["Vérifier une installation propre", "Tester la mise à jour depuis la version stable précédente", "Test rapide de synchronisation cloud"],
+                                        durationMinutes: 60
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Finaliser les notes de version et les captures d'écran",
+                                        checklistItems: ["Mettre en avant les 3 bénéfices clés", "Vérifier le rendu en mode clair et sombre"],
+                                        durationMinutes: 45
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "2. Distribution & Communication",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Taguer la version et vérifier les paquets compilés",
+                                        checklistItems: ["DMG universel et APK signés", "Sommes de contrôle SHA-256 vérifiées"],
+                                        durationMinutes: 30
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Publier l'annonce et suivre les retours",
+                                        checklistItems: ["Publier le journal des modifications", "Trier les retours du premier jour"],
+                                        durationMinutes: 45
+                                    )
+                                ]
+                            )
+                        ]
+                    ).toJSONString(),
+                    sortOrder: 20
+                ),
+                ProjectTemplate(
+                    id: "starter-client-onboarding",
+                    title: "Intégration client",
+                    notes: "Parcours de démarrage structuré pour les nouvelles missions clients.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "Lancement & Accès",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Signer le contrat et préparer l'espace de travail partagé",
+                                        checklistItems: ["Contrat / accord de confidentialité contresigné", "Créer le dossier partagé et le canal d'échange"],
+                                        durationMinutes: 30
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Animer la réunion de lancement et d'alignement",
+                                        checklistItems: ["Confirmer les indicateurs de réussite", "Définir le rythme hebdomadaire et les interlocuteurs"],
+                                        durationMinutes: 45
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "Jalons des 30 premiers jours",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Livrer la feuille de route initiale et un premier livrable rapide",
+                                        checklistItems: ["Rédiger le calendrier des jalons", "Passer en revue le premier livrable avec le client"],
+                                        durationMinutes: 60
+                                    )
+                                ]
+                            )
+                        ]
+                    ).toJSONString(),
+                    sortOrder: 30
+                ),
+                ProjectTemplate(
+                    id: "starter-weekly-sprint",
+                    title: "Sprint hebdomadaire",
+                    notes: "Sprint ciblé de 5 jours avec objectifs clairs et rétrospective du vendredi.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "Objectifs du sprint",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Définir les 3 résultats prioritaires de la semaine",
+                                        checklistItems: ["Résultat n° 1", "Résultat n° 2", "Résultat n° 3"],
+                                        durationMinutes: 30
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "Blocs de travail approfondi",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Livrable principal n° 1",
+                                        durationMinutes: 90
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Livrable principal n° 2",
+                                        durationMinutes: 90
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "Bilan & Rétrospective",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Présenter les avancées et faire la revue hebdomadaire du vendredi",
+                                        checklistItems: ["Livrer le travail terminé", "Noter les enseignements et les suites"],
+                                        durationMinutes: 30
+                                    )
+                                ]
+                            )
+                        ]
+                    ).toJSONString(),
+                    sortOrder: 40
+                )
+            ]
+
+        case "it":
+            return [
+                ProjectTemplate(
+                    id: "starter-trip-packing",
+                    title: "Viaggio e Valigia",
+                    notes: "Checklist serena prima della partenza, prenotazioni ed essenziali da viaggio.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        unheadedTasks: [
+                            TemplateTaskSpec(
+                                title: "Confermare voli, hotel e abbonamenti per i mezzi locali",
+                                checklistItems: ["Salvare le carte d'imbarco offline", "Condividere l'itinerario con la famiglia"],
+                                durationMinutes: 30
+                            )
+                        ],
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "Documenti e Tecnologia",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Preparare passaporto, documento, carte e assicurazione viaggio",
+                                        checklistItems: ["Passaporto / documento valido per oltre 6 mesi", "Avviso di viaggio per la carta di credito"],
+                                        durationMinutes: 15
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Mettere in valigia caricabatterie, powerbank e adattatore",
+                                        checklistItems: ["Cavi USB-C per laptop e telefono", "Cuffie con cancellazione del rumore"],
+                                        durationMinutes: 15
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "Casa prima di partire",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Preparare la casa per la partenza",
+                                        checklistItems: ["Svuotare il frigo e portare fuori i rifiuti", "Scollegare gli elettrodomestici non essenziali", "Chiudere le finestre e regolare il termostato"],
+                                        durationMinutes: 20
+                                    )
+                                ]
+                            )
+                        ]
+                    ).toJSONString(),
+                    sortOrder: 10
+                ),
+                ProjectTemplate(
+                    id: "starter-product-launch",
+                    title: "Lancio Prodotto",
+                    notes: "Piano completo a tappe dal blocco QA fino all'annuncio.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "1. Qualità e Preparazione",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Eseguire i test completi di regressione e migrazione",
+                                        checklistItems: ["Verifica installazione pulita", "Aggiornamento dalla precedente versione stabile", "Test rapido della sincronizzazione cloud"],
+                                        durationMinutes: 60
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Finalizzare note di rilascio e schermate",
+                                        checklistItems: ["Evidenziare i 3 principali vantaggi per l'utente", "Verificare la resa in modalità chiara e scura"],
+                                        durationMinutes: 45
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "2. Distribuzione e Comunicazione",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Taggare la versione e verificare i pacchetti di build",
+                                        checklistItems: ["DMG universale e APK firmati", "Checksum SHA-256 verificati"],
+                                        durationMinutes: 30
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Pubblicare l'annuncio e monitorare i feedback",
+                                        checklistItems: ["Pubblicare il changelog", "Smistare i feedback del primo giorno"],
+                                        durationMinutes: 45
+                                    )
+                                ]
+                            )
+                        ]
+                    ).toJSONString(),
+                    sortOrder: 20
+                ),
+                ProjectTemplate(
+                    id: "starter-client-onboarding",
+                    title: "Onboarding Cliente",
+                    notes: "Flusso di avvio strutturato per nuove collaborazioni con i clienti.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "Avvio e Accessi",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Firmare l'accordo e configurare lo spazio di lavoro condiviso",
+                                        checklistItems: ["Contratto / NDA controfirmato", "Creare cartella condivisa e canale di comunicazione"],
+                                        durationMinutes: 30
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Tenere la call iniziale di allineamento",
+                                        checklistItems: ["Confermare le metriche di successo", "Concordare cadenza settimanale e referenti"],
+                                        durationMinutes: 45
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "Traguardi dei primi 30 giorni",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Consegnare la roadmap iniziale e un primo risultato rapido",
+                                        checklistItems: ["Bozza del calendario delle tappe", "Rivedere il primo deliverable con il cliente"],
+                                        durationMinutes: 60
+                                    )
+                                ]
+                            )
+                        ]
+                    ).toJSONString(),
+                    sortOrder: 30
+                ),
+                ProjectTemplate(
+                    id: "starter-weekly-sprint",
+                    title: "Sprint Settimanale",
+                    notes: "Sprint focalizzato di 5 giorni con obiettivi chiari e retrospettiva del venerdì.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "Obiettivi dello Sprint",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Definire i 3 risultati principali della settimana",
+                                        checklistItems: ["Risultato n. 1", "Risultato n. 2", "Risultato n. 3"],
+                                        durationMinutes: 30
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "Blocchi di Lavoro Concentrato",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Risultato chiave n. 1",
+                                        durationMinutes: 90
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Risultato chiave n. 2",
+                                        durationMinutes: 90
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "Chiusura e Retrospettiva",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Mostrare i progressi ed eseguire la revisione settimanale del venerdì",
+                                        checklistItems: ["Rilasciare il lavoro completato", "Annotare lezioni apprese e attività da riportare"],
+                                        durationMinutes: 30
+                                    )
+                                ]
+                            )
+                        ]
+                    ).toJSONString(),
+                    sortOrder: 40
+                )
+            ]
+
+        case "es":
+            return [
+                ProjectTemplate(
+                    id: "starter-trip-packing",
+                    title: "Viaje y Equipaje",
+                    notes: "Lista tranquila antes de salir, reservas e imprescindibles de viaje.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        unheadedTasks: [
+                            TemplateTaskSpec(
+                                title: "Confirmar vuelos, hotel y abonos de transporte local",
+                                checklistItems: ["Guardar tarjetas de embarque sin conexión", "Compartir itinerario con la familia"],
+                                durationMinutes: 30
+                            )
+                        ],
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "Documentos y Tecnología",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Preparar pasaporte, documento, tarjetas y seguro de viaje",
+                                        checklistItems: ["Pasaporte / documento válido más de 6 meses", "Aviso de viaje en la tarjeta bancaria"],
+                                        durationMinutes: 15
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Guardar cargadores, batería externa y adaptador de viaje",
+                                        checklistItems: ["Cables USB-C para portátil y móvil", "Auriculares con cancelación de ruido"],
+                                        durationMinutes: 15
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "Casa antes de salir",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Preparar la casa para la salida",
+                                        checklistItems: ["Vaciar la nevera y sacar la basura", "Desenchufar aparatos no esenciales", "Cerrar ventanas y ajustar el termostato"],
+                                        durationMinutes: 20
+                                    )
+                                ]
+                            )
+                        ]
+                    ).toJSONString(),
+                    sortOrder: 10
+                ),
+                ProjectTemplate(
+                    id: "starter-product-launch",
+                    title: "Lanzamiento de Producto",
+                    notes: "Plan integral de hitos desde el cierre de QA hasta el anuncio.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "1. Calidad y Preparación",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Ejecutar pruebas completas de regresión y migración",
+                                        checklistItems: ["Verificar instalación limpia", "Probar actualización desde la versión estable anterior", "Prueba rápida de sincronización en la nube"],
+                                        durationMinutes: 60
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Finalizar notas de la versión y capturas de pantalla",
+                                        checklistItems: ["Destacar los 3 beneficios principales", "Revisar el diseño en modo claro y oscuro"],
+                                        durationMinutes: 45
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "2. Distribución y Comunicación",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Etiquetar versión y verificar artefactos de compilación",
+                                        checklistItems: ["DMG universal y APK firmados", "Sumas SHA-256 verificadas"],
+                                        durationMinutes: 30
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Publicar anuncio y supervisar comentarios",
+                                        checklistItems: ["Publicar registro de cambios", "Clasificar comentarios del primer día"],
+                                        durationMinutes: 45
+                                    )
+                                ]
+                            )
+                        ]
+                    ).toJSONString(),
+                    sortOrder: 20
+                ),
+                ProjectTemplate(
+                    id: "starter-client-onboarding",
+                    title: "Incorporación de Cliente",
+                    notes: "Flujo de inicio estructurado para nuevos proyectos con clientes.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "Inicio y Accesos",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Firmar acuerdo y configurar espacio de trabajo compartido",
+                                        checklistItems: ["Contrato / acuerdo de confidencialidad firmado", "Crear carpeta compartida y canal de comunicación"],
+                                        durationMinutes: 30
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Realizar reunión inicial de alineación",
+                                        checklistItems: ["Confirmar métricas de éxito", "Acordar cadencia semanal e interlocutores"],
+                                        durationMinutes: 45
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "Hitos de los primeros 30 días",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Entregar hoja de ruta inicial y primer entregable rápido",
+                                        checklistItems: ["Redactar cronograma de hitos", "Revisar el primer entregable con el cliente"],
+                                        durationMinutes: 60
+                                    )
+                                ]
+                            )
+                        ]
+                    ).toJSONString(),
+                    sortOrder: 30
+                ),
+                ProjectTemplate(
+                    id: "starter-weekly-sprint",
+                    title: "Sprint Semanal",
+                    notes: "Sprint enfocado de 5 días con resultados claros y retrospectiva del viernes.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "Objetivos del Sprint",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Definir los 3 resultados clave de la semana",
+                                        checklistItems: ["Resultado n.º 1", "Resultado n.º 2", "Resultado n.º 3"],
+                                        durationMinutes: 30
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "Bloques de Trabajo Profundo",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Entregable clave n.º 1",
+                                        durationMinutes: 90
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Entregable clave n.º 2",
+                                        durationMinutes: 90
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "Cierre y Retrospectiva",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Mostrar avances y realizar la revisión semanal del viernes",
+                                        checklistItems: ["Entregar el trabajo completado", "Anotar aprendizajes y tareas pendientes"],
+                                        durationMinutes: 30
+                                    )
+                                ]
+                            )
+                        ]
+                    ).toJSONString(),
+                    sortOrder: 40
+                )
+            ]
+
+        default:
+            return [
+                ProjectTemplate(
+                    id: "starter-trip-packing",
+                    title: "Trip & Packing",
+                    notes: "Calm pre-departure checklist, bookings, and travel essentials.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        unheadedTasks: [
+                            TemplateTaskSpec(
+                                title: "Confirm flights, hotel & local transit passes",
+                                checklistItems: ["Save boarding passes offline", "Share itinerary with family"],
+                                durationMinutes: 30
+                            )
+                        ],
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "Documents & Tech",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Pack passport, ID, cards & travel insurance",
+                                        checklistItems: ["Passport / ID valid 6+ months", "Credit card travel notice"],
+                                        durationMinutes: 15
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Pack chargers, power bank & travel adapter",
+                                        checklistItems: ["USB-C laptop & phone cables", "Noise-canceling headphones"],
+                                        durationMinutes: 15
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "Home Before Leaving",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Prep home for departure",
+                                        checklistItems: ["Empty fridge & take out trash", "Unplug non-essential appliances", "Lock windows & set thermostat"],
+                                        durationMinutes: 20
+                                    )
+                                ]
+                            )
+                        ]
+                    ).toJSONString(),
+                    sortOrder: 10
+                ),
+                ProjectTemplate(
+                    id: "starter-product-launch",
+                    title: "Product Launch",
+                    notes: "End-to-end milestone plan from QA freeze to announcement.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "1. Quality & Readiness",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Run full regression & upgrade migration suite",
+                                        checklistItems: ["Fresh install verification", "Upgrade from prior stable release", "Cloud sync smoke test"],
+                                        durationMinutes: 60
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Finalize release notes & screenshots",
+                                        checklistItems: ["Highlight top 3 user benefits", "Verify dark & light mode visuals"],
+                                        durationMinutes: 45
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "2. Distribution & Comms",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Tag release & verify build artifacts",
+                                        checklistItems: ["Signed Universal DMG & APK", "SHA-256 checksums verified"],
+                                        durationMinutes: 30
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Publish announcement & monitor feedback",
+                                        checklistItems: ["Post changelog", "Triage first-day feedback"],
+                                        durationMinutes: 45
+                                    )
+                                ]
+                            )
+                        ]
+                    ).toJSONString(),
+                    sortOrder: 20
+                ),
+                ProjectTemplate(
+                    id: "starter-client-onboarding",
+                    title: "Client Onboarding",
+                    notes: "Structured kickoff workflow for new client engagements.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "Kickoff & Access",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Execute agreement & set up shared workspace",
+                                        checklistItems: ["Countersigned SOW / NDA", "Create shared folder & communication channel"],
+                                        durationMinutes: 30
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Host alignment kickoff call",
+                                        checklistItems: ["Confirm success metrics", "Agree on weekly cadence & stakeholders"],
+                                        durationMinutes: 45
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "First 30-Day Milestones",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Deliver initial roadmap & quick-win deliverable",
+                                        checklistItems: ["Draft milestone timeline", "Review first deliverable with client"],
+                                        durationMinutes: 60
+                                    )
+                                ]
+                            )
+                        ]
+                    ).toJSONString(),
+                    sortOrder: 30
+                ),
+                ProjectTemplate(
+                    id: "starter-weekly-sprint",
+                    title: "Weekly Sprint",
+                    notes: "Focused 5-day execution sprint with clear outcomes and Friday retro.",
+                    blueprintJson: ProjectTemplateBlueprint(
+                        headings: [
+                            TemplateHeadingSpec(
+                                title: "Sprint Goals",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Define top 3 outcomes for the week",
+                                        checklistItems: ["Outcome #1", "Outcome #2", "Outcome #3"],
+                                        durationMinutes: 30
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "Deep Work Blocks",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Core Deliverable #1",
+                                        durationMinutes: 90
+                                    ),
+                                    TemplateTaskSpec(
+                                        title: "Core Deliverable #2",
+                                        durationMinutes: 90
+                                    )
+                                ]
+                            ),
+                            TemplateHeadingSpec(
+                                title: "Wrap-Up & Retro",
+                                tasks: [
+                                    TemplateTaskSpec(
+                                        title: "Demo progress & run Friday Weekly Review",
+                                        checklistItems: ["Ship completed work", "Capture lessons & carry-overs"],
+                                        durationMinutes: 30
+                                    )
+                                ]
+                            )
+                        ]
+                    ).toJSONString(),
+                    sortOrder: 40
+                )
+            ]
+        }
+    }
 }
 
 public struct MacCalendarInfo: Identifiable, Equatable, Hashable, Sendable {

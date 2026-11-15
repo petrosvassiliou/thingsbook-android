@@ -414,11 +414,12 @@
     <string name="v2_weekly_review_subtitle">Revisión GTD guiada en 4 pasos</string>
     <string name="v2_review_step_inbox">1. Vaciar Entrada</string>
     <string name="v2_review_step_today">2. Hoy y fechas límite</string>
-    <string name="v2_review_step_projects">3. Proyectos estancados</string>
+    <string name="v2_review_step_projects">3. Requieren atención</string>
     <string name="v2_review_step_someday">4. Algún día y cierre</string>
-    <string name="v2_stalled_project_badge">Estancado</string>
+    <string name="v2_stalled_project_badge">Requiere atención</string>
+    <string name="v2_requires_review_badge">Requiere revisión</string>
     <string name="v2_stalled_no_next_action">Sin próxima acción abierta</string>
-    <string name="v2_stalled_unreviewed">Sin revisar por más de 14 días</string>
+    <string name="v2_stalled_unreviewed">Requiere revisión (14+ días)</string>
     <string name="v2_add_next_action">Añadir próxima acción…</string>
     <string name="v2_mark_reviewed">Marcar como revisado</string>
     <string name="v2_complete_weekly_review">Completar revisión semanal</string>

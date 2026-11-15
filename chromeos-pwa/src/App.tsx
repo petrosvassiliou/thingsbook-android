@@ -13,7 +13,6 @@ import {
   ChevronUp,
   ClipboardList,
   Cloud,
-  Compass,
   Copy,
   Edit3,
   Flag,
@@ -24,6 +23,7 @@ import {
   Inbox,
   Layers,
   List,
+  ListChecks,
   Menu,
   Mic,
   Moon,
@@ -1963,10 +1963,17 @@ export const App: React.FC = () => {
               title={`${t.weeklyReviewTitle} (Ctrl+Shift+R)`}
               onClick={() => setWeeklyReviewModal({ open: true, step: 1 })}
             >
-              <Compass size={14} style={{ color: 'var(--things-blue)' }} />
+              <ListChecks size={14} style={{ color: 'var(--things-blue)' }} />
               <span className="topbar-label-hide-sm">{t.weeklyReviewBtn}</span>
               {stalledProjects.length > 0 && (
-                <span className="v2-stalled-count-dot" title={t.projectStalledBadge}>
+                <span
+                  className="v2-stalled-count-dot"
+                  title={
+                    stalledProjects.some((p) => p.status.reason === 'no_next_action')
+                      ? t.projectStalledBadge
+                      : t.projectRequiresReviewBadge
+                  }
+                >
                   {stalledProjects.length}
                 </span>
               )}
@@ -3009,7 +3016,7 @@ export const App: React.FC = () => {
                 <>
                   {/* Project Header */}
                   <div className="view-header" onClick={(e) => e.stopPropagation()}>
-                    {/* Row 1: ProgressRing(26) + Title + Stalled Badge + Up/Down + Edit + Complete + Delete */}
+                    {/* Row 1: ProgressRing(26) + Title + Attention/Review Badge + Up/Down + Edit + Complete + Delete */}
                     <div className="view-title-row">
                       <div className="view-title-left" style={{ flexWrap: 'wrap' }}>
                         <ProjectProgressRing
@@ -3031,7 +3038,11 @@ export const App: React.FC = () => {
                             }
                             onClick={() => setWeeklyReviewModal({ open: true, step: 3 })}
                           >
-                            <span>{t.projectStalledBadge}</span>
+                            <span>
+                              {stalledStatus.reason === 'no_next_action'
+                                ? t.projectStalledBadge
+                                : t.projectRequiresReviewBadge}
+                            </span>
                           </button>
                         )}
                       </div>
@@ -3793,6 +3804,7 @@ export const App: React.FC = () => {
           defaultAreaId={templatesModal.areaId}
           areas={snapshot.areas}
           savedTemplates={snapshot.projectTemplates}
+          lang={lang}
           t={t}
           onCreatedProject={(projectId) => {
             setTemplatesModal((prev) => ({ ...prev, open: false }));

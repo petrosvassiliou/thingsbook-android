@@ -13,17 +13,19 @@ import {
 import {
   type AreaRecord,
   type ProjectTemplate,
-  type ProjectTemplateBlueprint
+  type ProjectTemplateBlueprint,
+  type SupportedLang
 } from '../domain/types';
 import {
-  STARTER_GTD_TEMPLATES,
+  getStarterGtdTemplates,
   parseProjectOutlineInput,
   parseTemplateBlueprintJson
 } from '../domain/v2Utils';
 import { localDb } from '../data/localDb';
 import type { TranslationStrings } from '../i18n/translations';
 
-const SAMPLE_MARKDOWN_OUTLINE = `# Q4 Website Redesign
+const SAMPLE_MARKDOWN_OUTLINES: Record<SupportedLang, string> = {
+  en: `# Q4 Website Redesign
 Modernize landing pages, speed up Lighthouse score, and launch clean docs.
 
 ## Research & Architecture
@@ -36,7 +38,64 @@ Modernize landing pages, speed up Lighthouse score, and launch clean docs.
 - [ ] Build responsive hero & pricing grid @60m
   - [ ] Desktop & Chromebook layout
   - [ ] Dark mode contrast check
-- [ ] Run accessibility & QA pass @30m`;
+- [ ] Run accessibility & QA pass @30m`,
+  de: `# Q4 Website-Relaunch
+Landingpages modernisieren, Lighthouse-Score verbessern und Dokumentation starten.
+
+## Recherche & Architektur
+- [ ] Analytics & Conversion-Funnel prüfen @45m
+  - [ ] Top-20-Landingpages exportieren
+  - [ ] Mobile Abbruchstellen identifizieren
+- [ ] Design-Tokens & Typografie festlegen @30m
+
+## Umsetzung
+- [ ] Responsiven Hero-Bereich & Preisübersicht bauen @60m
+  - [ ] Desktop- & Chromebook-Layout
+  - [ ] Kontrastprüfung im Dunkelmodus
+- [ ] Barrierefreiheit & QA-Durchlauf @30m`,
+  fr: `# Refonte du site web T4
+Moderniser les pages d'accueil, améliorer le score Lighthouse et publier la doc.
+
+## Recherche & Architecture
+- [ ] Auditer les statistiques & le tunnel de conversion @45m
+  - [ ] Exporter les 20 pages principales
+  - [ ] Identifier les points d'abandon mobile
+- [ ] Finaliser les jetons de design & la typographie @30m
+
+## Implémentation
+- [ ] Construire la section héro & la grille tarifaire @60m
+  - [ ] Mise en page bureau & Chromebook
+  - [ ] Vérification du contraste en mode sombre
+- [ ] Effectuer la passe d'accessibilité & QA @30m`,
+  it: `# Restyling sito web Q4
+Modernizzare le landing page, migliorare il punteggio Lighthouse e lanciare la documentazione.
+
+## Ricerca & Architettura
+- [ ] Analizzare analytics & funnel di conversione @45m
+  - [ ] Esportare le prime 20 landing page
+  - [ ] Identificare i punti di abbandono mobile
+- [ ] Definire design token & tipografia @30m
+
+## Implementazione
+- [ ] Realizzare hero responsive & griglia prezzi @60m
+  - [ ] Layout desktop & Chromebook
+  - [ ] Controllo contrasto tema scuro
+- [ ] Eseguire verifica accessibilità & QA @30m`,
+  es: `# Rediseño web Q4
+Modernizar páginas de destino, optimizar Lighthouse y lanzar documentación clara.
+
+## Investigación y Arquitectura
+- [ ] Auditar analíticas y embudo de conversión @45m
+  - [ ] Exportar las 20 páginas principales
+  - [ ] Identificar pasos de abandono móvil
+- [ ] Definir tokens de diseño y tipografía @30m
+
+## Implementación
+- [ ] Construir cabecera adaptable y tabla de precios @60m
+  - [ ] Diseño para escritorio y Chromebook
+  - [ ] Revisión de contraste en modo oscuro
+- [ ] Ejecutar revisión de accesibilidad y QA @30m`
+};
 
 export type TemplatesModalTab = 'gallery' | 'import';
 
@@ -45,6 +104,7 @@ interface TemplatesAndImportModalProps {
   defaultAreaId?: string | null;
   areas: AreaRecord[];
   savedTemplates: ProjectTemplate[];
+  lang: SupportedLang;
   t: TranslationStrings;
   onCreatedProject: (projectId: string) => void;
   onToast: (msg: string) => void;
@@ -80,6 +140,7 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
   defaultAreaId = null,
   areas,
   savedTemplates,
+  lang,
   t,
   onCreatedProject,
   onToast,
@@ -89,6 +150,9 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
   const [selectedAreaId, setSelectedAreaId] = useState<string | null>(defaultAreaId);
   const [outlineText, setOutlineText] = useState('');
   const [busy, setBusy] = useState(false);
+
+  const starterTemplates = useMemo(() => getStarterGtdTemplates(lang), [lang]);
+  const sampleMarkdownOutline = SAMPLE_MARKDOWN_OUTLINES[lang] ?? SAMPLE_MARKDOWN_OUTLINES.en;
 
   const activeAreas = useMemo(() => areas.filter((a) => !a.isDeleted), [areas]);
   const visibleSavedTemplates = useMemo(
@@ -101,8 +165,8 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
 
   const parsedOutline = useMemo(() => {
     if (!outlineText.trim()) return null;
-    return parseProjectOutlineInput(outlineText);
-  }, [outlineText]);
+    return parseProjectOutlineInput(outlineText, t.entityNewProject);
+  }, [outlineText, t.entityNewProject]);
 
   const parsedStats = useMemo(
     () => (parsedOutline ? countBlueprintItems(parsedOutline.blueprint) : null),
@@ -225,14 +289,17 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
           <div className="v2-templates-scroll">
             <div className="v2-section-label">{t.templatesStarterSection}</div>
             <div className="v2-templates-grid">
-              {STARTER_GTD_TEMPLATES.map((starter) => {
+              {starterTemplates.map((starter) => {
                 const titleStr =
-                  (t[starter.titleKey as keyof TranslationStrings] as string) ||
-                  starter.defaultTitle;
-                const descStr =
-                  (t[starter.descKey as keyof TranslationStrings] as string) ||
-                  starter.defaultNotes;
+                  starter.defaultTitle ||
+                  (t[starter.titleKey as keyof TranslationStrings] as string);
+                const notesStr =
+                  starter.defaultNotes ||
+                  (t[starter.descKey as keyof TranslationStrings] as string);
                 const counts = countBlueprintItems(starter.blueprint);
+                const headingsPreview = starter.blueprint.headings
+                  .map((hd) => hd.title)
+                  .join(' · ');
 
                 return (
                   <div
@@ -250,7 +317,21 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
                         </div>
                       </div>
                     </div>
-                    <p className="v2-template-desc">{descStr}</p>
+                    <p className="v2-template-desc">{notesStr}</p>
+                    {headingsPreview && (
+                      <div
+                        style={{
+                          fontSize: 11.2,
+                          color: 'var(--text-muted)',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis'
+                        }}
+                        title={headingsPreview}
+                      >
+                        {headingsPreview}
+                      </div>
+                    )}
                     <button
                       type="button"
                       className="btn-primary"
@@ -259,7 +340,7 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
                       onClick={() =>
                         void handleInstantiateBlueprint({
                           title: titleStr,
-                          notes: descStr,
+                          notes: notesStr,
                           areaId: selectedAreaId,
                           blueprint: starter.blueprint
                         })
@@ -371,7 +452,7 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
               <button
                 type="button"
                 className="chip-btn"
-                onClick={() => setOutlineText(SAMPLE_MARKDOWN_OUTLINE)}
+                onClick={() => setOutlineText(sampleMarkdownOutline)}
               >
                 <Sparkles size={12} />
                 <span>{t.templatesImportSampleBtn}</span>
@@ -384,7 +465,7 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
               rows={9}
               value={outlineText}
               onChange={(e) => setOutlineText(e.target.value)}
-              placeholder={SAMPLE_MARKDOWN_OUTLINE}
+              placeholder={sampleMarkdownOutline}
             />
 
             {parsedOutline && parsedStats && (

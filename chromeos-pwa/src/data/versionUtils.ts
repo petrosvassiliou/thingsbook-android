@@ -1,4 +1,6 @@
-import { APP_VERSION } from '../domain/types.ts';
+import { APP_BUILD_CODE, APP_VERSION } from '../domain/types.ts';
+
+export { APP_BUILD_CODE, APP_VERSION };
 
 interface ParsedVersion {
   major: number;

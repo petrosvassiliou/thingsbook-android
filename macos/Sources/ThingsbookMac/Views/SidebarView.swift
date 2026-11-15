@@ -316,7 +316,16 @@ public struct SidebarView: View {
         let dest = NavigationDestination.project(proj.id)
         let selected = store.selectedDestination == dest
         let openCount = max(0, proj.totalTaskCount - proj.completedTaskCount)
-        let isStalled = store.projectStalledInfo(proj).isStalled
+        let stalledInfo = store.projectStalledInfo(proj)
+        let statusHelpText: String? = {
+            if stalledInfo.hasNoNextAction {
+                return store.tr("v2_stalled_project_badge")
+            } else if stalledInfo.isUnreviewed14Days {
+                return store.tr("v2_requires_review_badge")
+            } else {
+                return nil
+            }
+        }()
 
         return Button {
             store.selectedDestination = dest
@@ -337,10 +346,11 @@ public struct SidebarView: View {
 
                 Spacer(minLength: 4)
 
-                if isStalled {
+                if let statusHelpText {
                     Circle()
                         .fill(ThingsMacPalette.somedayAmber)
                         .frame(width: 6, height: 6)
+                        .help(statusHelpText)
                 }
 
                 if proj.deadline != nil {
@@ -365,7 +375,7 @@ public struct SidebarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(proj.title)
+        .help(statusHelpText.map { "\(proj.title) — \($0)" } ?? proj.title)
         .contextMenu {
             Button(store.tr("project_edit_title")) {
                 store.editingProject = proj

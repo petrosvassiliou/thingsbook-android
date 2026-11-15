@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { APP_BUILD_CODE, APP_VERSION } from '../src/domain/types.ts';
 import {
+  APP_BUILD_CODE as buildFromUtils,
+  APP_VERSION as versionFromUtils,
   compareSemver as compareFromUtils,
   isEligibleReleasePayload as isEligibleFromUtils,
   isPrereleaseVersion,
@@ -13,9 +15,11 @@ import {
   selectLatestEligibleRelease
 } from '../src/data/pwaUpdater.ts';
 
-test('v2.0.0-beta.1 build metadata constants are bumped to 2.0.0-beta.1 (Build 45)', () => {
-  assert.equal(APP_VERSION, '2.0.0-beta.1');
-  assert.equal(APP_BUILD_CODE, 45);
+test('v2.0.0-beta.2 build metadata constants are bumped to 2.0.0-beta.2 (Build 46)', () => {
+  assert.equal(APP_VERSION, '2.0.0-beta.2');
+  assert.equal(APP_BUILD_CODE, 46);
+  assert.equal(versionFromUtils, '2.0.0-beta.2');
+  assert.equal(buildFromUtils, 46);
   assert.equal(isPrereleaseVersion(APP_VERSION), true);
   assert.equal(isPrereleaseVersion('1.8.1'), false);
   assert.equal(isPrereleaseVersion('2.0.0'), false);

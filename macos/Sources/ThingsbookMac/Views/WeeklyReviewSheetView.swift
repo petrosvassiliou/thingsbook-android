@@ -41,7 +41,7 @@ public struct WeeklyReviewSheetView: View {
         [
             (0, store.tr("v2_review_step_inbox"), "tray.fill", store.inboxTasks.count, ThingsMacPalette.inboxBlue),
             (1, store.tr("v2_review_step_today"), "star.fill", todayAndDeadlineTasks.count, ThingsMacPalette.todayYellow),
-            (2, store.tr("v2_review_step_projects"), "chart.pie.fill", store.stalledProjects.count, ThingsMacPalette.somedayAmber),
+            (2, store.tr("v2_review_step_projects"), "checklist", store.stalledProjects.count, ThingsMacPalette.somedayAmber),
             (3, store.tr("v2_review_step_someday"), "archivebox.fill", store.somedayTasks.count, ThingsMacPalette.logbookGreen)
         ]
     }
@@ -158,7 +158,7 @@ public struct WeeklyReviewSheetView: View {
     @ViewBuilder
     private var inboxStepContent: some View {
         if store.inboxTasks.isEmpty {
-            calmEmptyState(icon: "checkmark.seal.fill", color: ThingsMacPalette.logbookGreen, message: store.tr("empty_inbox"))
+            calmEmptyState(icon: "checkmark.circle.fill", color: ThingsMacPalette.logbookGreen, message: store.tr("empty_inbox"))
         } else {
             ForEach(store.inboxTasks) { task in
                 VStack(alignment: .leading, spacing: 8) {
@@ -284,7 +284,7 @@ public struct WeeklyReviewSheetView: View {
         }
     }
 
-    // MARK: - Step 3: Stalled Projects
+    // MARK: - Step 3: Projects Requiring Attention
 
     @ViewBuilder
     private var stalledProjectsStepContent: some View {
@@ -464,7 +464,7 @@ public struct WeeklyReviewSheetView: View {
                 store.completeWeeklyReview()
                 dismiss()
             } label: {
-                Label(store.tr("v2_complete_weekly_review"), systemImage: "checkmark.seal.fill")
+                Label(store.tr("v2_complete_weekly_review"), systemImage: "checkmark.circle.fill")
                     .font(.system(size: 13, weight: .semibold))
             }
             .buttonStyle(.borderedProminent)

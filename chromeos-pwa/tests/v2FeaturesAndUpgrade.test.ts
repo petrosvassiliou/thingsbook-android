@@ -16,6 +16,7 @@ import {
   evaluateProjectStalledStatus,
   formatMinutesAsClock,
   formatTimeblockRange,
+  getStarterGtdTemplates,
   parseClockToMinutes,
   parseProjectOutlineInput,
   parseTemplateBlueprintJson
@@ -592,12 +593,163 @@ test('Stalled Project Detector & Timeblocking Daily Timeline interleaving + conf
   assert.deepEqual(timeline.timedItems[1].conflictTitles, ['Write 2.0 Migration Spec']);
   assert.equal(timeline.timedItems[2].hasConflict, false);
 
-  // Verify 5-language localization parity for v2.0 UI strings
+  // Verify 5-language localization parity for v2.0 UI strings & Requires Attention / Review badges
+  const forbiddenPattern = /stalled|unstall|stockend|stockt|bloqué|en pause|fermo|fermi|in stallo|estancad|⚠️/i;
   for (const locale of ['en', 'de', 'fr', 'it', 'es'] as const) {
     const tr = TRANSLATIONS[locale];
     assert.ok(tr.weeklyReviewTitle.length > 0, `${locale} weeklyReviewTitle`);
     assert.ok(tr.templatesModalTitle.length > 0, `${locale} templatesModalTitle`);
     assert.ok(tr.todayModeTimeline.length > 0, `${locale} todayModeTimeline`);
     assert.ok(tr.settingsIncludeBetaTitle.length > 0, `${locale} settingsIncludeBetaTitle`);
+    assert.ok(tr.projectStalledBadge.length > 0, `${locale} projectStalledBadge`);
+    assert.ok(tr.projectRequiresReviewBadge.length > 0, `${locale} projectRequiresReviewBadge`);
+    assert.notEqual(
+      tr.projectStalledBadge,
+      tr.projectRequiresReviewBadge,
+      `${locale} no_next_action vs inactive_14d badges must be distinct`
+    );
+
+    for (const sampleStr of [
+      tr.weeklyReviewSubtitle,
+      tr.weeklyReviewStep3Title,
+      tr.weeklyReviewStep3Desc,
+      tr.weeklyReviewNoStalledProjects,
+      tr.projectStalledBadge,
+      tr.projectRequiresReviewBadge,
+      tr.projectStalledNoActionHint,
+      tr.projectStalledInactiveHint(16)
+    ]) {
+      assert.equal(
+        forbiddenPattern.test(sampleStr),
+        false,
+        `Unexpected stalled/warning term in ${locale}: "${sampleStr}"`
+      );
+    }
+  }
+
+  assert.equal(TRANSLATIONS.en.projectStalledBadge, 'Requires attention');
+  assert.equal(TRANSLATIONS.en.projectRequiresReviewBadge, 'Requires review');
+  assert.equal(TRANSLATIONS.de.projectStalledBadge, 'Aufmerksamkeit nötig');
+  assert.equal(TRANSLATIONS.de.projectRequiresReviewBadge, 'Überprüfung nötig');
+  assert.equal(TRANSLATIONS.fr.projectStalledBadge, 'Attention requise');
+  assert.equal(TRANSLATIONS.fr.projectRequiresReviewBadge, 'Révision requise');
+  assert.equal(TRANSLATIONS.it.projectStalledBadge, 'Richiede attenzione');
+  assert.equal(TRANSLATIONS.it.projectRequiresReviewBadge, 'Revisione richiesta');
+  assert.equal(TRANSLATIONS.es.projectStalledBadge, 'Requiere atención');
+  assert.equal(TRANSLATIONS.es.projectRequiresReviewBadge, 'Requiere revisión');
+});
+
+test('getStarterGtdTemplates localizes all 4 built-in templates (titles, notes, headings, tasks, and checklists) across en, de, fr, it, and es', () => {
+  const enTemplates = getStarterGtdTemplates('en');
+  assert.equal(STARTER_GTD_TEMPLATES, enTemplates);
+  assert.equal(enTemplates.length, 4);
+
+  const expectedLocalizedSamples = {
+    en: {
+      tripTitle: 'Trip & Packing',
+      tripHeading: 'Documents & Essentials',
+      tripTask: 'Confirm flight, train, and hotel reservations',
+      tripChecklist: 'Save offline boarding passes',
+      sprintTitle: 'Weekly Sprint',
+      sprintChecklist: 'Outcome #1'
+    },
+    de: {
+      tripTitle: 'Reise & Packliste',
+      tripHeading: 'Dokumente & Wichtiges',
+      tripTask: 'Flug-, Bahn- und Hotelbuchungen bestätigen',
+      tripChecklist: 'Bordkarten offline speichern',
+      sprintTitle: 'Wochen-Sprint',
+      sprintChecklist: 'Ergebnis #1'
+    },
+    fr: {
+      tripTitle: 'Voyage & Bagages',
+      tripHeading: 'Documents & Essentiels',
+      tripTask: "Confirmer les réservations de vol, train et d'hôtel",
+      tripChecklist: "Enregistrer les cartes d'embarquement hors ligne",
+      sprintTitle: 'Sprint hebdomadaire',
+      sprintChecklist: 'Résultat n°1'
+    },
+    it: {
+      tripTitle: 'Viaggio & Valigia',
+      tripHeading: 'Documenti & Essenziali',
+      tripTask: 'Confermare prenotazioni di volo, treno e hotel',
+      tripChecklist: "Salvare carte d'imbarco offline",
+      sprintTitle: 'Sprint settimanale',
+      sprintChecklist: 'Risultato #1'
+    },
+    es: {
+      tripTitle: 'Viaje y Equipaje',
+      tripHeading: 'Documentos e Imprescindibles',
+      tripTask: 'Confirmar reservas de vuelo, tren y hotel',
+      tripChecklist: 'Guardar tarjetas de embarque sin conexión',
+      sprintTitle: 'Sprint semanal',
+      sprintChecklist: 'Resultado #1'
+    }
+  } as const;
+
+  for (const locale of ['en', 'de', 'fr', 'it', 'es'] as const) {
+    const localized = getStarterGtdTemplates(locale);
+    const exp = expectedLocalizedSamples[locale];
+    assert.equal(localized.length, 4, `${locale} must expose all 4 starter templates`);
+
+    const trip = localized.find((t) => t.id === 'starter-trip-packing')!;
+    const sprint = localized.find((t) => t.id === 'starter-weekly-sprint')!;
+    assert.equal(trip.defaultTitle, exp.tripTitle);
+    assert.equal(trip.blueprint.headings[0].title, exp.tripHeading);
+    assert.equal(trip.blueprint.tasks[0].title, exp.tripTask);
+    assert.equal(trip.blueprint.tasks[0].checklistItems?.[0], exp.tripChecklist);
+    assert.equal(sprint.defaultTitle, exp.sprintTitle);
+    assert.equal(sprint.blueprint.headings[0].tasks[0].checklistItems?.[0], exp.sprintChecklist);
+
+    // Structural parity with English templates (IDs, offsets, durations, task/checklist counts)
+    for (let idx = 0; idx < enTemplates.length; idx++) {
+      const baseTpl = enTemplates[idx];
+      const locTpl = localized[idx];
+      assert.equal(locTpl.id, baseTpl.id);
+      assert.equal(locTpl.icon, baseTpl.icon);
+      assert.ok(locTpl.defaultNotes.trim().length > 10, `${locale}:${locTpl.id} notes`);
+      assert.equal(locTpl.blueprint.tasks.length, baseTpl.blueprint.tasks.length);
+      assert.equal(locTpl.blueprint.headings.length, baseTpl.blueprint.headings.length);
+
+      if (locale !== 'en') {
+        assert.notEqual(
+          locTpl.defaultNotes,
+          baseTpl.defaultNotes,
+          `${locale}:${locTpl.id} defaultNotes should be localized`
+        );
+      }
+
+      for (let h = 0; h < baseTpl.blueprint.headings.length; h++) {
+        const baseHd = baseTpl.blueprint.headings[h];
+        const locHd = locTpl.blueprint.headings[h];
+        assert.equal(locHd.tasks.length, baseHd.tasks.length);
+        if (locale !== 'en') {
+          assert.notEqual(
+            locHd.title,
+            baseHd.title,
+            `${locale}:${locTpl.id} heading[${h}] should be localized`
+          );
+        }
+        for (let tk = 0; tk < baseHd.tasks.length; tk++) {
+          const baseTask = baseHd.tasks[tk];
+          const locTask = locHd.tasks[tk];
+          assert.equal(locTask.whenDaysOffset, baseTask.whenDaysOffset);
+          assert.equal(locTask.deadlineDaysOffset, baseTask.deadlineDaysOffset);
+          assert.equal(locTask.scheduledStartMinutes, baseTask.scheduledStartMinutes);
+          assert.equal(locTask.durationMinutes, baseTask.durationMinutes);
+          assert.equal(
+            locTask.checklistItems?.length ?? 0,
+            baseTask.checklistItems?.length ?? 0
+          );
+          if (locale !== 'en') {
+            assert.notEqual(
+              locTask.title,
+              baseTask.title,
+              `${locale}:${locTpl.id} heading[${h}].task[${tk}] should be localized`
+            );
+          }
+        }
+      }
+    }
   }
 });

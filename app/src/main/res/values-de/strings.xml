@@ -414,11 +414,12 @@
     <string name="v2_weekly_review_subtitle">Geführter GTD-Rückblick in 4 Schritten</string>
     <string name="v2_review_step_inbox">1. Eingang leeren</string>
     <string name="v2_review_step_today">2. Heute &amp; Fristen</string>
-    <string name="v2_review_step_projects">3. Stockende Projekte</string>
+    <string name="v2_review_step_projects">3. Aufmerksamkeit nötig</string>
     <string name="v2_review_step_someday">4. Irgendwann &amp; Abschluss</string>
-    <string name="v2_stalled_project_badge">Stockend</string>
+    <string name="v2_stalled_project_badge">Aufmerksamkeit nötig</string>
+    <string name="v2_requires_review_badge">Überprüfung nötig</string>
     <string name="v2_stalled_no_next_action">Keine offene nächste Aktion</string>
-    <string name="v2_stalled_unreviewed">Seit 14+ Tagen nicht geprüft</string>
+    <string name="v2_stalled_unreviewed">Überprüfung nötig (14+ Tage)</string>
     <string name="v2_add_next_action">Nächste Aktion hinzufügen…</string>
     <string name="v2_mark_reviewed">Als geprüft markieren</string>
     <string name="v2_complete_weekly_review">Wochenrückblick abschließen</string>

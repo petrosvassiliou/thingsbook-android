@@ -1,5 +1,6 @@
 import { openDB, type IDBPDatabase } from 'idb';
 import {
+  APP_VERSION,
   MAX_AREAS,
   addDaysLocal,
   calculateNextRecurrenceDate,
@@ -2728,7 +2729,7 @@ class ThingsLocalDb {
         includeBetaUpdates: Boolean(prefs.includeBetaUpdates),
         lastWeeklyReviewAt: prefs.lastWeeklyReviewAt || 0
       },
-      appVersionName: '2.0.0-beta.1-chromeos'
+      appVersionName: `${APP_VERSION}-chromeos`
     });
     const bytes = await encodeThingsBackup(payload, password);
     return {

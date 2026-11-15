@@ -133,8 +133,9 @@ public struct TemplatesAndImportSheetView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     sectionHeader(icon: "sparkles.rectangle.stack.fill", color: ThingsMacPalette.accentBlue, title: store.tr("v2_starter_templates"))
 
+                    let starterTemplates = ProjectTemplate.builtInStarterTemplates(for: store.preferences.language.resolvedCode)
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                        ForEach(ProjectTemplate.builtInStarterTemplates) { template in
+                        ForEach(starterTemplates) { template in
                             templateCard(template, isCustom: false)
                         }
                     }

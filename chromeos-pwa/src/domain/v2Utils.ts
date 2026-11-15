@@ -8,6 +8,7 @@ import {
   type ProjectTemplateHeadingBlueprint,
   type ProjectTemplateTaskBlueprint,
   type ScheduleState,
+  type SupportedLang,
   type TaskRecord
 } from './types.ts';
 
@@ -290,230 +291,1363 @@ export interface StarterProjectTemplateDef {
   blueprint: ProjectTemplateBlueprint;
 }
 
-export const STARTER_GTD_TEMPLATES: readonly StarterProjectTemplateDef[] = [
-  {
-    id: 'starter-trip-packing',
-    icon: '🧳',
-    titleKey: 'starterTplTripTitle',
-    descKey: 'starterTplTripDesc',
-    defaultTitle: 'Trip & Packing',
-    defaultNotes: 'End-to-end travel bookings, documents, packing checklist, and home departure prep.',
-    blueprint: {
-      version: 1,
-      tasks: [
-        {
-          title: 'Confirm flight, train, and hotel reservations',
-          whenDaysOffset: 0,
-          durationMinutes: 30,
-          checklistItems: ['Save offline boarding passes', 'Share itinerary with family']
-        }
-      ],
-      headings: [
-        {
-          title: 'Documents & Essentials',
-          tasks: [
-            {
-              title: 'Verify passport / ID validity & travel insurance',
-              whenDaysOffset: 0,
-              durationMinutes: 20,
-              checklistItems: ['Passport / ID card', 'Payment cards & local currency', 'Health / insurance card']
-            }
-          ]
-        },
-        {
-          title: 'Packing List',
-          tasks: [
-            {
-              title: 'Pack clothing & toiletries',
-              whenDaysOffset: 1,
-              durationMinutes: 45,
-              checklistItems: ['Weather-appropriate outfits', 'Shoes & jacket', 'Toiletries & medications']
-            },
-            {
-              title: 'Pack electronics & chargers',
-              whenDaysOffset: 1,
-              durationMinutes: 15,
-              checklistItems: ['Phone + Laptop chargers', 'Power bank', 'Universal travel adapter', 'Headphones']
-            }
-          ]
-        },
-        {
-          title: 'Before Leaving Home',
-          tasks: [
-            {
-              title: 'Home departure walkthrough',
-              whenDaysOffset: 2,
-              durationMinutes: 20,
-              checklistItems: ['Empty trash & perishable food', 'Water plants', 'Lock windows & doors']
-            }
-          ]
-        }
-      ]
+const STARTER_GTD_TEMPLATES_BY_LANG: Record<
+  SupportedLang,
+  readonly StarterProjectTemplateDef[]
+> = {
+  en: [
+    {
+      id: 'starter-trip-packing',
+      icon: '🧳',
+      titleKey: 'starterTplTripTitle',
+      descKey: 'starterTplTripDesc',
+      defaultTitle: 'Trip & Packing',
+      defaultNotes:
+        'End-to-end travel bookings, documents, packing checklist, and home departure prep.',
+      blueprint: {
+        version: 1,
+        tasks: [
+          {
+            title: 'Confirm flight, train, and hotel reservations',
+            whenDaysOffset: 0,
+            durationMinutes: 30,
+            checklistItems: ['Save offline boarding passes', 'Share itinerary with family']
+          }
+        ],
+        headings: [
+          {
+            title: 'Documents & Essentials',
+            tasks: [
+              {
+                title: 'Verify passport / ID validity & travel insurance',
+                whenDaysOffset: 0,
+                durationMinutes: 20,
+                checklistItems: [
+                  'Passport / ID card',
+                  'Payment cards & local currency',
+                  'Health / insurance card'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Packing List',
+            tasks: [
+              {
+                title: 'Pack clothing & toiletries',
+                whenDaysOffset: 1,
+                durationMinutes: 45,
+                checklistItems: [
+                  'Weather-appropriate outfits',
+                  'Shoes & jacket',
+                  'Toiletries & medications'
+                ]
+              },
+              {
+                title: 'Pack electronics & chargers',
+                whenDaysOffset: 1,
+                durationMinutes: 15,
+                checklistItems: [
+                  'Phone + Laptop chargers',
+                  'Power bank',
+                  'Universal travel adapter',
+                  'Headphones'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Before Leaving Home',
+            tasks: [
+              {
+                title: 'Home departure walkthrough',
+                whenDaysOffset: 2,
+                durationMinutes: 20,
+                checklistItems: [
+                  'Empty trash & perishable food',
+                  'Water plants',
+                  'Lock windows & doors'
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      id: 'starter-product-launch',
+      icon: '🚀',
+      titleKey: 'starterTplLaunchTitle',
+      descKey: 'starterTplLaunchDesc',
+      defaultTitle: 'Product Launch',
+      defaultNotes:
+        'Structured GTD launch playbook across positioning, QA sign-off, launch day, and follow-up.',
+      blueprint: {
+        version: 1,
+        tasks: [],
+        headings: [
+          {
+            title: 'Strategy & Positioning',
+            tasks: [
+              {
+                title: 'Finalize launch messaging & release notes',
+                whenDaysOffset: 0,
+                durationMinutes: 45,
+                checklistItems: [
+                  'Headline value proposition',
+                  'Changelog highlights',
+                  'Screenshots & demo assets'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Build & QA Readiness',
+            tasks: [
+              {
+                title: 'Complete pre-release QA & migration smoke tests',
+                whenDaysOffset: 1,
+                durationMinutes: 60,
+                checklistItems: [
+                  'Upgrade path verified',
+                  'Cloud sync verified',
+                  'Zero lint/build warnings'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Launch Day Execution',
+            tasks: [
+              {
+                title: 'Publish release & announce across channels',
+                whenDaysOffset: 2,
+                scheduledStartMinutes: 540,
+                durationMinutes: 45,
+                checklistItems: [
+                  'Tag release build',
+                  'Update landing page / docs',
+                  'Post announcement'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Post-Launch Follow-Up',
+            tasks: [
+              {
+                title: 'Monitor telemetry & triage early user feedback',
+                whenDaysOffset: 3,
+                durationMinutes: 30
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      id: 'starter-client-onboarding',
+      icon: '🤝',
+      titleKey: 'starterTplClientTitle',
+      descKey: 'starterTplClientDesc',
+      defaultTitle: 'Client Onboarding',
+      defaultNotes:
+        'Repeatable client kickoff workflow from signed agreement to first milestone delivery.',
+      blueprint: {
+        version: 1,
+        tasks: [],
+        headings: [
+          {
+            title: 'Kickoff & Agreements',
+            tasks: [
+              {
+                title: 'Countersign agreement & send welcome packet',
+                whenDaysOffset: 0,
+                durationMinutes: 30,
+                checklistItems: [
+                  'Signed SOW / MSA archived',
+                  'Billing profile configured',
+                  'Welcome email sent'
+                ]
+              },
+              {
+                title: 'Schedule kickoff workshop',
+                whenDaysOffset: 0,
+                durationMinutes: 15
+              }
+            ]
+          },
+          {
+            title: 'Access & Discovery',
+            tasks: [
+              {
+                title: 'Provision shared workspace & repository access',
+                whenDaysOffset: 1,
+                durationMinutes: 30,
+                checklistItems: [
+                  'Shared folder & docs',
+                  'Communication channel',
+                  'Technical credentials'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'First Milestone',
+            tasks: [
+              {
+                title: 'Deliver 30-day roadmap & success metrics',
+                whenDaysOffset: 3,
+                deadlineDaysOffset: 7,
+                durationMinutes: 60
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      id: 'starter-weekly-sprint',
+      icon: '⚡',
+      titleKey: 'starterTplSprintTitle',
+      descKey: 'starterTplSprintDesc',
+      defaultTitle: 'Weekly Sprint',
+      defaultNotes:
+        'Focused 5-day execution sprint with clear top outcomes, deep work blocks, and Friday retro.',
+      blueprint: {
+        version: 1,
+        tasks: [],
+        headings: [
+          {
+            title: 'Sprint Planning',
+            tasks: [
+              {
+                title: 'Define top 3 outcomes for the week',
+                whenDaysOffset: 0,
+                scheduledStartMinutes: 540,
+                durationMinutes: 30,
+                checklistItems: ['Outcome #1', 'Outcome #2', 'Outcome #3']
+              }
+            ]
+          },
+          {
+            title: 'Deep Work Execution',
+            tasks: [
+              {
+                title: 'Ship primary sprint deliverable',
+                whenDaysOffset: 1,
+                durationMinutes: 90
+              },
+              {
+                title: 'Clear mid-week blockers & stakeholder check-in',
+                whenDaysOffset: 2,
+                durationMinutes: 30
+              }
+            ]
+          },
+          {
+            title: 'Review & Retrospective',
+            tasks: [
+              {
+                title: 'Demo shipped work & capture retro notes',
+                whenDaysOffset: 4,
+                durationMinutes: 30,
+                checklistItems: ['What went well', 'What to improve next sprint']
+              }
+            ]
+          }
+        ]
+      }
     }
-  },
-  {
-    id: 'starter-product-launch',
-    icon: '🚀',
-    titleKey: 'starterTplLaunchTitle',
-    descKey: 'starterTplLaunchDesc',
-    defaultTitle: 'Product Launch',
-    defaultNotes: 'Structured GTD launch playbook across positioning, QA sign-off, launch day, and follow-up.',
-    blueprint: {
-      version: 1,
-      tasks: [],
-      headings: [
-        {
-          title: 'Strategy & Positioning',
-          tasks: [
-            {
-              title: 'Finalize launch messaging & release notes',
-              whenDaysOffset: 0,
-              durationMinutes: 45,
-              checklistItems: ['Headline value proposition', 'Changelog highlights', 'Screenshots & demo assets']
-            }
-          ]
-        },
-        {
-          title: 'Build & QA Readiness',
-          tasks: [
-            {
-              title: 'Complete pre-release QA & migration smoke tests',
-              whenDaysOffset: 1,
-              durationMinutes: 60,
-              checklistItems: ['Upgrade path verified', 'Cloud sync verified', 'Zero lint/build warnings']
-            }
-          ]
-        },
-        {
-          title: 'Launch Day Execution',
-          tasks: [
-            {
-              title: 'Publish release & announce across channels',
-              whenDaysOffset: 2,
-              scheduledStartMinutes: 540,
-              durationMinutes: 45,
-              checklistItems: ['Tag release build', 'Update landing page / docs', 'Post announcement']
-            }
-          ]
-        },
-        {
-          title: 'Post-Launch Follow-Up',
-          tasks: [
-            {
-              title: 'Monitor telemetry & triage early user feedback',
-              whenDaysOffset: 3,
-              durationMinutes: 30
-            }
-          ]
-        }
-      ]
+  ],
+  de: [
+    {
+      id: 'starter-trip-packing',
+      icon: '🧳',
+      titleKey: 'starterTplTripTitle',
+      descKey: 'starterTplTripDesc',
+      defaultTitle: 'Reise & Packliste',
+      defaultNotes:
+        'Komplette Reisevorbereitung mit Buchungen, Dokumenten, Packliste und Check vor der Abreise.',
+      blueprint: {
+        version: 1,
+        tasks: [
+          {
+            title: 'Flug-, Bahn- und Hotelbuchungen bestätigen',
+            whenDaysOffset: 0,
+            durationMinutes: 30,
+            checklistItems: ['Bordkarten offline speichern', 'Reiseplan mit der Familie teilen']
+          }
+        ],
+        headings: [
+          {
+            title: 'Dokumente & Wichtiges',
+            tasks: [
+              {
+                title: 'Reisepass / Ausweis & Reiseversicherung prüfen',
+                whenDaysOffset: 0,
+                durationMinutes: 20,
+                checklistItems: [
+                  'Reisepass / Personalausweis',
+                  'Zahlungskarten & Landeswährung',
+                  'Kranken- / Versicherungskarte'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Packliste',
+            tasks: [
+              {
+                title: 'Kleidung & Kulturbeutel einpacken',
+                whenDaysOffset: 1,
+                durationMinutes: 45,
+                checklistItems: [
+                  'Wettergerechte Kleidung',
+                  'Schuhe & Jacke',
+                  'Pflegeartikel & Reiseapotheke'
+                ]
+              },
+              {
+                title: 'Elektronik & Ladegeräte einpacken',
+                whenDaysOffset: 1,
+                durationMinutes: 15,
+                checklistItems: [
+                  'Smartphone- & Laptop-Ladegeräte',
+                  'Powerbank',
+                  'Reiseadapter',
+                  'Kopfhörer'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Vor der Abreise',
+            tasks: [
+              {
+                title: 'Rundgang durch die Wohnung vor Abreise',
+                whenDaysOffset: 2,
+                durationMinutes: 20,
+                checklistItems: [
+                  'Müll & verderbliche Lebensmittel entsorgen',
+                  'Pflanzen gießen',
+                  'Fenster & Türen verschließen'
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      id: 'starter-product-launch',
+      icon: '🚀',
+      titleKey: 'starterTplLaunchTitle',
+      descKey: 'starterTplLaunchDesc',
+      defaultTitle: 'Produkt-Launch',
+      defaultNotes:
+        'Strukturierter GTD-Launch-Plan von Positionierung und QA-Freigabe bis zum Launch-Tag und Follow-up.',
+      blueprint: {
+        version: 1,
+        tasks: [],
+        headings: [
+          {
+            title: 'Strategie & Positionierung',
+            tasks: [
+              {
+                title: 'Launch-Botschaft & Release Notes finalisieren',
+                whenDaysOffset: 0,
+                durationMinutes: 45,
+                checklistItems: [
+                  'Kernnutzen & Wertversprechen',
+                  'Changelog-Highlights',
+                  'Screenshots & Demo-Material'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Build- & QA-Freigabe',
+            tasks: [
+              {
+                title: 'Pre-Release-QA & Migrations-Tests abschließen',
+                whenDaysOffset: 1,
+                durationMinutes: 60,
+                checklistItems: [
+                  'Upgrade-Pfad geprüft',
+                  'Cloud-Synchronisation geprüft',
+                  'Null Lint-/Build-Warnungen'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Launch-Tag',
+            tasks: [
+              {
+                title: 'Release veröffentlichen & auf allen Kanälen ankündigen',
+                whenDaysOffset: 2,
+                scheduledStartMinutes: 540,
+                durationMinutes: 45,
+                checklistItems: [
+                  'Release-Build taggen',
+                  'Landingpage / Dokumentation aktualisieren',
+                  'Ankündigung veröffentlichen'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Nachbereitung',
+            tasks: [
+              {
+                title: 'Telemetrie überwachen & erstes Nutzer-Feedback sichten',
+                whenDaysOffset: 3,
+                durationMinutes: 30
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      id: 'starter-client-onboarding',
+      icon: '🤝',
+      titleKey: 'starterTplClientTitle',
+      descKey: 'starterTplClientDesc',
+      defaultTitle: 'Kunden-Onboarding',
+      defaultNotes:
+        'Wiederholbarer Onboarding-Workflow vom unterzeichneten Vertrag bis zum ersten Meilenstein.',
+      blueprint: {
+        version: 1,
+        tasks: [],
+        headings: [
+          {
+            title: 'Kickoff & Vereinbarungen',
+            tasks: [
+              {
+                title: 'Vertrag gegenzeichnen & Willkommenspaket senden',
+                whenDaysOffset: 0,
+                durationMinutes: 30,
+                checklistItems: [
+                  'Unterzeichneten Vertrag archivieren',
+                  'Abrechnungsprofil einrichten',
+                  'Willkommens-E-Mail versenden'
+                ]
+              },
+              {
+                title: 'Kickoff-Workshop terminieren',
+                whenDaysOffset: 0,
+                durationMinutes: 15
+              }
+            ]
+          },
+          {
+            title: 'Zugänge & Discovery',
+            tasks: [
+              {
+                title: 'Gemeinsamen Workspace & Repository-Zugriff einrichten',
+                whenDaysOffset: 1,
+                durationMinutes: 30,
+                checklistItems: [
+                  'Geteilte Ordner & Dokumente',
+                  'Kommunikationskanal',
+                  'Technische Zugangsdaten'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Erster Meilenstein',
+            tasks: [
+              {
+                title: '30-Tage-Roadmap & Erfolgskennzahlen liefern',
+                whenDaysOffset: 3,
+                deadlineDaysOffset: 7,
+                durationMinutes: 60
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      id: 'starter-weekly-sprint',
+      icon: '⚡',
+      titleKey: 'starterTplSprintTitle',
+      descKey: 'starterTplSprintDesc',
+      defaultTitle: 'Wochen-Sprint',
+      defaultNotes:
+        'Fokussierter 5-Tage-Sprint mit klaren Wochenzielen, Deep-Work-Blöcken und Freitags-Retrospektive.',
+      blueprint: {
+        version: 1,
+        tasks: [],
+        headings: [
+          {
+            title: 'Sprint-Planung',
+            tasks: [
+              {
+                title: 'Top-3-Ergebnisse für die Woche festlegen',
+                whenDaysOffset: 0,
+                scheduledStartMinutes: 540,
+                durationMinutes: 30,
+                checklistItems: ['Ergebnis #1', 'Ergebnis #2', 'Ergebnis #3']
+              }
+            ]
+          },
+          {
+            title: 'Deep-Work-Umsetzung',
+            tasks: [
+              {
+                title: 'Wichtigstes Sprint-Ergebnis fertigstellen',
+                whenDaysOffset: 1,
+                durationMinutes: 90
+              },
+              {
+                title: 'Blocker zur Wochenmitte lösen & Stakeholder-Update',
+                whenDaysOffset: 2,
+                durationMinutes: 30
+              }
+            ]
+          },
+          {
+            title: 'Review & Retrospektive',
+            tasks: [
+              {
+                title: 'Ergebnisse präsentieren & Retro-Notizen festhalten',
+                whenDaysOffset: 4,
+                durationMinutes: 30,
+                checklistItems: ['Was gut lief', 'Was im nächsten Sprint verbessert wird']
+              }
+            ]
+          }
+        ]
+      }
     }
-  },
-  {
-    id: 'starter-client-onboarding',
-    icon: '🤝',
-    titleKey: 'starterTplClientTitle',
-    descKey: 'starterTplClientDesc',
-    defaultTitle: 'Client Onboarding',
-    defaultNotes: 'Repeatable client kickoff workflow from signed agreement to first milestone delivery.',
-    blueprint: {
-      version: 1,
-      tasks: [],
-      headings: [
-        {
-          title: 'Kickoff & Agreements',
-          tasks: [
-            {
-              title: 'Countersign agreement & send welcome packet',
-              whenDaysOffset: 0,
-              durationMinutes: 30,
-              checklistItems: ['Signed SOW / MSA archived', 'Billing profile configured', 'Welcome email sent']
-            },
-            {
-              title: 'Schedule kickoff workshop',
-              whenDaysOffset: 0,
-              durationMinutes: 15
-            }
-          ]
-        },
-        {
-          title: 'Access & Discovery',
-          tasks: [
-            {
-              title: 'Provision shared workspace & repository access',
-              whenDaysOffset: 1,
-              durationMinutes: 30,
-              checklistItems: ['Shared folder & docs', 'Communication channel', 'Technical credentials']
-            }
-          ]
-        },
-        {
-          title: 'First Milestone',
-          tasks: [
-            {
-              title: 'Deliver 30-day roadmap & success metrics',
-              whenDaysOffset: 3,
-              deadlineDaysOffset: 7,
-              durationMinutes: 60
-            }
-          ]
-        }
-      ]
+  ],
+  fr: [
+    {
+      id: 'starter-trip-packing',
+      icon: '🧳',
+      titleKey: 'starterTplTripTitle',
+      descKey: 'starterTplTripDesc',
+      defaultTitle: 'Voyage & Bagages',
+      defaultNotes:
+        'Préparation complète du voyage : réservations, documents, liste de bagages et départ de la maison.',
+      blueprint: {
+        version: 1,
+        tasks: [
+          {
+            title: "Confirmer les réservations de vol, train et d'hôtel",
+            whenDaysOffset: 0,
+            durationMinutes: 30,
+            checklistItems: [
+              "Enregistrer les cartes d'embarquement hors ligne",
+              "Partager l'itinéraire avec la famille"
+            ]
+          }
+        ],
+        headings: [
+          {
+            title: 'Documents & Essentiels',
+            tasks: [
+              {
+                title: "Vérifier la validité du passeport / pièce d'identité et l'assurance voyage",
+                whenDaysOffset: 0,
+                durationMinutes: 20,
+                checklistItems: [
+                  "Passeport / Carte d'identité",
+                  'Cartes bancaires & devise locale',
+                  "Carte vitale / d'assurance"
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Liste de bagages',
+            tasks: [
+              {
+                title: 'Préparer les vêtements & la trousse de toilette',
+                whenDaysOffset: 1,
+                durationMinutes: 45,
+                checklistItems: [
+                  'Tenues adaptées à la météo',
+                  'Chaussures & veste',
+                  'Articles de toilette & médicaments'
+                ]
+              },
+              {
+                title: 'Préparer les appareils électroniques & chargeurs',
+                whenDaysOffset: 1,
+                durationMinutes: 15,
+                checklistItems: [
+                  'Chargeurs téléphone + ordinateur',
+                  'Batterie externe',
+                  'Adaptateur universel',
+                  'Écouteurs / casque'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Avant de quitter la maison',
+            tasks: [
+              {
+                title: 'Vérification du domicile avant le départ',
+                whenDaysOffset: 2,
+                durationMinutes: 20,
+                checklistItems: [
+                  'Vider les poubelles & aliments périssables',
+                  'Arroser les plantes',
+                  'Verrouiller fenêtres & portes'
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      id: 'starter-product-launch',
+      icon: '🚀',
+      titleKey: 'starterTplLaunchTitle',
+      descKey: 'starterTplLaunchDesc',
+      defaultTitle: 'Lancement de produit',
+      defaultNotes:
+        'Plan de lancement GTD structuré : positionnement, validation QA, jour J et suivi post-lancement.',
+      blueprint: {
+        version: 1,
+        tasks: [],
+        headings: [
+          {
+            title: 'Stratégie & Positionnement',
+            tasks: [
+              {
+                title: 'Finaliser le message de lancement & les notes de version',
+                whenDaysOffset: 0,
+                durationMinutes: 45,
+                checklistItems: [
+                  'Proposition de valeur principale',
+                  'Points clés du journal des modifications',
+                  "Captures d'écran & démos"
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Préparation Build & QA',
+            tasks: [
+              {
+                title: 'Terminer la recette QA & les tests de migration',
+                whenDaysOffset: 1,
+                durationMinutes: 60,
+                checklistItems: [
+                  'Parcours de mise à jour vérifié',
+                  'Synchronisation cloud vérifiée',
+                  'Zéro avertissement lint/build'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Exécution du jour J',
+            tasks: [
+              {
+                title: 'Publier la version & annoncer sur tous les canaux',
+                whenDaysOffset: 2,
+                scheduledStartMinutes: 540,
+                durationMinutes: 45,
+                checklistItems: [
+                  'Taguer la version publiée',
+                  "Mettre à jour la page d'accueil / documentation",
+                  "Publier l'annonce"
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Suivi post-lancement',
+            tasks: [
+              {
+                title: 'Surveiller la télémétrie & trier les premiers retours utilisateurs',
+                whenDaysOffset: 3,
+                durationMinutes: 30
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      id: 'starter-client-onboarding',
+      icon: '🤝',
+      titleKey: 'starterTplClientTitle',
+      descKey: 'starterTplClientDesc',
+      defaultTitle: 'Intégration client',
+      defaultNotes:
+        "Flux d'intégration client reproductible, du contrat signé à la livraison du premier jalon.",
+      blueprint: {
+        version: 1,
+        tasks: [],
+        headings: [
+          {
+            title: 'Lancement & Accords',
+            tasks: [
+              {
+                title: "Contresigner l'accord & envoyer le dossier de bienvenue",
+                whenDaysOffset: 0,
+                durationMinutes: 30,
+                checklistItems: [
+                  'Contrat signé archivé',
+                  'Profil de facturation configuré',
+                  'E-mail de bienvenue envoyé'
+                ]
+              },
+              {
+                title: "Planifier l'atelier de lancement",
+                whenDaysOffset: 0,
+                durationMinutes: 15
+              }
+            ]
+          },
+          {
+            title: 'Accès & Découverte',
+            tasks: [
+              {
+                title: "Configurer l'espace partagé & les accès techniques",
+                whenDaysOffset: 1,
+                durationMinutes: 30,
+                checklistItems: [
+                  'Dossier & documents partagés',
+                  'Canal de communication',
+                  'Identifiants techniques'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Premier jalon',
+            tasks: [
+              {
+                title: 'Livrer la feuille de route à 30 jours & les indicateurs de succès',
+                whenDaysOffset: 3,
+                deadlineDaysOffset: 7,
+                durationMinutes: 60
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      id: 'starter-weekly-sprint',
+      icon: '⚡',
+      titleKey: 'starterTplSprintTitle',
+      descKey: 'starterTplSprintDesc',
+      defaultTitle: 'Sprint hebdomadaire',
+      defaultNotes:
+        "Sprint d'exécution ciblé de 5 jours avec objectifs prioritaires, travail profond et rétrospective du vendredi.",
+      blueprint: {
+        version: 1,
+        tasks: [],
+        headings: [
+          {
+            title: 'Planification du sprint',
+            tasks: [
+              {
+                title: 'Définir les 3 résultats prioritaires de la semaine',
+                whenDaysOffset: 0,
+                scheduledStartMinutes: 540,
+                durationMinutes: 30,
+                checklistItems: ['Résultat n°1', 'Résultat n°2', 'Résultat n°3']
+              }
+            ]
+          },
+          {
+            title: 'Travail profond',
+            tasks: [
+              {
+                title: 'Livrer le livrable principal du sprint',
+                whenDaysOffset: 1,
+                durationMinutes: 90
+              },
+              {
+                title: 'Lever les blocages de mi-semaine & point parties prenantes',
+                whenDaysOffset: 2,
+                durationMinutes: 30
+              }
+            ]
+          },
+          {
+            title: 'Revue & Rétrospective',
+            tasks: [
+              {
+                title: 'Présenter le travail livré & noter le bilan rétro',
+                whenDaysOffset: 4,
+                durationMinutes: 30,
+                checklistItems: [
+                  'Ce qui a bien fonctionné',
+                  'Ce qu’il faut améliorer au prochain sprint'
+                ]
+              }
+            ]
+          }
+        ]
+      }
     }
-  },
-  {
-    id: 'starter-weekly-sprint',
-    icon: '⚡',
-    titleKey: 'starterTplSprintTitle',
-    descKey: 'starterTplSprintDesc',
-    defaultTitle: 'Weekly Sprint',
-    defaultNotes: 'Focused 5-day execution sprint with clear top outcomes, deep work blocks, and Friday retro.',
-    blueprint: {
-      version: 1,
-      tasks: [],
-      headings: [
-        {
-          title: 'Sprint Planning',
-          tasks: [
-            {
-              title: 'Define top 3 outcomes for the week',
-              whenDaysOffset: 0,
-              scheduledStartMinutes: 540,
-              durationMinutes: 30,
-              checklistItems: ['Outcome #1', 'Outcome #2', 'Outcome #3']
-            }
-          ]
-        },
-        {
-          title: 'Deep Work Execution',
-          tasks: [
-            {
-              title: 'Ship primary sprint deliverable',
-              whenDaysOffset: 1,
-              durationMinutes: 90
-            },
-            {
-              title: 'Clear mid-week blockers & stakeholder check-in',
-              whenDaysOffset: 2,
-              durationMinutes: 30
-            }
-          ]
-        },
-        {
-          title: 'Review & Retrospective',
-          tasks: [
-            {
-              title: 'Demo shipped work & capture retro notes',
-              whenDaysOffset: 4,
-              durationMinutes: 30,
-              checklistItems: ['What went well', 'What to improve next sprint']
-            }
-          ]
-        }
-      ]
+  ],
+  it: [
+    {
+      id: 'starter-trip-packing',
+      icon: '🧳',
+      titleKey: 'starterTplTripTitle',
+      descKey: 'starterTplTripDesc',
+      defaultTitle: 'Viaggio & Valigia',
+      defaultNotes:
+        'Organizzazione completa del viaggio: prenotazioni, documenti, lista bagagli e controlli prima di partire.',
+      blueprint: {
+        version: 1,
+        tasks: [
+          {
+            title: 'Confermare prenotazioni di volo, treno e hotel',
+            whenDaysOffset: 0,
+            durationMinutes: 30,
+            checklistItems: [
+              "Salvare carte d'imbarco offline",
+              "Condividere l'itinerario con la famiglia"
+            ]
+          }
+        ],
+        headings: [
+          {
+            title: 'Documenti & Essenziali',
+            tasks: [
+              {
+                title: 'Verificare validità passaporto / documento e assicurazione viaggio',
+                whenDaysOffset: 0,
+                durationMinutes: 20,
+                checklistItems: [
+                  "Passaporto / Carta d'identità",
+                  'Carte di pagamento & valuta locale',
+                  'Tessera sanitaria / assicurativa'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Lista bagagli',
+            tasks: [
+              {
+                title: 'Preparare abbigliamento & beauty case',
+                whenDaysOffset: 1,
+                durationMinutes: 45,
+                checklistItems: [
+                  'Abiti adatti al meteo',
+                  'Scarpe & giacca',
+                  'Articoli da toilette & medicinali'
+                ]
+              },
+              {
+                title: 'Preparare dispositivi elettronici & caricabatterie',
+                whenDaysOffset: 1,
+                durationMinutes: 15,
+                checklistItems: [
+                  'Caricabatterie telefono + laptop',
+                  'Power bank',
+                  'Adattatore universale da viaggio',
+                  'Cuffie / auricolari'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Prima di uscire di casa',
+            tasks: [
+              {
+                title: 'Controllo finale di casa prima della partenza',
+                whenDaysOffset: 2,
+                durationMinutes: 20,
+                checklistItems: [
+                  'Svuotare rifiuti & cibi deperibili',
+                  'Annaffiare le piante',
+                  'Chiudere finestre & porte'
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      id: 'starter-product-launch',
+      icon: '🚀',
+      titleKey: 'starterTplLaunchTitle',
+      descKey: 'starterTplLaunchDesc',
+      defaultTitle: 'Lancio prodotto',
+      defaultNotes:
+        'Playbook GTD strutturato per il lancio: posizionamento, verifica QA, giorno del lancio e follow-up.',
+      blueprint: {
+        version: 1,
+        tasks: [],
+        headings: [
+          {
+            title: 'Strategia & Posizionamento',
+            tasks: [
+              {
+                title: 'Finalizzare messaggio di lancio & note di rilascio',
+                whenDaysOffset: 0,
+                durationMinutes: 45,
+                checklistItems: [
+                  'Proposta di valore principale',
+                  'Punti salienti del changelog',
+                  'Screenshot & materiali demo'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Prontezza Build & QA',
+            tasks: [
+              {
+                title: 'Completare test QA pre-rilascio & verifica migrazione',
+                whenDaysOffset: 1,
+                durationMinutes: 60,
+                checklistItems: [
+                  'Percorso di aggiornamento verificato',
+                  'Sincronizzazione cloud verificata',
+                  'Zero avvisi di lint/build'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Giorno del lancio',
+            tasks: [
+              {
+                title: 'Pubblicare la release & annunciare sui canali',
+                whenDaysOffset: 2,
+                scheduledStartMinutes: 540,
+                durationMinutes: 45,
+                checklistItems: [
+                  'Taggare la build di rilascio',
+                  'Aggiornare landing page / documentazione',
+                  "Pubblicare l'annuncio"
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Follow-up post-lancio',
+            tasks: [
+              {
+                title: 'Monitorare la telemetria & raccogliere i primi feedback',
+                whenDaysOffset: 3,
+                durationMinutes: 30
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      id: 'starter-client-onboarding',
+      icon: '🤝',
+      titleKey: 'starterTplClientTitle',
+      descKey: 'starterTplClientDesc',
+      defaultTitle: 'Onboarding cliente',
+      defaultNotes:
+        'Flusso ripetibile di avvio cliente: dal contratto firmato alla consegna del primo traguardo.',
+      blueprint: {
+        version: 1,
+        tasks: [],
+        headings: [
+          {
+            title: 'Kickoff & Accordi',
+            tasks: [
+              {
+                title: 'Controfirmare il contratto & inviare kit di benvenuto',
+                whenDaysOffset: 0,
+                durationMinutes: 30,
+                checklistItems: [
+                  'Contratto firmato archiviato',
+                  'Profilo di fatturazione configurato',
+                  'Email di benvenuto inviata'
+                ]
+              },
+              {
+                title: 'Pianificare il workshop di kickoff',
+                whenDaysOffset: 0,
+                durationMinutes: 15
+              }
+            ]
+          },
+          {
+            title: 'Accessi & Discovery',
+            tasks: [
+              {
+                title: 'Configurare spazio condiviso & accessi ai repository',
+                whenDaysOffset: 1,
+                durationMinutes: 30,
+                checklistItems: [
+                  'Cartella & documenti condivisi',
+                  'Canale di comunicazione',
+                  'Credenziali tecniche'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Primo traguardo',
+            tasks: [
+              {
+                title: 'Consegnare roadmap a 30 giorni & metriche di successo',
+                whenDaysOffset: 3,
+                deadlineDaysOffset: 7,
+                durationMinutes: 60
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      id: 'starter-weekly-sprint',
+      icon: '⚡',
+      titleKey: 'starterTplSprintTitle',
+      descKey: 'starterTplSprintDesc',
+      defaultTitle: 'Sprint settimanale',
+      defaultNotes:
+        'Sprint focalizzato di 5 giorni con obiettivi chiave, blocchi di deep work e retrospettiva del venerdì.',
+      blueprint: {
+        version: 1,
+        tasks: [],
+        headings: [
+          {
+            title: 'Pianificazione sprint',
+            tasks: [
+              {
+                title: 'Definire i 3 risultati principali della settimana',
+                whenDaysOffset: 0,
+                scheduledStartMinutes: 540,
+                durationMinutes: 30,
+                checklistItems: ['Risultato #1', 'Risultato #2', 'Risultato #3']
+              }
+            ]
+          },
+          {
+            title: 'Esecuzione Deep Work',
+            tasks: [
+              {
+                title: 'Completare il risultato principale dello sprint',
+                whenDaysOffset: 1,
+                durationMinutes: 90
+              },
+              {
+                title: 'Rimuovere blocchi di metà settimana & allineamento stakeholder',
+                whenDaysOffset: 2,
+                durationMinutes: 30
+              }
+            ]
+          },
+          {
+            title: 'Revisione & Retrospettiva',
+            tasks: [
+              {
+                title: 'Presentare il lavoro completato & annotare la retrospettiva',
+                whenDaysOffset: 4,
+                durationMinutes: 30,
+                checklistItems: [
+                  'Cosa ha funzionato bene',
+                  'Cosa migliorare nel prossimo sprint'
+                ]
+              }
+            ]
+          }
+        ]
+      }
     }
-  }
-];
+  ],
+  es: [
+    {
+      id: 'starter-trip-packing',
+      icon: '🧳',
+      titleKey: 'starterTplTripTitle',
+      descKey: 'starterTplTripDesc',
+      defaultTitle: 'Viaje y Equipaje',
+      defaultNotes:
+        'Preparación integral del viaje: reservas, documentos, lista de equipaje y revisión antes de salir.',
+      blueprint: {
+        version: 1,
+        tasks: [
+          {
+            title: 'Confirmar reservas de vuelo, tren y hotel',
+            whenDaysOffset: 0,
+            durationMinutes: 30,
+            checklistItems: [
+              'Guardar tarjetas de embarque sin conexión',
+              'Compartir itinerario con la familia'
+            ]
+          }
+        ],
+        headings: [
+          {
+            title: 'Documentos e Imprescindibles',
+            tasks: [
+              {
+                title: 'Verificar validez de pasaporte / DNI y seguro de viaje',
+                whenDaysOffset: 0,
+                durationMinutes: 20,
+                checklistItems: [
+                  'Pasaporte / Documento de identidad',
+                  'Tarjetas bancarias y moneda local',
+                  'Tarjeta sanitaria / de seguro'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Lista de equipaje',
+            tasks: [
+              {
+                title: 'Empacar ropa y neceser',
+                whenDaysOffset: 1,
+                durationMinutes: 45,
+                checklistItems: [
+                  'Ropa adecuada al clima',
+                  'Calzado y chaqueta',
+                  'Artículos de aseo y medicación'
+                ]
+              },
+              {
+                title: 'Empacar dispositivos electrónicos y cargadores',
+                whenDaysOffset: 1,
+                durationMinutes: 15,
+                checklistItems: [
+                  'Cargadores de móvil y portátil',
+                  'Batería externa',
+                  'Adaptador universal de viaje',
+                  'Auriculares'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Antes de salir de casa',
+            tasks: [
+              {
+                title: 'Revisión final de casa antes de salir',
+                whenDaysOffset: 2,
+                durationMinutes: 20,
+                checklistItems: [
+                  'Sacar basura y alimentos perecederos',
+                  'Regar las plantas',
+                  'Cerrar ventanas y puertas con llave'
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      id: 'starter-product-launch',
+      icon: '🚀',
+      titleKey: 'starterTplLaunchTitle',
+      descKey: 'starterTplLaunchDesc',
+      defaultTitle: 'Lanzamiento de producto',
+      defaultNotes:
+        'Guía GTD estructurada de lanzamiento: posicionamiento, validación QA, día de lanzamiento y seguimiento.',
+      blueprint: {
+        version: 1,
+        tasks: [],
+        headings: [
+          {
+            title: 'Estrategia y Posicionamiento',
+            tasks: [
+              {
+                title: 'Definir mensaje de lanzamiento y notas de la versión',
+                whenDaysOffset: 0,
+                durationMinutes: 45,
+                checklistItems: [
+                  'Propuesta de valor principal',
+                  'Novedades destacadas del registro de cambios',
+                  'Capturas de pantalla y recursos demo'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Preparación de Build y QA',
+            tasks: [
+              {
+                title: 'Completar pruebas QA previas al lanzamiento y migración',
+                whenDaysOffset: 1,
+                durationMinutes: 60,
+                checklistItems: [
+                  'Ruta de actualización verificada',
+                  'Sincronización en la nube verificada',
+                  'Cero advertencias de lint/compilación'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Ejecución del día de lanzamiento',
+            tasks: [
+              {
+                title: 'Publicar versión y anunciar en todos los canales',
+                whenDaysOffset: 2,
+                scheduledStartMinutes: 540,
+                durationMinutes: 45,
+                checklistItems: [
+                  'Etiquetar compilación de lanzamiento',
+                  'Actualizar página de inicio / documentación',
+                  'Publicar anuncio oficial'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Seguimiento poslanzamiento',
+            tasks: [
+              {
+                title: 'Supervisar telemetría y clasificar primeros comentarios',
+                whenDaysOffset: 3,
+                durationMinutes: 30
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      id: 'starter-client-onboarding',
+      icon: '🤝',
+      titleKey: 'starterTplClientTitle',
+      descKey: 'starterTplClientDesc',
+      defaultTitle: 'Incorporación de cliente',
+      defaultNotes:
+        'Flujo repetible de inicio con clientes desde el acuerdo firmado hasta el primer hito entregado.',
+      blueprint: {
+        version: 1,
+        tasks: [],
+        headings: [
+          {
+            title: 'Inicio y Acuerdos',
+            tasks: [
+              {
+                title: 'Firmar acuerdo y enviar paquete de bienvenida',
+                whenDaysOffset: 0,
+                durationMinutes: 30,
+                checklistItems: [
+                  'Contrato firmado archivado',
+                  'Perfil de facturación configurado',
+                  'Correo de bienvenida enviado'
+                ]
+              },
+              {
+                title: 'Programar taller de inicio',
+                whenDaysOffset: 0,
+                durationMinutes: 15
+              }
+            ]
+          },
+          {
+            title: 'Accesos y Descubrimiento',
+            tasks: [
+              {
+                title: 'Configurar espacio compartido y acceso a repositorios',
+                whenDaysOffset: 1,
+                durationMinutes: 30,
+                checklistItems: [
+                  'Carpeta y documentos compartidos',
+                  'Canal de comunicación',
+                  'Credenciales técnicas'
+                ]
+              }
+            ]
+          },
+          {
+            title: 'Primer hito',
+            tasks: [
+              {
+                title: 'Entregar hoja de ruta de 30 días y métricas de éxito',
+                whenDaysOffset: 3,
+                deadlineDaysOffset: 7,
+                durationMinutes: 60
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      id: 'starter-weekly-sprint',
+      icon: '⚡',
+      titleKey: 'starterTplSprintTitle',
+      descKey: 'starterTplSprintDesc',
+      defaultTitle: 'Sprint semanal',
+      defaultNotes:
+        'Sprint enfocado de 5 días con resultados clave, bloques de trabajo profundo y retrospectiva del viernes.',
+      blueprint: {
+        version: 1,
+        tasks: [],
+        headings: [
+          {
+            title: 'Planificación del sprint',
+            tasks: [
+              {
+                title: 'Definir los 3 resultados clave de la semana',
+                whenDaysOffset: 0,
+                scheduledStartMinutes: 540,
+                durationMinutes: 30,
+                checklistItems: ['Resultado #1', 'Resultado #2', 'Resultado #3']
+              }
+            ]
+          },
+          {
+            title: 'Ejecución de trabajo profundo',
+            tasks: [
+              {
+                title: 'Entregar el objetivo principal del sprint',
+                whenDaysOffset: 1,
+                durationMinutes: 90
+              },
+              {
+                title: 'Resolver bloqueos de mitad de semana y revisión de avance',
+                whenDaysOffset: 2,
+                durationMinutes: 30
+              }
+            ]
+          },
+          {
+            title: 'Revisión y Retrospectiva',
+            tasks: [
+              {
+                title: 'Mostrar avances entregados y anotar retrospectiva',
+                whenDaysOffset: 4,
+                durationMinutes: 30,
+                checklistItems: [
+                  'Qué funcionó bien',
+                  'Qué mejorar en el próximo sprint'
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+};
+
+export function getStarterGtdTemplates(
+  lang: SupportedLang = 'en'
+): readonly StarterProjectTemplateDef[] {
+  return STARTER_GTD_TEMPLATES_BY_LANG[lang] ?? STARTER_GTD_TEMPLATES_BY_LANG.en;
+}
+
+export const STARTER_GTD_TEMPLATES: readonly StarterProjectTemplateDef[] =
+  STARTER_GTD_TEMPLATES_BY_LANG.en;
 
 /**
  * Captures a live Project, its Headings, Open Tasks, and Checklists into a reusable ProjectTemplateBlueprint.

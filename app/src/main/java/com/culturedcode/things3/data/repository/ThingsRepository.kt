@@ -2324,8 +2324,12 @@ class ThingsRepository @Inject constructor(
         }
     }
 
-    suspend fun importProjectFromOutline(rawOutline: String, areaId: String? = null): String {
-        val blueprint = ProjectOutlineImporter.parseOutline(rawOutline)
+    suspend fun importProjectFromOutline(
+        rawOutline: String,
+        areaId: String? = null,
+        fallbackTitle: String = "Imported Project"
+    ): String {
+        val blueprint = ProjectOutlineImporter.parseOutline(rawOutline, fallbackTitle = fallbackTitle)
         return createProjectFromTemplateBlueprint(
             blueprint = blueprint,
             areaIdOverride = areaId

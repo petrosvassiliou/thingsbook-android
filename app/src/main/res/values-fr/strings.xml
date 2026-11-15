@@ -414,11 +414,12 @@
     <string name="v2_weekly_review_subtitle">Revue GTD guidée en 4 étapes</string>
     <string name="v2_review_step_inbox">1. Vider la boîte de réception</string>
     <string name="v2_review_step_today">2. Aujourd\'hui et échéances</string>
-    <string name="v2_review_step_projects">3. Projets bloqués</string>
+    <string name="v2_review_step_projects">3. Attention requise</string>
     <string name="v2_review_step_someday">4. Un jour et bilan</string>
-    <string name="v2_stalled_project_badge">Bloqué</string>
+    <string name="v2_stalled_project_badge">Attention requise</string>
+    <string name="v2_requires_review_badge">Révision requise</string>
     <string name="v2_stalled_no_next_action">Aucune prochaine action ouverte</string>
-    <string name="v2_stalled_unreviewed">Non révisé depuis 14+ jours</string>
+    <string name="v2_stalled_unreviewed">Révision requise (14+ jours)</string>
     <string name="v2_add_next_action">Ajouter la prochaine action…</string>
     <string name="v2_mark_reviewed">Marquer comme révisé</string>
     <string name="v2_complete_weekly_review">Terminer la revue hebdomadaire</string>

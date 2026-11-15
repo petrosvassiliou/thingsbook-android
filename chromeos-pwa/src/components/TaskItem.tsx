@@ -53,7 +53,8 @@ import { localDb } from '../data/localDb';
 import type { TranslationStrings } from '../i18n/translations';
 import { extractDetectedLinksFromNotes } from '../domain/powerUtils';
 import { DetectedNotesLinksRow, MarkdownNotesField } from './MarkdownNotesField';
-import { AttachmentsStrip, processAndAddAttachmentFile } from './AttachmentStrip';
+import { AttachmentsStrip } from './AttachmentStrip';
+import { processAndAddAttachmentFile } from '../data/attachmentHelpers';
 
 interface ChecklistSubtaskRowProps {
   item: ChecklistItemRecord;

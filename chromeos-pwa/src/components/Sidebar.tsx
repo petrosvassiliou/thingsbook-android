@@ -5,11 +5,11 @@ import {
   CalendarDays,
   CheckSquare,
   ClipboardList,
-  Compass,
   Download,
   Flag,
   Inbox,
   Layers,
+  ListChecks,
   Package,
   Plus,
   Star,
@@ -287,9 +287,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
             }}
           >
             <span className="nav-item-icon">
-              <Compass size={16.5} style={{ color: 'var(--things-blue)' }} />
+              <ListChecks size={16.5} style={{ color: 'var(--things-blue)' }} />
             </span>
-            <span className="nav-item-label">🧭 {t.weeklyReviewBtn}</span>
+            <span className="nav-item-label">{t.weeklyReviewBtn}</span>
             {stalledProjectsCount > 0 && (
               <span className="nav-item-count v2-warn-count">{stalledProjectsCount}</span>
             )}
@@ -570,7 +570,8 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
 
         <span className="strip-divider" />
         <button type="button" className="strip-pill" onClick={onOpenWeeklyReview}>
-          <span>🧭 {t.weeklyReviewBtn}</span>
+          <ListChecks size={14} style={{ color: 'var(--things-blue)' }} />
+          <span>{t.weeklyReviewBtn}</span>
         </button>
         <button type="button" className="strip-pill" onClick={onOpenTemplates}>
           <span>📋 {t.templatesBtn}</span>

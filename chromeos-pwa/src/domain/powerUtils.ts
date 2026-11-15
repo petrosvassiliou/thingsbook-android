@@ -13,7 +13,7 @@ const PHONE_REGEX =
   /(?<!\w)(?:\+\d{1,3}[\s.-]?)?(?:\(?\d{2,5}\)?[\s.-]?)?\d{3,5}[\s.-]?\d{2,6}(?!\w)/g;
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const EXPLICIT_LOCATION_LINE_REGEX =
-  /^(?:[-*•]\s*)?(?:📍\s*|(?:\*\*)?(?:location|address|standort|ort|adresse|lieu|luogo|indirizzo|ubicación|dirección)(?:\*\*)?\s*[:\-]\s*)(.+)$/i;
+  /^(?:[-*•]\s*)?(?:📍\s*|(?:\*\*)?(?:location|address|standort|ort|adresse|lieu|luogo|indirizzo|ubicación|dirección)(?:\*\*)?\s*[:-]\s*)(.+)$/i;
 const GPS_COORD_REGEX = /(?<!\d)(-?\d{1,2}\.\d{4,})\s*,\s*(-?\d{1,3}\.\d{4,})(?!\d)/g;
 const STREET_ADDRESS_REGEX =
   /\b([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-\s]{2,35}\s(?:Street|St\.?|Avenue|Ave\.?|Road|Rd\.?|Boulevard|Blvd\.?|Lane|Ln\.?|Drive|Dr\.?|Way|Court|Ct\.?|Plaza|Square|Sq\.?|Straße|Str\.?|Gasse|Weg|Platz|Allee|Rue|Boulevard|Avenue|Via|Piazza|Calle|Avenida)\s*\d{1,5}[A-Za-z]?(?:,\s*\d{4,5}\s+[A-ZÄÖÜa-zäöüß\-\s]{2,25})?)\b/g;

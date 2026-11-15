@@ -314,6 +314,10 @@ public struct SmartViewCanvas: View {
 
                 let stalledInfo = store.projectStalledInfo(project)
                 if stalledInfo.isStalled {
+                    let badgeIcon = stalledInfo.hasNoNextAction ? "exclamationmark.circle" : "clock.arrow.circlepath"
+                    let badgeLabel = stalledInfo.hasNoNextAction
+                        ? store.tr("v2_stalled_project_badge")
+                        : store.tr("v2_requires_review_badge")
                     Menu {
                         Button(store.tr("v2_mark_reviewed")) {
                             store.markProjectReviewed(project.id)
@@ -323,9 +327,9 @@ public struct SmartViewCanvas: View {
                         }
                     } label: {
                         HStack(spacing: 4) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.system(size: 10, weight: .bold))
-                            Text(store.tr("v2_stalled_project_badge"))
+                            Image(systemName: badgeIcon)
+                                .font(.system(size: 10.5, weight: .semibold))
+                            Text(badgeLabel)
                                 .font(.system(size: 11, weight: .semibold))
                         }
                         .foregroundStyle(ThingsMacPalette.somedayAmber)

@@ -201,7 +201,40 @@ object ProjectTemplateCodec {
 }
 
 object StarterProjectTemplates {
-    val builtInTemplates: List<ProjectTemplate> by lazy {
+    val builtInTemplates: List<ProjectTemplate>
+        get() = getBuiltInTemplates(Locale.getDefault().language)
+
+    fun normalizeLanguageCode(languageCode: String): String {
+        return when (languageCode.trim().lowercase(Locale.ROOT).take(2)) {
+            "de" -> "de"
+            "fr" -> "fr"
+            "it" -> "it"
+            "es" -> "es"
+            else -> "en"
+        }
+    }
+
+    fun getSampleOutlineMarkdown(languageCode: String): String {
+        return when (normalizeLanguageCode(languageCode)) {
+            "de" -> "# Q3-Launch-Plan\n## Vorbereitung\n- [ ] QA-Checkliste abschließen (45m)\n  - [ ] Neuinstallations-Schnelltest\n  - [ ] Upgrade-Migrationstest\n- [ ] Ankündigung formulieren @10:00 (30m)\n## Veröffentlichung\n- [ ] Signiertes Release veröffentlichen"
+            "fr" -> "# Plan de lancement T3\n## Préparation\n- [ ] Finaliser la liste qualité (45m)\n  - [ ] Test d'installation propre\n  - [ ] Test de migration\n- [ ] Rédiger l'annonce @10:00 (30m)\n## Distribution\n- [ ] Publier la version signée"
+            "it" -> "# Piano di lancio Q3\n## Preparazione\n- [ ] Completare lista qualità (45m)\n  - [ ] Test di nuova installazione\n  - [ ] Test di migrazione\n- [ ] Scrivere annuncio @10:00 (30m)\n## Distribuzione\n- [ ] Pubblicare versione firmata"
+            "es" -> "# Plan de lanzamiento T3\n## Preparación\n- [ ] Completar lista de calidad (45m)\n  - [ ] Prueba de instalación limpia\n  - [ ] Prueba de migración\n- [ ] Redactar anuncio @10:00 (30m)\n## Distribución\n- [ ] Publicar versión firmada"
+            else -> "# Q3 Launch Plan\n## Readiness\n- [ ] Finalize QA checklist (45m)\n  - [ ] Clean install smoke test\n  - [ ] Upgrade migration test\n- [ ] Draft release announcement @10:00 (30m)\n## Distribution\n- [ ] Publish signed release"
+        }
+    }
+
+    fun getBuiltInTemplates(languageCode: String): List<ProjectTemplate> {
+        return when (normalizeLanguageCode(languageCode)) {
+            "de" -> germanTemplates
+            "fr" -> frenchTemplates
+            "it" -> italianTemplates
+            "es" -> spanishTemplates
+            else -> englishTemplates
+        }
+    }
+
+    private val englishTemplates: List<ProjectTemplate> by lazy {
         listOf(
             ProjectTemplate(
                 id = "builtin_trip_packing",
@@ -421,6 +454,890 @@ object StarterProjectTemplates {
             )
         )
     }
+
+    private val germanTemplates: List<ProjectTemplate> by lazy {
+        listOf(
+            ProjectTemplate(
+                id = "builtin_trip_packing",
+                title = "✈️ Reise & Packliste",
+                notes = "Stressfreie Reisevorbereitung, Buchungscheck und Abreise-Checkliste.",
+                defaultAreaId = null,
+                tagIds = emptyList(),
+                sortOrder = 1.0,
+                createdAt = 0L,
+                updatedAt = 0L,
+                isBuiltIn = true,
+                blueprint = ProjectTemplateBlueprint(
+                    title = "Reise & Packliste",
+                    notes = "Reiseplan, Dokumente und Packliste.",
+                    headings = listOf(
+                        TemplateHeadingBlueprint(
+                            title = "Buchungen & Dokumente",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Flüge, Hotel & Nahverkehr bestätigen",
+                                    checklistItems = listOf("Check-in-Erinnerung gesetzt", "Bordkarten offline speichern", "Hoteladresse offline sichern"),
+                                    dayOffset = 0,
+                                    durationMinutes = 30
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Reisepass, Ausweis & Reiseversicherung prüfen",
+                                    checklistItems = listOf("Reisepass > 6 Monate gültig", "Versicherungsnachweis gespeichert"),
+                                    dayOffset = 0,
+                                    durationMinutes = 15
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Koffer packen",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Kleidung & Basics einpacken",
+                                    checklistItems = listOf("Jacke & wetterfeste Kleidung", "Bequeme Schuhe", "Kulturbeutel", "Sonnenbrille"),
+                                    dayOffset = 1,
+                                    durationMinutes = 45
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Technik & Ladegeräte einpacken",
+                                    checklistItems = listOf("Smartphone + USB-C-Kabel", "Powerbank geladen", "Reiseadapter", "Kopfhörer"),
+                                    dayOffset = 1,
+                                    durationMinutes = 15
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Vor der Abreise",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Wohnungscheck vor Abreise",
+                                    checklistItems = listOf("Müll & Verderbliches entsorgen", "Geräte vom Strom trennen", "Fenster & Türen verschließen"),
+                                    dayOffset = 2,
+                                    durationMinutes = 15
+                                )
+                            )
+                        )
+                    )
+                )
+            ),
+            ProjectTemplate(
+                id = "builtin_product_launch",
+                title = "🚀 Produkt-Launch",
+                notes = "Durchgängiger GTD-Launch-Plan vom QA-Abschluss bis zur Ankündigung.",
+                defaultAreaId = null,
+                tagIds = emptyList(),
+                sortOrder = 2.0,
+                createdAt = 0L,
+                updatedAt = 0L,
+                isBuiltIn = true,
+                blueprint = ProjectTemplateBlueprint(
+                    title = "Produkt-Launch",
+                    notes = "Vollständige Launch-Checkliste für Produkt, Qualitätssicherung und Release.",
+                    deadlineDayOffset = 7,
+                    headings = listOf(
+                        TemplateHeadingBlueprint(
+                            title = "Vorbereitung & Qualitätssicherung",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Regressions- und Upgrade-Tests durchführen",
+                                    checklistItems = listOf("Neuinstallations-Schnelltest", "Upgrade-Migrationstest im Bestand", "Cloud-Synchronisation prüfen"),
+                                    dayOffset = 0,
+                                    durationMinutes = 60
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Versionshinweise & Bildschirmfotos fertigstellen",
+                                    checklistItems = listOf("Top-3-Funktionen hervorheben", "Änderungsprotokoll übersetzen"),
+                                    dayOffset = 1,
+                                    durationMinutes = 45
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Veröffentlichung & Kommunikation",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Version taggen & signierte Pakete hochladen",
+                                    checklistItems = listOf("SHA-256-Prüfsummen verifizieren", "GitHub-Version veröffentlichen"),
+                                    dayOffset = 2,
+                                    durationMinutes = 30
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Kennzahlen & Rückmeldungen nach dem Start beobachten",
+                                    checklistItems = listOf("Erstes Feedback sichten", "Hotfix-Zeitfenster bei Bedarf einplanen"),
+                                    dayOffset = 3,
+                                    durationMinutes = 30
+                                )
+                            )
+                        )
+                    )
+                )
+            ),
+            ProjectTemplate(
+                id = "builtin_client_onboarding",
+                title = "🤝 Kunden-Onboarding",
+                notes = "Strukturierter Startablauf für neue Kundenprojekte.",
+                defaultAreaId = null,
+                tagIds = emptyList(),
+                sortOrder = 3.0,
+                createdAt = 0L,
+                updatedAt = 0L,
+                isBuiltIn = true,
+                blueprint = ProjectTemplateBlueprint(
+                    title = "Kunden-Onboarding",
+                    notes = "Auftakt-Meilensteine, Zugänge einrichten und Plan für das erste Ergebnis.",
+                    headings = listOf(
+                        TemplateHeadingBlueprint(
+                            title = "Verträge & Zugänge",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Vertrag gegenzeichnen & Abrechnung einrichten",
+                                    checklistItems = listOf("Unterzeichneten Vertrag archiviert", "Rechnungskontakt bestätigt"),
+                                    dayOffset = 0,
+                                    durationMinutes = 30
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Gemeinsamen Arbeitsbereich & Zugangsdaten bereitstellen",
+                                    checklistItems = listOf("Gemeinsamer Ordner erstellt", "Einladung zum Kommunikationskanal gesendet"),
+                                    dayOffset = 1,
+                                    durationMinutes = 30
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Auftakt & Fahrplan",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Kickoff-Gespräch führen & 30-Tage-Ziele abstimmen",
+                                    checklistItems = listOf("Ansprechpartner bestätigen", "Wöchentlichen Abstimmungsrhythmus vereinbaren", "Gesprächsprotokoll versenden"),
+                                    dayOffset = 2,
+                                    durationMinutes = 60
+                                )
+                            )
+                        )
+                    )
+                )
+            ),
+            ProjectTemplate(
+                id = "builtin_weekly_sprint",
+                title = "⚡ Wochensprint",
+                notes = "Fokussierter 5-Tage-Umsetzungssprint mit klaren Zielen und Rückblick.",
+                defaultAreaId = null,
+                tagIds = emptyList(),
+                sortOrder = 4.0,
+                createdAt = 0L,
+                updatedAt = 0L,
+                isBuiltIn = true,
+                blueprint = ProjectTemplateBlueprint(
+                    title = "Wochensprint",
+                    notes = "Wichtigste Ergebnisse, Fokusblöcke und Freitags-Retrospektive.",
+                    deadlineDayOffset = 5,
+                    headings = listOf(
+                        TemplateHeadingBlueprint(
+                            title = "Sprint-Planung",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Top-3-Ergebnisse der Woche festlegen",
+                                    checklistItems = listOf("Ergebnis Nr. 1", "Ergebnis Nr. 2", "Ergebnis Nr. 3"),
+                                    dayOffset = 0,
+                                    scheduledStartMinutes = 9 * 60,
+                                    durationMinutes = 30
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Fokussierte Umsetzung",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Hauptergebnis fertigstellen",
+                                    dayOffset = 1,
+                                    scheduledStartMinutes = 10 * 60,
+                                    durationMinutes = 90
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Hindernisse lösen & Wochenmitte prüfen",
+                                    dayOffset = 2,
+                                    durationMinutes = 30
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Abschluss & Rückblick",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Freitagsabschluss & Sprint-Retrospektive",
+                                    checklistItems = listOf("Was lief gut", "Was nächste Woche verbessern"),
+                                    dayOffset = 4,
+                                    durationMinutes = 30
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    }
+
+    private val frenchTemplates: List<ProjectTemplate> by lazy {
+        listOf(
+            ProjectTemplate(
+                id = "builtin_trip_packing",
+                title = "✈️ Voyage et bagages",
+                notes = "Préparation de voyage sereine, vérification des réservations et check-list de départ.",
+                defaultAreaId = null,
+                tagIds = emptyList(),
+                sortOrder = 1.0,
+                createdAt = 0L,
+                updatedAt = 0L,
+                isBuiltIn = true,
+                blueprint = ProjectTemplateBlueprint(
+                    title = "Voyage et bagages",
+                    notes = "Itinéraire de voyage, documents et liste de bagages.",
+                    headings = listOf(
+                        TemplateHeadingBlueprint(
+                            title = "Réservations et documents",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Confirmer les vols, l'hôtel et les transports locaux",
+                                    checklistItems = listOf("Rappel d'enregistrement programmé", "Télécharger les cartes d'embarquement hors ligne", "Enregistrer l'adresse de l'hôtel hors ligne"),
+                                    dayOffset = 0,
+                                    durationMinutes = 30
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Vérifier le passeport, la pièce d'identité et l'assurance voyage",
+                                    checklistItems = listOf("Passeport valide > 6 mois", "Attestation d'assurance enregistrée"),
+                                    dayOffset = 0,
+                                    durationMinutes = 15
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Préparer la valise",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Préparer les vêtements et les essentiels",
+                                    checklistItems = listOf("Vestes et tenues selon la météo", "Chaussures confortables", "Trousse de toilette", "Lunettes de soleil"),
+                                    dayOffset = 1,
+                                    durationMinutes = 45
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Préparer les appareils et chargeurs",
+                                    checklistItems = listOf("Téléphone + câble USB-C", "Batterie externe chargée", "Adaptateur de voyage", "Écouteurs"),
+                                    dayOffset = 1,
+                                    durationMinutes = 15
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Avant de quitter la maison",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Tour de vérification avant le départ",
+                                    checklistItems = listOf("Vider les poubelles et denrées périssables", "Débrancher les appareils", "Fermer fenêtres et portes à clé"),
+                                    dayOffset = 2,
+                                    durationMinutes = 15
+                                )
+                            )
+                        )
+                    )
+                )
+            ),
+            ProjectTemplate(
+                id = "builtin_product_launch",
+                title = "🚀 Lancement de produit",
+                notes = "Plan de lancement GTD complet, de la validation qualité à l'annonce.",
+                defaultAreaId = null,
+                tagIds = emptyList(),
+                sortOrder = 2.0,
+                createdAt = 0L,
+                updatedAt = 0L,
+                isBuiltIn = true,
+                blueprint = ProjectTemplateBlueprint(
+                    title = "Lancement de produit",
+                    notes = "Liste complète de lancement couvrant produit, qualité et publication.",
+                    deadlineDayOffset = 7,
+                    headings = listOf(
+                        TemplateHeadingBlueprint(
+                            title = "Préparation et validation qualité",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Exécuter les tests de non-régression et de mise à niveau",
+                                    checklistItems = listOf("Test rapide d'installation propre", "Test de migration lors de la mise à jour", "Vérification de la synchronisation cloud"),
+                                    dayOffset = 0,
+                                    durationMinutes = 60
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Finaliser les notes de version et captures d'écran",
+                                    checklistItems = listOf("Mettre en avant les 3 nouveautés clés", "Traduire le journal des modifications"),
+                                    dayOffset = 1,
+                                    durationMinutes = 45
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Distribution et communication",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Étiqueter la version et publier les paquets signés",
+                                    checklistItems = listOf("Vérifier les empreintes SHA-256", "Publier la version sur GitHub"),
+                                    dayOffset = 2,
+                                    durationMinutes = 30
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Suivre les indicateurs et retours après lancement",
+                                    checklistItems = listOf("Trier les premiers retours", "Prévoir un créneau de correctif si nécessaire"),
+                                    dayOffset = 3,
+                                    durationMinutes = 30
+                                )
+                            )
+                        )
+                    )
+                )
+            ),
+            ProjectTemplate(
+                id = "builtin_client_onboarding",
+                title = "🤝 Intégration client",
+                notes = "Processus de démarrage structuré pour les nouvelles missions clients.",
+                defaultAreaId = null,
+                tagIds = emptyList(),
+                sortOrder = 3.0,
+                createdAt = 0L,
+                updatedAt = 0L,
+                isBuiltIn = true,
+                blueprint = ProjectTemplateBlueprint(
+                    title = "Intégration client",
+                    notes = "Jalons de lancement, configuration des accès et plan du premier livrable.",
+                    headings = listOf(
+                        TemplateHeadingBlueprint(
+                            title = "Contrats et accès",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Contresigner le contrat et configurer la facturation",
+                                    checklistItems = listOf("Contrat signé archivé", "Contact principal de facturation confirmé"),
+                                    dayOffset = 0,
+                                    durationMinutes = 30
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Préparer l'espace de travail partagé et les identifiants",
+                                    checklistItems = listOf("Dossier partagé créé", "Invitation au canal de communication envoyée"),
+                                    dayOffset = 1,
+                                    durationMinutes = 30
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Lancement et feuille de route",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Animer la réunion de lancement et aligner les objectifs à 30 jours",
+                                    checklistItems = listOf("Confirmer les parties prenantes", "Définir le rythme de suivi hebdomadaire", "Envoyer le compte rendu"),
+                                    dayOffset = 2,
+                                    durationMinutes = 60
+                                )
+                            )
+                        )
+                    )
+                )
+            ),
+            ProjectTemplate(
+                id = "builtin_weekly_sprint",
+                title = "⚡ Sprint hebdomadaire",
+                notes = "Sprint d'exécution ciblé sur 5 jours avec objectifs clairs et bilan.",
+                defaultAreaId = null,
+                tagIds = emptyList(),
+                sortOrder = 4.0,
+                createdAt = 0L,
+                updatedAt = 0L,
+                isBuiltIn = true,
+                blueprint = ProjectTemplateBlueprint(
+                    title = "Sprint hebdomadaire",
+                    notes = "Résultats clés, créneaux de concentration et rétrospective du vendredi.",
+                    deadlineDayOffset = 5,
+                    headings = listOf(
+                        TemplateHeadingBlueprint(
+                            title = "Planification du sprint",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Définir les 3 résultats prioritaires de la semaine",
+                                    checklistItems = listOf("Résultat n° 1", "Résultat n° 2", "Résultat n° 3"),
+                                    dayOffset = 0,
+                                    scheduledStartMinutes = 9 * 60,
+                                    durationMinutes = 30
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Travail en profondeur",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Livrer le livrable principal",
+                                    dayOffset = 1,
+                                    scheduledStartMinutes = 10 * 60,
+                                    durationMinutes = 90
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Lever les blocages et faire le point à mi-semaine",
+                                    dayOffset = 2,
+                                    durationMinutes = 30
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Bilan et rétrospective",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Clôture du vendredi et rétrospective",
+                                    checklistItems = listOf("Ce qui a bien fonctionné", "Ce qu'il faut améliorer la semaine prochaine"),
+                                    dayOffset = 4,
+                                    durationMinutes = 30
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    }
+
+    private val italianTemplates: List<ProjectTemplate> by lazy {
+        listOf(
+            ProjectTemplate(
+                id = "builtin_trip_packing",
+                title = "✈️ Viaggio e valigia",
+                notes = "Preparazione del viaggio senza stress, verifica prenotazioni e lista prima della partenza.",
+                defaultAreaId = null,
+                tagIds = emptyList(),
+                sortOrder = 1.0,
+                createdAt = 0L,
+                updatedAt = 0L,
+                isBuiltIn = true,
+                blueprint = ProjectTemplateBlueprint(
+                    title = "Viaggio e valigia",
+                    notes = "Itinerario di viaggio, documenti e lista per la valigia.",
+                    headings = listOf(
+                        TemplateHeadingBlueprint(
+                            title = "Prenotazioni e documenti",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Confermare voli, hotel e trasporti locali",
+                                    checklistItems = listOf("Promemoria check-in impostato", "Scaricare carte d'imbarco offline", "Salvare indirizzo dell'hotel offline"),
+                                    dayOffset = 0,
+                                    durationMinutes = 30
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Verificare passaporto, documento d'identità e assicurazione",
+                                    checklistItems = listOf("Passaporto valido > 6 mesi", "Tessera assicurativa salvata"),
+                                    dayOffset = 0,
+                                    durationMinutes = 15
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Preparare il bagaglio",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Mettere in valigia abiti ed essenziali",
+                                    checklistItems = listOf("Giacche e capi per il meteo", "Scarpe comode", "Beauty case", "Occhiali da sole"),
+                                    dayOffset = 1,
+                                    durationMinutes = 45
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Mettere in valigia dispositivi e caricabatterie",
+                                    checklistItems = listOf("Telefono + cavo USB-C", "Power bank carica", "Adattatore da viaggio", "Cuffie"),
+                                    dayOffset = 1,
+                                    durationMinutes = 15
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Prima di uscire di casa",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Controllo finale di casa prima della partenza",
+                                    checklistItems = listOf("Svuotare rifiuti e cibi deperibili", "Scollegare gli elettrodomestici", "Chiudere finestre e porte"),
+                                    dayOffset = 2,
+                                    durationMinutes = 15
+                                )
+                            )
+                        )
+                    )
+                )
+            ),
+            ProjectTemplate(
+                id = "builtin_product_launch",
+                title = "🚀 Lancio prodotto",
+                notes = "Piano operativo GTD completo dal blocco qualità fino all'annuncio.",
+                defaultAreaId = null,
+                tagIds = emptyList(),
+                sortOrder = 2.0,
+                createdAt = 0L,
+                updatedAt = 0L,
+                isBuiltIn = true,
+                blueprint = ProjectTemplateBlueprint(
+                    title = "Lancio prodotto",
+                    notes = "Lista completa di lancio tra prodotto, verifica qualità e rilascio.",
+                    deadlineDayOffset = 7,
+                    headings = listOf(
+                        TemplateHeadingBlueprint(
+                            title = "Preparazione e verifica qualità",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Eseguire test di regressione e di aggiornamento",
+                                    checklistItems = listOf("Test rapido di nuova installazione", "Test di migrazione durante l'aggiornamento", "Controllo sincronizzazione cloud"),
+                                    dayOffset = 0,
+                                    durationMinutes = 60
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Finalizzare note di rilascio e schermate",
+                                    checklistItems = listOf("Evidenziare le 3 novità principali", "Tradurre il registro delle modifiche"),
+                                    dayOffset = 1,
+                                    durationMinutes = 45
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Distribuzione e comunicazione",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Creare tag di versione e caricare i pacchetti firmati",
+                                    checklistItems = listOf("Verificare impronte SHA-256", "Pubblicare versione su GitHub"),
+                                    dayOffset = 2,
+                                    durationMinutes = 30
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Monitorare metriche e riscontri post-lancio",
+                                    checklistItems = listOf("Valutare i primi riscontri", "Pianificare finestra di correzione se necessario"),
+                                    dayOffset = 3,
+                                    durationMinutes = 30
+                                )
+                            )
+                        )
+                    )
+                )
+            ),
+            ProjectTemplate(
+                id = "builtin_client_onboarding",
+                title = "🤝 Accoglienza cliente",
+                notes = "Flusso di avvio strutturato per nuove collaborazioni con i clienti.",
+                defaultAreaId = null,
+                tagIds = emptyList(),
+                sortOrder = 3.0,
+                createdAt = 0L,
+                updatedAt = 0L,
+                isBuiltIn = true,
+                blueprint = ProjectTemplateBlueprint(
+                    title = "Accoglienza cliente",
+                    notes = "Tappe iniziali, configurazione degli accessi e piano della prima consegna.",
+                    headings = listOf(
+                        TemplateHeadingBlueprint(
+                            title = "Accordi e accessi",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Controfirmare il contratto e impostare la fatturazione",
+                                    checklistItems = listOf("Contratto firmato archiviato", "Referente amministrativo confermato"),
+                                    dayOffset = 0,
+                                    durationMinutes = 30
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Configurare spazio condiviso e credenziali",
+                                    checklistItems = listOf("Cartella condivisa creata", "Invito al canale di comunicazione inviato"),
+                                    dayOffset = 1,
+                                    durationMinutes = 30
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Avvio e tabella di marcia",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Tenere la riunione iniziale e allineare gli obiettivi a 30 giorni",
+                                    checklistItems = listOf("Confermare i referenti del progetto", "Concordare cadenza di aggiornamento settimanale", "Inviare riepilogo dell'incontro"),
+                                    dayOffset = 2,
+                                    durationMinutes = 60
+                                )
+                            )
+                        )
+                    )
+                )
+            ),
+            ProjectTemplate(
+                id = "builtin_weekly_sprint",
+                title = "⚡ Sprint settimanale",
+                notes = "Ciclo operativo mirato di 5 giorni con obiettivi chiari e retrospettiva.",
+                defaultAreaId = null,
+                tagIds = emptyList(),
+                sortOrder = 4.0,
+                createdAt = 0L,
+                updatedAt = 0L,
+                isBuiltIn = true,
+                blueprint = ProjectTemplateBlueprint(
+                    title = "Sprint settimanale",
+                    notes = "Risultati chiave, blocchi di concentrazione e retrospettiva del venerdì.",
+                    deadlineDayOffset = 5,
+                    headings = listOf(
+                        TemplateHeadingBlueprint(
+                            title = "Pianificazione settimanale",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Definire i 3 risultati principali della settimana",
+                                    checklistItems = listOf("Risultato n. 1", "Risultato n. 2", "Risultato n. 3"),
+                                    dayOffset = 0,
+                                    scheduledStartMinutes = 9 * 60,
+                                    durationMinutes = 30
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Lavoro concentrato",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Completare il risultato principale",
+                                    dayOffset = 1,
+                                    scheduledStartMinutes = 10 * 60,
+                                    durationMinutes = 90
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Rimuovere gli ostacoli e verificare i progressi di metà settimana",
+                                    dayOffset = 2,
+                                    durationMinutes = 30
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Riepilogo e retrospettiva",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Chiusura del venerdì e retrospettiva",
+                                    checklistItems = listOf("Cosa ha funzionato bene", "Cosa migliorare la prossima settimana"),
+                                    dayOffset = 4,
+                                    durationMinutes = 30
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    }
+
+    private val spanishTemplates: List<ProjectTemplate> by lazy {
+        listOf(
+            ProjectTemplate(
+                id = "builtin_trip_packing",
+                title = "✈️ Viaje y equipaje",
+                notes = "Preparación de viaje sin estrés, verificación de reservas y lista antes de salir.",
+                defaultAreaId = null,
+                tagIds = emptyList(),
+                sortOrder = 1.0,
+                createdAt = 0L,
+                updatedAt = 0L,
+                isBuiltIn = true,
+                blueprint = ProjectTemplateBlueprint(
+                    title = "Viaje y equipaje",
+                    notes = "Itinerario de viaje, documentos y lista de equipaje.",
+                    headings = listOf(
+                        TemplateHeadingBlueprint(
+                            title = "Reservas y documentos",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Confirmar vuelos, hotel y transporte local",
+                                    checklistItems = listOf("Recordatorio de check-in activado", "Descargar tarjetas de embarque sin conexión", "Guardar dirección del hotel sin conexión"),
+                                    dayOffset = 0,
+                                    durationMinutes = 30
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Verificar pasaporte, documento de identidad y seguro de viaje",
+                                    checklistItems = listOf("Pasaporte con validez > 6 meses", "Tarjeta del seguro guardada"),
+                                    dayOffset = 0,
+                                    durationMinutes = 15
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Hacer la maleta",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Empacar ropa y artículos esenciales",
+                                    checklistItems = listOf("Chaquetas y capas para el clima", "Calzado cómodo", "Neceser de aseo", "Gafas de sol"),
+                                    dayOffset = 1,
+                                    durationMinutes = 45
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Empacar tecnología y cargadores",
+                                    checklistItems = listOf("Teléfono + cable USB-C", "Batería externa cargada", "Adaptador de viaje", "Auriculares"),
+                                    dayOffset = 1,
+                                    durationMinutes = 15
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Antes de salir de casa",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Revisión final de casa antes de salir",
+                                    checklistItems = listOf("Sacar basura y alimentos perecederos", "Desenchufar electrodomésticos", "Cerrar ventanas y puertas con llave"),
+                                    dayOffset = 2,
+                                    durationMinutes = 15
+                                )
+                            )
+                        )
+                    )
+                )
+            ),
+            ProjectTemplate(
+                id = "builtin_product_launch",
+                title = "🚀 Lanzamiento de producto",
+                notes = "Guía GTD integral de lanzamiento desde el cierre de pruebas hasta el anuncio.",
+                defaultAreaId = null,
+                tagIds = emptyList(),
+                sortOrder = 2.0,
+                createdAt = 0L,
+                updatedAt = 0L,
+                isBuiltIn = true,
+                blueprint = ProjectTemplateBlueprint(
+                    title = "Lanzamiento de producto",
+                    notes = "Lista integral de lanzamiento para producto, pruebas y publicación.",
+                    deadlineDayOffset = 7,
+                    headings = listOf(
+                        TemplateHeadingBlueprint(
+                            title = "Preparación y control de calidad",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Ejecutar pruebas de regresión y actualización",
+                                    checklistItems = listOf("Prueba rápida de instalación limpia", "Prueba de migración al actualizar", "Revisión de sincronización en la nube"),
+                                    dayOffset = 0,
+                                    durationMinutes = 60
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Finalizar notas de la versión y capturas de pantalla",
+                                    checklistItems = listOf("Destacar las 3 funciones principales", "Traducir el registro de cambios"),
+                                    dayOffset = 1,
+                                    durationMinutes = 45
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Distribución y comunicación",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Etiquetar versión y subir paquetes firmados",
+                                    checklistItems = listOf("Verificar sumas SHA-256", "Publicar versión en GitHub"),
+                                    dayOffset = 2,
+                                    durationMinutes = 30
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Supervisar métricas y comentarios tras el lanzamiento",
+                                    checklistItems = listOf("Clasificar primeros comentarios", "Planificar ventana de corrección si hace falta"),
+                                    dayOffset = 3,
+                                    durationMinutes = 30
+                                )
+                            )
+                        )
+                    )
+                )
+            ),
+            ProjectTemplate(
+                id = "builtin_client_onboarding",
+                title = "🤝 Incorporación de cliente",
+                notes = "Flujo estructurado de inicio para nuevos proyectos con clientes.",
+                defaultAreaId = null,
+                tagIds = emptyList(),
+                sortOrder = 3.0,
+                createdAt = 0L,
+                updatedAt = 0L,
+                isBuiltIn = true,
+                blueprint = ProjectTemplateBlueprint(
+                    title = "Incorporación de cliente",
+                    notes = "Hitos de arranque, configuración de accesos y plan del primer entregable.",
+                    headings = listOf(
+                        TemplateHeadingBlueprint(
+                            title = "Acuerdos y accesos",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Firmar contrato y configurar la facturación",
+                                    checklistItems = listOf("Contrato firmado archivado", "Contacto principal de facturación confirmado"),
+                                    dayOffset = 0,
+                                    durationMinutes = 30
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Preparar espacio de trabajo compartido y credenciales",
+                                    checklistItems = listOf("Carpeta compartida creada", "Invitación al canal de comunicación enviada"),
+                                    dayOffset = 1,
+                                    durationMinutes = 30
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Reunión inicial y hoja de ruta",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Realizar llamada inicial y alinear objetivos de 30 días",
+                                    checklistItems = listOf("Confirmar responsables", "Acordar frecuencia de seguimiento semanal", "Enviar resumen de la reunión"),
+                                    dayOffset = 2,
+                                    durationMinutes = 60
+                                )
+                            )
+                        )
+                    )
+                )
+            ),
+            ProjectTemplate(
+                id = "builtin_weekly_sprint",
+                title = "⚡ Sprint semanal",
+                notes = "Ciclo enfocado de ejecución de 5 días con objetivos claros y retrospectiva.",
+                defaultAreaId = null,
+                tagIds = emptyList(),
+                sortOrder = 4.0,
+                createdAt = 0L,
+                updatedAt = 0L,
+                isBuiltIn = true,
+                blueprint = ProjectTemplateBlueprint(
+                    title = "Sprint semanal",
+                    notes = "Resultados clave, bloques de concentración y retrospectiva del viernes.",
+                    deadlineDayOffset = 5,
+                    headings = listOf(
+                        TemplateHeadingBlueprint(
+                            title = "Planificación semanal",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Definir los 3 resultados clave de la semana",
+                                    checklistItems = listOf("Resultado n.º 1", "Resultado n.º 2", "Resultado n.º 3"),
+                                    dayOffset = 0,
+                                    scheduledStartMinutes = 9 * 60,
+                                    durationMinutes = 30
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Ejecución enfocada",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Entregar el resultado principal",
+                                    dayOffset = 1,
+                                    scheduledStartMinutes = 10 * 60,
+                                    durationMinutes = 90
+                                ),
+                                TemplateTaskBlueprint(
+                                    title = "Resolver bloqueos y revisar el avance de mitad de semana",
+                                    dayOffset = 2,
+                                    durationMinutes = 30
+                                )
+                            )
+                        ),
+                        TemplateHeadingBlueprint(
+                            title = "Cierre y retrospectiva",
+                            tasks = listOf(
+                                TemplateTaskBlueprint(
+                                    title = "Cierre del viernes y retrospectiva semanal",
+                                    checklistItems = listOf("Qué salió bien", "Qué mejorar la próxima semana"),
+                                    dayOffset = 4,
+                                    durationMinutes = 30
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    }
 }
 
 object ProjectOutlineImporter {
@@ -428,19 +1345,20 @@ object ProjectOutlineImporter {
     private val durationSuffixRegex = Regex("""(?:\s+|\()(\d{1,3})\s*m(?:in)?\)?$""", RegexOption.IGNORE_CASE)
     private val startTimeTokenRegex = Regex("""(?:^|\s)@(\d{1,2}):(\d{2})(?=\s|$)""")
 
-    fun parseOutline(rawInput: String): ProjectTemplateBlueprint {
+    fun parseOutline(rawInput: String, fallbackTitle: String = "Imported Project"): ProjectTemplateBlueprint {
+        val resolvedFallback = fallbackTitle.trim().ifBlank { "Imported Project" }
         val trimmed = rawInput.trim()
         if (trimmed.isEmpty()) {
-            return ProjectTemplateBlueprint(title = "Imported Project")
+            return ProjectTemplateBlueprint(title = resolvedFallback)
         }
 
         if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
             val parsedJson = runCatching {
                 val element = ProjectTemplateCodec.json.parseToJsonElement(trimmed)
-                ProjectTemplateCodec.parseJsonElementToBlueprint(element, fallbackTitle = "Imported Project")
+                ProjectTemplateCodec.parseJsonElementToBlueprint(element, fallbackTitle = resolvedFallback)
             }.getOrNull()
             if (parsedJson != null && (parsedJson.title.isNotBlank() || parsedJson.totalTaskCount > 0 || parsedJson.headings.isNotEmpty())) {
-                return parsedJson.copy(title = parsedJson.title.ifBlank { "Imported Project" })
+                return parsedJson.copy(title = parsedJson.title.ifBlank { resolvedFallback })
             }
         }
 
@@ -521,7 +1439,7 @@ object ProjectOutlineImporter {
         }
 
         return ProjectTemplateBlueprint(
-            title = projectTitle.ifBlank { "Imported Project" },
+            title = projectTitle.ifBlank { resolvedFallback },
             notes = projectNotesLines.joinToString("\n").trim(),
             unheadedTasks = unheadedTasks.map { it.build() },
             headings = headings.map { it.build() }

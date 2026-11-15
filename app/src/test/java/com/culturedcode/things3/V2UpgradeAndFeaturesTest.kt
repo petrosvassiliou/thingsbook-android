@@ -35,6 +35,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -397,9 +398,95 @@ class V2UpgradeAndFeaturesTest {
         assertEquals(listOf("Mobile", "Tablet"), parsedJsonBp.headings.single().tasks.single().checklistItems)
         assertEquals(60, parsedJsonBp.headings.single().tasks.single().durationMinutes)
 
+        // Localized fallbackTitle when outline has no explicit project title
+        assertEquals("Neues Projekt", ProjectOutlineImporter.parseOutline("", fallbackTitle = "Neues Projekt").title)
+        assertEquals("Nouveau projet", ProjectOutlineImporter.parseOutline("[\"Tâche 1\"]", fallbackTitle = "Nouveau projet").title)
+
         // Starter GTD templates gallery has all 4 built-in templates with structured tasks
         assertEquals(4, StarterProjectTemplates.builtInTemplates.size)
         assertTrue(StarterProjectTemplates.builtInTemplates.all { it.isBuiltIn && it.blueprint.totalTaskCount >= 3 })
+    }
+
+    @Test
+    fun `StarterProjectTemplates localizes all 4 templates including headings tasks and checklists in en de fr it es`() {
+        val enTemplates = StarterProjectTemplates.getBuiltInTemplates("en")
+        assertEquals(
+            listOf("builtin_trip_packing", "builtin_product_launch", "builtin_client_onboarding", "builtin_weekly_sprint"),
+            enTemplates.map { it.id }
+        )
+
+        val localizedCodes = listOf("de", "fr", "it", "es")
+        for (lang in localizedCodes) {
+            val localized = StarterProjectTemplates.getBuiltInTemplates(lang)
+            assertEquals("Expected 4 templates for $lang", 4, localized.size)
+            assertEquals(enTemplates.map { it.id }, localized.map { it.id })
+
+            for (idx in enTemplates.indices) {
+                val enTpl = enTemplates[idx]
+                val locTpl = localized[idx]
+
+                assertTrue(locTpl.isBuiltIn)
+                assertNotEquals("Template title not localized for $lang (${enTpl.id})", enTpl.title, locTpl.title)
+                assertNotEquals("Template notes not localized for $lang (${enTpl.id})", enTpl.notes, locTpl.notes)
+                assertNotEquals("Blueprint title not localized for $lang (${enTpl.id})", enTpl.blueprint.title, locTpl.blueprint.title)
+                assertNotEquals("Blueprint notes not localized for $lang (${enTpl.id})", enTpl.blueprint.notes, locTpl.blueprint.notes)
+                assertEquals(enTpl.blueprint.deadlineDayOffset, locTpl.blueprint.deadlineDayOffset)
+                assertEquals(enTpl.blueprint.headings.size, locTpl.blueprint.headings.size)
+                assertEquals(enTpl.blueprint.totalTaskCount, locTpl.blueprint.totalTaskCount)
+
+                for (hIdx in enTpl.blueprint.headings.indices) {
+                    val enHeading = enTpl.blueprint.headings[hIdx]
+                    val locHeading = locTpl.blueprint.headings[hIdx]
+                    assertTrue(locHeading.title.isNotBlank())
+                    assertNotEquals(
+                        "Heading title not localized for $lang (${enTpl.id} / ${enHeading.title})",
+                        enHeading.title,
+                        locHeading.title
+                    )
+                    assertEquals(enHeading.tasks.size, locHeading.tasks.size)
+
+                    for (tIdx in enHeading.tasks.indices) {
+                        val enTask = enHeading.tasks[tIdx]
+                        val locTask = locHeading.tasks[tIdx]
+                        assertTrue(locTask.title.isNotBlank())
+                        assertNotEquals(
+                            "Task title not localized for $lang (${enTpl.id} / ${enTask.title})",
+                            enTask.title,
+                            locTask.title
+                        )
+                        assertEquals(enTask.dayOffset, locTask.dayOffset)
+                        assertEquals(enTask.scheduledStartMinutes, locTask.scheduledStartMinutes)
+                        assertEquals(enTask.durationMinutes, locTask.durationMinutes)
+                        assertEquals(enTask.checklistItems.size, locTask.checklistItems.size)
+
+                        for (cIdx in enTask.checklistItems.indices) {
+                            val enChk = enTask.checklistItems[cIdx]
+                            val locChk = locTask.checklistItems[cIdx]
+                            assertTrue(locChk.isNotBlank())
+                            assertNotEquals(
+                                "Checklist item not localized for $lang (${enTpl.id} / $enChk)",
+                                enChk,
+                                locChk
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Verify language tag normalization (region tags and fallback to English)
+        assertEquals(
+            StarterProjectTemplates.getBuiltInTemplates("de").map { it.blueprint.title },
+            StarterProjectTemplates.getBuiltInTemplates("de-AT").map { it.blueprint.title }
+        )
+        assertEquals(
+            StarterProjectTemplates.getBuiltInTemplates("fr").map { it.blueprint.title },
+            StarterProjectTemplates.getBuiltInTemplates("FR_CH").map { it.blueprint.title }
+        )
+        assertEquals(
+            enTemplates.map { it.blueprint.title },
+            StarterProjectTemplates.getBuiltInTemplates("ja").map { it.blueprint.title }
+        )
     }
 
     @Test
@@ -441,6 +528,14 @@ class V2UpgradeAndFeaturesTest {
             lastReviewedAt = fifteenDaysAgo,
             updatedAt = fifteenDaysAgo
         )
+        val bothEmptyAndUnreviewedProject = healthyProject.copy(
+            id = "p-both",
+            title = "Empty and Unreviewed Project",
+            totalTaskCount = 1,
+            completedTaskCount = 1,
+            lastReviewedAt = fifteenDaysAgo,
+            updatedAt = fifteenDaysAgo
+        )
         val somedayProject = noNextActionProject.copy(
             id = "p-someday",
             scheduleState = ScheduleState.SOMEDAY,
@@ -450,19 +545,32 @@ class V2UpgradeAndFeaturesTest {
         assertNull(StalledProjectDetector.evaluateProject(healthyProject, nowMillis = now))
         assertNull(StalledProjectDetector.evaluateProject(somedayProject, nowMillis = now))
 
+        // Requires attention: hasNoNextAction == true, isUnreviewed == false
         val emptyEval = StalledProjectDetector.evaluateProject(noNextActionProject, nowMillis = now)
         assertNotNull(emptyEval)
-        assertEquals(StalledProjectReason.NO_NEXT_ACTION, emptyEval!!.reason)
+        assertTrue(emptyEval!!.hasNoNextAction)
+        assertFalse(emptyEval.isUnreviewed)
+        assertEquals(StalledProjectReason.NO_NEXT_ACTION, emptyEval.reason)
 
+        // Requires review only: hasNoNextAction == false, isUnreviewed == true
         val staleEval = StalledProjectDetector.evaluateProject(staleUnreviewedProject, nowMillis = now)
         assertNotNull(staleEval)
-        assertEquals(StalledProjectReason.UNREVIEWED, staleEval!!.reason)
+        assertFalse(staleEval!!.hasNoNextAction)
+        assertTrue(staleEval.isUnreviewed)
+        assertEquals(StalledProjectReason.UNREVIEWED, staleEval.reason)
+
+        // Both missing next action and unreviewed: hasNoNextAction == true, isUnreviewed == true
+        val bothEval = StalledProjectDetector.evaluateProject(bothEmptyAndUnreviewedProject, nowMillis = now)
+        assertNotNull(bothEval)
+        assertTrue(bothEval!!.hasNoNextAction)
+        assertTrue(bothEval.isUnreviewed)
+        assertEquals(StalledProjectReason.BOTH, bothEval.reason)
 
         val detected = StalledProjectDetector.detectStalledProjects(
-            projects = listOf(healthyProject, noNextActionProject, staleUnreviewedProject, somedayProject),
+            projects = listOf(healthyProject, noNextActionProject, staleUnreviewedProject, bothEmptyAndUnreviewedProject, somedayProject),
             nowMillis = now
         )
-        assertEquals(listOf("p-empty", "p-stale"), detected.map { it.project.id })
+        assertEquals(listOf("p-empty", "p-stale", "p-both"), detected.map { it.project.id })
 
         // Timeblock formatting, Focus Timer duration resolution & Timeline overlap detection
         assertEquals("🕐 09:00–09:45 (45m)", TimeblockScheduleUtils.formatTimeblockBadge(9 * 60, 45))
@@ -552,7 +660,7 @@ class V2UpgradeAndFeaturesTest {
     }
 
     @Test
-    fun `all 5 localized strings_xml files contain all 33 plain v2 keys with identical key sets`() {
+    fun `all 5 localized strings_xml files contain all 34 plain v2 keys with identical key sets`() {
         val expectedV2Keys = setOf(
             "v2_beta_badge",
             "v2_beta_channel_toggle",
@@ -564,6 +672,7 @@ class V2UpgradeAndFeaturesTest {
             "v2_review_step_projects",
             "v2_review_step_someday",
             "v2_stalled_project_badge",
+            "v2_requires_review_badge",
             "v2_stalled_no_next_action",
             "v2_stalled_unreviewed",
             "v2_add_next_action",
@@ -588,7 +697,7 @@ class V2UpgradeAndFeaturesTest {
             "v2_unscheduled_today",
             "v2_schedule_conflict"
         )
-        assertEquals(33, expectedV2Keys.size)
+        assertEquals(34, expectedV2Keys.size)
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -620,6 +729,11 @@ class V2UpgradeAndFeaturesTest {
                 assertTrue("Blank $v2Key in $folder/strings.xml", value!!.isNotBlank())
                 assertFalse("Unexpected % format specifier in $folder/$v2Key: $value", value.contains("%"))
             }
+            assertFalse(
+                "Deprecated 'stalled' wording still in $folder/strings.xml",
+                keysInFile["v2_stalled_project_badge"]!!.contains("stalled", ignoreCase = true) ||
+                    keysInFile["v2_review_step_projects"]!!.contains("stalled", ignoreCase = true)
+            )
         }
     }
 }

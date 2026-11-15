@@ -33,15 +33,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircleOutline
+import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Event
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Button
@@ -67,6 +70,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
@@ -283,7 +287,12 @@ fun ThingsWeeklyReviewModal(
                                 .background(colors.thingsBlueSoft),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(text = "🧭", fontSize = 18.sp)
+                            Icon(
+                                imageVector = Icons.Outlined.Checklist,
+                                contentDescription = stringResource(R.string.v2_weekly_review_title),
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                         Column {
                             Text(
@@ -534,7 +543,11 @@ fun ThingsWeeklyReviewModal(
                                                 .fillMaxWidth()
                                                 .border(
                                                     width = 1.dp,
-                                                    color = colors.somedayWarmAmber.copy(alpha = 0.45f),
+                                                    color = if (status.hasNoNextAction) {
+                                                        colors.somedayWarmAmber.copy(alpha = 0.45f)
+                                                    } else {
+                                                        colors.thingsBlue.copy(alpha = 0.35f)
+                                                    },
                                                     shape = RoundedCornerShape(13.dp)
                                                 )
                                         ) {
@@ -563,16 +576,52 @@ fun ThingsWeeklyReviewModal(
                                                             overflow = TextOverflow.Ellipsis
                                                         )
                                                     }
-                                                    Surface(
-                                                        shape = RoundedCornerShape(6.dp),
-                                                        color = colors.todayStarYellow.copy(alpha = 0.22f)
-                                                    ) {
-                                                        Text(
-                                                            text = "⚠️ ${stringResource(R.string.v2_stalled_project_badge)}",
-                                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                                            color = colors.somedayWarmAmber,
-                                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                                                        )
+                                                    if (status.hasNoNextAction) {
+                                                        Surface(
+                                                            shape = RoundedCornerShape(6.dp),
+                                                            color = colors.todayStarYellow.copy(alpha = 0.22f)
+                                                        ) {
+                                                            Row(
+                                                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                                                verticalAlignment = Alignment.CenterVertically,
+                                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                            ) {
+                                                                Icon(
+                                                                    imageVector = Icons.Outlined.WarningAmber,
+                                                                    contentDescription = null,
+                                                                    tint = colors.somedayWarmAmber,
+                                                                    modifier = Modifier.size(12.dp)
+                                                                )
+                                                                Text(
+                                                                    text = stringResource(R.string.v2_stalled_project_badge),
+                                                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                                    color = colors.somedayWarmAmber
+                                                                )
+                                                            }
+                                                        }
+                                                    } else {
+                                                        Surface(
+                                                            shape = RoundedCornerShape(6.dp),
+                                                            color = colors.thingsBlueSoft
+                                                        ) {
+                                                            Row(
+                                                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                                                verticalAlignment = Alignment.CenterVertically,
+                                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                            ) {
+                                                                Icon(
+                                                                    imageVector = Icons.Outlined.Schedule,
+                                                                    contentDescription = null,
+                                                                    tint = colors.thingsBlue,
+                                                                    modifier = Modifier.size(12.dp)
+                                                                )
+                                                                Text(
+                                                                    text = stringResource(R.string.v2_requires_review_badge),
+                                                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                                    color = colors.thingsBlue
+                                                                )
+                                                            }
+                                                        }
                                                     }
                                                 }
 
@@ -702,7 +751,7 @@ fun ThingsWeeklyReviewModal(
                                                     color = colors.thingsBlue
                                                 )
                                                 Text(
-                                                    text = "${stringResource(R.string.view_inbox)}: ${inboxTasks.size} • ⚠️ ${stalledProjects.size}",
+                                                    text = "${stringResource(R.string.view_inbox)}: ${inboxTasks.size} • ${stringResource(R.string.v2_stalled_project_badge)}: ${stalledProjects.size}",
                                                     style = MaterialTheme.typography.labelSmall,
                                                     color = colors.secondaryText
                                                 )
@@ -909,6 +958,7 @@ fun ThingsTemplatesAndImportModal(
     defaultAreaId: String? = null,
     areas: List<Area>,
     userTemplates: List<ProjectTemplate>,
+    locale: Locale = Locale.getDefault(),
     onCreateFromTemplate: (template: ProjectTemplate, areaIdOverride: String?) -> Unit,
     onDeleteUserTemplate: (String) -> Unit,
     onImportOutline: (rawOutline: String, areaId: String?) -> Unit,
@@ -916,16 +966,29 @@ fun ThingsTemplatesAndImportModal(
 ) {
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
-    var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab.coerceIn(0, 1)) }
-    var selectedAreaId by remember(defaultAreaId) { mutableStateOf(defaultAreaId) }
-    var rawOutline by remember {
-        mutableStateOf(
-            "# Q3 Launch Plan\n## Readiness\n- [ ] Finalize QA checklist (45m)\n  - [ ] Clean install smoke test\n  - [ ] Upgrade migration test\n- [ ] Draft release announcement @10:00 (30m)\n## Distribution\n- [ ] Publish signed release"
+    val configuration = LocalConfiguration.current
+    val resolvedLanguageCode = remember(configuration, locale) {
+        val appCompatLang = runCatching {
+            AppCompatDelegate.getApplicationLocales().get(0)?.language
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+        val configLang = configuration.locales[0]?.language?.takeIf { it.isNotBlank() }
+        StarterProjectTemplates.normalizeLanguageCode(
+            appCompatLang ?: configLang ?: locale.language
         )
     }
+    val localizedStarterTemplates = remember(resolvedLanguageCode) {
+        StarterProjectTemplates.getBuiltInTemplates(resolvedLanguageCode)
+    }
+    val fallbackProjectTitle = stringResource(R.string.entity_new_project)
 
-    val parsedPreview = remember(rawOutline) {
-        ProjectOutlineImporter.parseOutline(rawOutline)
+    var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab.coerceIn(0, 1)) }
+    var selectedAreaId by remember(defaultAreaId) { mutableStateOf(defaultAreaId) }
+    var rawOutline by remember(resolvedLanguageCode) {
+        mutableStateOf(StarterProjectTemplates.getSampleOutlineMarkdown(resolvedLanguageCode))
+    }
+
+    val parsedPreview = remember(rawOutline, fallbackProjectTitle) {
+        ProjectOutlineImporter.parseOutline(rawOutline, fallbackTitle = fallbackProjectTitle)
     }
 
     Dialog(
@@ -1099,7 +1162,7 @@ fun ThingsTemplatesAndImportModal(
                                 color = colors.secondaryText
                             )
                         }
-                        items(StarterProjectTemplates.builtInTemplates, key = { it.id }) { tpl ->
+                        items(localizedStarterTemplates, key = { "${resolvedLanguageCode}_${it.id}" }) { tpl ->
                             TemplateGalleryCard(
                                 template = tpl,
                                 onCreate = { onCreateFromTemplate(tpl, selectedAreaId) },

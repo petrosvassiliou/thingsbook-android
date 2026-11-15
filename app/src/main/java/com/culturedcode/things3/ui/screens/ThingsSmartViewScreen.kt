@@ -72,6 +72,7 @@ import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircleOutline
+import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudOff
@@ -89,10 +90,12 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.LocalOffer
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.NotificationsActive
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SystemUpdateAlt
+import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -1439,7 +1442,7 @@ private fun ThingsTopHeaderAndQuickFindSection(
 
     val showSidebar = isWideScreen && isSidebarVisible
 
-    // Top Utility & Navigation Bar (Sidebar/Hamburger Toggle, Thingsbook Symbol when sidebar hidden, Quick Find, Voice 🎙️, Weekly Review 🧭, Gemini AI ✨, Areas 📦, Tags 🏷️, Notifications 🔔, Language, Cloud Sync, Settings ⚙️)
+    // Top Utility & Navigation Bar (Sidebar/Hamburger Toggle, Thingsbook Symbol when sidebar hidden, Quick Find, Voice 🎙️, Weekly Review, Gemini AI ✨, Areas 📦, Tags 🏷️, Notifications 🔔, Language, Cloud Sync, Settings ⚙️)
     TopThingsbookBar(
         isWideScreen = isWideScreen,
         isSidebarVisible = if (isWideScreen) isSidebarVisible else isMobileDrawerOpen,
@@ -2799,11 +2802,13 @@ private fun ThingsModalsOverlay(
 
     // v2 Pillar 2: Reusable Project Templates & Markdown / JSON Outline Importer Modal
     if (isTemplatesModalOpen) {
+        val fallbackProjectTitle = stringResource(R.string.entity_new_project)
         ThingsTemplatesAndImportModal(
             initialTab = templatesModalInitialTab,
             defaultAreaId = templatesModalDefaultAreaId,
             areas = areas,
             userTemplates = userProjectTemplates,
+            locale = activeLocale,
             onCreateFromTemplate = { template, areaOverride ->
                 viewModel.createProjectFromTemplate(template, areaOverride)
             },
@@ -2811,7 +2816,7 @@ private fun ThingsModalsOverlay(
                 viewModel.deleteProjectTemplate(templateId)
             },
             onImportOutline = { rawOutline, areaId ->
-                viewModel.importProjectFromOutline(rawOutline, areaId)
+                viewModel.importProjectFromOutline(rawOutline, areaId, fallbackProjectTitle)
             },
             onDismiss = { viewModel.closeTemplatesModal() }
         )
@@ -3054,7 +3059,7 @@ private fun AreaProjectOverviewRow(
 ) {
     val colors = ThingsTheme.colors
     var showDeadlinePicker by remember(project.id) { mutableStateOf(false) }
-    val isStalled = remember(project) { StalledProjectDetector.evaluateProject(project)?.isStalled == true }
+    val stalledStatus = remember(project) { StalledProjectDetector.evaluateProject(project) }
 
     Surface(
         modifier = Modifier
@@ -3089,17 +3094,51 @@ private fun AreaProjectOverviewRow(
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
                             color = colors.primaryText
                         )
-                        if (isStalled) {
+                        if (stalledStatus?.hasNoNextAction == true) {
                             Surface(
                                 shape = RoundedCornerShape(6.dp),
                                 color = colors.todayStarYellow.copy(alpha = 0.22f)
                             ) {
-                                Text(
-                                    text = "⚠️ ${stringResource(R.string.v2_stalled_project_badge)}",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
-                                    color = colors.somedayWarmAmber,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
-                                )
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.WarningAmber,
+                                        contentDescription = null,
+                                        tint = colors.somedayWarmAmber,
+                                        modifier = Modifier.size(11.dp)
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.v2_stalled_project_badge),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                                        color = colors.somedayWarmAmber
+                                    )
+                                }
+                            }
+                        } else if (stalledStatus?.isUnreviewed == true) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = colors.thingsBlueSoft
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Schedule,
+                                        contentDescription = null,
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(11.dp)
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.v2_requires_review_badge),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                                        color = colors.thingsBlue
+                                    )
+                                }
                             }
                         }
                     }
@@ -3303,7 +3342,7 @@ private fun TopThingsbookBar(
                     }
                 }
 
-                // Guided GTD Weekly Review Button 🧭
+                // Guided GTD Weekly Review Button
                 ThingsHoverTooltip(text = stringResource(R.string.v2_weekly_review_title)) {
                     Row(
                         modifier = Modifier
@@ -3317,7 +3356,12 @@ private fun TopThingsbookBar(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Text(text = "🧭", fontSize = if (isWideScreen) 13.sp else 12.sp)
+                        Icon(
+                            imageVector = Icons.Outlined.Checklist,
+                            contentDescription = stringResource(R.string.v2_weekly_review_title),
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(if (isWideScreen) 16.dp else 15.dp)
+                        )
                         if (isWideScreen) {
                             Text(
                                 text = stringResource(R.string.v2_weekly_review_title),
@@ -3642,7 +3686,12 @@ private fun SmartViewNavigationStrip(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                Text(text = "🧭", fontSize = 13.sp)
+                Icon(
+                    imageVector = Icons.Outlined.Checklist,
+                    contentDescription = stringResource(R.string.v2_weekly_review_title),
+                    tint = colors.thingsBlue,
+                    modifier = Modifier.size(15.dp)
+                )
                 Text(
                     text = stringResource(R.string.v2_weekly_review_title),
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
@@ -3965,7 +4014,7 @@ private fun ViewTitleHeader(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false)
                         )
-                        if (stalledStatus?.isStalled == true) {
+                        if (stalledStatus?.hasNoNextAction == true) {
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
                                 color = colors.todayStarYellow.copy(alpha = 0.24f),
@@ -3973,12 +4022,49 @@ private fun ViewTitleHeader(
                                     .clip(RoundedCornerShape(8.dp))
                                     .clickable(onClick = onOpenStalledProjectReview)
                             ) {
-                                Text(
-                                    text = "⚠️ ${stringResource(R.string.v2_stalled_project_badge)}",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = colors.somedayWarmAmber,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                )
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.WarningAmber,
+                                        contentDescription = null,
+                                        tint = colors.somedayWarmAmber,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.v2_stalled_project_badge),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = colors.somedayWarmAmber
+                                    )
+                                }
+                            }
+                        } else if (stalledStatus?.isUnreviewed == true) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = colors.thingsBlueSoft,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable(onClick = onOpenStalledProjectReview)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Schedule,
+                                        contentDescription = null,
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.v2_requires_review_badge),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = colors.thingsBlue
+                                    )
+                                }
                             }
                         }
                     }
@@ -4998,8 +5084,12 @@ private fun ThingsChromebookSidebar(
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
     val areasLabel = stringResource(R.string.entity_areas)
-    val stalledCount = remember(projects) {
-        StalledProjectDetector.detectStalledProjects(projects).size
+    val stalledStatuses = remember(projects) {
+        StalledProjectDetector.detectStalledProjects(projects)
+    }
+    val stalledCount = stalledStatuses.size
+    val anyMissingNextAction = remember(stalledStatuses) {
+        stalledStatuses.any { it.hasNoNextAction }
     }
 
     Column(
@@ -5108,7 +5198,12 @@ private fun ThingsChromebookSidebar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(9.dp)
             ) {
-                Text(text = "🧭", fontSize = 14.sp)
+                Icon(
+                    imageVector = Icons.Outlined.Checklist,
+                    contentDescription = stringResource(R.string.v2_weekly_review_title),
+                    tint = colors.thingsBlue,
+                    modifier = Modifier.size(16.dp)
+                )
                 Text(
                     text = stringResource(R.string.v2_weekly_review_title),
                     style = MaterialTheme.typography.bodyMedium.copy(
@@ -5122,17 +5217,32 @@ private fun ThingsChromebookSidebar(
             if (stalledCount > 0) {
                 Surface(
                     shape = RoundedCornerShape(50),
-                    color = colors.todayStarYellow.copy(alpha = 0.28f)
+                    color = if (anyMissingNextAction) {
+                        colors.todayStarYellow.copy(alpha = 0.28f)
+                    } else {
+                        colors.cardSurface.copy(alpha = 0.85f)
+                    }
                 ) {
-                    Text(
-                        text = "⚠️ $stalledCount",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        color = colors.somedayWarmAmber,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (anyMissingNextAction) Icons.Outlined.WarningAmber else Icons.Outlined.Schedule,
+                            contentDescription = null,
+                            tint = if (anyMissingNextAction) colors.somedayWarmAmber else colors.thingsBlue,
+                            modifier = Modifier.size(11.dp)
+                        )
+                        Text(
+                            text = stalledCount.toString(),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = if (anyMissingNextAction) colors.somedayWarmAmber else colors.thingsBlue
+                        )
+                    }
                 }
             }
         }
@@ -5226,7 +5336,7 @@ private fun ThingsChromebookSidebar(
                     // Indented Projects inside this Area
                     areaProjects.forEach { project ->
                         val selected = navTarget == ActiveNavigationTarget.ProjectDetail(project.id)
-                        val isStalled = StalledProjectDetector.evaluateProject(project)?.isStalled == true
+                        val projStatus = StalledProjectDetector.evaluateProject(project)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -5261,8 +5371,20 @@ private fun ThingsChromebookSidebar(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                if (isStalled) {
-                                    Text(text = "⚠️", fontSize = 10.sp)
+                                if (projStatus?.hasNoNextAction == true) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.WarningAmber,
+                                        contentDescription = stringResource(R.string.v2_stalled_project_badge),
+                                        tint = colors.somedayWarmAmber,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                } else if (projStatus?.isUnreviewed == true) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Schedule,
+                                        contentDescription = stringResource(R.string.v2_requires_review_badge),
+                                        tint = colors.secondaryText,
+                                        modifier = Modifier.size(12.dp)
+                                    )
                                 }
                                 if (project.deadline != null) {
                                     Icon(
@@ -5282,7 +5404,7 @@ private fun ThingsChromebookSidebar(
             val unassignedProjects = projects.filter { it.areaId == null }
             items(unassignedProjects, key = { "sidebar_proj_unassigned_${it.id}" }) { project ->
                 val selected = navTarget == ActiveNavigationTarget.ProjectDetail(project.id)
-                val isStalled = StalledProjectDetector.evaluateProject(project)?.isStalled == true
+                val projStatus = StalledProjectDetector.evaluateProject(project)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -5316,8 +5438,20 @@ private fun ThingsChromebookSidebar(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        if (isStalled) {
-                            Text(text = "⚠️", fontSize = 10.sp)
+                        if (projStatus?.hasNoNextAction == true) {
+                            Icon(
+                                imageVector = Icons.Outlined.WarningAmber,
+                                contentDescription = stringResource(R.string.v2_stalled_project_badge),
+                                tint = colors.somedayWarmAmber,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        } else if (projStatus?.isUnreviewed == true) {
+                            Icon(
+                                imageVector = Icons.Outlined.Schedule,
+                                contentDescription = stringResource(R.string.v2_requires_review_badge),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(12.dp)
+                            )
                         }
                         if (project.deadline != null) {
                             Icon(

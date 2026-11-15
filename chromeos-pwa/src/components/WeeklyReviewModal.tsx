@@ -7,11 +7,11 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
-  Compass,
   Flag,
   Folder,
   Inbox,
   Layers,
+  ListChecks,
   Moon,
   Plus,
   Sparkles,
@@ -214,7 +214,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
         <div className="modal-header">
           <div>
             <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Compass size={19} style={{ color: 'var(--things-blue)' }} />
+              <ListChecks size={19} style={{ color: 'var(--things-blue)' }} />
               <span>{t.weeklyReviewTitle}</span>
             </h3>
             <div style={{ fontSize: 12.2, color: 'var(--text-secondary)', marginTop: 2 }}>
@@ -502,7 +502,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
             </>
           )}
 
-          {/* STEP 3: STALLED PROJECTS */}
+          {/* STEP 3: PROJECTS REQUIRING ATTENTION / REVIEW */}
           {step === 3 && (
             <>
               {stalledProjects.length === 0 ? (
@@ -517,6 +517,14 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                       ? areasMap.get(st.project.areaId)
                       : undefined;
                     const draftVal = nextActionDrafts[st.project.id] ?? '';
+                    const badgeLabel =
+                      st.status.reason === 'no_next_action'
+                        ? t.projectStalledBadge
+                        : t.projectRequiresReviewBadge;
+                    const detailHint =
+                      st.status.reason === 'no_next_action'
+                        ? t.projectStalledNoActionHint
+                        : t.projectStalledInactiveHint(st.status.daysSinceActivity);
 
                     return (
                       <div key={st.project.id} className="v2-stalled-project-card">
@@ -541,26 +549,20 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                                 <Folder size={15} style={{ color: 'var(--things-blue)' }} />
                                 <span>{st.project.title}</span>
                               </button>
-                              <span className="v2-stalled-pill">
+                              <span className="v2-stalled-pill" title={detailHint}>
                                 <AlertTriangle size={11} />
-                                <span>
-                                  {st.status.reason === 'no_next_action'
-                                    ? t.projectStalledNoActionHint
-                                    : t.projectStalledInactiveHint(st.status.daysSinceActivity)}
-                                </span>
+                                <span>{badgeLabel}</span>
                               </span>
                             </div>
-                            {area && (
-                              <div
-                                style={{
-                                  fontSize: 11.6,
-                                  color: 'var(--text-secondary)',
-                                  marginTop: 2
-                                }}
-                              >
-                                {area.title}
-                              </div>
-                            )}
+                            <div
+                              style={{
+                                fontSize: 11.6,
+                                color: 'var(--text-secondary)',
+                                marginTop: 2
+                              }}
+                            >
+                              {area ? `${area.title} · ${detailHint}` : detailHint}
+                            </div>
                           </div>
 
                           <div className="v2-review-actions-wrap">

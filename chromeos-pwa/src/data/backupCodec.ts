@@ -1,4 +1,6 @@
 import {
+  APP_BUILD_CODE,
+  APP_VERSION,
   MAX_AREAS,
   type AreaRecord,
   type AttachmentRecord,
@@ -452,8 +454,8 @@ export function buildBackupPayloadFromEntities(params: {
 export async function encodeThingsBackup(
   payload: ThingsbookBackupPayload,
   password: string | null,
-  appVersionName: string = payload.appVersionName || '2.0.0-beta.1-chromeos',
-  appVersionCode = 45
+  appVersionName: string = payload.appVersionName || `${APP_VERSION}-chromeos`,
+  appVersionCode: number = APP_BUILD_CODE
 ): Promise<Uint8Array> {
   const jsonBytes = new TextEncoder().encode(JSON.stringify(payload));
   const compressed = await gzipCompress(jsonBytes);

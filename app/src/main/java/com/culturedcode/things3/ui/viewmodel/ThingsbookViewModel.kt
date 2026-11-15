@@ -3378,10 +3378,18 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
-    fun importProjectFromOutline(rawOutline: String, areaId: String? = null) {
+    fun importProjectFromOutline(
+        rawOutline: String,
+        areaId: String? = null,
+        fallbackTitle: String = "Imported Project"
+    ) {
         if (rawOutline.isBlank()) return
         safeVmScope.launch {
-            val createdProjectId = repository.importProjectFromOutline(rawOutline, areaId)
+            val createdProjectId = repository.importProjectFromOutline(
+                rawOutline = rawOutline,
+                areaId = areaId,
+                fallbackTitle = fallbackTitle
+            )
             _isTemplatesModalOpen.value = false
             _expandedTaskId.value = null
             _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(createdProjectId)

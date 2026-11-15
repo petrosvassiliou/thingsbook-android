@@ -190,7 +190,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.1"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.2"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -405,12 +405,12 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(searchHits.tasks.map(\.id), ["remote-sync-task-1"], "FTS5 must index remotely synced tasks")
     }
 
-    // MARK: - 7. v2.0.0-beta.1 AppUpdateService Beta Channel, Stable Isolation & Version Bump
+    // MARK: - 7. v2.0.0-beta.2 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.1")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.1")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 45)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.2")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.2")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 46)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
 
         // Core [major, minor, patch] + build metadata comparisons on stable channel (includeBeta inferred false for 1.8.1)
@@ -1211,12 +1211,12 @@ final class ThingsbookCoreTests: XCTestCase {
         _ = try freshV2Db.applyRemoteDeltas(RemoteDeltaBatch(projectTemplates: [remoteTemplate]))
         XCTAssertEqual(try freshV2Db.loadWorkspaceSnapshot().projectTemplates.map(\.title), ["Synced Sprint Template"])
 
-        // 7. Verify all 33 shared v2_* localization keys exist and are non-empty across EN/DE/FR/IT/ES
+        // 7. Verify all 34 shared v2_* localization keys exist and are non-empty across EN/DE/FR/IT/ES
         let requiredV2Keys = [
             "v2_beta_badge", "v2_beta_channel_toggle", "v2_beta_channel_desc",
             "v2_weekly_review_title", "v2_weekly_review_subtitle",
             "v2_review_step_inbox", "v2_review_step_today", "v2_review_step_projects", "v2_review_step_someday",
-            "v2_stalled_project_badge", "v2_stalled_no_next_action", "v2_stalled_unreviewed",
+            "v2_stalled_project_badge", "v2_requires_review_badge", "v2_stalled_no_next_action", "v2_stalled_unreviewed",
             "v2_add_next_action", "v2_mark_reviewed", "v2_complete_weekly_review", "v2_weekly_review_done_toast",
             "v2_templates_title", "v2_save_as_template", "v2_template_saved_toast",
             "v2_create_from_template", "v2_starter_templates", "v2_my_templates",
@@ -1224,7 +1224,7 @@ final class ThingsbookCoreTests: XCTestCase {
             "v2_timeblock_title", "v2_timeblock_start", "v2_timeblock_duration", "v2_timeblock_clear",
             "v2_timeline_view", "v2_list_view", "v2_unscheduled_today", "v2_schedule_conflict"
         ]
-        XCTAssertEqual(requiredV2Keys.count, 33)
+        XCTAssertEqual(requiredV2Keys.count, 34)
         for lang in [AppLanguage.en, .de, .fr, .it, .es] {
             for key in requiredV2Keys {
                 let text = ThingsStrings.shared.text(key, lang: lang)
@@ -1233,6 +1233,115 @@ final class ThingsbookCoreTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - 14. v2.0.0-beta.2 Localized Built-In Starter Project Templates & Attention Badges
+
+    func testLocalizedBuiltInStarterTemplatesAcrossAllFiveLanguages() throws {
+        let expectedIds = [
+            "starter-trip-packing",
+            "starter-product-launch",
+            "starter-client-onboarding",
+            "starter-weekly-sprint"
+        ]
+
+        let enTemplates = ProjectTemplate.builtInStarterTemplates(for: "en")
+        XCTAssertEqual(enTemplates.count, 4)
+        XCTAssertEqual(enTemplates.map(\.id), expectedIds)
+        XCTAssertEqual(ProjectTemplate.builtInStarterTemplates, enTemplates)
+        XCTAssertEqual(ProjectTemplate.builtInStarterTemplates(for: "ja_JP"), enTemplates)
+
+        // Verify normalization of locale identifiers with region tags & whitespace
+        XCTAssertEqual(
+            ProjectTemplate.builtInStarterTemplates(for: " de_DE "),
+            ProjectTemplate.builtInStarterTemplates(for: "de")
+        )
+        XCTAssertEqual(
+            ProjectTemplate.builtInStarterTemplates(for: "FR-FR"),
+            ProjectTemplate.builtInStarterTemplates(for: "fr")
+        )
+
+        for langCode in ["en", "de", "fr", "it", "es"] {
+            let localized = ProjectTemplate.builtInStarterTemplates(for: langCode)
+            XCTAssertEqual(localized.count, 4, "Expected 4 starter templates for \(langCode)")
+            XCTAssertEqual(localized.map(\.id), expectedIds)
+
+            for (tIdx, tmpl) in localized.enumerated() {
+                let enTmpl = enTemplates[tIdx]
+                XCTAssertFalse(tmpl.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                XCTAssertFalse(tmpl.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                XCTAssertEqual(tmpl.sortOrder, enTmpl.sortOrder)
+
+                let bp = tmpl.blueprint
+                let enBp = enTmpl.blueprint
+                XCTAssertEqual(bp.unheadedTasks.count, enBp.unheadedTasks.count)
+                XCTAssertEqual(bp.headings.count, enBp.headings.count)
+                XCTAssertFalse(bp.headings.isEmpty)
+                XCTAssertEqual(bp.totalTaskCount, enBp.totalTaskCount)
+
+                if langCode != "en" {
+                    XCTAssertNotEqual(tmpl.title, enTmpl.title, "Template title not localized in \(langCode): \(tmpl.id)")
+                    XCTAssertNotEqual(tmpl.notes, enTmpl.notes, "Template notes not localized in \(langCode): \(tmpl.id)")
+                }
+
+                for (uIdx, uTask) in bp.unheadedTasks.enumerated() {
+                    let enUTask = enBp.unheadedTasks[uIdx]
+                    XCTAssertFalse(uTask.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    XCTAssertEqual(uTask.durationMinutes, enUTask.durationMinutes)
+                    XCTAssertEqual(uTask.checklistItems.count, enUTask.checklistItems.count)
+                    if langCode != "en" {
+                        XCTAssertNotEqual(uTask.title, enUTask.title, "Unheaded task title not localized in \(langCode)")
+                    }
+                    for (cIdx, item) in uTask.checklistItems.enumerated() {
+                        XCTAssertFalse(item.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        if langCode != "en" {
+                            XCTAssertNotEqual(item, enUTask.checklistItems[cIdx], "Unheaded checklist item not localized in \(langCode)")
+                        }
+                    }
+                }
+
+                for (hIdx, heading) in bp.headings.enumerated() {
+                    let enHeading = enBp.headings[hIdx]
+                    XCTAssertFalse(heading.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    XCTAssertEqual(heading.tasks.count, enHeading.tasks.count)
+                    XCTAssertFalse(heading.tasks.isEmpty)
+                    if langCode != "en" {
+                        XCTAssertNotEqual(heading.title, enHeading.title, "Heading title not localized in \(langCode): \(heading.title)")
+                    }
+
+                    for (taskIdx, task) in heading.tasks.enumerated() {
+                        let enTask = enHeading.tasks[taskIdx]
+                        XCTAssertFalse(task.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        XCTAssertEqual(task.durationMinutes, enTask.durationMinutes)
+                        XCTAssertEqual(task.checklistItems.count, enTask.checklistItems.count)
+                        if langCode != "en" {
+                            XCTAssertNotEqual(task.title, enTask.title, "Task title not localized in \(langCode): \(task.title)")
+                        }
+                        for (cIdx, item) in task.checklistItems.enumerated() {
+                            XCTAssertFalse(item.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            if langCode != "en" {
+                                XCTAssertNotEqual(item, enTask.checklistItems[cIdx], "Checklist item not localized in \(langCode): \(item)")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Verify SQLite instantiation of a localized starter template preserves localized project, headings, tasks, and checklists
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let deTripTemplate = ProjectTemplate.builtInStarterTemplates(for: "de")[0]
+        let createdDeProject = try db.instantiateProjectFromTemplate(deTripTemplate)
+        let snap = try db.loadWorkspaceSnapshot()
+        XCTAssertEqual(createdDeProject.title, "Reise & Packliste")
+        XCTAssertEqual(snap.headingsByProject[createdDeProject.id]?.map(\.title), ["Dokumente & Technik", "Zuhause vor der Abreise"])
+        let createdDeTasks = snap.allOpenTasks.filter { $0.projectId == createdDeProject.id }
+        XCTAssertEqual(createdDeTasks.count, 4)
+        XCTAssertTrue(createdDeTasks.contains(where: {
+            $0.title == "Flüge, Hotel & Nahverkehrstickets bestätigen" &&
+            $0.checklistItems.map(\.title) == ["Bordkarten offline speichern", "Reiseplan mit der Familie teilen"]
+        }))
+    }
 }
+
 
 

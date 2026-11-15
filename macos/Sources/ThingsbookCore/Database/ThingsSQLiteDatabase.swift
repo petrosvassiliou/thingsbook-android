@@ -442,6 +442,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             INSERT INTO projects_fts(rowid, title, notes) VALUES (new.rowid, new.title, new.notes);
         END;
         """)
+        rebuildFtsLocked()
     }
 
     private func rebuildFtsLocked() {

@@ -1673,7 +1673,8 @@ final class ThingsbookCoreTests: XCTestCase {
         let parsedRemote = try XCTUnwrap(FirebaseCloudSyncService.parseProject(wireMap))
         _ = try dbDeviceB.applyRemoteDeltas(RemoteDeltaBatch(projects: [parsedRemote]))
 
-        let syncedOnB = try XCTUnwrap(dbDeviceB.loadWorkspaceSnapshot().projects.first(where: { $0.id == sharedStaleProject.id }))
+        let snapB1 = try dbDeviceB.loadWorkspaceSnapshot()
+        let syncedOnB = try XCTUnwrap(snapB1.projects.first(where: { $0.id == sharedStaleProject.id }))
         XCTAssertEqual(syncedOnB.lastReviewedAt, reviewTimestamp, "Device B must immediately receive Device A's project review status")
 
         // 4. Even if Device B later receives an edit with nil/older lastReviewedAt or has a newer local updatedAt (clock skew),
@@ -1690,7 +1691,8 @@ final class ThingsbookCoreTests: XCTestCase {
             updatedAt: dirtyReviewedProj.updatedAt + 5_000
         )
         _ = try dbDeviceB.applyRemoteDeltas(RemoteDeltaBatch(projects: [olderReviewEdit]))
-        let afterRenameOnB = try XCTUnwrap(dbDeviceB.loadWorkspaceSnapshot().projects.first(where: { $0.id == sharedStaleProject.id }))
+        let snapB2 = try dbDeviceB.loadWorkspaceSnapshot()
+        let afterRenameOnB = try XCTUnwrap(snapB2.projects.first(where: { $0.id == sharedStaleProject.id }))
         XCTAssertEqual(afterRenameOnB.title, "Q4 Architecture Review (Renamed)")
         XCTAssertEqual(afterRenameOnB.lastReviewedAt, reviewTimestamp, "Non-review edits with nil lastReviewedAt must not wipe synced review timestamp")
 
@@ -1708,7 +1710,8 @@ final class ThingsbookCoreTests: XCTestCase {
             updatedAt: afterRenameOnB.updatedAt - 1_000
         )
         _ = try dbDeviceB.applyRemoteDeltas(RemoteDeltaBatch(projects: [clockSkewedPeerReview]))
-        let afterSkewedPeerReview = try XCTUnwrap(dbDeviceB.loadWorkspaceSnapshot().projects.first(where: { $0.id == sharedStaleProject.id }))
+        let snapB3 = try dbDeviceB.loadWorkspaceSnapshot()
+        let afterSkewedPeerReview = try XCTUnwrap(snapB3.projects.first(where: { $0.id == sharedStaleProject.id }))
         XCTAssertEqual(afterSkewedPeerReview.title, "Q4 Architecture Review (Renamed)")
         XCTAssertEqual(afterSkewedPeerReview.lastReviewedAt, newerPeerReview)
         XCTAssertEqual(

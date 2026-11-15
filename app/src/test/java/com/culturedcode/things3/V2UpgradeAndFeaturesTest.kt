@@ -856,7 +856,7 @@ class V2UpgradeAndFeaturesTest {
             isDeleted = false,
             isDirty = true
         )
-        val firestoreMap = ProjectFirestoreDto.fromEntity(reviewedEntityOnDeviceA, emptyList()).toFirestoreMap()
+        val firestoreMap = ProjectFirestoreDto.fromEntity(reviewedEntityOnDeviceA).toFirestoreMap()
         val parsedOnDeviceB = ProjectFirestoreDto.fromFirestoreMap(firestoreMap)
         assertNotNull(parsedOnDeviceB)
         assertEquals(now, parsedOnDeviceB!!.lastReviewedAt)

@@ -101,6 +101,7 @@ public final class ThingsbookStore: ObservableObject {
     @Published public var isNewProjectSheetPresented = false
     @Published public var newProjectDefaultAreaId: String? = nil
     @Published public var editingProject: Project? = nil
+    @Published public var pendingProjectDeletion: PendingProjectDeletion? = nil
     @Published public var isNewAreaSheetPresented = false
     @Published public var editingArea: Area? = nil
     @Published public var isAreaManagerPresented = false
@@ -131,6 +132,7 @@ public final class ThingsbookStore: ObservableObject {
         if isSettingsPresented { return "settings" }
         if isNewProjectSheetPresented { return "newProject" }
         if editingProject != nil { return "editProject" }
+        if pendingProjectDeletion != nil { return "confirmProjectDeletion" }
         if isNewAreaSheetPresented { return "newArea" }
         if editingArea != nil { return "editArea" }
         if isAreaManagerPresented { return "areaManager" }
@@ -731,13 +733,39 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func deleteProjectWithUndo(_ project: Project) {
-        guard let detached = try? database.softDeleteProject(project.id) else { return }
+        let count = (try? database.countNonDeletedTasksInProject(project.id)) ?? 0
+        if count > 0 {
+            pendingProjectDeletion = PendingProjectDeletion(project: project, taskCount: count)
+        } else {
+            confirmDeleteProject(project, deleteAssociatedTasks: true)
+        }
+    }
+
+    public func confirmDeleteProject(_ project: Project, deleteAssociatedTasks: Bool) {
+        pendingProjectDeletion = nil
+        guard let detached = try? database.softDeleteProject(project.id, deleteAssociatedTasks: deleteAssociatedTasks) else { return }
+        let cascadeDeletedTaskIds = deleteAssociatedTasks ? Array(detached.keys) : []
+        if deleteAssociatedTasks && !cascadeDeletedTaskIds.isEmpty {
+            if let ft = focusTimer, cascadeDeletedTaskIds.contains(ft.taskId) {
+                stopFocusTimer()
+            }
+            NotificationReminderService.shared.cancelTaskReminders(taskIds: cascadeDeletedTaskIds)
+            selectedTaskIds.subtract(cascadeDeletedTaskIds)
+            if let exp = expandedTaskId, cascadeDeletedTaskIds.contains(exp) {
+                expandedTaskId = nil
+            }
+        }
         if selectedDestination == .project(project.id) {
             selectedDestination = .smartView(.today)
         }
         presentUndo(
             message: trf("undo_project_deleted", project.title),
-            action: .projectDeleted(projectId: project.id, title: project.title, previousTaskProjects: detached)
+            action: .projectDeleted(
+                projectId: project.id,
+                title: project.title,
+                previousTaskProjects: detached,
+                deletedTaskIds: cascadeDeletedTaskIds
+            )
         )
     }
 
@@ -764,6 +792,10 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func permanentlyDeleteProject(_ project: Project) {
+        let deletedChildIds = trashedTasks.filter { $0.projectId == project.id }.map(\.id)
+        if !deletedChildIds.isEmpty {
+            NotificationReminderService.shared.cancelTaskReminders(taskIds: deletedChildIds)
+        }
         try? database.permanentlyDeleteProject(project.id)
     }
 
@@ -816,8 +848,12 @@ public final class ThingsbookStore: ObservableObject {
                 openTasks: allOpenTasks,
                 lang: preferences.language
             )
-        case .projectDeleted(let projectId, _, let previousTasks):
-            try? database.restoreDeletedProject(projectId: projectId, previousTasks: previousTasks)
+        case .projectDeleted(let projectId, _, let previousTasks, let deletedTaskIds):
+            try? database.restoreDeletedProject(
+                projectId: projectId,
+                previousTasks: previousTasks,
+                restoredDeletedTaskIds: deletedTaskIds
+            )
             reloadSnapshot()
             NotificationReminderService.shared.syncAllTaskReminders(
                 openTasks: allOpenTasks,

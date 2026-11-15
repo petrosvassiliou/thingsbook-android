@@ -96,6 +96,8 @@ import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SystemUpdateAlt
 import androidx.compose.material.icons.outlined.WarningAmber
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -105,10 +107,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -2852,12 +2858,141 @@ private fun ThingsModalsOverlay(
         )
     }
 
+    // Project Deletion Confirmation Prompt (when deleting a project with associated non-deleted to-dos)
+    val pendingProjectDeletePrompt by viewModel.pendingProjectDeletePrompt.collectAsState()
+    pendingProjectDeletePrompt?.let { prompt ->
+        ThingsDeleteProjectConfirmDialog(
+            projectTitle = prompt.projectTitle,
+            associatedTaskCount = prompt.associatedTaskCount,
+            onDeleteProjectAndTasks = { viewModel.confirmDeleteProject(deleteAssociatedTasks = true) },
+            onKeepTasksDeleteProjectOnly = { viewModel.confirmDeleteProject(deleteAssociatedTasks = false) },
+            onCancel = { viewModel.dismissDeleteProjectPrompt() }
+        )
+    }
+
     // Empty Trash Confirmation Dialog
     if (showEmptyTrashConfirmDialog) {
         ThingsEmptyTrashConfirmDialog(
             onDismiss = onDismissEmptyTrashConfirmDialog,
             onConfirmEmptyTrash = { viewModel.emptyTrash() }
         )
+    }
+}
+
+@Composable
+private fun ThingsDeleteProjectConfirmDialog(
+    projectTitle: String,
+    associatedTaskCount: Int,
+    onDeleteProjectAndTasks: () -> Unit,
+    onKeepTasksDeleteProjectOnly: () -> Unit,
+    onCancel: () -> Unit
+) {
+    val colors = ThingsTheme.colors
+    Dialog(
+        onDismissRequest = onCancel,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .widthIn(max = 420.dp)
+                .fillMaxWidth(0.92f)
+                .clip(RoundedCornerShape(18.dp)),
+            color = colors.cardSurface,
+            shape = RoundedCornerShape(18.dp),
+            tonalElevation = 8.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(colors.deadlineSoftBg),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.DeleteOutline,
+                            contentDescription = null,
+                            tint = colors.deadlineUrgentRed,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                    Text(
+                        text = stringResource(R.string.project_delete_prompt_title, projectTitle),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = colors.primaryText,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Text(
+                    text = stringResource(R.string.project_delete_prompt_tasks_body, associatedTaskCount),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.secondaryText
+                )
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = onDeleteProjectAndTasks,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colors.deadlineUrgentRed,
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text(
+                            text = stringResource(R.string.project_delete_with_tasks_btn),
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                            color = Color.White
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = onKeepTasksDeleteProjectOnly,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, colors.hairlineDivider),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = colors.tagPillBg,
+                            contentColor = colors.primaryText
+                        )
+                    ) {
+                        Text(
+                            text = stringResource(R.string.project_delete_keep_tasks_btn),
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
+                            color = colors.primaryText
+                        )
+                    }
+
+                    TextButton(
+                        onClick = onCancel,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = stringResource(R.string.action_cancel),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = colors.secondaryText
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

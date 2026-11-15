@@ -181,6 +181,9 @@ interface HeadingDao {
     @Query("SELECT * FROM headings WHERE projectId = :projectId AND isDeleted = 0 AND isArchived = 0 ORDER BY sortOrder ASC")
     suspend fun getHeadingsForProjectList(projectId: String): List<HeadingEntity>
 
+    @Query("SELECT * FROM headings WHERE projectId = :projectId AND isDeleted = 0 ORDER BY sortOrder ASC")
+    suspend fun getNonDeletedHeadingsForProjectList(projectId: String): List<HeadingEntity>
+
     @Query("SELECT * FROM headings WHERE isDeleted = 0 ORDER BY sortOrder ASC")
     suspend fun getAllNonDeletedHeadingsList(): List<HeadingEntity>
 
@@ -417,14 +420,29 @@ interface TaskDao {
     @Query("UPDATE tasks SET areaId = NULL, updatedAt = :now, isDirty = 1 WHERE areaId = :areaId")
     suspend fun clearAreaFromTasks(areaId: String, now: Long)
 
+    @Query("SELECT COUNT(*) FROM tasks WHERE projectId = :projectId AND isDeleted = 0")
+    suspend fun countNonDeletedTasksByProject(projectId: String): Int
+
+    @Query("SELECT * FROM tasks WHERE projectId = :projectId AND isDeleted = 0")
+    suspend fun getNonDeletedTasksByProject(projectId: String): List<TaskEntity>
+
     @Query("SELECT * FROM tasks WHERE projectId = :projectId AND isDeleted = 0 AND status = 'OPEN'")
     suspend fun getOpenTasksByProject(projectId: String): List<TaskEntity>
+
+    @Query("SELECT * FROM tasks WHERE projectId = :projectId AND isDeleted = 1")
+    suspend fun getDeletedTasksByProject(projectId: String): List<TaskEntity>
+
+    @Query("SELECT * FROM tasks WHERE projectId = :projectId AND isDeleted = 1 AND (title != '' OR notes != '')")
+    suspend fun getNonPurgedDeletedTasksByProject(projectId: String): List<TaskEntity>
 
     @Query("SELECT * FROM tasks WHERE projectId = :projectId")
     suspend fun getTasksByProjectAll(projectId: String): List<TaskEntity>
 
     @Query("UPDATE tasks SET projectId = NULL, headingId = NULL, updatedAt = :now, isDirty = 1 WHERE projectId = :projectId")
     suspend fun clearProjectFromTasks(projectId: String, now: Long)
+
+    @Query("UPDATE tasks SET projectId = NULL, headingId = NULL, updatedAt = :now, isDirty = 1 WHERE projectId = :projectId AND isDeleted = 0")
+    suspend fun clearProjectFromNonDeletedTasks(projectId: String, now: Long)
 
     @Query("UPDATE tasks SET projectId = NULL, headingId = NULL, updatedAt = :now, isDirty = 1 WHERE projectId = :projectId AND isDeleted = 0 AND status = 'OPEN'")
     suspend fun clearProjectFromOpenTasks(projectId: String, now: Long)
@@ -592,6 +610,9 @@ interface ChecklistDao {
 
     @Query("UPDATE checklist_items SET isDeleted = 0, isDirty = 1, updatedAt = :now WHERE id IN (:ids)")
     suspend fun restoreChecklistItemsByIds(ids: List<String>, now: Long)
+
+    @Query("UPDATE checklist_items SET isDeleted = 0, isDirty = 1, updatedAt = :now WHERE taskId = :taskId AND isDeleted = 1 AND title != ''")
+    suspend fun restoreNonPurgedByTaskId(taskId: String, now: Long)
 
     @Query("UPDATE checklist_items SET isDeleted = 1, isDirty = 1, title = '', updatedAt = :now WHERE taskId = :taskId")
     suspend fun compactTombstonesByTaskId(taskId: String, now: Long)

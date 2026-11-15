@@ -51,7 +51,8 @@ test('TRANSLATIONS maintains 100% key parity and non-empty strings/arrays/format
         const sampleArg =
           key.toLowerCase().includes('version') ||
           key.toLowerCase().includes('uptodate') ||
-          key.toLowerCase().includes('undo')
+          key.toLowerCase().includes('undo') ||
+          key.toLowerCase().includes('title')
             ? 'Test'
             : 3;
         const rendered = fn(sampleArg);
@@ -68,6 +69,23 @@ test('TRANSLATIONS maintains 100% key parity and non-empty strings/arrays/format
         assert.fail(`Unexpected translation value type for "${key}" in "${lang}"`);
       }
     }
+  }
+});
+
+test('project deletion prompt localization keys format title & count accurately across en, de, fr, it, and es', () => {
+  for (const lang of SUPPORTED_LANGS) {
+    const dict = TRANSLATIONS[lang];
+    const titleOut = dict.projectDeletePromptTitle('Q4 Launch');
+    const bodyOut = dict.projectDeletePromptTasksBody(7);
+    assert.ok(titleOut.includes('Q4 Launch'), `Missing title interpolation in ${lang}`);
+    assert.ok(bodyOut.includes('7'), `Missing count interpolation in ${lang}`);
+    assert.ok(dict.projectDeleteWithTasksBtn.trim().length > 0, `Empty with-tasks btn in ${lang}`);
+    assert.ok(dict.projectDeleteKeepTasksBtn.trim().length > 0, `Empty keep-tasks btn in ${lang}`);
+    assert.notEqual(
+      dict.projectDeleteWithTasksBtn,
+      dict.projectDeleteKeepTasksBtn,
+      `Buttons must be distinct in ${lang}`
+    );
   }
 });
 

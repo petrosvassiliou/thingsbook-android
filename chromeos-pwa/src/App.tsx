@@ -255,6 +255,10 @@ export const App: React.FC = () => {
   const [focusTimer, setFocusTimer] = useState<FocusTimerUiState | null>(null);
   const [undoBanner, setUndoBanner] = useState<{ id: number; message: string } | null>(null);
   const [emptyTrashConfirmOpen, setEmptyTrashConfirmOpen] = useState(false);
+  const [pendingDeleteProject, setPendingDeleteProject] = useState<{
+    project: ProjectRecord;
+    associatedTasksCount: number;
+  } | null>(null);
   const [appLockSetupOpen, setAppLockSetupOpen] = useState(false);
   const [isAppLocked, setIsAppLocked] = useState<boolean>(() => {
     const initial = loadPreferences();
@@ -1274,6 +1278,31 @@ export const App: React.FC = () => {
     [t.copySuffix, handleSelectNav]
   );
 
+  const executeDeleteProject = useCallback(
+    async (projectId: string, deleteAssociatedTasks: boolean) => {
+      setPendingDeleteProject(null);
+      await localDb.deleteProject(projectId, deleteAssociatedTasks);
+      if (activeNav.kind === 'project' && activeNav.projectId === projectId) {
+        handleSelectNav({ kind: 'smart', view: 'TODAY' });
+      }
+    },
+    [activeNav, handleSelectNav]
+  );
+
+  const requestDeleteProject = useCallback(
+    async (project: ProjectRecord) => {
+      const associatedTasksCount = snapshot.tasks.filter(
+        (tk) => !tk.isDeleted && tk.projectId === project.id
+      ).length;
+      if (associatedTasksCount > 0) {
+        setPendingDeleteProject({ project, associatedTasksCount });
+        return;
+      }
+      await executeDeleteProject(project.id, true);
+    },
+    [snapshot.tasks, executeDeleteProject]
+  );
+
   const handleToggleBiometricAppLock = useCallback(
     (enabled: boolean) => {
       if (enabled) {
@@ -1437,6 +1466,7 @@ export const App: React.FC = () => {
         if (weeklyReviewModal.open) return setWeeklyReviewModal((prev) => ({ ...prev, open: false }));
         if (templatesModal.open) return setTemplatesModal((prev) => ({ ...prev, open: false }));
         if (quickShareDraft) return setQuickShareDraft(null);
+        if (pendingDeleteProject) return setPendingDeleteProject(null);
         if (emptyTrashConfirmOpen) return setEmptyTrashConfirmOpen(false);
         if (appLockSetupOpen) return setAppLockSetupOpen(false);
         if (whenModalTaskId) return setWhenModalTaskId(null);
@@ -1627,6 +1657,7 @@ export const App: React.FC = () => {
     weeklyReviewModal.open,
     templatesModal.open,
     quickShareDraft,
+    pendingDeleteProject,
     emptyTrashConfirmOpen,
     appLockSetupOpen,
     whenModalTaskId,
@@ -3107,12 +3138,10 @@ export const App: React.FC = () => {
                         <button
                           type="button"
                           className="icon-btn"
+                          data-testid="project-delete-btn"
                           style={{ color: 'var(--deadline-red)' }}
                           title={t.actionDelete}
-                          onClick={async () => {
-                            await localDb.deleteProject(project.id);
-                            handleSelectNav({ kind: 'smart', view: 'TODAY' });
-                          }}
+                          onClick={() => void requestDeleteProject(project)}
                         >
                           <Trash2 size={15.5} />
                         </button>
@@ -3990,6 +4019,79 @@ export const App: React.FC = () => {
             showToast(`✓ ${t.quickShareTitle}`);
           }}
         />
+      )}
+
+      {pendingDeleteProject && (
+        <div
+          className="modal-backdrop"
+          onClick={() => setPendingDeleteProject(null)}
+        >
+          <div
+            className="modal-panel"
+            data-testid="delete-project-confirm-modal"
+            style={{ maxWidth: 440 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h3 className="modal-title">
+                {t.projectDeletePromptTitle(
+                  pendingDeleteProject.project.title || t.entityNewProject
+                )}
+              </h3>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => setPendingDeleteProject(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p
+              style={{
+                margin: '0 0 18px',
+                fontSize: 13.5,
+                color: 'var(--text-secondary)',
+                lineHeight: 1.5
+              }}
+            >
+              {t.projectDeletePromptTasksBody(pendingDeleteProject.associatedTasksCount)}
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button
+                type="button"
+                className="btn-danger"
+                data-testid="confirm-delete-project-with-tasks"
+                style={{ width: '100%', padding: '9px 14px' }}
+                onClick={() =>
+                  void executeDeleteProject(pendingDeleteProject.project.id, true)
+                }
+              >
+                <Trash2 size={14} />
+                <span>{t.projectDeleteWithTasksBtn}</span>
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                data-testid="confirm-delete-project-keep-tasks"
+                style={{ width: '100%', padding: '8.5px 14px' }}
+                onClick={() =>
+                  void executeDeleteProject(pendingDeleteProject.project.id, false)
+                }
+              >
+                <span>{t.projectDeleteKeepTasksBtn}</span>
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                data-testid="cancel-delete-project"
+                style={{ width: '100%', padding: '8.5px 14px' }}
+                onClick={() => setPendingDeleteProject(null)}
+              >
+                <span>{t.actionCancel}</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {emptyTrashConfirmOpen && (

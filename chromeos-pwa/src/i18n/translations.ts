@@ -218,6 +218,10 @@ export interface TranslationStrings {
   undoTaskCompleted: (title: string) => string;
   undoTaskDeleted: (title: string) => string;
   undoProjectDeleted: (title: string) => string;
+  projectDeletePromptTitle: (title: string) => string;
+  projectDeletePromptTasksBody: (count: number) => string;
+  projectDeleteWithTasksBtn: string;
+  projectDeleteKeepTasksBtn: string;
   actionFocusTimer: string;
   focusTimerActiveLabel: string;
   focusTimerFinishedTitle: string;
@@ -552,6 +556,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     undoTaskCompleted: (s) => `Completed “${s}”`,
     undoTaskDeleted: (s) => `Moved “${s}” to Trash`,
     undoProjectDeleted: (s) => `Moved project “${s}” to Trash`,
+    projectDeletePromptTitle: (title) => `Delete “${title}”?`,
+    projectDeletePromptTasksBody: (count) =>
+      `This project has ${count} associated to-dos. Should all associated to-dos be deleted too, or kept without a project?`,
+    projectDeleteWithTasksBtn: 'Delete Project & To-Dos',
+    projectDeleteKeepTasksBtn: 'Keep To-Dos (Delete Project Only)',
     actionFocusTimer: 'Start Focus Timer (25m)',
     focusTimerActiveLabel: 'Focus Session',
     focusTimerFinishedTitle: 'Focus Session Complete!',
@@ -890,6 +899,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     undoTaskCompleted: (s) => `„${s}“ erledigt`,
     undoTaskDeleted: (s) => `„${s}“ in den Papierkorb verschoben`,
     undoProjectDeleted: (s) => `Projekt „${s}“ in den Papierkorb verschoben`,
+    projectDeletePromptTitle: (title) => `„${title}“ löschen?`,
+    projectDeletePromptTasksBody: (count) =>
+      `Dieses Projekt enthält ${count} zugehörige Aufgaben. Sollen alle zugehörigen Aufgaben ebenfalls gelöscht werden oder ohne Projekt erhalten bleiben?`,
+    projectDeleteWithTasksBtn: 'Projekt & Aufgaben löschen',
+    projectDeleteKeepTasksBtn: 'Aufgaben behalten (nur Projekt löschen)',
     actionFocusTimer: 'Fokus-Timer starten (25 Min.)',
     focusTimerActiveLabel: 'Fokus-Sitzung',
     focusTimerFinishedTitle: 'Fokus-Sitzung abgeschlossen!',
@@ -1227,6 +1241,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     undoTaskCompleted: (s) => `« ${s} » terminée`,
     undoTaskDeleted: (s) => `« ${s} » déplacée vers la corbeille`,
     undoProjectDeleted: (s) => `Projet « ${s} » déplacé vers la corbeille`,
+    projectDeletePromptTitle: (title) => `Supprimer « ${title} » ?`,
+    projectDeletePromptTasksBody: (count) =>
+      `Ce projet contient ${count} tâches associées. Voulez-vous supprimer aussi toutes les tâches associées ou les conserver sans projet ?`,
+    projectDeleteWithTasksBtn: 'Supprimer projet et tâches',
+    projectDeleteKeepTasksBtn: 'Garder les tâches (supprimer le projet)',
     actionFocusTimer: 'Démarrer le minuteur Focus (25 min)',
     focusTimerActiveLabel: 'Session Focus',
     focusTimerFinishedTitle: 'Session Focus terminée !',
@@ -1565,6 +1584,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     undoTaskCompleted: (s) => `«${s}» completata`,
     undoTaskDeleted: (s) => `«${s}» spostata nel cestino`,
     undoProjectDeleted: (s) => `Progetto «${s}» spostato nel cestino`,
+    projectDeletePromptTitle: (title) => `Eliminare «${title}»?`,
+    projectDeletePromptTasksBody: (count) =>
+      `Questo progetto contiene ${count} attività associate. Vuoi eliminare anche tutte le attività associate o mantenerle senza progetto?`,
+    projectDeleteWithTasksBtn: 'Elimina progetto e attività',
+    projectDeleteKeepTasksBtn: 'Mantieni attività (elimina solo progetto)',
     actionFocusTimer: 'Avvia timer Focus (25 min)',
     focusTimerActiveLabel: 'Sessione Focus',
     focusTimerFinishedTitle: 'Sessione Focus completata!',
@@ -1903,6 +1927,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     undoTaskCompleted: (s) => `«${s}» completada`,
     undoTaskDeleted: (s) => `«${s}» movida a la papelera`,
     undoProjectDeleted: (s) => `Proyecto «${s}» movido a la papelera`,
+    projectDeletePromptTitle: (title) => `¿Eliminar «${title}»?`,
+    projectDeletePromptTasksBody: (count) =>
+      `Este proyecto contiene ${count} tareas asociadas. ¿Deseas eliminar también todas las tareas asociadas o conservarlas sin proyecto?`,
+    projectDeleteWithTasksBtn: 'Eliminar proyecto y tareas',
+    projectDeleteKeepTasksBtn: 'Conservar tareas (solo eliminar proyecto)',
     actionFocusTimer: 'Iniciar temporizador Focus (25 min)',
     focusTimerActiveLabel: 'Sesión Focus',
     focusTimerFinishedTitle: '¡Sesión Focus completada!',

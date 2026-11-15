@@ -293,6 +293,26 @@ public struct MainWorkspaceView: View {
         .sheet(item: $store.previewingAttachment) { att in
             AttachmentPreviewSheet(store: store, attachment: att)
         }
+        .alert(
+            store.pendingProjectDeletion.map { store.trf("project_delete_prompt_title", $0.project.title) } ?? "",
+            isPresented: Binding(
+                get: { store.pendingProjectDeletion != nil },
+                set: { if !$0 { store.pendingProjectDeletion = nil } }
+            ),
+            presenting: store.pendingProjectDeletion
+        ) { prompt in
+            Button(store.tr("project_delete_with_tasks_btn"), role: .destructive) {
+                store.confirmDeleteProject(prompt.project, deleteAssociatedTasks: true)
+            }
+            Button(store.tr("project_delete_keep_tasks_btn")) {
+                store.confirmDeleteProject(prompt.project, deleteAssociatedTasks: false)
+            }
+            Button(store.tr("action_cancel"), role: .cancel) {
+                store.pendingProjectDeletion = nil
+            }
+        } message: { prompt in
+            Text(store.trf("project_delete_prompt_tasks_body", prompt.taskCount))
+        }
     }
 
     // MARK: - Focus Session (25m Pomodoro) Card

@@ -1167,6 +1167,28 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 bindText(stmt, 2, taskId)
                 _ = sqlite3_step(stmt)
 
+                let detachProjectStmt = try prepareLocked("""
+                    UPDATE tasks
+                    SET project_id = NULL, heading_id = NULL
+                    WHERE id = ?
+                      AND project_id IS NOT NULL
+                      AND NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = tasks.project_id AND p.is_deleted = 0);
+                """)
+                defer { sqlite3_finalize(detachProjectStmt) }
+                bindText(detachProjectStmt, 1, taskId)
+                _ = sqlite3_step(detachProjectStmt)
+
+                let detachHeadingStmt = try prepareLocked("""
+                    UPDATE tasks
+                    SET heading_id = NULL
+                    WHERE id = ?
+                      AND heading_id IS NOT NULL
+                      AND NOT EXISTS (SELECT 1 FROM headings h WHERE h.id = tasks.heading_id AND h.is_deleted = 0);
+                """)
+                defer { sqlite3_finalize(detachHeadingStmt) }
+                bindText(detachHeadingStmt, 1, taskId)
+                _ = sqlite3_step(detachHeadingStmt)
+
                 let chkStmt = try prepareLocked("UPDATE checklist_items SET is_deleted = 0, updated_at = ?, is_dirty = 1 WHERE task_id = ? AND is_deleted = 1 AND title != '';")
                 defer { sqlite3_finalize(chkStmt) }
                 bindInt64(chkStmt, 1, now)
@@ -1263,6 +1285,19 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             att.isDeleted = true
             att.updatedAt = now
             try upsertAttachmentLocked(att, isDirty: true)
+        }
+
+        var deletedChildTaskIds: [String] = []
+        let childTaskStmt = try prepareLocked("SELECT id FROM tasks WHERE project_id = ? AND is_deleted = 1 AND is_purged = 0;")
+        defer { sqlite3_finalize(childTaskStmt) }
+        bindText(childTaskStmt, 1, projectId)
+        while sqlite3_step(childTaskStmt) == SQLITE_ROW {
+            if let tid = colString(childTaskStmt, 0) {
+                deletedChildTaskIds.append(tid)
+            }
+        }
+        for tid in deletedChildTaskIds {
+            try purgeTaskToTombstoneLocked(taskId: tid, now: now)
         }
 
         let detachStmt = try prepareLocked("UPDATE tasks SET project_id = NULL, heading_id = NULL, updated_at = ?, is_dirty = 1 WHERE project_id = ? AND is_deleted = 0;")
@@ -1678,9 +1713,21 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         notifyMutation()
     }
 
-    /// Soft-deletes project, cascades to headings/attachments, and detaches its open tasks so they aren't lost; returns detached task map for Undo.
+    public func countNonDeletedTasksInProject(_ projectId: String) throws -> Int {
+        try queue.sync {
+            let stmt = try prepareLocked("SELECT COUNT(*) FROM tasks WHERE project_id = ? AND is_deleted = 0;")
+            defer { sqlite3_finalize(stmt) }
+            bindText(stmt, 1, projectId)
+            if sqlite3_step(stmt) == SQLITE_ROW {
+                return Int(sqlite3_column_int(stmt, 0))
+            }
+            return 0
+        }
+    }
+
+    /// Soft-deletes project, cascades to headings/attachments, and either cascade-deletes or detaches its tasks; returns affected task map for Undo.
     @discardableResult
-    public func softDeleteProject(_ projectId: String) throws -> [String: DetachedTaskPlacement] {
+    public func softDeleteProject(_ projectId: String, deleteAssociatedTasks: Bool = false) throws -> [String: DetachedTaskPlacement] {
         let detached = try queue.sync { () -> [String: DetachedTaskPlacement] in
             let now = nowMillis()
             return try inTransactionLocked {
@@ -1699,23 +1746,43 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 bindText(clearDetachedStmt, 1, projectId)
                 _ = sqlite3_step(clearDetachedStmt)
 
-                for (tid, placement) in previousMap {
-                    let saveStmt = try prepareLocked("""
-                        INSERT OR REPLACE INTO detached_project_tasks (project_id, task_id, heading_id)
-                        VALUES (?, ?, ?);
-                    """)
-                    defer { sqlite3_finalize(saveStmt) }
-                    bindText(saveStmt, 1, projectId)
-                    bindText(saveStmt, 2, tid)
-                    bindText(saveStmt, 3, placement.headingId)
-                    _ = sqlite3_step(saveStmt)
-                }
+                if deleteAssociatedTasks {
+                    for tid in previousMap.keys {
+                        let escapedTid = tid.replacingOccurrences(of: "'", with: "''")
+                        let taskAtts = (try? fetchAttachmentsWhereLocked("task_id = '\(escapedTid)' AND is_deleted = 0")) ?? []
+                        for var att in taskAtts {
+                            deleteAttachmentFileLocked(relativePath: att.localRelativePath)
+                            att.localRelativePath = ""
+                            att.isDeleted = true
+                            att.updatedAt = now
+                            try upsertAttachmentLocked(att, isDirty: true)
+                        }
+                    }
 
-                let detachStmt = try prepareLocked("UPDATE tasks SET project_id = NULL, heading_id = NULL, updated_at = ?, is_dirty = 1 WHERE project_id = ? AND is_deleted = 0;")
-                defer { sqlite3_finalize(detachStmt) }
-                bindInt64(detachStmt, 1, now)
-                bindText(detachStmt, 2, projectId)
-                _ = sqlite3_step(detachStmt)
+                    let delTasksStmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 0, updated_at = ?, is_dirty = 1 WHERE project_id = ? AND is_deleted = 0;")
+                    defer { sqlite3_finalize(delTasksStmt) }
+                    bindInt64(delTasksStmt, 1, now)
+                    bindText(delTasksStmt, 2, projectId)
+                    _ = sqlite3_step(delTasksStmt)
+                } else {
+                    for (tid, placement) in previousMap {
+                        let saveStmt = try prepareLocked("""
+                            INSERT OR REPLACE INTO detached_project_tasks (project_id, task_id, heading_id)
+                            VALUES (?, ?, ?);
+                        """)
+                        defer { sqlite3_finalize(saveStmt) }
+                        bindText(saveStmt, 1, projectId)
+                        bindText(saveStmt, 2, tid)
+                        bindText(saveStmt, 3, placement.headingId)
+                        _ = sqlite3_step(saveStmt)
+                    }
+
+                    let detachStmt = try prepareLocked("UPDATE tasks SET project_id = NULL, heading_id = NULL, updated_at = ?, is_dirty = 1 WHERE project_id = ? AND is_deleted = 0;")
+                    defer { sqlite3_finalize(detachStmt) }
+                    bindInt64(detachStmt, 1, now)
+                    bindText(detachStmt, 2, projectId)
+                    _ = sqlite3_step(detachStmt)
+                }
 
                 let hdgStmt = try prepareLocked("UPDATE headings SET is_deleted = 1, updated_at = ?, is_dirty = 1 WHERE project_id = ? AND is_deleted = 0;")
                 defer { sqlite3_finalize(hdgStmt) }
@@ -1747,10 +1814,20 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     }
 
     public func restoreProject(_ projectId: String) throws {
-        try restoreDeletedProject(projectId: projectId, previousTasks: [:])
+        try restoreDeletedProject(
+            projectId: projectId,
+            previousTasks: [:],
+            restoredDeletedTaskIds: [],
+            restoreAllProjectDeletedTasks: true
+        )
     }
 
-    public func restoreDeletedProject(projectId: String, previousTasks: [String: DetachedTaskPlacement] = [:]) throws {
+    public func restoreDeletedProject(
+        projectId: String,
+        previousTasks: [String: DetachedTaskPlacement] = [:],
+        restoredDeletedTaskIds: [String] = [],
+        restoreAllProjectDeletedTasks: Bool = false
+    ) throws {
         try queue.sync {
             let now = nowMillis()
             try inTransactionLocked {
@@ -1765,6 +1842,39 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 bindInt64(hdgStmt, 1, now)
                 bindText(hdgStmt, 2, projectId)
                 _ = sqlite3_step(hdgStmt)
+
+                if !restoredDeletedTaskIds.isEmpty {
+                    for tid in restoredDeletedTaskIds {
+                        let rtStmt = try prepareLocked("UPDATE tasks SET is_deleted = 0, is_purged = 0, updated_at = ?, is_dirty = 1 WHERE id = ? AND is_purged = 0;")
+                        defer { sqlite3_finalize(rtStmt) }
+                        bindInt64(rtStmt, 1, now)
+                        bindText(rtStmt, 2, tid)
+                        _ = sqlite3_step(rtStmt)
+
+                        let chkStmt = try prepareLocked("UPDATE checklist_items SET is_deleted = 0, updated_at = ?, is_dirty = 1 WHERE task_id = ? AND is_deleted = 1 AND title != '';")
+                        defer { sqlite3_finalize(chkStmt) }
+                        bindInt64(chkStmt, 1, now)
+                        bindText(chkStmt, 2, tid)
+                        _ = sqlite3_step(chkStmt)
+                    }
+                } else if restoreAllProjectDeletedTasks {
+                    let rtAllStmt = try prepareLocked("UPDATE tasks SET is_deleted = 0, is_purged = 0, updated_at = ?, is_dirty = 1 WHERE project_id = ? AND is_deleted = 1 AND is_purged = 0;")
+                    defer { sqlite3_finalize(rtAllStmt) }
+                    bindInt64(rtAllStmt, 1, now)
+                    bindText(rtAllStmt, 2, projectId)
+                    _ = sqlite3_step(rtAllStmt)
+
+                    let chkAllStmt = try prepareLocked("""
+                        UPDATE checklist_items
+                        SET is_deleted = 0, updated_at = ?, is_dirty = 1
+                        WHERE is_deleted = 1 AND title != ''
+                          AND task_id IN (SELECT id FROM tasks WHERE project_id = ? AND is_deleted = 0);
+                    """)
+                    defer { sqlite3_finalize(chkAllStmt) }
+                    bindInt64(chkAllStmt, 1, now)
+                    bindText(chkAllStmt, 2, projectId)
+                    _ = sqlite3_step(chkAllStmt)
+                }
 
                 var mergedPlacements: [String: DetachedTaskPlacement] = [:]
                 let q = try prepareLocked("SELECT task_id, heading_id FROM detached_project_tasks WHERE project_id = ?;")

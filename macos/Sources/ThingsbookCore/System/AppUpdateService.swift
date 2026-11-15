@@ -18,9 +18,9 @@ public struct ReleaseUpdateInfo: Equatable, Sendable {
 }
 
 public enum AppUpdateService {
-    public static let currentVersion = "2.0.0-beta.2"
-    public static let displayVersion = "2.0.0-beta.2"
-    public static let currentBuildNumber = 46
+    public static let currentVersion = "2.0.0-beta.3"
+    public static let displayVersion = "2.0.0-beta.3"
+    public static let currentBuildNumber = 47
     private static let releasesEndpoint = "https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases?per_page=15"
 
     public static var currentVersionIsPrerelease: Bool {

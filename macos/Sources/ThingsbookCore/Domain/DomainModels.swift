@@ -1618,11 +1618,22 @@ public struct DetachedTaskPlacement: Equatable, Hashable, Sendable {
     }
 }
 
+public struct PendingProjectDeletion: Identifiable, Equatable, Sendable {
+    public var id: String { project.id }
+    public let project: Project
+    public let taskCount: Int
+
+    public init(project: Project, taskCount: Int) {
+        self.project = project
+        self.taskCount = taskCount
+    }
+}
+
 public enum UndoActionKind: Equatable, Sendable {
     case taskCompleted(taskId: String, title: String, spawnedRecurringTaskId: String?)
     case taskDeleted(taskId: String, title: String)
     case tasksDeleted([String])
-    case projectDeleted(projectId: String, title: String, previousTaskProjects: [String: DetachedTaskPlacement])
+    case projectDeleted(projectId: String, title: String, previousTaskProjects: [String: DetachedTaskPlacement], deletedTaskIds: [String] = [])
 }
 
 public struct UndoBannerState: Identifiable, Equatable, Sendable {

@@ -814,6 +814,31 @@ public struct SmartViewCanvas: View {
                             .thingsCardSurface(cornerRadius: 10)
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            Button(store.tr("project_edit_title")) {
+                                store.editingProject = proj
+                            }
+                            Button(store.tr("v2_save_as_template")) {
+                                store.saveProjectAsTemplate(proj.id)
+                            }
+                            Button(store.tr("v2_mark_reviewed")) {
+                                store.markProjectReviewed(proj.id)
+                            }
+                            Button(store.tr("action_duplicate_project")) {
+                                if let copy = try? store.database.duplicateProject(proj.id, copySuffix: store.tr("macos_copy_suffix")) {
+                                    store.selectedDestination = .project(copy.id)
+                                }
+                            }
+                            Button(store.tr("macos_complete_project")) {
+                                try? store.database.setProjectStatus(projectId: proj.id, status: .completed)
+                            }
+                            Divider()
+                            Button(role: .destructive) {
+                                store.deleteProjectWithUndo(proj)
+                            } label: {
+                                Text(store.tr("macos_delete_project"))
+                            }
+                        }
                     }
                 }
             }

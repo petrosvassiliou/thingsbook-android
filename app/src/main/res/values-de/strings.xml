@@ -441,4 +441,8 @@
     <string name="v2_list_view">Liste</string>
     <string name="v2_unscheduled_today">Heute ohne Zeitfenster</string>
     <string name="v2_schedule_conflict">Zeitüberschneidung</string>
+    <string name="project_delete_prompt_title">„%1$s“ löschen?</string>
+    <string name="project_delete_prompt_tasks_body">Dieses Projekt enthält %1$d zugehörige Aufgaben. Sollen alle zugehörigen Aufgaben ebenfalls gelöscht werden oder ohne Projekt erhalten bleiben?</string>
+    <string name="project_delete_with_tasks_btn">Projekt &amp; Aufgaben löschen</string>
+    <string name="project_delete_keep_tasks_btn">Aufgaben behalten (nur Projekt löschen)</string>
 </resources>

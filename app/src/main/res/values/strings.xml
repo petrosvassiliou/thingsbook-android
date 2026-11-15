@@ -441,4 +441,8 @@
     <string name="v2_list_view">List</string>
     <string name="v2_unscheduled_today">Unscheduled Today</string>
     <string name="v2_schedule_conflict">Overlapping timeblock</string>
+    <string name="project_delete_prompt_title">Delete “%1$s”?</string>
+    <string name="project_delete_prompt_tasks_body">This project has %1$d associated to-dos. Should all associated to-dos be deleted too, or kept without a project?</string>
+    <string name="project_delete_with_tasks_btn">Delete Project &amp; To-Dos</string>
+    <string name="project_delete_keep_tasks_btn">Keep To-Dos (Delete Project Only)</string>
 </resources>

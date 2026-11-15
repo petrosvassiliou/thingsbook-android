@@ -441,4 +441,8 @@
     <string name="v2_list_view">Elenco</string>
     <string name="v2_unscheduled_today">Non pianificato oggi</string>
     <string name="v2_schedule_conflict">Sovrapposizione oraria</string>
+    <string name="project_delete_prompt_title">Eliminare «%1$s»?</string>
+    <string name="project_delete_prompt_tasks_body">Questo progetto contiene %1$d attività associate. Vuoi eliminare anche tutte le attività associate o mantenerle senza progetto?</string>
+    <string name="project_delete_with_tasks_btn">Elimina progetto e attività</string>
+    <string name="project_delete_keep_tasks_btn">Mantieni attività (elimina solo progetto)</string>
 </resources>

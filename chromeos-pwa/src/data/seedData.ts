@@ -9,7 +9,7 @@ import {
   type SupportedLang,
   type TagRecord,
   type TaskRecord
-} from '../domain/types';
+} from '../domain/types.ts';
 
 export const SAMPLE_TASK_IDS = new Set([
   'task-inbox-001',

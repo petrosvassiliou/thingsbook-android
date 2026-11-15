@@ -190,7 +190,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.2"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.3"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -405,12 +405,12 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(searchHits.tasks.map(\.id), ["remote-sync-task-1"], "FTS5 must index remotely synced tasks")
     }
 
-    // MARK: - 7. v2.0.0-beta.2 AppUpdateService Beta Channel, Stable Isolation & Version Bump
+    // MARK: - 7. v2.0.0-beta.3 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.2")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.2")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 46)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.3")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.3")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 47)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
 
         // Core [major, minor, patch] + build metadata comparisons on stable channel (includeBeta inferred false for 1.8.1)
@@ -430,8 +430,9 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.1", current: "2.0.0-beta.1"))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "1.8.2", current: "2.0.0-beta.1"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.2", current: "2.0.0-beta.1"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.10", current: "2.0.0-beta.2"))
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.2", current: "2.0.0-beta.10"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.3", current: "2.0.0-beta.2"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.10", current: "2.0.0-beta.3"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.3", current: "2.0.0-beta.10"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.1"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.99"))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.99", current: "2.0.0", includeBeta: true))
@@ -1341,7 +1342,167 @@ final class ThingsbookCoreTests: XCTestCase {
             $0.checklistItems.map(\.title) == ["Bordkarten offline speichern", "Reiseplan mit der Familie teilen"]
         }))
     }
+
+    // MARK: - 15. v2.0.0-beta.3 Project Deletion Prompt, Cascade Task Deletion, Restore & Tombstone Purge
+
+    func testDeleteProjectWithTasksCascadeRestoreAndDetachOptions() throws {
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let proj = try db.createProject(title: "Mobile App v2.0", notes: "Cascade deletion test")
+        let hdg = try db.createHeading(projectId: proj.id, title: "Release Engineering")
+
+        let openTask1 = try db.createTask(
+            title: "Build Universal DMG",
+            scheduleState: .today,
+            whenDate: DateEpochConverter.startOfDayMillis(for: Date()),
+            projectId: proj.id,
+            headingId: hdg.id,
+            checklistTitles: ["Notarize binary", "Verify SHA-256"]
+        )
+        let openTask2 = try db.createTask(
+            title: "Publish Release Notes",
+            scheduleState: .anytime,
+            projectId: proj.id
+        )
+        let completedTask = try db.createTask(
+            title: "Draft Architecture RFC",
+            scheduleState: .anytime,
+            projectId: proj.id,
+            headingId: hdg.id
+        )
+        _ = try db.setTaskStatus(taskId: completedTask.id, status: .completed)
+
+        let alreadyDeletedTask = try db.createTask(
+            title: "Abandoned Spike",
+            scheduleState: .anytime,
+            projectId: proj.id
+        )
+        try db.softDeleteTask(alreadyDeletedTask.id)
+
+        _ = try db.addAttachment(
+            taskId: openTask1.id,
+            fileName: "spec.txt",
+            mimeType: "text/plain",
+            data: Data("spec".utf8)
+        )
+        _ = try db.addAttachment(
+            projectId: proj.id,
+            fileName: "roadmap.txt",
+            mimeType: "text/plain",
+            data: Data("roadmap".utf8)
+        )
+
+        // 1. countNonDeletedTasksInProject counts both open (2) and completed (1) non-deleted tasks, excluding already trashed tasks
+        XCTAssertEqual(try db.countNonDeletedTasksInProject(proj.id), 3)
+
+        // 2. softDeleteProject(..., deleteAssociatedTasks: true) soft-deletes both open AND completed tasks inside the project
+        let affectedMap = try db.softDeleteProject(proj.id, deleteAssociatedTasks: true)
+        XCTAssertEqual(Set(affectedMap.keys), [openTask1.id, openTask2.id, completedTask.id])
+        XCTAssertEqual(try db.countNonDeletedTasksInProject(proj.id), 0)
+
+        var snap = try db.loadWorkspaceSnapshot()
+        XCTAssertTrue(snap.projects.isEmpty)
+        XCTAssertEqual(snap.trashedProjects.map(\.id), [proj.id])
+        XCTAssertFalse(snap.allOpenTasks.contains { $0.id == openTask1.id || $0.id == openTask2.id })
+        XCTAssertFalse(snap.logbookTasks.contains { $0.id == completedTask.id })
+        XCTAssertTrue(snap.trashedTasks.contains { $0.id == openTask1.id && $0.projectId == proj.id && $0.headingId == hdg.id })
+        XCTAssertTrue(snap.trashedTasks.contains { $0.id == openTask2.id && $0.projectId == proj.id })
+        XCTAssertTrue(snap.trashedTasks.contains { $0.id == completedTask.id && $0.projectId == proj.id && $0.status == .completed })
+
+        let dirtyAfterCascade = try db.fetchDirtyBatch()
+        XCTAssertTrue(dirtyAfterCascade.attachments.contains { $0.taskId == openTask1.id && $0.isDeleted })
+        XCTAssertTrue(dirtyAfterCascade.attachments.contains { $0.projectId == proj.id && $0.isDeleted })
+
+        // Verify immediate Undo restores project, headings, and ONLY the tasks deleted by this action (not alreadyDeletedTask)
+        try db.restoreDeletedProject(
+            projectId: proj.id,
+            previousTasks: affectedMap,
+            restoredDeletedTaskIds: Array(affectedMap.keys)
+        )
+        snap = try db.loadWorkspaceSnapshot()
+        XCTAssertEqual(snap.projects.map(\.id), [proj.id])
+        XCTAssertEqual(snap.allOpenTasks.count, 2)
+        XCTAssertEqual(snap.logbookTasks.map(\.id), [completedTask.id])
+        XCTAssertEqual(snap.trashedTasks.map(\.id), [alreadyDeletedTask.id])
+        try db.permanentlyDeleteTask(alreadyDeletedTask.id)
+
+        // Cascade-delete again to test Trash flows
+        _ = try db.softDeleteProject(proj.id, deleteAssociatedTasks: true)
+
+        // 3. Restoring an individual trashed task while proj is still in Trash detaches projectId = nil so it reappears in Smart Views
+        try db.restoreTask(openTask2.id)
+        snap = try db.loadWorkspaceSnapshot()
+        let individuallyRestored = try XCTUnwrap(snap.allOpenTasks.first(where: { $0.id == openTask2.id }))
+        XCTAssertNil(individuallyRestored.projectId)
+        XCTAssertNil(individuallyRestored.headingId)
+        XCTAssertTrue(snap.anytimeTasks.contains { $0.id == openTask2.id })
+
+        // 4. restoreProject(proj.id) restores proj, its headings, AND its remaining cascade-deleted tasks with headings & checklists intact
+        try db.restoreProject(proj.id)
+        snap = try db.loadWorkspaceSnapshot()
+        XCTAssertTrue(snap.trashedProjects.isEmpty)
+        XCTAssertEqual(snap.projects.map(\.id), [proj.id])
+        XCTAssertEqual(snap.headingsByProject[proj.id]?.map(\.id), [hdg.id])
+        let restoredOpen1 = try XCTUnwrap(snap.allOpenTasks.first(where: { $0.id == openTask1.id }))
+        XCTAssertEqual(restoredOpen1.projectId, proj.id)
+        XCTAssertEqual(restoredOpen1.headingId, hdg.id)
+        XCTAssertEqual(restoredOpen1.checklistItems.map(\.title), ["Notarize binary", "Verify SHA-256"])
+        let restoredCompleted = try XCTUnwrap(snap.logbookTasks.first(where: { $0.id == completedTask.id }))
+        XCTAssertEqual(restoredCompleted.projectId, proj.id)
+        XCTAssertEqual(restoredCompleted.headingId, hdg.id)
+        XCTAssertNil(snap.allOpenTasks.first(where: { $0.id == openTask2.id })?.projectId)
+
+        // Verify "Keep To-Dos (Delete Project Only)" option (deleteAssociatedTasks: false) detaches tasks and keeps them active
+        let keepProj = try db.createProject(title: "Keep Tasks Project")
+        let keptTask = try db.createTask(title: "Surviving Detached Task", scheduleState: .anytime, projectId: keepProj.id)
+        _ = try db.softDeleteProject(keepProj.id, deleteAssociatedTasks: false)
+        snap = try db.loadWorkspaceSnapshot()
+        XCTAssertNil(snap.allOpenTasks.first(where: { $0.id == keptTask.id })?.projectId)
+        XCTAssertTrue(snap.anytimeTasks.contains { $0.id == keptTask.id })
+
+        // 5. permanentlyDeleteProject(proj.id) after softDeleteProject(..., deleteAssociatedTasks: true) creates dirty tombstones for both project AND cascade-deleted tasks
+        try db.markDirtyBatchSynced(try db.fetchDirtyBatch())
+        _ = try db.softDeleteProject(proj.id, deleteAssociatedTasks: true)
+        try db.permanentlyDeleteProject(proj.id)
+
+        snap = try db.loadWorkspaceSnapshot()
+        XCTAssertFalse(snap.trashedProjects.contains { $0.id == proj.id })
+        XCTAssertFalse(snap.trashedTasks.contains { $0.id == openTask1.id || $0.id == completedTask.id })
+
+        let dirtyTombstones = try db.fetchDirtyBatch()
+        let projTombstone = try XCTUnwrap(dirtyTombstones.projects.first(where: { $0.id == proj.id }))
+        XCTAssertTrue(projTombstone.isDeleted)
+        XCTAssertEqual(projTombstone.title, "")
+
+        let openTask1Tombstone = try XCTUnwrap(dirtyTombstones.tasks.first(where: { $0.id == openTask1.id }))
+        XCTAssertTrue(openTask1Tombstone.isDeleted)
+        XCTAssertEqual(openTask1Tombstone.title, "")
+        XCTAssertEqual(openTask1Tombstone.notes, "")
+
+        let completedTaskTombstone = try XCTUnwrap(dirtyTombstones.tasks.first(where: { $0.id == completedTask.id }))
+        XCTAssertTrue(completedTaskTombstone.isDeleted)
+        XCTAssertEqual(completedTaskTombstone.title, "")
+
+        // 6. Verify the 4 new project_delete_* keys across all 5 languages (en, de, fr, it, es)
+        let projectDeleteKeys = [
+            "project_delete_prompt_title",
+            "project_delete_prompt_tasks_body",
+            "project_delete_with_tasks_btn",
+            "project_delete_keep_tasks_btn"
+        ]
+        for lang in [AppLanguage.en, .de, .fr, .it, .es] {
+            for key in projectDeleteKeys {
+                let text = ThingsStrings.shared.text(key, lang: lang)
+                XCTAssertFalse(text.isEmpty, "Missing \(key) in \(lang.rawValue)")
+                XCTAssertNotEqual(text, key, "Untranslated \(key) in \(lang.rawValue)")
+            }
+            let formattedTitle = ThingsStrings.shared.format("project_delete_prompt_title", lang: lang, "Roadmap")
+            XCTAssertTrue(formattedTitle.contains("Roadmap"))
+            let formattedBody = ThingsStrings.shared.format("project_delete_prompt_tasks_body", lang: lang, 5)
+            XCTAssertTrue(formattedBody.contains("5"))
+        }
+    }
 }
+
 
 
 

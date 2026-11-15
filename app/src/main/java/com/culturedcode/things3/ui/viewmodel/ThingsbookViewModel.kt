@@ -89,6 +89,12 @@ sealed interface ActiveNavigationTarget {
     data class AreaDetail(val areaId: String) : ActiveNavigationTarget
 }
 
+data class PendingProjectDeletePrompt(
+    val projectId: String,
+    val projectTitle: String,
+    val associatedTaskCount: Int
+)
+
 class PendingRestoreSession(
     val rawBytes: ByteArray,
     val fileNameHint: String?,
@@ -214,6 +220,10 @@ class ThingsbookViewModel @Inject constructor(
     // Area Manager Modal State
     private val _isAreaManagerOpen = MutableStateFlow(false)
     val isAreaManagerOpen: StateFlow<Boolean> = _isAreaManagerOpen.asStateFlow()
+
+    // Project Deletion Confirmation Prompt State
+    private val _pendingProjectDeletePrompt = MutableStateFlow<PendingProjectDeletePrompt?>(null)
+    val pendingProjectDeletePrompt: StateFlow<PendingProjectDeletePrompt?> = _pendingProjectDeletePrompt.asStateFlow()
 
     // Daily Digest & Notification Settings Modal States
     private val _isNotificationSettingsOpen = MutableStateFlow(false)
@@ -990,17 +1000,59 @@ class ThingsbookViewModel @Inject constructor(
     fun deleteProject(projectId: String) {
         safeVmScope.launch {
             val prevTitle = activeProjects.value.find { it.id == projectId }?.title
-            val currentTarget = _navigationTarget.value
-            if (currentTarget is ActiveNavigationTarget.ProjectDetail && currentTarget.projectId == projectId) {
-                _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
+                ?: database.projectDao().getById(projectId)?.title
+            val label = prevTitle?.trim()?.ifEmpty { null } ?: getLocalizedString(R.string.entity_project)
+            val associatedTaskCount = database.taskDao().countNonDeletedTasksByProject(projectId)
+            if (associatedTaskCount > 0) {
+                _pendingProjectDeletePrompt.value = PendingProjectDeletePrompt(
+                    projectId = projectId,
+                    projectTitle = label,
+                    associatedTaskCount = associatedTaskCount
+                )
+            } else {
+                executeProjectDeletion(
+                    projectId = projectId,
+                    projectLabel = label,
+                    deleteAssociatedTasks = true
+                )
             }
-            repository.softDeleteProject(projectId)
-            val label = prevTitle?.ifBlank { null } ?: getLocalizedString(R.string.entity_project)
-            registerUndoAction(
-                message = getLocalizedString(R.string.undo_project_deleted, label)
-            ) {
-                repository.restoreDeletedProject(projectId)
-            }
+        }
+    }
+
+    fun confirmDeleteProject(deleteAssociatedTasks: Boolean) {
+        val prompt = _pendingProjectDeletePrompt.value ?: return
+        _pendingProjectDeletePrompt.value = null
+        safeVmScope.launch {
+            executeProjectDeletion(
+                projectId = prompt.projectId,
+                projectLabel = prompt.projectTitle,
+                deleteAssociatedTasks = deleteAssociatedTasks
+            )
+        }
+    }
+
+    fun dismissDeleteProjectPrompt() {
+        _pendingProjectDeletePrompt.value = null
+    }
+
+    private suspend fun executeProjectDeletion(
+        projectId: String,
+        projectLabel: String,
+        deleteAssociatedTasks: Boolean
+    ) {
+        val currentTarget = _navigationTarget.value
+        if (currentTarget is ActiveNavigationTarget.ProjectDetail && currentTarget.projectId == projectId) {
+            _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
+        }
+        if (deleteAssociatedTasks) {
+            _expandedTaskId.value = null
+            _selectedTaskIds.value = emptySet()
+        }
+        repository.softDeleteProject(projectId, deleteAssociatedTasks = deleteAssociatedTasks)
+        registerUndoAction(
+            message = getLocalizedString(R.string.undo_project_deleted, projectLabel)
+        ) {
+            repository.restoreDeletedProject(projectId)
         }
     }
 
@@ -2299,6 +2351,10 @@ class ThingsbookViewModel @Inject constructor(
         return when {
             _uiErrorMessage.value != null -> {
                 _uiErrorMessage.value = null
+                true
+            }
+            _pendingProjectDeletePrompt.value != null -> {
+                dismissDeleteProjectPrompt()
                 true
             }
             _quickShareDraft.value != null -> {

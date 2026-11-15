@@ -736,4 +736,63 @@ class V2UpgradeAndFeaturesTest {
             )
         }
     }
+
+    @Test
+    fun `v2_0_0_beta_3 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
+        assertEquals(47, BuildConfig.VERSION_CODE)
+        assertEquals("2.0.0-beta.3", BuildConfig.VERSION_NAME)
+
+        val resRoot = sequenceOf(
+            File("src/main/res"),
+            File("app/src/main/res")
+        ).first { it.isDirectory }
+
+        val folders = listOf("values", "values-de", "values-fr", "values-it", "values-es")
+        var enMap: Map<String, String>? = null
+
+        for (folder in folders) {
+            val xmlFile = File(resRoot, "$folder/strings.xml")
+            assertTrue("Missing $folder/strings.xml", xmlFile.isFile)
+            val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(xmlFile)
+            val nodes = doc.getElementsByTagName("string")
+            val keysInFile = mutableMapOf<String, String>()
+            for (i in 0 until nodes.length) {
+                val elem = nodes.item(i)
+                val name = elem.attributes?.getNamedItem("name")?.nodeValue ?: continue
+                keysInFile[name] = elem.textContent.orEmpty()
+            }
+
+            val titleTemplate = keysInFile["project_delete_prompt_title"]
+            val bodyTemplate = keysInFile["project_delete_prompt_tasks_body"]
+            val deleteWithTasksBtn = keysInFile["project_delete_with_tasks_btn"]
+            val keepTasksBtn = keysInFile["project_delete_keep_tasks_btn"]
+
+            assertNotNull("Missing project_delete_prompt_title in $folder/strings.xml", titleTemplate)
+            assertNotNull("Missing project_delete_prompt_tasks_body in $folder/strings.xml", bodyTemplate)
+            assertNotNull("Missing project_delete_with_tasks_btn in $folder/strings.xml", deleteWithTasksBtn)
+            assertNotNull("Missing project_delete_keep_tasks_btn in $folder/strings.xml", keepTasksBtn)
+
+            assertTrue(titleTemplate!!.contains("%1\$s"))
+            assertTrue(String.format(titleTemplate, "Roadmap").contains("Roadmap"))
+
+            assertTrue(bodyTemplate!!.contains("%1\$d"))
+            assertTrue(String.format(bodyTemplate, 5).contains("5"))
+
+            assertTrue(deleteWithTasksBtn!!.isNotBlank())
+            assertFalse(deleteWithTasksBtn.contains("%"))
+
+            assertTrue(keepTasksBtn!!.isNotBlank())
+            assertFalse(keepTasksBtn.contains("%"))
+
+            if (folder == "values") {
+                enMap = keysInFile
+            } else {
+                val base = enMap!!
+                assertNotEquals(base["project_delete_prompt_title"], titleTemplate)
+                assertNotEquals(base["project_delete_prompt_tasks_body"], bodyTemplate)
+                assertNotEquals(base["project_delete_with_tasks_btn"], deleteWithTasksBtn)
+                assertNotEquals(base["project_delete_keep_tasks_btn"], keepTasksBtn)
+            }
+        }
+    }
 }

@@ -1,5 +1,5 @@
-export const APP_VERSION = '2.0.0-beta.2';
-export const APP_BUILD_CODE = 46;
+export const APP_VERSION = '2.0.0-beta.3';
+export const APP_BUILD_CODE = 47;
 export const MAX_AREAS = 8;
 
 export type ScheduleState =
@@ -76,6 +76,7 @@ export interface ProjectRecord {
   isDirty: boolean;
   purgedFromTrash?: boolean;
   detachedTaskSnapshots?: DetachedProjectTaskSnapshot[];
+  deletedTaskIds?: string[];
 }
 
 export type Project = ProjectRecord;

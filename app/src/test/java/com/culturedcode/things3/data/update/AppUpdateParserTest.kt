@@ -50,8 +50,9 @@ class AppUpdateParserTest {
 
     @Test
     fun `beta channel compares numeric pre-release identifiers and promotes cleanly to 2_0_0 final`() {
-        // Running 2.0.0-beta.1 automatically accepts newer betas and 2.0.0 final
+        // Running 2.0.0-beta.1 / beta.2 automatically accepts newer betas and 2.0.0 final
         assertTrue(AppUpdateParser.isNewerVersion("2.0.0-beta.1", "2.0.0-beta.2"))
+        assertTrue(AppUpdateParser.isNewerVersion("2.0.0-beta.2", "2.0.0-beta.3"))
         assertTrue(AppUpdateParser.isNewerVersion("2.0.0-beta.2", "2.0.0-beta.10"))
         assertTrue(AppUpdateParser.isNewerVersion("2.0.0-beta.1", "2.0.0-beta.10"))
         assertFalse(AppUpdateParser.isNewerVersion("2.0.0-beta.10", "2.0.0-beta.2"))

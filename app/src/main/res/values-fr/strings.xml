@@ -441,4 +441,8 @@
     <string name="v2_list_view">Liste</string>
     <string name="v2_unscheduled_today">Non planifié aujourd\'hui</string>
     <string name="v2_schedule_conflict">Chevauchement horaire</string>
+    <string name="project_delete_prompt_title">Supprimer « %1$s » ?</string>
+    <string name="project_delete_prompt_tasks_body">Ce projet contient %1$d tâches associées. Voulez-vous supprimer aussi toutes les tâches associées ou les conserver sans projet ?</string>
+    <string name="project_delete_with_tasks_btn">Supprimer projet et tâches</string>
+    <string name="project_delete_keep_tasks_btn">Garder les tâches (supprimer le projet)</string>
 </resources>

@@ -517,7 +517,9 @@ public struct ProjectTemplateBlueprint: Codable, Equatable, Hashable, Sendable {
     }
 
     public func toJSONString() -> String {
-        guard let data = try? JSONEncoder().encode(self),
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(self),
               let s = String(data: data, encoding: .utf8) else {
             return "{}"
         }

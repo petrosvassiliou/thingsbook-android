@@ -1575,7 +1575,7 @@ final class ThingsbookCoreTests: XCTestCase {
             requiresAdmin: false
         )
         XCTAssertTrue(userScript.contains("OLD_PID=42424"))
-        XCTAssertTrue(userScript.contains("'Petros'\\''s Stage"))
+        XCTAssertTrue(userScript.contains("STAGED_APP='/var/folders/tmp/Petros'\\''s Stage/Thingsbook.app'"))
         XCTAssertTrue(userScript.contains("rollback-Thingsbook.app"))
         XCTAssertTrue(userScript.contains("/usr/bin/ditto \"$STAGED_APP\" \"$TARGET_APP\""))
         XCTAssertTrue(userScript.contains("/usr/bin/xattr -cr \"$TARGET_APP\""))

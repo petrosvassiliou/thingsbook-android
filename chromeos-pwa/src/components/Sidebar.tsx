@@ -291,7 +291,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </span>
             <span className="nav-item-label">{t.weeklyReviewBtn}</span>
             {stalledProjectsCount > 0 && (
-              <span className="nav-item-count v2-warn-count">{stalledProjectsCount}</span>
+              <span className="nav-item-count">{stalledProjectsCount}</span>
             )}
           </button>
 
@@ -308,7 +308,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span className="nav-item-icon">
               <ClipboardList size={16.5} style={{ color: 'var(--gemini-violet)' }} />
             </span>
-            <span className="nav-item-label">📋 {t.templatesBtn}</span>
+            <span className="nav-item-label">{t.templatesBtn}</span>
           </button>
 
           {(activeAreas.length > 0 || unassignedProjects.length > 0) && (
@@ -570,11 +570,12 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
 
         <span className="strip-divider" />
         <button type="button" className="strip-pill" onClick={onOpenWeeklyReview}>
-          <ListChecks size={14} style={{ color: 'var(--things-blue)' }} />
+          <ListChecks size={13.5} style={{ color: 'var(--things-blue)' }} />
           <span>{t.weeklyReviewBtn}</span>
         </button>
         <button type="button" className="strip-pill" onClick={onOpenTemplates}>
-          <span>📋 {t.templatesBtn}</span>
+          <ClipboardList size={13.5} style={{ color: 'var(--gemini-violet)' }} />
+          <span>{t.templatesBtn}</span>
         </button>
 
         {activeAreas.length > 0 && <span className="strip-divider" />}

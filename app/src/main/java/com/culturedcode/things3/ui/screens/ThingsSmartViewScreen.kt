@@ -3479,32 +3479,16 @@ private fun TopThingsbookBar(
 
                 // Guided GTD Weekly Review Button
                 ThingsHoverTooltip(text = stringResource(R.string.v2_weekly_review_title)) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(colors.tagPillBg)
-                            .clickable(onClick = onOpenWeeklyReview)
-                            .padding(
-                                horizontal = if (isWideScreen) 10.dp else 8.dp,
-                                vertical = if (isWideScreen) 6.dp else 5.dp
-                            ),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    IconButton(
+                        onClick = onOpenWeeklyReview,
+                        modifier = Modifier.size(iconButtonSize)
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Checklist,
                             contentDescription = stringResource(R.string.v2_weekly_review_title),
                             tint = colors.thingsBlue,
-                            modifier = Modifier.size(if (isWideScreen) 16.dp else 15.dp)
+                            modifier = Modifier.size(iconGlyphSize)
                         )
-                        if (isWideScreen) {
-                            Text(
-                                text = stringResource(R.string.v2_weekly_review_title),
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = colors.primaryText,
-                                maxLines = 1
-                            )
-                        }
                     }
                 }
 
@@ -3812,25 +3796,25 @@ private fun SmartViewNavigationStrip(
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
-                    .background(colors.thingsBlueSoft)
+                    .background(Color.Transparent)
                     .clickable {
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onOpenWeeklyReview()
                     }
-                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                    .padding(horizontal = 11.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Checklist,
                     contentDescription = stringResource(R.string.v2_weekly_review_title),
                     tint = colors.thingsBlue,
-                    modifier = Modifier.size(15.dp)
+                    modifier = Modifier.size(18.dp)
                 )
                 Text(
                     text = stringResource(R.string.v2_weekly_review_title),
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                    color = colors.thingsBlue
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                    color = colors.secondaryText
                 )
             }
         }
@@ -3839,20 +3823,25 @@ private fun SmartViewNavigationStrip(
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
-                    .background(colors.tagPillBg)
+                    .background(Color.Transparent)
                     .clickable {
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onOpenTemplatesAndImport()
                     }
-                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                    .padding(horizontal = 11.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text(text = "📋", fontSize = 13.sp)
+                Icon(
+                    imageVector = Icons.Outlined.ContentCopy,
+                    contentDescription = stringResource(R.string.v2_templates_title),
+                    tint = colors.anytimeTeal,
+                    modifier = Modifier.size(18.dp)
+                )
                 Text(
                     text = stringResource(R.string.v2_templates_title),
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
-                    color = colors.primaryText
+                    color = colors.secondaryText
                 )
             }
         }
@@ -5223,9 +5212,6 @@ private fun ThingsChromebookSidebar(
         StalledProjectDetector.detectStalledProjects(projects)
     }
     val stalledCount = stalledStatuses.size
-    val anyMissingNextAction = remember(stalledStatuses) {
-        stalledStatuses.any { it.hasNoNextAction }
-    }
 
     Column(
         modifier = Modifier
@@ -5320,65 +5306,41 @@ private fun ThingsChromebookSidebar(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(9.dp))
-                .background(colors.thingsBlueSoft.copy(alpha = 0.65f))
+                .background(Color.Transparent)
                 .clickable {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onOpenWeeklyReview()
                 }
-                .padding(horizontal = 10.dp, vertical = 7.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(9.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Checklist,
                     contentDescription = stringResource(R.string.v2_weekly_review_title),
                     tint = colors.thingsBlue,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(18.dp)
                 )
                 Text(
                     text = stringResource(R.string.v2_weekly_review_title),
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.thingsBlue
+                        fontWeight = FontWeight.Normal,
+                        color = colors.primaryText
                     ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
             if (stalledCount > 0) {
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = if (anyMissingNextAction) {
-                        colors.todayStarYellow.copy(alpha = 0.28f)
-                    } else {
-                        colors.cardSurface.copy(alpha = 0.85f)
-                    }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (anyMissingNextAction) Icons.Outlined.WarningAmber else Icons.Outlined.Schedule,
-                            contentDescription = null,
-                            tint = if (anyMissingNextAction) colors.somedayWarmAmber else colors.thingsBlue,
-                            modifier = Modifier.size(11.dp)
-                        )
-                        Text(
-                            text = stalledCount.toString(),
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = if (anyMissingNextAction) colors.somedayWarmAmber else colors.thingsBlue
-                        )
-                    }
-                }
+                Text(
+                    text = stalledCount.toString(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.secondaryText
+                )
             }
         }
 
@@ -5386,19 +5348,25 @@ private fun ThingsChromebookSidebar(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(9.dp))
+                .background(Color.Transparent)
                 .clickable {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onOpenTemplatesAndImport()
                 }
-                .padding(horizontal = 10.dp, vertical = 7.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(9.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text(text = "📋", fontSize = 14.sp)
+            Icon(
+                imageVector = Icons.Outlined.ContentCopy,
+                contentDescription = stringResource(R.string.v2_templates_title),
+                tint = colors.anytimeTeal,
+                modifier = Modifier.size(18.dp)
+            )
             Text(
                 text = stringResource(R.string.v2_templates_title),
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = FontWeight.Normal,
                     color = colors.primaryText
                 ),
                 maxLines = 1,

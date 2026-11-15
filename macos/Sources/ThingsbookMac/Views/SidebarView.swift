@@ -189,11 +189,10 @@ public struct SidebarView: View {
 
                 if stalledCount > 0 {
                     Text("\(stalledCount)")
-                        .font(.system(size: 11.5, weight: .bold, design: .rounded))
-                        .foregroundStyle(ThingsMacPalette.somedayAmber)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)
-                        .background(Capsule().fill(ThingsMacPalette.somedayAmber.opacity(0.14)))
                 }
             }
             .padding(.horizontal, 10)

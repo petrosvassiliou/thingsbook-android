@@ -11,10 +11,12 @@ import com.culturedcode.things3.data.backup.BackupTaskDto
 import com.culturedcode.things3.data.backup.ThingsBackupCodec
 import com.culturedcode.things3.data.backup.ThingsbookBackupEnvelope
 import com.culturedcode.things3.data.backup.ThingsbookBackupPayload
+import com.culturedcode.things3.data.local.entity.ProjectEntity
 import com.culturedcode.things3.data.remote.dto.CloudDeltaBatchPayload
 import com.culturedcode.things3.data.remote.dto.ProjectFirestoreDto
 import com.culturedcode.things3.data.remote.dto.ProjectTemplateFirestoreDto
 import com.culturedcode.things3.data.remote.dto.TaskFirestoreDto
+import com.culturedcode.things3.data.repository.SyncRepository
 import com.culturedcode.things3.domain.model.CalendarEventItem
 import com.culturedcode.things3.domain.model.Project
 import com.culturedcode.things3.domain.model.ProjectOutlineImporter
@@ -738,9 +740,9 @@ class V2UpgradeAndFeaturesTest {
     }
 
     @Test
-    fun `v2_0_0_beta_6 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
-        assertEquals(50, BuildConfig.VERSION_CODE)
-        assertEquals("2.0.0-beta.6", BuildConfig.VERSION_NAME)
+    fun `v2_0_0_beta_7 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
+        assertEquals(51, BuildConfig.VERSION_CODE)
+        assertEquals("2.0.0-beta.7", BuildConfig.VERSION_NAME)
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -794,5 +796,94 @@ class V2UpgradeAndFeaturesTest {
                 assertNotEquals(base["project_delete_keep_tasks_btn"], keepTasksBtn)
             }
         }
+    }
+
+    @Test
+    fun `v2_0_0_beta_7 cross-device project review sync clears review prompt and merges lastReviewedAt monotonically`() {
+        val dayMs = 24L * 60L * 60L * 1000L
+        val now = 1_785_000_000_000L
+
+        // 1. Freshly created project from macOS/ChromeOS or v1.8 with null lastReviewedAt (< 14 days old)
+        //    must NOT falsely prompt "Requires review" on Android.
+        val freshNullReviewProject = Project(
+            id = "p-fresh-peer",
+            areaId = null,
+            title = "Created Yesterday on Another Device",
+            notes = "",
+            status = ProjectStatus.ACTIVE,
+            scheduleState = ScheduleState.ANYTIME,
+            whenDate = null,
+            deadline = null,
+            completedAt = null,
+            lastReviewedAt = null,
+            sortOrder = 100.0,
+            tagIds = emptyList(),
+            totalTaskCount = 2,
+            completedTaskCount = 0,
+            createdAt = now - 1L * dayMs,
+            updatedAt = now - 1L * dayMs
+        )
+        assertNull(StalledProjectDetector.evaluateProject(freshNullReviewProject, nowMillis = now))
+
+        // 2. Legacy 20-day-old project with null lastReviewedAt requires review initially on Device A & Device B
+        val legacyStaleProject = freshNullReviewProject.copy(
+            id = "p-sync-review",
+            title = "Cross-Device Roadmap",
+            createdAt = now - 20L * dayMs,
+            updatedAt = now - 16L * dayMs,
+            lastReviewedAt = null
+        )
+        val beforeReview = StalledProjectDetector.evaluateProject(legacyStaleProject, nowMillis = now)
+        assertNotNull(beforeReview)
+        assertTrue(beforeReview!!.isUnreviewed)
+
+        // 3. Device A marks the project reviewed and pushes via Firestore + ntfy delta payload
+        val reviewedEntityOnDeviceA = ProjectEntity(
+            id = legacyStaleProject.id,
+            areaId = null,
+            title = legacyStaleProject.title,
+            notes = "",
+            status = ProjectStatus.ACTIVE,
+            scheduleState = ScheduleState.ANYTIME,
+            whenDate = null,
+            deadline = null,
+            completedAt = null,
+            lastReviewedAt = now,
+            sortOrder = 100.0,
+            tagIdsJson = "[]",
+            createdAt = legacyStaleProject.createdAt,
+            updatedAt = now,
+            isDeleted = false,
+            isDirty = true
+        )
+        val firestoreMap = ProjectFirestoreDto.fromEntity(reviewedEntityOnDeviceA, emptyList()).toFirestoreMap()
+        val parsedOnDeviceB = ProjectFirestoreDto.fromFirestoreMap(firestoreMap)
+        assertNotNull(parsedOnDeviceB)
+        assertEquals(now, parsedOnDeviceB!!.lastReviewedAt)
+
+        // 4. Monotonic merge preserves the newer review timestamp even against older/null edits
+        assertEquals(
+            now,
+            SyncRepository.mergeMonotonicReviewTimestamp(localLastReviewedAt = null, remoteLastReviewedAt = now)
+        )
+        assertEquals(
+            now,
+            SyncRepository.mergeMonotonicReviewTimestamp(
+                localLastReviewedAt = now,
+                remoteLastReviewedAt = now - 15L * dayMs
+            )
+        )
+        assertEquals(
+            now,
+            SyncRepository.mergeMonotonicReviewTimestamp(localLastReviewedAt = now, remoteLastReviewedAt = null)
+        )
+
+        // 5. Device B evaluates the synced project -> no longer prompts to review!
+        val syncedEntityOnDeviceB = parsedOnDeviceB.toEntity()
+        val syncedDomainOnDeviceB = legacyStaleProject.copy(
+            lastReviewedAt = syncedEntityOnDeviceB.lastReviewedAt,
+            updatedAt = syncedEntityOnDeviceB.updatedAt
+        )
+        assertNull(StalledProjectDetector.evaluateProject(syncedDomainOnDeviceB, nowMillis = now + 5_000L))
     }
 }

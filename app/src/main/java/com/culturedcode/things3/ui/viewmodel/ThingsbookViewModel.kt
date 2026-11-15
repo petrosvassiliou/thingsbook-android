@@ -3308,7 +3308,17 @@ class ThingsbookViewModel @Inject constructor(
     private val _lastWeeklyReviewAt = MutableStateFlow<Long?>(
         coreSettingsPrefs.getLong(PREF_LAST_WEEKLY_REVIEW_AT, -1L).takeIf { it > 0L }
     )
-    val lastWeeklyReviewAt: StateFlow<Long?> = _lastWeeklyReviewAt.asStateFlow()
+    val lastWeeklyReviewAt: StateFlow<Long?> = combine(
+        _lastWeeklyReviewAt,
+        activeProjects
+    ) { localPref, projects ->
+        val maxProjectReview = projects.maxOfOrNull { it.lastReviewedAt ?: 0L }?.takeIf { it > 0L }
+        listOfNotNull(localPref, maxProjectReview).maxOrNull()
+    }.stateIn(
+        safeVmScope,
+        SharingStarted.WhileSubscribed(5000),
+        _lastWeeklyReviewAt.value
+    )
 
     fun openWeeklyReviewModal(initialStep: Int = 0) {
         _weeklyReviewInitialStep.value = initialStep.coerceIn(0, 3)
@@ -3330,6 +3340,9 @@ class ThingsbookViewModel @Inject constructor(
     fun completeWeeklyReview(toastMessage: String) {
         val now = System.currentTimeMillis()
         setLastWeeklyReviewAt(now)
+        safeVmScope.launch {
+            repository.markAllActiveProjectsReviewed(now)
+        }
         _isWeeklyReviewModalOpen.value = false
         showCelebrationToast(toastMessage)
     }

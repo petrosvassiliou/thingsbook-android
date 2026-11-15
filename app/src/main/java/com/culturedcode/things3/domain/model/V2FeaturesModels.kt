@@ -1548,8 +1548,13 @@ object StalledProjectDetector {
         }
         val hasNoNextAction = openNextActionCount <= 0
         val lastReviewed = project.lastReviewedAt
-        val isUnreviewed = lastReviewed == null ||
-            (nowMillis - maxOf(project.updatedAt, lastReviewed)) >= FOURTEEN_DAYS_MILLIS
+        val reviewAnchor = if (lastReviewed != null && lastReviewed > 0L) {
+            lastReviewed
+        } else {
+            maxOf(project.updatedAt, project.createdAt)
+        }
+        val isUnreviewed = reviewAnchor <= 0L ||
+            (nowMillis - reviewAnchor) >= FOURTEEN_DAYS_MILLIS
 
         if (!hasNoNextAction && !isUnreviewed) return null
         return StalledProjectStatus(

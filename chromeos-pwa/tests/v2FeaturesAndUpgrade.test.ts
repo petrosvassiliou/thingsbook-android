@@ -8,6 +8,7 @@ import {
   normalizeBackupPayloadToEntities,
   type ThingsbookBackupPayload
 } from '../src/data/backupCodec.ts';
+import { mergeMonotonicReviewTimestamp } from '../src/data/syncUtils.ts';
 import {
   STARTER_GTD_TEMPLATES,
   buildDailyTimeline,
@@ -753,3 +754,75 @@ test('getStarterGtdTemplates localizes all 4 built-in templates (titles, notes, 
     }
   }
 });
+
+test('v2.0.0-beta.7 cross-device project review sync unifies 14-day review anchor and merges lastReviewedAt monotonically', () => {
+  const dayMs = 86_400_000;
+  const now = 1_785_000_000_000;
+
+  // 1. Editing a child task does NOT mask an unreviewed 16-day-old project (unified with Android & macOS)
+  const unreviewedProj: ProjectRecord = {
+    id: 'p-cross-sync',
+    areaId: null,
+    title: 'Cross-Device Project',
+    notes: '',
+    status: 'ACTIVE',
+    scheduleState: 'ANYTIME',
+    whenDate: null,
+    deadline: null,
+    completedAt: null,
+    lastReviewedAt: now - 16 * dayMs,
+    sortOrder: 100,
+    tagIds: [],
+    createdAt: now - 30 * dayMs,
+    updatedAt: now - 2 * dayMs,
+    isDeleted: false,
+    isDirty: false
+  };
+  const recentChildTask: TaskRecord = {
+    id: 'tk-recent-child',
+    title: 'Recently edited task',
+    notes: '',
+    status: 'OPEN',
+    scheduleState: 'ANYTIME',
+    whenDate: null,
+    deadline: null,
+    reminderTime: null,
+    scheduledStartMinutes: null,
+    durationMinutes: null,
+    completedAt: null,
+    projectId: unreviewedProj.id,
+    headingId: null,
+    areaId: null,
+    recurrenceRule: null,
+    sortOrder: 100,
+    tagIds: [],
+    createdAt: now - 10 * dayMs,
+    updatedAt: now - 1 * dayMs,
+    isDeleted: false,
+    isDirty: false
+  };
+
+  const beforeSyncEval = evaluateProjectStalledStatus(unreviewedProj, [recentChildTask], now);
+  assert.equal(beforeSyncEval.isStalled, true);
+  assert.equal(beforeSyncEval.reason, 'inactive_14d');
+
+  // 2. Reviewing the project on another device syncs lastReviewedAt = now and clears the review prompt
+  const mergedReview = mergeMonotonicReviewTimestamp(unreviewedProj.lastReviewedAt, now);
+  assert.equal(mergedReview, now);
+  assert.equal(mergeMonotonicReviewTimestamp(now, null), now);
+  assert.equal(mergeMonotonicReviewTimestamp(now, now - 15 * dayMs), now);
+
+  const syncedProjOnSecondDevice: ProjectRecord = {
+    ...unreviewedProj,
+    lastReviewedAt: mergedReview,
+    updatedAt: now
+  };
+  const afterSyncEval = evaluateProjectStalledStatus(
+    syncedProjOnSecondDevice,
+    [recentChildTask],
+    now + 5_000
+  );
+  assert.equal(afterSyncEval.isStalled, false);
+  assert.equal(afterSyncEval.reason, null);
+});
+

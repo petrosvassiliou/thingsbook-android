@@ -50,6 +50,7 @@ import {
   ATTACHMENT_BACKFILL_STORAGE_PREFIX,
   ATTACHMENT_BATCH_CHUNK_SIZE,
   METADATA_BATCH_CHUNK_SIZE,
+  PROJECTS_REVIEW_BACKFILL_STORAGE_PREFIX,
   attachmentToFirestoreMap,
   buildBoundedNtfyRelayPayload,
   chunkItems,
@@ -464,8 +465,8 @@ class ThingsCloudSyncService {
   };
 
   constructor() {
-    localDb.setSyncTrigger(() => {
-      this.triggerBackgroundSync(600);
+    localDb.setSyncTrigger((immediate) => {
+      this.triggerBackgroundSync(immediate ? 0 : 600);
     });
   }
 
@@ -1165,6 +1166,8 @@ class ThingsCloudSyncService {
     const effectiveSince = computeEffectivePullCursor(sinceTimestamp);
     const backfillKey = `${ATTACHMENT_BACKFILL_STORAGE_PREFIX}${userId}`;
     const needsAttachmentBackfill = localStorage.getItem(backfillKey) !== '1';
+    const projReviewBackfillKey = `${PROJECTS_REVIEW_BACKFILL_STORAGE_PREFIX}${userId}`;
+    const needsProjectsReviewBackfill = localStorage.getItem(projReviewBackfillKey) !== '1';
 
     const fetchCollection = async (
       colName: string,
@@ -1188,7 +1191,7 @@ class ThingsCloudSyncService {
     ] = await Promise.all([
       fetchCollection('tags', effectiveSince),
       fetchCollection('areas', effectiveSince),
-      fetchCollection('projects', effectiveSince),
+      fetchCollection('projects', needsProjectsReviewBackfill ? 0 : effectiveSince),
       fetchCollection('headings', effectiveSince),
       fetchCollection('tasks', effectiveSince),
       fetchCollection('checklist_items', effectiveSince),
@@ -1228,6 +1231,9 @@ class ThingsCloudSyncService {
       if (needsAttachmentBackfill) {
         localStorage.setItem(backfillKey, '1');
       }
+      if (needsProjectsReviewBackfill) {
+        localStorage.setItem(projReviewBackfillKey, '1');
+      }
       return sinceTimestamp;
     }
 
@@ -1244,6 +1250,9 @@ class ThingsCloudSyncService {
 
     if (needsAttachmentBackfill) {
       localStorage.setItem(backfillKey, '1');
+    }
+    if (needsProjectsReviewBackfill) {
+      localStorage.setItem(projReviewBackfillKey, '1');
     }
 
     return clampRemoteCursorTimestamp(appliedMax, Date.now());

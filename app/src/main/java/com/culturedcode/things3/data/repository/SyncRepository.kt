@@ -188,7 +188,7 @@ class SyncRepository @Inject constructor(
                 }
         }
         scope.launch {
-            delay(800L)
+            delay(150L)
             runCatchingCancellable {
                 restoreBuiltInCloudSession()
             }.onFailure { err ->
@@ -609,6 +609,30 @@ class SyncRepository @Inject constructor(
     private fun projectTemplatesBackfillKeyForUser(userId: String) =
         booleanPreferencesKey("project_templates_backfill_v1_$userId")
 
+    private fun projectsReviewBackfillKeyForUser(userId: String) =
+        booleanPreferencesKey("projects_review_backfill_v1_$userId")
+
+    private suspend fun applyRemoteProjectDto(dto: ProjectFirestoreDto) {
+        val local = database.projectDao().getById(dto.id)
+        val mergedLastReviewed = if (dto.isDeleted) {
+            dto.lastReviewedAt
+        } else {
+            mergeMonotonicReviewTimestamp(local?.lastReviewedAt, dto.lastReviewedAt)
+        }
+        if (local == null || dto.updatedAt >= local.updatedAt) {
+            database.projectDao().upsertProjectWithTags(
+                dto.toEntity().copy(lastReviewedAt = mergedLastReviewed),
+                dto.tagIds
+            )
+        } else if (!dto.isDeleted && !local.isDeleted &&
+            mergedLastReviewed != null && mergedLastReviewed > (local.lastReviewedAt ?: 0L)
+        ) {
+            database.projectDao().upsert(
+                local.copy(lastReviewedAt = mergedLastReviewed)
+            )
+        }
+    }
+
     private fun lastNtfyMsgIdKeyForTopic(channelTopic: String) =
         stringPreferencesKey("last_ntfy_msg_id_$channelTopic")
 
@@ -962,10 +986,7 @@ class SyncRepository @Inject constructor(
 
             for (dto in batch.projects) {
                 if (dto.id.isBlank()) continue
-                val local = database.projectDao().getById(dto.id)
-                if (local == null || dto.updatedAt >= local.updatedAt) {
-                    database.projectDao().upsertProjectWithTags(dto.toEntity(), dto.tagIds)
-                }
+                applyRemoteProjectDto(dto)
                 val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
                 if (clamped > maxTimestamp) maxTimestamp = clamped
             }
@@ -1255,6 +1276,7 @@ class SyncRepository @Inject constructor(
             .first()
         val needsAttachmentsBackfill = prefs[attachmentsBackfillKeyForUser(userId)] != true
         val needsTemplatesBackfill = prefs[projectTemplatesBackfillKeyForUser(userId)] != true
+        val needsProjectsReviewBackfill = prefs[projectsReviewBackfillKeyForUser(userId)] != true
 
         val tagSnapshots = userDoc.collection("tags")
             .whereGreaterThan("updatedAt", queryFloor)
@@ -1265,7 +1287,7 @@ class SyncRepository @Inject constructor(
             .get()
             .await()
         val projectSnapshots = userDoc.collection("projects")
-            .whereGreaterThan("updatedAt", queryFloor)
+            .whereGreaterThan("updatedAt", if (needsProjectsReviewBackfill) 0L else queryFloor)
             .get()
             .await()
         val headingSnapshots = userDoc.collection("headings")
@@ -1326,10 +1348,7 @@ class SyncRepository @Inject constructor(
             for (doc in projectSnapshots.documents) {
                 val dto = runCatching { ProjectFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
                 if (dto.id.isBlank()) continue
-                val local = database.projectDao().getById(dto.id)
-                if (local == null || dto.updatedAt >= local.updatedAt) {
-                    database.projectDao().upsertProjectWithTags(dto.toEntity(), dto.tagIds)
-                }
+                applyRemoteProjectDto(dto)
                 val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
                 if (clamped > maxTimestamp) maxTimestamp = clamped
             }
@@ -1391,11 +1410,17 @@ class SyncRepository @Inject constructor(
             }
         }
 
-        if (needsAttachmentsBackfill || (needsTemplatesBackfill && templateSnapshots != null)) {
+        if (needsAttachmentsBackfill ||
+            needsProjectsReviewBackfill ||
+            (needsTemplatesBackfill && templateSnapshots != null)
+        ) {
             runCatchingCancellable {
                 context.syncDataStore.edit { editPrefs ->
                     if (needsAttachmentsBackfill) {
                         editPrefs[attachmentsBackfillKeyForUser(userId)] = true
+                    }
+                    if (needsProjectsReviewBackfill) {
+                        editPrefs[projectsReviewBackfillKeyForUser(userId)] = true
                     }
                     if (needsTemplatesBackfill && templateSnapshots != null) {
                         editPrefs[projectTemplatesBackfillKeyForUser(userId)] = true
@@ -1465,10 +1490,7 @@ class SyncRepository @Inject constructor(
                                     runCatchingCancellable {
                                         val dto = ProjectFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
                                         if (dto.id.isNotBlank()) {
-                                            val local = database.projectDao().getById(dto.id)
-                                            if (local == null || dto.updatedAt >= local.updatedAt) {
-                                                database.projectDao().upsertProjectWithTags(dto.toEntity(), dto.tagIds)
-                                            }
+                                            applyRemoteProjectDto(dto)
                                             val clamped = clampRemoteTimestamp(dto.updatedAt)
                                             if (clamped > maxTs) {
                                                 maxTs = clamped
@@ -1756,6 +1778,19 @@ class SyncRepository @Inject constructor(
             remoteUpdatedAt: Long,
             nowMillis: Long = System.currentTimeMillis()
         ): Long = minOf(remoteUpdatedAt, nowMillis + MAX_FUTURE_DRIFT_MS)
+
+        fun mergeMonotonicReviewTimestamp(
+            localLastReviewedAt: Long?,
+            remoteLastReviewedAt: Long?
+        ): Long? {
+            val l = localLastReviewedAt?.takeIf { it > 0L }
+            val r = remoteLastReviewedAt?.takeIf { it > 0L }
+            return when {
+                l != null && r != null -> maxOf(l, r)
+                l != null -> l
+                else -> r
+            }
+        }
 
         fun buildSafeLocalAttachmentPath(attachmentId: String, fileName: String): String {
             val safeId = attachmentId.trim()

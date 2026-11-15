@@ -40,6 +40,7 @@ import {
   type BackupSummary
 } from './backupCodec.ts';
 import { parseCsvTaskImport, serializeEntitiesToCsv } from './csvCodec.ts';
+import { mergeMonotonicReviewTimestamp } from './syncUtils.ts';
 import {
   SAMPLE_CHECKLIST_IDS,
   SAMPLE_HEADING_IDS,
@@ -182,7 +183,7 @@ export class ThingsLocalDb {
   private listeners = new Set<Listener>();
   private undoListeners = new Set<UndoListener>();
   private lastUndoSnapshot: InternalUndoSnapshot | null = null;
-  private syncTriggerCallback: (() => void) | null = null;
+  private syncTriggerCallback: ((immediate?: boolean) => void) | null = null;
   private writeChain: Promise<unknown> = Promise.resolve();
   private cachedSnapshot: DataSnapshot = {
     areas: [],
@@ -209,13 +210,13 @@ export class ThingsLocalDb {
     return next;
   }
 
-  setSyncTrigger(cb: () => void) {
+  setSyncTrigger(cb: (immediate?: boolean) => void) {
     this.syncTriggerCallback = cb;
   }
 
-  private triggerSync() {
+  private triggerSync(immediate = false) {
     if (this.syncTriggerCallback) {
-      this.syncTriggerCallback();
+      this.syncTriggerCallback(immediate);
     }
   }
 
@@ -1660,6 +1661,7 @@ export class ThingsLocalDb {
     lastReviewedAt?: number | null;
     tagIds?: string[];
     sortOrder?: number;
+    immediateSync?: boolean;
   }): Promise<ProjectRecord> {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
@@ -1670,8 +1672,15 @@ export class ThingsLocalDb {
       const status = params.status ?? existing?.status ?? 'ACTIVE';
       const lastReviewedAt =
         params.lastReviewedAt !== undefined
-          ? params.lastReviewedAt
-          : (existing?.lastReviewedAt ?? null);
+          ? params.lastReviewedAt !== null
+            ? mergeMonotonicReviewTimestamp(existing?.lastReviewedAt, params.lastReviewedAt)
+            : null
+          : existing
+            ? (existing.lastReviewedAt ?? null)
+            : now;
+      const nextUpdatedAt = existing
+        ? Math.max(existing.updatedAt + 1, now, lastReviewedAt ?? 0)
+        : now;
       const record: ProjectRecord = {
         id,
         areaId: params.areaId !== undefined ? params.areaId : (existing?.areaId ?? null),
@@ -1689,20 +1698,51 @@ export class ThingsLocalDb {
             : (existing?.sortOrder ?? now),
         tagIds: params.tagIds !== undefined ? params.tagIds : (existing?.tagIds ?? []),
         createdAt: existing?.createdAt ?? now,
-        updatedAt: now,
+        updatedAt: nextUpdatedAt,
         isDeleted: false,
         isDirty: true
       };
       await tx.store.put(record);
       await tx.done;
       await this.refreshSnapshot();
-      this.triggerSync();
+      this.triggerSync(Boolean(params.immediateSync));
       return record;
     });
   }
 
   async markProjectReviewed(projectId: string, reviewedAt: number = Date.now()): Promise<void> {
-    await this.upsertProject({ id: projectId, lastReviewedAt: reviewedAt });
+    await this.upsertProject({
+      id: projectId,
+      lastReviewedAt: reviewedAt,
+      immediateSync: true
+    });
+  }
+
+  async markAllActiveProjectsReviewed(reviewedAt: number = Date.now()): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const tx = db.transaction('projects', 'readwrite');
+      const allProjects = (await tx.store.getAll()) as ProjectRecord[];
+      let changed = false;
+      for (const existing of allProjects) {
+        if (existing.isDeleted || existing.status !== 'ACTIVE') continue;
+        const nextReviewedAt =
+          mergeMonotonicReviewTimestamp(existing.lastReviewedAt, reviewedAt) ?? reviewedAt;
+        const nextUpdatedAt = Math.max(existing.updatedAt + 1, reviewedAt, nextReviewedAt);
+        await tx.store.put({
+          ...existing,
+          lastReviewedAt: nextReviewedAt,
+          updatedAt: nextUpdatedAt,
+          isDirty: true
+        });
+        changed = true;
+      }
+      await tx.done;
+      if (changed) {
+        await this.refreshSnapshot();
+        this.triggerSync(true);
+      }
+    });
   }
 
   async saveProjectAsTemplate(
@@ -2841,14 +2881,41 @@ export class ThingsLocalDb {
 
       await applyList('tags', batch.tags);
       await applyList('areas', batch.areas);
-      await applyList('projects', batch.projects, (local, remote) => ({
-        ...remote,
-        purgedFromTrash: Boolean(
-          remote.purgedFromTrash || (remote.isDeleted && local?.purgedFromTrash)
-        ),
-        detachedTaskSnapshots: remote.isDeleted ? local?.detachedTaskSnapshots : undefined,
-        deletedTaskIds: remote.isDeleted ? local?.deletedTaskIds : undefined
-      }));
+      if (batch.projects && batch.projects.length > 0) {
+        const projStore = tx.objectStore('projects');
+        for (const remote of batch.projects) {
+          if (!remote.id) continue;
+          const local = (await projStore.get(remote.id)) as ProjectRecord | undefined;
+          const mergedLastReviewed: number | null = remote.isDeleted
+            ? (remote.lastReviewedAt ?? null)
+            : mergeMonotonicReviewTimestamp(local?.lastReviewedAt, remote.lastReviewedAt);
+          if (!local || remote.updatedAt >= local.updatedAt) {
+            await projStore.put({
+              ...remote,
+              lastReviewedAt: mergedLastReviewed,
+              purgedFromTrash: Boolean(
+                remote.purgedFromTrash || (remote.isDeleted && local?.purgedFromTrash)
+              ),
+              detachedTaskSnapshots: remote.isDeleted ? local?.detachedTaskSnapshots : undefined,
+              deletedTaskIds: remote.isDeleted ? local?.deletedTaskIds : undefined,
+              isDirty: false
+            });
+          } else if (
+            !remote.isDeleted &&
+            !local.isDeleted &&
+            mergedLastReviewed !== null &&
+            mergedLastReviewed > (local.lastReviewedAt ?? 0)
+          ) {
+            await projStore.put({
+              ...local,
+              lastReviewedAt: mergedLastReviewed
+            });
+          }
+          if (remote.updatedAt > maxUpdatedAt) {
+            maxUpdatedAt = remote.updatedAt;
+          }
+        }
+      }
       await applyList('headings', batch.headings);
       await applyList('tasks', batch.tasks, (local, remote) => ({
         ...remote,

@@ -583,7 +583,9 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                                 void localDb.upsertProject({
                                   id: st.project.id,
                                   scheduleState: 'SOMEDAY',
-                                  whenDate: null
+                                  whenDate: null,
+                                  lastReviewedAt: Date.now(),
+                                  immediateSync: true
                                 })
                               }
                             >

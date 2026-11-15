@@ -52,19 +52,12 @@ export function evaluateProjectStalledStatus(
   const projectTasks = tasks.filter((t) => !t.isDeleted && t.projectId === project.id);
   const openTasks = projectTasks.filter((t) => t.status === 'OPEN');
 
-  let lastActivityAt = Math.max(
-    project.updatedAt || 0,
-    project.createdAt || 0,
-    project.lastReviewedAt ?? 0
-  );
-  for (const t of projectTasks) {
-    if (t.updatedAt > lastActivityAt) lastActivityAt = t.updatedAt;
-    if (t.completedAt != null && t.completedAt > lastActivityAt) {
-      lastActivityAt = t.completedAt;
-    }
-  }
+  const reviewAnchor =
+    project.lastReviewedAt != null && project.lastReviewedAt > 0
+      ? project.lastReviewedAt
+      : Math.max(project.updatedAt || 0, project.createdAt || 0);
 
-  const elapsedMs = Math.max(0, nowMillis - lastActivityAt);
+  const elapsedMs = Math.max(0, nowMillis - reviewAnchor);
   const daysSinceActivity = Math.floor(elapsedMs / 86_400_000);
 
   if (
@@ -76,7 +69,7 @@ export function evaluateProjectStalledStatus(
       isStalled: false,
       reason: null,
       openTasksCount: openTasks.length,
-      lastActivityAt,
+      lastActivityAt: reviewAnchor,
       daysSinceActivity
     };
   }
@@ -86,17 +79,17 @@ export function evaluateProjectStalledStatus(
       isStalled: true,
       reason: 'no_next_action',
       openTasksCount: 0,
-      lastActivityAt,
+      lastActivityAt: reviewAnchor,
       daysSinceActivity
     };
   }
 
-  if (elapsedMs >= STALLED_PROJECT_THRESHOLD_MS) {
+  if (reviewAnchor <= 0 || elapsedMs >= STALLED_PROJECT_THRESHOLD_MS) {
     return {
       isStalled: true,
       reason: 'inactive_14d',
       openTasksCount: openTasks.length,
-      lastActivityAt,
+      lastActivityAt: reviewAnchor,
       daysSinceActivity
     };
   }
@@ -105,7 +98,7 @@ export function evaluateProjectStalledStatus(
     isStalled: false,
     reason: null,
     openTasksCount: openTasks.length,
-    lastActivityAt,
+    lastActivityAt: reviewAnchor,
     daysSinceActivity
   };
 }

@@ -3811,7 +3811,12 @@ export const App: React.FC = () => {
           tasks={snapshot.tasks}
           areasMap={areasMap}
           projectsMap={allNonDeletedProjectsMap}
-          lastWeeklyReviewAt={prefs.lastWeeklyReviewAt}
+          lastWeeklyReviewAt={
+            snapshot.projects.reduce<number>(
+              (acc, p) => (!p.isDeleted && p.lastReviewedAt && p.lastReviewedAt > acc ? p.lastReviewedAt : acc),
+              prefs.lastWeeklyReviewAt ?? 0
+            ) || undefined
+          }
           lang={lang}
           t={t}
           onOpenProject={(projectId) => {
@@ -3819,7 +3824,9 @@ export const App: React.FC = () => {
             handleSelectNav({ kind: 'project', projectId });
           }}
           onCompleteReview={() => {
-            updatePrefs({ lastWeeklyReviewAt: Date.now() });
+            const now = Date.now();
+            updatePrefs({ lastWeeklyReviewAt: now });
+            void localDb.markAllActiveProjectsReviewed(now);
             setWeeklyReviewModal({ open: false, step: 1 });
             showToast(`🎉 ${t.weeklyReviewCompletedToast}`);
           }}

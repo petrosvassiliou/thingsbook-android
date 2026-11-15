@@ -1674,6 +1674,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 scheduleState: scheduleState,
                 whenDate: whenDate,
                 deadline: deadline,
+                lastReviewedAt: now,
                 sortOrder: maxOrd + 1000.0,
                 tagIds: tagIds,
                 createdAt: now,
@@ -1691,7 +1692,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     public func updateProject(_ project: Project) throws {
         try queue.sync {
             var copy = project
-            copy.updatedAt = nowMillis()
+            let now = nowMillis()
+            copy.updatedAt = max(copy.updatedAt + 1, now)
             try inTransactionLocked {
                 try upsertProjectLocked(copy, isDirty: true)
             }
@@ -2017,8 +2019,9 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         try queue.sync {
             guard var p = try fetchProjectByIdLocked(projectId) else { return }
             let now = nowMillis()
-            p.lastReviewedAt = reviewedAt ?? now
-            p.updatedAt = now
+            let nextReview = reviewedAt ?? max(p.lastReviewedAt ?? 0, now)
+            p.lastReviewedAt = nextReview
+            p.updatedAt = max(p.updatedAt + 1, now, nextReview)
             try inTransactionLocked {
                 try upsertProjectLocked(p, isDirty: true)
             }
@@ -2030,12 +2033,12 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         guard !projectIds.isEmpty else { return }
         try queue.sync {
             let now = nowMillis()
-            let stamp = reviewedAt ?? now
             try inTransactionLocked {
                 for pid in Set(projectIds) {
                     guard var p = try fetchProjectByIdLocked(pid) else { continue }
-                    p.lastReviewedAt = stamp
-                    p.updatedAt = now
+                    let nextReview = reviewedAt ?? max(p.lastReviewedAt ?? 0, now)
+                    p.lastReviewedAt = nextReview
+                    p.updatedAt = max(p.updatedAt + 1, now, nextReview)
                     try upsertProjectLocked(p, isDirty: true)
                 }
             }
@@ -3320,14 +3323,31 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 }
                 for remote in deltas.projects {
                     maxTimestamp = max(maxTimestamp, remote.updatedAt)
+                    let existingLocal = try? fetchProjectByIdLocked(remote.id)
+                    let mergedLastReviewed: Int64? = remote.isDeleted
+                        ? remote.lastReviewedAt
+                        : Self.mergeMonotonicReviewTimestamp(existingLocal?.lastReviewedAt, remote.lastReviewedAt)
                     if shouldApplyRemoteLocked(table: "projects", id: remote.id, remoteUpdatedAt: remote.updatedAt) {
-                        try upsertProjectLocked(remote, isDirty: false)
+                        var toSave = remote
+                        toSave.lastReviewedAt = mergedLastReviewed
+                        try upsertProjectLocked(toSave, isDirty: false)
                         appliedCount += 1
                         if remote.isDeleted {
                             appliedCount += try detachLocalChildrenForDeletedProjectLocked(projectId: remote.id)
                         }
                     } else if remote.isDeleted {
                         appliedCount += try detachLocalChildrenForDeletedProjectLocked(projectId: remote.id)
+                    } else if let existingLocal,
+                              !existingLocal.isDeleted,
+                              let mergedLastReviewed,
+                              mergedLastReviewed > (existingLocal.lastReviewedAt ?? 0) {
+                        let stmt = try prepareLocked("UPDATE projects SET last_reviewed_at = ? WHERE id = ?;")
+                        defer { sqlite3_finalize(stmt) }
+                        bindInt64(stmt, 1, mergedLastReviewed)
+                        bindText(stmt, 2, remote.id)
+                        if sqlite3_step(stmt) == SQLITE_DONE {
+                            appliedCount += Int(sqlite3_changes(db))
+                        }
                     }
                 }
                 for remote in deltas.headings {
@@ -3405,6 +3425,13 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             }
         }
         return clampedMax
+    }
+
+    public static func mergeMonotonicReviewTimestamp(_ local: Int64?, _ remote: Int64?) -> Int64? {
+        let l = (local ?? 0) > 0 ? local : nil
+        let r = (remote ?? 0) > 0 ? remote : nil
+        if let l, let r { return max(l, r) }
+        return l ?? r
     }
 
     private static func sortParentFirst<T>(
@@ -3515,7 +3542,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             if localIsDirty {
                 return remoteUpdatedAt > localUpdated
             }
-            return remoteUpdatedAt > localUpdated
+            return remoteUpdatedAt >= localUpdated
         }
         return true
     }

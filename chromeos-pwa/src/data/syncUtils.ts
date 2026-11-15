@@ -7,10 +7,27 @@ export const CLOCK_SKEW_OVERLAP_MS = 120_000;
 export const MAX_FUTURE_CURSOR_DRIFT_MS = 60_000;
 export const MAX_NTFY_PAYLOAD_BYTES = 3_800;
 export const ATTACHMENT_BACKFILL_STORAGE_PREFIX = 'thingsbook_att_backfill_v1_';
+export const PROJECTS_REVIEW_BACKFILL_STORAGE_PREFIX = 'thingsbook_proj_review_backfill_v1_';
 
 function finiteNumber(v: unknown, fallback = 0): number {
   const n = typeof v === 'number' ? v : Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+export function mergeMonotonicReviewTimestamp(
+  localLastReviewedAt: number | null | undefined,
+  remoteLastReviewedAt: number | null | undefined
+): number | null {
+  const l =
+    typeof localLastReviewedAt === 'number' && Number.isFinite(localLastReviewedAt) && localLastReviewedAt > 0
+      ? Math.trunc(localLastReviewedAt)
+      : null;
+  const r =
+    typeof remoteLastReviewedAt === 'number' && Number.isFinite(remoteLastReviewedAt) && remoteLastReviewedAt > 0
+      ? Math.trunc(remoteLastReviewedAt)
+      : null;
+  if (l !== null && r !== null) return Math.max(l, r);
+  return l ?? r;
 }
 
 export function computeEffectivePullCursor(

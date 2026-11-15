@@ -113,6 +113,9 @@ public actor FirebaseCloudSyncService {
     public static func templateBackfillDefaultsKey(uid: String) -> String {
         "thingsbook.sync.tmplBackfillV1.\(uid)"
     }
+    public static func projectReviewBackfillDefaultsKey(uid: String) -> String {
+        "thingsbook.sync.projReviewBackfillV1.\(uid)"
+    }
 
     private static let keychainAccount = "firebase_auth_session_v1"
     private static let lastSyncCursorPrefix = "thingsbook_macos_last_sync_ts_"
@@ -965,9 +968,13 @@ public actor FirebaseCloudSyncService {
         let needsTmplBackfill = !UserDefaults.standard.bool(forKey: tmplBackfillKey)
         let tmplSince: Int64 = needsTmplBackfill ? 0 : sinceTimestamp
 
+        let projReviewBackfillKey = Self.projectReviewBackfillDefaultsKey(uid: uid)
+        let needsProjReviewBackfill = !UserDefaults.standard.bool(forKey: projReviewBackfillKey)
+        let projSince: Int64 = needsProjReviewBackfill ? 0 : sinceTimestamp
+
         async let rawTags = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "tags", since: sinceTimestamp)
         async let rawAreas = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "areas", since: sinceTimestamp)
-        async let rawProjects = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "projects", since: sinceTimestamp)
+        async let rawProjects = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "projects", since: projSince)
         async let rawHeadings = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "headings", since: sinceTimestamp)
         async let rawTasks = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "tasks", since: sinceTimestamp)
         async let rawChecklists = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "checklist_items", since: sinceTimestamp)
@@ -999,6 +1006,9 @@ public actor FirebaseCloudSyncService {
             if needsTmplBackfill {
                 UserDefaults.standard.set(true, forKey: tmplBackfillKey)
             }
+            if needsProjReviewBackfill {
+                UserDefaults.standard.set(true, forKey: projReviewBackfillKey)
+            }
             return sinceTimestamp
         }
 
@@ -1019,6 +1029,9 @@ public actor FirebaseCloudSyncService {
         }
         if needsTmplBackfill {
             UserDefaults.standard.set(true, forKey: tmplBackfillKey)
+        }
+        if needsProjReviewBackfill {
+            UserDefaults.standard.set(true, forKey: projReviewBackfillKey)
         }
         return appliedMax
     }

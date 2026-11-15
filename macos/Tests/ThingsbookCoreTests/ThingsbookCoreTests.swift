@@ -190,7 +190,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.6"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.7"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -405,12 +405,12 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(searchHits.tasks.map(\.id), ["remote-sync-task-1"], "FTS5 must index remotely synced tasks")
     }
 
-    // MARK: - 7. v2.0.0-beta.6 AppUpdateService Beta Channel, Stable Isolation & Version Bump
+    // MARK: - 7. v2.0.0-beta.7 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.6")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.6")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 50)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.7")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.7")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 51)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
 
         // Core [major, minor, patch] + build metadata comparisons on stable channel (includeBeta inferred false for 1.8.1)
@@ -434,8 +434,9 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.4", current: "2.0.0-beta.3"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.5", current: "2.0.0-beta.4"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.6", current: "2.0.0-beta.5"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.10", current: "2.0.0-beta.6"))
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.6", current: "2.0.0-beta.10"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.7", current: "2.0.0-beta.6"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.10", current: "2.0.0-beta.7"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.7", current: "2.0.0-beta.10"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.1"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.99"))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.99", current: "2.0.0", includeBeta: true))
@@ -1610,7 +1611,113 @@ final class ThingsbookCoreTests: XCTestCase {
             XCTAssertTrue(ThingsStrings.shared.format("macos_updates_installing_relaunching", lang: lang, "2.0.0-beta.5").contains("2.0.0-beta.5"))
         }
     }
+
+    // MARK: - 15. v2.0.0-beta.7 Cross-Device Project Review Sync & Monotonic lastReviewedAt Merge
+
+    func testCrossDeviceProjectReviewSyncAndMonotonicMergeV200Beta7() throws {
+        let fm = FileManager.default
+        let dirA = fm.temporaryDirectory.appendingPathComponent("tb-rev-sync-a-\(UUID().uuidString)", isDirectory: true)
+        let dirB = fm.temporaryDirectory.appendingPathComponent("tb-rev-sync-b-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? fm.removeItem(at: dirA)
+            try? fm.removeItem(at: dirB)
+        }
+
+        let dbDeviceA = try ThingsSQLiteDatabase(directoryURL: dirA, seedIfEmpty: false)
+        let dbDeviceB = try ThingsSQLiteDatabase(directoryURL: dirB, seedIfEmpty: false)
+
+        // 1. Newly created project on macOS initializes non-nil lastReviewedAt (matching Android & ChromeOS)
+        let newlyCreated = try dbDeviceA.createProject(title: "Fresh Launch Plan")
+        XCTAssertNotNil(newlyCreated.lastReviewedAt)
+        XCTAssertGreaterThan(newlyCreated.lastReviewedAt ?? 0, 0)
+
+        // 2. Seed a 16-day-old unreviewed project on BOTH Device A and Device B
+        let dayMs: Int64 = 86_400_000
+        let now: Int64 = 1_785_000_000_000
+        let sixteenDaysAgo = now - 16 * dayMs
+        let sharedStaleProject = Project(
+            id: "proj-shared-review-1",
+            title: "Q4 Architecture Review",
+            notes: "Needs review",
+            status: .active,
+            scheduleState: .anytime,
+            lastReviewedAt: sixteenDaysAgo,
+            sortOrder: 500,
+            createdAt: now - 30 * dayMs,
+            updatedAt: sixteenDaysAgo
+        )
+        _ = try dbDeviceA.applyRemoteDeltas(RemoteDeltaBatch(projects: [sharedStaleProject]))
+        _ = try dbDeviceB.applyRemoteDeltas(RemoteDeltaBatch(projects: [sharedStaleProject]))
+
+        // 3. Review the project on Device A -> fetch dirty batch -> parse via CloudSync -> apply on Device B
+        let reviewTimestamp = now
+        try dbDeviceA.markProjectReviewed(projectId: sharedStaleProject.id, reviewedAt: reviewTimestamp)
+        let dirtyA = try dbDeviceA.fetchDirtyBatch()
+        let dirtyReviewedProj = try XCTUnwrap(dirtyA.projects.first(where: { $0.id == sharedStaleProject.id }))
+        XCTAssertEqual(dirtyReviewedProj.lastReviewedAt, reviewTimestamp)
+        XCTAssertGreaterThanOrEqual(dirtyReviewedProj.updatedAt, reviewTimestamp)
+
+        let wireMap: [String: Any] = [
+            "id": dirtyReviewedProj.id,
+            "title": dirtyReviewedProj.title,
+            "notes": dirtyReviewedProj.notes,
+            "status": dirtyReviewedProj.status.rawValue,
+            "scheduleState": dirtyReviewedProj.scheduleState.rawValue,
+            "lastReviewedAt": dirtyReviewedProj.lastReviewedAt as Any,
+            "sortOrder": dirtyReviewedProj.sortOrder,
+            "tagIds": dirtyReviewedProj.tagIds,
+            "createdAt": dirtyReviewedProj.createdAt,
+            "updatedAt": dirtyReviewedProj.updatedAt,
+            "isDeleted": dirtyReviewedProj.isDeleted
+        ]
+        let parsedRemote = try XCTUnwrap(FirebaseCloudSyncService.parseProject(wireMap))
+        _ = try dbDeviceB.applyRemoteDeltas(RemoteDeltaBatch(projects: [parsedRemote]))
+
+        let syncedOnB = try XCTUnwrap(dbDeviceB.loadWorkspaceSnapshot().projects.first(where: { $0.id == sharedStaleProject.id }))
+        XCTAssertEqual(syncedOnB.lastReviewedAt, reviewTimestamp, "Device B must immediately receive Device A's project review status")
+
+        // 4. Even if Device B later receives an edit with nil/older lastReviewedAt or has a newer local updatedAt (clock skew),
+        //    monotonic merge NEVER regresses lastReviewedAt!
+        let olderReviewEdit = Project(
+            id: sharedStaleProject.id,
+            title: "Q4 Architecture Review (Renamed)",
+            notes: "Needs review",
+            status: .active,
+            scheduleState: .anytime,
+            lastReviewedAt: nil,
+            sortOrder: 500,
+            createdAt: sharedStaleProject.createdAt,
+            updatedAt: dirtyReviewedProj.updatedAt + 5_000
+        )
+        _ = try dbDeviceB.applyRemoteDeltas(RemoteDeltaBatch(projects: [olderReviewEdit]))
+        let afterRenameOnB = try XCTUnwrap(dbDeviceB.loadWorkspaceSnapshot().projects.first(where: { $0.id == sharedStaleProject.id }))
+        XCTAssertEqual(afterRenameOnB.title, "Q4 Architecture Review (Renamed)")
+        XCTAssertEqual(afterRenameOnB.lastReviewedAt, reviewTimestamp, "Non-review edits with nil lastReviewedAt must not wipe synced review timestamp")
+
+        // Clock-skewed peer review arriving with updatedAt < local.updatedAt still advances lastReviewedAt!
+        let newerPeerReview = reviewTimestamp + 60_000
+        let clockSkewedPeerReview = Project(
+            id: sharedStaleProject.id,
+            title: "Q4 Architecture Review",
+            notes: "Needs review",
+            status: .active,
+            scheduleState: .anytime,
+            lastReviewedAt: newerPeerReview,
+            sortOrder: 500,
+            createdAt: sharedStaleProject.createdAt,
+            updatedAt: afterRenameOnB.updatedAt - 1_000
+        )
+        _ = try dbDeviceB.applyRemoteDeltas(RemoteDeltaBatch(projects: [clockSkewedPeerReview]))
+        let afterSkewedPeerReview = try XCTUnwrap(dbDeviceB.loadWorkspaceSnapshot().projects.first(where: { $0.id == sharedStaleProject.id }))
+        XCTAssertEqual(afterSkewedPeerReview.title, "Q4 Architecture Review (Renamed)")
+        XCTAssertEqual(afterSkewedPeerReview.lastReviewedAt, newerPeerReview)
+        XCTAssertEqual(
+            FirebaseCloudSyncService.projectReviewBackfillDefaultsKey(uid: "u123"),
+            "thingsbook.sync.projReviewBackfillV1.u123"
+        )
+    }
 }
+
 
 
 

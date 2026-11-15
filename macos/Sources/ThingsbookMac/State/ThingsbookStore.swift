@@ -318,12 +318,15 @@ public final class ThingsbookStore: ObservableObject {
         guard project.status == .active, !project.isDeleted, project.scheduleState != .someday else {
             return (false, false, false)
         }
-        let hasOpenNextAction = allOpenTasks.contains {
-            $0.projectId == project.id && $0.scheduleState != .someday
-        }
+        let hasOpenNextAction = allOpenTasks.contains { $0.projectId == project.id }
         let hasNoNextAction = !hasOpenNextAction
-        let reviewAnchor = project.lastReviewedAt ?? project.createdAt
-        let isUnreviewed14Days = (nowMillis - reviewAnchor) >= Self.stalledReviewThresholdMillis
+        let reviewAnchor: Int64
+        if let lr = project.lastReviewedAt, lr > 0 {
+            reviewAnchor = lr
+        } else {
+            reviewAnchor = max(project.updatedAt, project.createdAt)
+        }
+        let isUnreviewed14Days = reviewAnchor <= 0 || (nowMillis - reviewAnchor) >= Self.stalledReviewThresholdMillis
         return (hasNoNextAction || isUnreviewed14Days, hasNoNextAction, isUnreviewed14Days)
     }
 
@@ -341,6 +344,7 @@ public final class ThingsbookStore: ObservableObject {
 
     public func markProjectReviewed(_ projectId: String) {
         try? database.markProjectReviewed(projectId: projectId)
+        triggerImmediateCloudSync()
     }
 
     @discardableResult
@@ -354,6 +358,7 @@ public final class ThingsbookStore: ObservableObject {
             areaId: proj.areaId
         )
         try? database.markProjectReviewed(projectId: proj.id)
+        triggerImmediateCloudSync()
         return created
     }
 
@@ -361,8 +366,10 @@ public final class ThingsbookStore: ObservableObject {
         var copy = project
         copy.scheduleState = .someday
         copy.whenDate = nil
-        copy.lastReviewedAt = Int64(Date().timeIntervalSince1970 * 1000.0)
+        let now = Int64(Date().timeIntervalSince1970 * 1000.0)
+        copy.lastReviewedAt = max(copy.lastReviewedAt ?? 0, now)
         try? database.updateProject(copy)
+        triggerImmediateCloudSync()
     }
 
     public func completeWeeklyReview() {
@@ -370,6 +377,7 @@ public final class ThingsbookStore: ObservableObject {
             .filter { $0.status == .active && !$0.isDeleted }
             .map(\.id)
         try? database.markMultipleProjectsReviewed(activeIds)
+        triggerImmediateCloudSync()
         isWeeklyReviewPresented = false
         showToast(tr("v2_weekly_review_done_toast"))
     }
@@ -921,6 +929,15 @@ public final class ThingsbookStore: ObservableObject {
         syncDebounceTask?.cancel()
         syncDebounceTask = Task {
             try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled else { return }
+            await cloudSync.syncBidirectionalDeltas(forceFullPull: false, localOnlyMode: preferences.localOnlyDbMode)
+        }
+    }
+
+    public func triggerImmediateCloudSync() {
+        guard !preferences.localOnlyDbMode else { return }
+        syncDebounceTask?.cancel()
+        syncDebounceTask = Task {
             guard !Task.isCancelled else { return }
             await cloudSync.syncBidirectionalDeltas(forceFullPull: false, localOnlyMode: preferences.localOnlyDbMode)
         }

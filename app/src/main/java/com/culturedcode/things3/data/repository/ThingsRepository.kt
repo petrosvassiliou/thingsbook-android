@@ -1142,12 +1142,31 @@ class ThingsRepository @Inject constructor(
 
     suspend fun markProjectReviewed(projectId: String, reviewedAtMillis: Long = System.currentTimeMillis()) {
         val existing = database.projectDao().getById(projectId) ?: return
+        val nextReviewedAt = maxOf(existing.lastReviewedAt ?: 0L, reviewedAtMillis)
+        val nextUpdatedAt = maxOf(existing.updatedAt + 1L, nextReviewedAt)
         database.projectDao().upsert(
             existing.copy(
-                lastReviewedAt = reviewedAtMillis,
-                updatedAt = reviewedAtMillis,
+                lastReviewedAt = nextReviewedAt,
+                updatedAt = nextUpdatedAt,
                 isDirty = true
             )
+        )
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun markAllActiveProjectsReviewed(reviewedAtMillis: Long = System.currentTimeMillis()) {
+        val activeProjects = database.projectDao().getActiveProjectsList()
+        if (activeProjects.isEmpty()) return
+        database.projectDao().upsertAll(
+            activeProjects.map { existing ->
+                val nextReviewedAt = maxOf(existing.lastReviewedAt ?: 0L, reviewedAtMillis)
+                val nextUpdatedAt = maxOf(existing.updatedAt + 1L, nextReviewedAt)
+                existing.copy(
+                    lastReviewedAt = nextReviewedAt,
+                    updatedAt = nextUpdatedAt,
+                    isDirty = true
+                )
+            }
         )
         syncRepository.triggerBackgroundSync()
     }
@@ -1155,12 +1174,14 @@ class ThingsRepository @Inject constructor(
     suspend fun moveProjectToSomeday(projectId: String) {
         val existing = database.projectDao().getById(projectId) ?: return
         val now = System.currentTimeMillis()
+        val nextReviewedAt = maxOf(existing.lastReviewedAt ?: 0L, now)
+        val nextUpdatedAt = maxOf(existing.updatedAt + 1L, nextReviewedAt)
         database.projectDao().upsert(
             existing.copy(
                 scheduleState = ScheduleState.SOMEDAY,
                 whenDate = null,
-                lastReviewedAt = now,
-                updatedAt = now,
+                lastReviewedAt = nextReviewedAt,
+                updatedAt = nextUpdatedAt,
                 isDirty = true
             )
         )

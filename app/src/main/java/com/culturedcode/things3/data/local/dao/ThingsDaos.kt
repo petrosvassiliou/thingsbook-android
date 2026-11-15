@@ -15,6 +15,7 @@ import com.culturedcode.things3.data.local.entity.ChecklistItemEntity
 import com.culturedcode.things3.data.local.entity.HeadingEntity
 import com.culturedcode.things3.data.local.entity.ProjectEntity
 import com.culturedcode.things3.data.local.entity.ProjectTagCrossRef
+import com.culturedcode.things3.data.local.entity.ProjectTemplateEntity
 import com.culturedcode.things3.data.local.entity.ProjectWithDetails
 import com.culturedcode.things3.data.local.entity.ProjectWithProgressTuple
 import com.culturedcode.things3.data.local.entity.TagEntity
@@ -733,4 +734,50 @@ interface AttachmentDao {
     @Query("UPDATE attachments SET isDirty = 1 WHERE isDeleted = 0")
     suspend fun markAllActiveDirty()
 }
+
+@Dao
+interface ProjectTemplateDao {
+    @Query("SELECT * FROM project_templates WHERE isDeleted = 0 ORDER BY sortOrder ASC, createdAt DESC")
+    fun observeActiveTemplates(): Flow<List<ProjectTemplateEntity>>
+
+    @Query("SELECT * FROM project_templates WHERE isDeleted = 0 ORDER BY sortOrder ASC, createdAt DESC")
+    suspend fun getAllNonDeletedTemplatesList(): List<ProjectTemplateEntity>
+
+    @Query("SELECT * FROM project_templates WHERE isDirty = 1")
+    suspend fun getDirtyTemplates(): List<ProjectTemplateEntity>
+
+    @Query("SELECT * FROM project_templates WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): ProjectTemplateEntity?
+
+    @Upsert
+    suspend fun upsert(template: ProjectTemplateEntity)
+
+    @Upsert
+    suspend fun upsertAll(templates: List<ProjectTemplateEntity>)
+
+    @Query("UPDATE project_templates SET isDirty = 0 WHERE id IN (:ids) AND updatedAt <= :maxUpdatedAt")
+    suspend fun markSynced(ids: List<String>, maxUpdatedAt: Long = Long.MAX_VALUE)
+
+    suspend fun markSyncedSafe(ids: List<String>, maxUpdatedAt: Long = Long.MAX_VALUE) {
+        ids.chunked(500).forEach { chunk ->
+            if (chunk.isNotEmpty()) markSynced(chunk, maxUpdatedAt)
+        }
+    }
+
+    @Query("UPDATE project_templates SET isDeleted = 1, title = '', notes = '', blueprintJson = '{}', tagIdsJson = '[]', defaultAreaId = NULL, updatedAt = :now, isDirty = 1 WHERE id = :id")
+    suspend fun softDeleteById(id: String, now: Long)
+
+    @Query("UPDATE project_templates SET defaultAreaId = NULL, updatedAt = :now, isDirty = 1 WHERE defaultAreaId = :areaId")
+    suspend fun clearAreaFromTemplates(areaId: String, now: Long)
+
+    @Query("DELETE FROM project_templates WHERE id IN (:ids)")
+    suspend fun hardDeleteByIds(ids: List<String>)
+
+    @Query("DELETE FROM project_templates")
+    suspend fun hardDeleteAll()
+
+    @Query("UPDATE project_templates SET isDirty = 1 WHERE isDeleted = 0")
+    suspend fun markAllActiveDirty()
+}
+
 

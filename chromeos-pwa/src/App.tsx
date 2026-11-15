@@ -11,7 +11,9 @@ import {
   CheckSquare,
   ChevronDown,
   ChevronUp,
+  ClipboardList,
   Cloud,
+  Compass,
   Copy,
   Edit3,
   Flag,
@@ -21,6 +23,7 @@ import {
   Heading as HeadingIcon,
   Inbox,
   Layers,
+  List,
   Menu,
   Mic,
   Moon,
@@ -37,6 +40,7 @@ import {
   X
 } from 'lucide-react';
 import {
+  APP_VERSION,
   addDaysLocal,
   computeMidpointSortOrder,
   computeUpcomingTargetDate,
@@ -56,6 +60,10 @@ import {
   type TagRecord,
   type TaskRecord
 } from './domain/types';
+import {
+  detectStalledProjects,
+  evaluateProjectStalledStatus
+} from './domain/v2Utils';
 import {
   clearLastCalendarError,
   connectGoogleCalendarPopup,
@@ -85,6 +93,7 @@ import {
   checkForSwAndReleaseUpdates,
   type UpdateCheckResult
 } from './data/pwaUpdater';
+import { isPrereleaseVersion } from './data/versionUtils';
 import { checkDueRemindersAndDigest } from './data/reminderRuntime';
 import { TRANSLATIONS, resolveLanguage } from './i18n/translations';
 import { AttachmentsStrip } from './components/AttachmentStrip';
@@ -120,6 +129,15 @@ import { ProjectProgressRing } from './components/ProjectProgressRing';
 import { AuthSyncModal, SettingsModal } from './components/SettingsAndAuthModals';
 import { Sidebar, SmartViewNavigationStrip } from './components/Sidebar';
 import { TaskItem } from './components/TaskItem';
+import {
+  TemplatesAndImportModal,
+  type TemplatesModalTab
+} from './components/TemplatesAndImportModal';
+import { TodayTimelineView } from './components/TodayTimelineView';
+import {
+  WeeklyReviewModal,
+  type WeeklyReviewStep
+} from './components/WeeklyReviewModal';
 import { DeadlineModal, RepeatModal, WhenModal } from './components/WhenAndRepeatModals';
 
 interface BeforeInstallPromptEvent extends Event {
@@ -221,6 +239,16 @@ export const App: React.FC = () => {
   const [geminiModalOpen, setGeminiModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [weeklyReviewModal, setWeeklyReviewModal] = useState<{
+    open: boolean;
+    step: WeeklyReviewStep;
+  }>({ open: false, step: 1 });
+  const [templatesModal, setTemplatesModal] = useState<{
+    open: boolean;
+    tab: TemplatesModalTab;
+    areaId: string | null;
+  }>({ open: false, tab: 'gallery', areaId: null });
+  const [todayViewMode, setTodayViewMode] = useState<'list' | 'timeline'>('list');
 
   // Android v1.7.0 Power Features State
   const [quickShareDraft, setQuickShareDraft] = useState<QuickShareDraft | null>(null);
@@ -442,6 +470,8 @@ export const App: React.FC = () => {
         });
       } else if (actionParam === 'quick-find') {
         setQuickFindOpen(true);
+      } else if (actionParam === 'weekly-review') {
+        setWeeklyReviewModal({ open: true, step: 1 });
       } else if (actionParam === 'new-todo') {
         const inboxOpen = initialSnap.tasks.filter(
           (tk) =>
@@ -481,7 +511,9 @@ export const App: React.FC = () => {
     });
 
     if (prefs.autoCheckUpdatesEnabled) {
-      void checkForSwAndReleaseUpdates().then((res) => {
+      const includeBeta =
+        Boolean(prefs.includeBetaUpdates) || isPrereleaseVersion(APP_VERSION);
+      void checkForSwAndReleaseUpdates(APP_VERSION, includeBeta).then((res) => {
         if (res.hasUpdate) {
           setAvailableUpdate(res);
         }
@@ -864,6 +896,10 @@ export const App: React.FC = () => {
   );
 
   const statistics = useMemo(() => computeStatistics(snapshot, endOfToday), [snapshot, endOfToday]);
+  const stalledProjects = useMemo(
+    () => detectStalledProjects(snapshot.projects, snapshot.tasks),
+    [snapshot.projects, snapshot.tasks]
+  );
 
   // ==================== Calendar Integration State & Refresh (Android v1.6.21–v1.6.23 Parity) ====================
   const [hasCalendarPermission, setHasCalendarPermission] = useState<boolean>(() =>
@@ -1198,16 +1234,24 @@ export const App: React.FC = () => {
     []
   );
 
-  // Android v1.7.0 Power Feature Callbacks
-  const handleStartFocusTimer = useCallback((taskId: string, taskTitle: string) => {
-    setFocusTimer({
-      taskId,
-      taskTitle,
-      totalSeconds: 25 * 60,
-      remainingSeconds: 25 * 60,
-      isRunning: true
-    });
-  }, []);
+  // Android v1.7.0 + v2.0 Timeblock Focus Timer Callback
+  const handleStartFocusTimer = useCallback(
+    (taskId: string, taskTitle: string, durationMinutes?: number | null) => {
+      const mins =
+        durationMinutes != null && Number.isFinite(durationMinutes) && durationMinutes > 0
+          ? Math.max(1, Math.min(720, Math.trunc(durationMinutes)))
+          : 25;
+      const secs = mins * 60;
+      setFocusTimer({
+        taskId,
+        taskTitle,
+        totalSeconds: secs,
+        remainingSeconds: secs,
+        isRunning: true
+      });
+    },
+    []
+  );
 
   const handleDuplicateTask = useCallback(
     async (taskId: string) => {
@@ -1390,6 +1434,8 @@ export const App: React.FC = () => {
           target.isContentEditable);
 
       if (e.key === 'Escape') {
+        if (weeklyReviewModal.open) return setWeeklyReviewModal((prev) => ({ ...prev, open: false }));
+        if (templatesModal.open) return setTemplatesModal((prev) => ({ ...prev, open: false }));
         if (quickShareDraft) return setQuickShareDraft(null);
         if (emptyTrashConfirmOpen) return setEmptyTrashConfirmOpen(false);
         if (appLockSetupOpen) return setAppLockSetupOpen(false);
@@ -1417,6 +1463,15 @@ export const App: React.FC = () => {
       }
 
       const lower = e.key.toLowerCase();
+
+      // Global Ctrl+Shift+R / Cmd+Shift+R -> Guided GTD Weekly Review (v2.0)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && lower === 'r') {
+        e.preventDefault();
+        setMobileDrawerOpen(false);
+        setMagicFabOpen(false);
+        setWeeklyReviewModal({ open: true, step: 1 });
+        return;
+      }
 
       // Global Ctrl+Shift+N / Cmd+Shift+N / Alt+Shift+N -> New Project Modal (works everywhere, even when editing a task!)
       if ((e.ctrlKey || e.metaKey || (e.altKey && !e.ctrlKey)) && e.shiftKey && lower === 'n') {
@@ -1569,6 +1624,8 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     isAppLocked,
+    weeklyReviewModal.open,
+    templatesModal.open,
     quickShareDraft,
     emptyTrashConfirmOpen,
     appLockSetupOpen,
@@ -1830,6 +1887,7 @@ export const App: React.FC = () => {
         projects={snapshot.projects}
         tasks={snapshot.tasks}
         counts={sidebarCounts}
+        stalledProjectsCount={stalledProjects.length}
         canInstallPwa={Boolean(deferredInstallPrompt)}
         isStandalonePwa={isStandalonePwa}
         t={t}
@@ -1838,6 +1896,10 @@ export const App: React.FC = () => {
         onCreateProjectInArea={(areaId) =>
           setProjectModalState({ open: true, project: null, defaultAreaId: areaId })
         }
+        onOpenTemplates={(areaId) =>
+          setTemplatesModal({ open: true, tab: 'gallery', areaId })
+        }
+        onOpenWeeklyReview={() => setWeeklyReviewModal({ open: true, step: 1 })}
         onOpenManageAreas={() => setAreaManagerOpen(true)}
         onDropTaskOnTarget={(taskId, target) => void handleDropTaskOnSidebarTarget(taskId, target)}
         onTriggerInstallPwa={() => void handleTriggerInstallPwa()}
@@ -1893,6 +1955,40 @@ export const App: React.FC = () => {
           </div>
 
           <div className="topbar-right">
+            {/* Guided GTD Weekly Review Pill (v2.0) */}
+            <button
+              type="button"
+              className="topbar-pill"
+              data-testid="topbar-weekly-review-btn"
+              title={`${t.weeklyReviewTitle} (Ctrl+Shift+R)`}
+              onClick={() => setWeeklyReviewModal({ open: true, step: 1 })}
+            >
+              <Compass size={14} style={{ color: 'var(--things-blue)' }} />
+              <span className="topbar-label-hide-sm">{t.weeklyReviewBtn}</span>
+              {stalledProjects.length > 0 && (
+                <span className="v2-stalled-count-dot" title={t.projectStalledBadge}>
+                  {stalledProjects.length}
+                </span>
+              )}
+            </button>
+
+            {/* Templates & Markdown Importer Icon (v2.0) */}
+            <button
+              type="button"
+              className="icon-btn"
+              data-testid="topbar-templates-btn"
+              title={t.templatesModalTitle}
+              onClick={() =>
+                setTemplatesModal({
+                  open: true,
+                  tab: 'gallery',
+                  areaId: defaultAreaIdForNewProject
+                })
+              }
+            >
+              <ClipboardList size={17} />
+            </button>
+
             {/* Gemini Hub Pill */}
             <button
               type="button"
@@ -2085,6 +2181,14 @@ export const App: React.FC = () => {
                 defaultAreaId: defaultAreaIdForNewProject
               })
             }
+            onOpenTemplates={() =>
+              setTemplatesModal({
+                open: true,
+                tab: 'gallery',
+                areaId: defaultAreaIdForNewProject
+              })
+            }
+            onOpenWeeklyReview={() => setWeeklyReviewModal({ open: true, step: 1 })}
             onOpenManageAreas={() => setAreaManagerOpen(true)}
           />
         )}
@@ -2219,6 +2323,29 @@ export const App: React.FC = () => {
                       )}
                       <h1 className="view-title">{currentViewTitle}</h1>
                     </div>
+
+                    {activeNav.view === 'TODAY' && (
+                      <div className="v2-segmented-toggle" data-testid="today-mode-toggle">
+                        <button
+                          type="button"
+                          className={`v2-segmented-btn ${todayViewMode === 'list' ? 'active' : ''}`}
+                          data-testid="today-mode-list-btn"
+                          onClick={() => setTodayViewMode('list')}
+                        >
+                          <List size={13.5} />
+                          <span>{t.todayModeList}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`v2-segmented-btn ${todayViewMode === 'timeline' ? 'active' : ''}`}
+                          data-testid="today-mode-timeline-btn"
+                          onClick={() => setTodayViewMode('timeline')}
+                        >
+                          <CalendarDays size={13.5} />
+                          <span>{t.todayModeTimeline}</span>
+                        </button>
+                      </div>
+                    )}
 
                     {activeNav.view === 'TRASH' &&
                       deletedProjects.length + deletedTasks.length > 0 && (
@@ -2361,10 +2488,29 @@ export const App: React.FC = () => {
                   </div>
                 )}
 
-                {/* TODAY View (Daytime + Optional Project/Area Grouping + 🌙 This Evening) */}
+                {/* TODAY View (Daytime + Optional Project/Area Grouping + 🌙 This Evening | 🗓️ Timeline) */}
                 {activeNav.view === 'TODAY' && (() => {
                   const dayFiltered = filterByTag(todayDaytimeTasks);
                   const eveFiltered = filterByTag(todayEveningTasks);
+
+                  if (todayViewMode === 'timeline') {
+                    return (
+                      <TodayTimelineView
+                        todayTasks={[...dayFiltered, ...eveFiltered]}
+                        calendarEvents={prefs.calendarEventsEnabled ? todayCalendarEvents : []}
+                        areasMap={areasMap}
+                        projectsMap={allNonDeletedProjectsMap}
+                        t={t}
+                        onExpandTask={(taskId) => {
+                          setTodayViewMode('list');
+                          setSelectedTaskIds([]);
+                          setExpandedTaskId(taskId);
+                        }}
+                        onStartFocusTimer={handleStartFocusTimer}
+                      />
+                    );
+                  }
+
                   if (dayFiltered.length === 0 && eveFiltered.length === 0) {
                     return <div className="empty-state">{t.emptyToday}</div>;
                   }
@@ -2857,14 +3003,15 @@ export const App: React.FC = () => {
               const dlDiff =
                 project.deadline != null ? daysBetweenToday(project.deadline) : null;
               const projArea = project.areaId ? areasMap.get(project.areaId) : undefined;
+              const stalledStatus = evaluateProjectStalledStatus(project, snapshot.tasks);
 
               return (
                 <>
                   {/* Project Header */}
                   <div className="view-header" onClick={(e) => e.stopPropagation()}>
-                    {/* Row 1: ProgressRing(26) + Title + Up/Down + Edit + Complete + Delete */}
+                    {/* Row 1: ProgressRing(26) + Title + Stalled Badge + Up/Down + Edit + Complete + Delete */}
                     <div className="view-title-row">
-                      <div className="view-title-left">
+                      <div className="view-title-left" style={{ flexWrap: 'wrap' }}>
                         <ProjectProgressRing
                           completed={doneProjTasks}
                           total={allProjTasks.length}
@@ -2872,6 +3019,21 @@ export const App: React.FC = () => {
                           isProjectCompleted={project.status === 'COMPLETED'}
                         />
                         <h1 className="view-title">{project.title}</h1>
+                        {stalledStatus.isStalled && (
+                          <button
+                            type="button"
+                            className="v2-stalled-pill"
+                            data-testid="project-stalled-badge"
+                            title={
+                              stalledStatus.reason === 'no_next_action'
+                                ? t.projectStalledNoActionHint
+                                : t.projectStalledInactiveHint(stalledStatus.daysSinceActivity)
+                            }
+                            onClick={() => setWeeklyReviewModal({ open: true, step: 3 })}
+                          >
+                            <span>{t.projectStalledBadge}</span>
+                          </button>
+                        )}
                       </div>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -3069,6 +3231,21 @@ export const App: React.FC = () => {
                       >
                         <HeadingIcon size={12.5} />
                         <span>+ {t.entityHeading}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="chip-btn"
+                        data-testid="project-save-template-btn"
+                        onClick={async () => {
+                          const tpl = await localDb.saveProjectAsTemplate(project.id);
+                          if (tpl) {
+                            showToast(`📋 ${t.projectSavedAsTemplateToast(tpl.title)}`);
+                          }
+                        }}
+                      >
+                        <ClipboardList size={12.5} />
+                        <span>{t.projectSaveAsTemplateBtn}</span>
                       </button>
                     </div>
                   </div>
@@ -3425,6 +3602,13 @@ export const App: React.FC = () => {
               defaultAreaId: defaultAreaIdForNewProject
             })
           }
+          onOpenTemplates={() =>
+            setTemplatesModal({
+              open: true,
+              tab: 'gallery',
+              areaId: defaultAreaIdForNewProject
+            })
+          }
           onNewArea={() => setQuickCreateAreaOpen(true)}
         />
       </main>
@@ -3573,7 +3757,49 @@ export const App: React.FC = () => {
           areas={snapshot.areas}
           t={t}
           onSaved={(projectId) => handleSelectNav({ kind: 'project', projectId })}
+          onOpenTemplates={(areaId) =>
+            setTemplatesModal({ open: true, tab: 'gallery', areaId })
+          }
           onClose={() => setProjectModalState({ open: false })}
+        />
+      )}
+
+      {weeklyReviewModal.open && (
+        <WeeklyReviewModal
+          initialStep={weeklyReviewModal.step}
+          projects={snapshot.projects}
+          tasks={snapshot.tasks}
+          areasMap={areasMap}
+          projectsMap={allNonDeletedProjectsMap}
+          lastWeeklyReviewAt={prefs.lastWeeklyReviewAt}
+          lang={lang}
+          t={t}
+          onOpenProject={(projectId) => {
+            setWeeklyReviewModal((prev) => ({ ...prev, open: false }));
+            handleSelectNav({ kind: 'project', projectId });
+          }}
+          onCompleteReview={() => {
+            updatePrefs({ lastWeeklyReviewAt: Date.now() });
+            setWeeklyReviewModal({ open: false, step: 1 });
+            showToast(`🎉 ${t.weeklyReviewCompletedToast}`);
+          }}
+          onClose={() => setWeeklyReviewModal((prev) => ({ ...prev, open: false }))}
+        />
+      )}
+
+      {templatesModal.open && (
+        <TemplatesAndImportModal
+          initialTab={templatesModal.tab}
+          defaultAreaId={templatesModal.areaId}
+          areas={snapshot.areas}
+          savedTemplates={snapshot.projectTemplates}
+          t={t}
+          onCreatedProject={(projectId) => {
+            setTemplatesModal((prev) => ({ ...prev, open: false }));
+            handleSelectNav({ kind: 'project', projectId });
+          }}
+          onToast={showToast}
+          onClose={() => setTemplatesModal((prev) => ({ ...prev, open: false }))}
         />
       )}
 

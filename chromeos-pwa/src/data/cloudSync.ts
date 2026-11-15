@@ -29,6 +29,7 @@ import type {
   CloudSyncStatus,
   HeadingRecord,
   ProjectRecord,
+  ProjectTemplate,
   TagRecord,
   TaskRecord
 } from '../domain/types';
@@ -220,6 +221,7 @@ function projectToFirestoreMap(project: ProjectRecord): Record<string, unknown> 
     whenDate: project.whenDate != null ? Math.trunc(project.whenDate) : null,
     deadline: project.deadline != null ? Math.trunc(project.deadline) : null,
     completedAt: project.completedAt != null ? Math.trunc(project.completedAt) : null,
+    lastReviewedAt: project.lastReviewedAt != null ? Math.trunc(project.lastReviewedAt) : null,
     sortOrder: finiteNumber(project.sortOrder),
     tagIds: project.tagIds || [],
     createdAt: Math.trunc(finiteNumber(project.createdAt)),
@@ -248,6 +250,7 @@ function projectFromFirestoreMap(map: Record<string, unknown>): ProjectRecord | 
     whenDate: nullableNumber(map.whenDate),
     deadline: nullableNumber(map.deadline),
     completedAt: nullableNumber(map.completedAt),
+    lastReviewedAt: nullableNumber(map.lastReviewedAt),
     sortOrder: finiteNumber(map.sortOrder),
     tagIds: stringList(map.tagIds),
     createdAt: Math.trunc(finiteNumber(map.createdAt)),
@@ -298,6 +301,10 @@ function taskToFirestoreMap(task: TaskRecord): Record<string, unknown> {
     whenDate: task.whenDate != null ? Math.trunc(task.whenDate) : null,
     deadline: task.deadline != null ? Math.trunc(task.deadline) : null,
     reminderTime: task.reminderTime != null ? Math.trunc(task.reminderTime) : null,
+    scheduledStartMinutes:
+      task.scheduledStartMinutes != null ? Math.trunc(task.scheduledStartMinutes) : null,
+    durationMinutes:
+      task.durationMinutes != null ? Math.trunc(task.durationMinutes) : null,
     completedAt: task.completedAt != null ? Math.trunc(task.completedAt) : null,
     projectId: task.projectId ?? null,
     headingId: task.headingId ?? null,
@@ -330,6 +337,8 @@ function taskFromFirestoreMap(map: Record<string, unknown>): TaskRecord | null {
     whenDate: nullableNumber(map.whenDate),
     deadline: nullableNumber(map.deadline),
     reminderTime: nullableNumber(map.reminderTime),
+    scheduledStartMinutes: nullableNumber(map.scheduledStartMinutes),
+    durationMinutes: nullableNumber(map.durationMinutes),
     completedAt: nullableNumber(map.completedAt),
     projectId: nullableString(map.projectId),
     headingId: nullableString(map.headingId),
@@ -394,6 +403,39 @@ function attachmentFromFirestoreMap(map: Record<string, unknown>): AttachmentRec
     createdAt: Math.trunc(finiteNumber(map.createdAt)),
     updatedAt: Math.trunc(finiteNumber(map.updatedAt)),
     isDeleted,
+    isDirty: false
+  };
+}
+
+function projectTemplateToFirestoreMap(tpl: ProjectTemplate): Record<string, unknown> {
+  return {
+    id: tpl.id,
+    title: tpl.title,
+    notes: tpl.notes || '',
+    defaultAreaId: tpl.defaultAreaId ?? null,
+    tagIds: tpl.tagIds || [],
+    blueprintJson: tpl.blueprintJson || '{}',
+    sortOrder: finiteNumber(tpl.sortOrder),
+    createdAt: Math.trunc(finiteNumber(tpl.createdAt)),
+    updatedAt: Math.trunc(finiteNumber(tpl.updatedAt)),
+    isDeleted: Boolean(tpl.isDeleted)
+  };
+}
+
+function projectTemplateFromFirestoreMap(map: Record<string, unknown>): ProjectTemplate | null {
+  const id = nullableString(map.id);
+  if (!id) return null;
+  return {
+    id,
+    title: typeof map.title === 'string' ? map.title : '',
+    notes: typeof map.notes === 'string' ? map.notes : '',
+    defaultAreaId: nullableString(map.defaultAreaId),
+    tagIds: stringList(map.tagIds),
+    blueprintJson: typeof map.blueprintJson === 'string' ? map.blueprintJson : '{}',
+    sortOrder: finiteNumber(map.sortOrder),
+    createdAt: Math.trunc(finiteNumber(map.createdAt)),
+    updatedAt: Math.trunc(finiteNumber(map.updatedAt)),
+    isDeleted: Boolean(map.isDeleted),
     isDirty: false
   };
 }
@@ -1006,6 +1048,7 @@ class ThingsCloudSyncService {
     tasks: Record<string, unknown>[];
     checklistItems: Record<string, unknown>[];
     attachments: Record<string, unknown>[];
+    projectTemplates: Record<string, unknown>[];
   } | null> {
     const dirty = await localDb.getDirtyEntities();
     const metadataOps: Array<{ col: string; id: string; data: Record<string, unknown> }> = [];
@@ -1017,6 +1060,7 @@ class ThingsCloudSyncService {
     const taskMaps = dirty.tasks.map(taskToFirestoreMap);
     const checklistMaps = dirty.checklistItems.map(checklistToFirestoreMap);
     const attachmentMaps = dirty.attachments.map(attachmentToFirestoreMap);
+    const projectTemplateMaps = dirty.projectTemplates.map(projectTemplateToFirestoreMap);
 
     for (let i = 0; i < dirty.tags.length; i++) {
       metadataOps.push({ col: 'tags', id: dirty.tags[i].id, data: tagMaps[i] });
@@ -1038,6 +1082,13 @@ class ThingsCloudSyncService {
         col: 'checklist_items',
         id: dirty.checklistItems[i].id,
         data: checklistMaps[i]
+      });
+    }
+    for (let i = 0; i < dirty.projectTemplates.length; i++) {
+      metadataOps.push({
+        col: 'project_templates',
+        id: dirty.projectTemplates[i].id,
+        data: projectTemplateMaps[i]
       });
     }
 
@@ -1087,6 +1138,10 @@ class ThingsCloudSyncService {
       attachments: {
         ids: dirty.attachments.map((x) => x.id),
         maxUpdatedAt: maxOf(dirty.attachments)
+      },
+      projectTemplates: {
+        ids: dirty.projectTemplates.map((x) => x.id),
+        maxUpdatedAt: maxOf(dirty.projectTemplates)
       }
     });
 
@@ -1097,7 +1152,8 @@ class ThingsCloudSyncService {
       headings: headingMaps,
       tasks: taskMaps,
       checklistItems: checklistMaps,
-      attachments: attachmentMaps
+      attachments: attachmentMaps,
+      projectTemplates: projectTemplateMaps
     };
   }
 
@@ -1120,16 +1176,25 @@ class ThingsCloudSyncService {
       return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     };
 
-    const [rawTags, rawAreas, rawProjects, rawHeadings, rawTasks, rawChecklists, rawAttachments] =
-      await Promise.all([
-        fetchCollection('tags', effectiveSince),
-        fetchCollection('areas', effectiveSince),
-        fetchCollection('projects', effectiveSince),
-        fetchCollection('headings', effectiveSince),
-        fetchCollection('tasks', effectiveSince),
-        fetchCollection('checklist_items', effectiveSince),
-        fetchCollection('attachments', needsAttachmentBackfill ? 0 : effectiveSince)
-      ]);
+    const [
+      rawTags,
+      rawAreas,
+      rawProjects,
+      rawHeadings,
+      rawTasks,
+      rawChecklists,
+      rawAttachments,
+      rawTemplates
+    ] = await Promise.all([
+      fetchCollection('tags', effectiveSince),
+      fetchCollection('areas', effectiveSince),
+      fetchCollection('projects', effectiveSince),
+      fetchCollection('headings', effectiveSince),
+      fetchCollection('tasks', effectiveSince),
+      fetchCollection('checklist_items', effectiveSince),
+      fetchCollection('attachments', needsAttachmentBackfill ? 0 : effectiveSince),
+      fetchCollection('project_templates', effectiveSince)
+    ]);
 
     const tags = rawTags.map(tagFromFirestoreMap).filter((x): x is TagRecord => x !== null);
     const areas = rawAreas.map(areaFromFirestoreMap).filter((x): x is AreaRecord => x !== null);
@@ -1146,6 +1211,9 @@ class ThingsCloudSyncService {
     const attachments = rawAttachments
       .map(attachmentFromFirestoreMap)
       .filter((x): x is AttachmentRecord => x !== null);
+    const projectTemplates = rawTemplates
+      .map(projectTemplateFromFirestoreMap)
+      .filter((x): x is ProjectTemplate => x !== null);
 
     if (
       tags.length === 0 &&
@@ -1154,7 +1222,8 @@ class ThingsCloudSyncService {
       headings.length === 0 &&
       tasks.length === 0 &&
       checklistItems.length === 0 &&
-      attachments.length === 0
+      attachments.length === 0 &&
+      projectTemplates.length === 0
     ) {
       if (needsAttachmentBackfill) {
         localStorage.setItem(backfillKey, '1');
@@ -1169,7 +1238,8 @@ class ThingsCloudSyncService {
       headings,
       tasks,
       checklistItems,
-      attachments
+      attachments,
+      projectTemplates
     });
 
     if (needsAttachmentBackfill) {
@@ -1191,7 +1261,8 @@ class ThingsCloudSyncService {
       'headings',
       'tasks',
       'checklist_items',
-      'attachments'
+      'attachments',
+      'project_templates'
     ] as const;
 
     for (const colName of collections) {
@@ -1246,6 +1317,12 @@ class ThingsCloudSyncService {
                 .map(attachmentFromFirestoreMap)
                 .filter((x): x is AttachmentRecord => x !== null)
             });
+          } else if (colName === 'project_templates') {
+            maxTs = await localDb.applyRemoteDeltas({
+              projectTemplates: docs
+                .map(projectTemplateFromFirestoreMap)
+                .filter((x): x is ProjectTemplate => x !== null)
+            });
           }
 
           const clampedMax = clampRemoteCursorTimestamp(maxTs, Date.now());
@@ -1286,6 +1363,7 @@ class ThingsCloudSyncService {
       tasks: Record<string, unknown>[];
       checklistItems: Record<string, unknown>[];
       attachments: Record<string, unknown>[];
+      projectTemplates: Record<string, unknown>[];
     } | null
   ): Promise<void> {
     if (pushedDirtyMaps) {
@@ -1299,7 +1377,8 @@ class ThingsCloudSyncService {
         headings: pushedDirtyMaps.headings,
         tasks: pushedDirtyMaps.tasks,
         checklistItems: pushedDirtyMaps.checklistItems,
-        attachments: pushedDirtyMaps.attachments
+        attachments: pushedDirtyMaps.attachments,
+        projectTemplates: pushedDirtyMaps.projectTemplates
       });
       if (payload !== null) {
         await fetch(`https://ntfy.sh/${encodeURIComponent(channelTopic)}`, {
@@ -1381,6 +1460,11 @@ class ThingsCloudSyncService {
             ? batch.attachments
                 .map(attachmentFromFirestoreMap)
                 .filter((x: AttachmentRecord | null): x is AttachmentRecord => x !== null)
+            : undefined,
+          projectTemplates: Array.isArray(batch.projectTemplates)
+            ? batch.projectTemplates
+                .map(projectTemplateFromFirestoreMap)
+                .filter((x: ProjectTemplate | null): x is ProjectTemplate => x !== null)
             : undefined
         });
       } catch {

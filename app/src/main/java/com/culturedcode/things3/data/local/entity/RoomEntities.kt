@@ -47,6 +47,7 @@ data class ProjectEntity(
     val whenDate: Long? = null,
     val deadline: Long? = null,
     val completedAt: Long? = null,
+    val lastReviewedAt: Long? = null,
     val sortOrder: Double,
     val tagIdsJson: String = "[]",
     val createdAt: Long,
@@ -100,6 +101,8 @@ data class TaskEntity(
     val whenDate: Long? = null,
     val deadline: Long? = null,
     val reminderTime: Long? = null,
+    val scheduledStartMinutes: Int? = null,
+    val durationMinutes: Int? = null,
     val completedAt: Long? = null,
     val projectId: String? = null,
     val headingId: String? = null,
@@ -203,4 +206,26 @@ data class AttachmentEntity(
     val isDeleted: Boolean = false,
     val isDirty: Boolean = true
 )
+
+@Entity(
+    tableName = "project_templates",
+    indices = [
+        Index(value = ["updatedAt"]),
+        Index(value = ["isDirty"])
+    ]
+)
+data class ProjectTemplateEntity(
+    @PrimaryKey val id: String,
+    val title: String,
+    val notes: String = "",
+    val defaultAreaId: String? = null,
+    val tagIdsJson: String = "[]",
+    val blueprintJson: String = "{}",
+    val sortOrder: Double,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val isDeleted: Boolean = false,
+    val isDirty: Boolean = true
+)
+
 

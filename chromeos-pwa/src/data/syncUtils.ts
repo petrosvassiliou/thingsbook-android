@@ -97,6 +97,7 @@ export interface NtfyRelayBatchInput {
   tasks?: Record<string, unknown>[];
   checklistItems?: Record<string, unknown>[];
   attachments?: Record<string, unknown>[];
+  projectTemplates?: Record<string, unknown>[];
 }
 
 export function buildBoundedNtfyRelayPayload(
@@ -110,7 +111,8 @@ export function buildBoundedNtfyRelayPayload(
     (input.headings?.length ?? 0) > 0 ||
     (input.tasks?.length ?? 0) > 0 ||
     (input.checklistItems?.length ?? 0) > 0 ||
-    (input.attachments?.length ?? 0) > 0;
+    (input.attachments?.length ?? 0) > 0 ||
+    (input.projectTemplates?.length ?? 0) > 0;
   if (!hasAny) return null;
 
   const compactAttachments = input.attachments?.map((att) => {
@@ -133,6 +135,7 @@ export function buildBoundedNtfyRelayPayload(
   if (input.tasks?.length) payloadObj.tasks = input.tasks;
   if (input.checklistItems?.length) payloadObj.checklistItems = input.checklistItems;
   if (compactAttachments?.length) payloadObj.attachments = compactAttachments;
+  if (input.projectTemplates?.length) payloadObj.projectTemplates = input.projectTemplates;
 
   const json = JSON.stringify(payloadObj);
   const byteLength = new TextEncoder().encode(json).byteLength;

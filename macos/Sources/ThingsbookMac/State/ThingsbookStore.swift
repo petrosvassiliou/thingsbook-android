@@ -23,6 +23,20 @@ public enum SettingsSectionTab: String, CaseIterable, Identifiable {
     public var id: String { rawValue }
 }
 
+public enum TodayViewMode: String, CaseIterable, Identifiable, Sendable {
+    case list
+    case timeline
+
+    public var id: String { rawValue }
+}
+
+public enum TemplatesSheetTab: Int, CaseIterable, Identifiable, Sendable {
+    case gallery = 0
+    case importOutline = 1
+
+    public var id: Int { rawValue }
+}
+
 @MainActor
 public final class ThingsbookStore: ObservableObject {
     public let database: ThingsSQLiteDatabase
@@ -43,9 +57,11 @@ public final class ThingsbookStore: ObservableObject {
     }
     @Published public var areas: [Area] = []
     @Published public var projects: [Project] = []
+    @Published public var projectTemplates: [ProjectTemplate] = []
     @Published public var headingsByProject: [String: [Heading]] = [:]
     @Published public var projectAttachments: [String: [TaskAttachment]] = [:]
     @Published public var tags: [Tag] = []
+    @Published public var todayViewMode: TodayViewMode = .list
 
     @Published public var inboxTasks: [TaskItem] = []
     @Published public var todayDaytimeTasks: [TaskItem] = []
@@ -76,6 +92,9 @@ public final class ThingsbookStore: ObservableObject {
     @Published public var previewingAttachment: TaskAttachment? = nil
     @Published public var isGeminiSheetPresented = false
     @Published public var geminiInitialTab: GeminiSheetTab = .brainDump
+    @Published public var isWeeklyReviewPresented = false
+    @Published public var isTemplatesSheetPresented = false
+    @Published public var templatesInitialTab: TemplatesSheetTab = .gallery
     @Published public var isSettingsPresented = false
     @Published public var settingsTab: SettingsSectionTab = .general
 
@@ -107,6 +126,8 @@ public final class ThingsbookStore: ObservableObject {
         if isQuickEntryPresented { return "quickEntry" }
         if previewingAttachment != nil { return "attachmentPreview" }
         if isGeminiSheetPresented { return "gemini" }
+        if isWeeklyReviewPresented { return "weeklyReview" }
+        if isTemplatesSheetPresented { return "templates" }
         if isSettingsPresented { return "settings" }
         if isNewProjectSheetPresented { return "newProject" }
         if editingProject != nil { return "editProject" }
@@ -212,6 +233,7 @@ public final class ThingsbookStore: ObservableObject {
         guard let snap = try? database.loadWorkspaceSnapshot() else { return }
         self.areas = snap.areas
         self.projects = snap.projects
+        self.projectTemplates = snap.projectTemplates
         self.headingsByProject = snap.headingsByProject
         self.projectAttachments = snap.projectAttachments
         self.tags = snap.tags
@@ -277,6 +299,148 @@ public final class ThingsbookStore: ObservableObject {
         guard let id else { return nil }
         return areas.first { $0.id == id }
     }
+
+    // MARK: - v2.0 Weekly Review, Stalled Projects, Templates & Timeblocking
+
+    public static let stalledReviewThresholdMillis: Int64 = 14 * 86_400_000
+
+    public func projectStalledInfo(
+        _ project: Project,
+        nowMillis: Int64 = Int64(Date().timeIntervalSince1970 * 1000.0)
+    ) -> (isStalled: Bool, hasNoNextAction: Bool, isUnreviewed14Days: Bool) {
+        guard project.status == .active, !project.isDeleted, project.scheduleState != .someday else {
+            return (false, false, false)
+        }
+        let hasOpenNextAction = allOpenTasks.contains {
+            $0.projectId == project.id && $0.scheduleState != .someday
+        }
+        let hasNoNextAction = !hasOpenNextAction
+        let reviewAnchor = project.lastReviewedAt ?? project.createdAt
+        let isUnreviewed14Days = (nowMillis - reviewAnchor) >= Self.stalledReviewThresholdMillis
+        return (hasNoNextAction || isUnreviewed14Days, hasNoNextAction, isUnreviewed14Days)
+    }
+
+    public var stalledProjects: [Project] {
+        let now = Int64(Date().timeIntervalSince1970 * 1000.0)
+        return projects
+            .filter { projectStalledInfo($0, nowMillis: now).isStalled }
+            .sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    public var completedTasksLast7DaysCount: Int {
+        let cutoff = Int64(Date().addingTimeInterval(-7 * 86_400).timeIntervalSince1970 * 1000.0)
+        return logbookTasks.filter { ($0.completedAt ?? 0) >= cutoff && $0.status == .completed }.count
+    }
+
+    public func markProjectReviewed(_ projectId: String) {
+        try? database.markProjectReviewed(projectId: projectId)
+    }
+
+    @discardableResult
+    public func addNextActionToProject(_ projectId: String, title: String) -> TaskItem? {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let proj = project(byId: projectId) else { return nil }
+        let created = try? database.createTask(
+            title: trimmed,
+            scheduleState: .anytime,
+            projectId: proj.id,
+            areaId: proj.areaId
+        )
+        try? database.markProjectReviewed(projectId: proj.id)
+        return created
+    }
+
+    public func moveProjectToSomeday(_ project: Project) {
+        var copy = project
+        copy.scheduleState = .someday
+        copy.whenDate = nil
+        copy.lastReviewedAt = Int64(Date().timeIntervalSince1970 * 1000.0)
+        try? database.updateProject(copy)
+    }
+
+    public func completeWeeklyReview() {
+        let activeIds = projects
+            .filter { $0.status == .active && !$0.isDeleted }
+            .map(\.id)
+        try? database.markMultipleProjectsReviewed(activeIds)
+        isWeeklyReviewPresented = false
+        showToast(tr("v2_weekly_review_done_toast"))
+    }
+
+    public func saveProjectAsTemplate(_ projectId: String) {
+        if (try? database.saveProjectAsTemplate(projectId: projectId)) != nil {
+            showToast(tr("v2_template_saved_toast"))
+        }
+    }
+
+    @discardableResult
+    public func createProjectFromTemplate(
+        _ template: ProjectTemplate,
+        titleOverride: String? = nil,
+        areaIdOverride: String? = nil
+    ) -> Project? {
+        guard let created = try? database.instantiateProjectFromTemplate(
+            template,
+            titleOverride: titleOverride,
+            areaIdOverride: areaIdOverride
+        ) else {
+            return nil
+        }
+        isTemplatesSheetPresented = false
+        selectedDestination = .project(created.id)
+        return created
+    }
+
+    public func deleteCustomTemplate(_ templateId: String) {
+        try? database.deleteProjectTemplate(templateId)
+    }
+
+    @discardableResult
+    public func importProjectFromOutline(
+        _ rawInput: String,
+        areaId: String? = nil
+    ) -> Project? {
+        let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard let created = try? database.importProjectFromMarkdownOrJson(
+            trimmed,
+            defaultTitle: tr("entity_new_project"),
+            areaId: areaId
+        ) else {
+            return nil
+        }
+        isTemplatesSheetPresented = false
+        selectedDestination = .project(created.id)
+        return created
+    }
+
+    public func setTaskTimeblock(
+        _ taskId: String,
+        startMinutes: Int?,
+        durationMinutes: Int?
+    ) {
+        try? database.setTaskTimeblock(
+            taskId: taskId,
+            scheduledStartMinutes: startMinutes,
+            durationMinutes: durationMinutes
+        )
+    }
+
+    public func shiftTaskTimeblock(_ task: TaskItem, deltaMinutes: Int) {
+        let currentStart = task.scheduledStartMinutes ?? (9 * 60)
+        let nextStart = min(23 * 60 + 45, max(0, currentStart + deltaMinutes))
+        let duration = task.durationMinutes ?? 30
+        setTaskTimeblock(task.id, startMinutes: nextStart, durationMinutes: duration)
+    }
+
+    public func todayTimelineCalendarEvents() -> [CalendarEventItem] {
+        guard preferences.calendarEventsEnabled else { return [] }
+        let todayEpochDay = DateEpochConverter.epochDay(for: Date())
+        return calendarEvents
+            .filter { todayEpochDay >= $0.startDateEpochDay && todayEpochDay <= $0.endDateInclusiveEpochDay }
+            .sorted { $0.startMillis < $1.startMillis }
+    }
+
 
     // MARK: - Context-Aware New To-Do Creation
 
@@ -667,7 +831,13 @@ public final class ThingsbookStore: ObservableObject {
     public func startFocusTimer(for task: TaskItem) {
         focusTimerCancellable?.invalidate()
         let title = task.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? tr("macos_untitled_todo") : task.title
-        focusTimer = FocusTimerState(taskId: task.id, taskTitle: title)
+        let durationSeconds = max(1, task.durationMinutes ?? 25) * 60
+        focusTimer = FocusTimerState(
+            taskId: task.id,
+            taskTitle: title,
+            remainingSeconds: durationSeconds,
+            totalSeconds: durationSeconds
+        )
         focusTimerCancellable = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, var ft = self.focusTimer, !ft.isPaused else { return }
@@ -828,6 +998,7 @@ public final class ThingsbookStore: ObservableObject {
             if let dh = payload.preferences.dailyDigestHour { prefs.dailyDigestHour = dh }
             if let dm = payload.preferences.dailyDigestMinute { prefs.dailyDigestMinute = dm }
             if let gt = payload.preferences.groupTodayByProjectOrArea { prefs.groupTodayByProjectOrArea = gt }
+            if let ib = payload.preferences.includeBetaUpdates { prefs.includeBetaUpdates = ib }
             if let tag = payload.preferences.languageTag {
                 prefs.language = tag.isEmpty ? .system : (AppLanguage(rawValue: tag) ?? .system)
             }
@@ -883,7 +1054,7 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func checkForAppUpdatesSilently() async {
-        if let info = try? await AppUpdateService.checkForUpdates() {
+        if let info = try? await AppUpdateService.checkForUpdates(includeBeta: preferences.includeBetaUpdates) {
             self.availableUpdate = info
         }
     }
@@ -1171,6 +1342,11 @@ public final class ThingsbookStore: ObservableObject {
             selectedDestination = .smartView(.logbook)
         case "search":
             isQuickFindPresented = true
+        case "review", "weekly-review":
+            isWeeklyReviewPresented = true
+        case "templates":
+            templatesInitialTab = .gallery
+            isTemplatesSheetPresented = true
         default:
             break
         }

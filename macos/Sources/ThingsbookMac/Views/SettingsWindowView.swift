@@ -239,6 +239,7 @@ public struct SettingsWindowView: View {
                         shortcutRow(title: store.tr("view_this_evening"), keys: "⌘E")
                         shortcutRow(title: store.tr("view_someday"), keys: "⌘O")
                         shortcutRow(title: store.tr("quick_find_title"), keys: "⌘F")
+                        shortcutRow(title: store.tr("v2_weekly_review_title"), keys: "⇧⌘R")
                         shortcutRow(title: store.tr("gemini_hub_title"), keys: "⌘G")
                         shortcutRow(title: store.tr("action_focus_timer"), keys: "⌥⌘F")
                         shortcutRow(title: store.tr("action_undo"), keys: "⌘Z")
@@ -996,8 +997,18 @@ public struct SettingsWindowView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(store.tr("app_name"))
-                        .font(.system(size: 20, weight: .bold))
+                    HStack(spacing: 8) {
+                        Text(store.tr("app_name"))
+                            .font(.system(size: 20, weight: .bold))
+                        if AppUpdateService.currentVersionIsPrerelease {
+                            Text(store.tr("v2_beta_badge"))
+                                .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                                .foregroundStyle(ThingsMacPalette.accentBlue)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.14)))
+                        }
+                    }
                     Text(
                         store.trf(
                             "macos_version_subtitle",
@@ -1033,12 +1044,29 @@ public struct SettingsWindowView: View {
 
                 Divider()
 
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(store.tr("v2_beta_channel_toggle"))
+                            .font(.system(size: 13, weight: .medium))
+                        Text(store.tr("v2_beta_channel_desc"))
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Toggle("", isOn: $store.preferences.includeBetaUpdates)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
+
+                Divider()
+
                 HStack(spacing: 10) {
                     Button {
                         isCheckingUpdate = true
                         updateStatusText = store.tr("settings_updates_checking")
+                        let includeBeta = store.preferences.includeBetaUpdates
                         Task {
-                            let found = try? await AppUpdateService.checkForUpdates()
+                            let found = try? await AppUpdateService.checkForUpdates(includeBeta: includeBeta)
                             await MainActor.run {
                                 isCheckingUpdate = false
                                 store.availableUpdate = found

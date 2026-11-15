@@ -20,6 +20,7 @@ data class Project(
     val whenDate: Long?,
     val deadline: Long?,
     val completedAt: Long?,
+    val lastReviewedAt: Long? = null,
     val sortOrder: Double,
     val tagIds: List<String>,
     val totalTaskCount: Int = 0,
@@ -31,6 +32,9 @@ data class Project(
     /** Live progress fraction [0.0f .. 1.0f] for the Things 3 Pie-Chart Progress Ring */
     val progress: Float
         get() = if (totalTaskCount <= 0) 0f else (completedTaskCount.toFloat() / totalTaskCount.toFloat()).coerceIn(0f, 1f)
+
+    val openTaskCount: Int
+        get() = (totalTaskCount - completedTaskCount).coerceAtLeast(0)
 }
 
 data class Heading(
@@ -99,6 +103,8 @@ data class TaskItem(
     val whenDate: Long?,
     val deadline: Long?,
     val reminderTime: Long?,
+    val scheduledStartMinutes: Int? = null,
+    val durationMinutes: Int? = null,
     val completedAt: Long?,
     val projectId: String?,
     val headingId: String?,

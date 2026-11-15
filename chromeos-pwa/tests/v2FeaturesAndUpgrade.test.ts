@@ -1,0 +1,603 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  buildBackupPayloadFromEntities,
+  decodeThingsBackup,
+  encodeThingsBackup,
+  inspectThingsBackup,
+  normalizeBackupPayloadToEntities,
+  type ThingsbookBackupPayload
+} from '../src/data/backupCodec.ts';
+import {
+  STARTER_GTD_TEMPLATES,
+  buildDailyTimeline,
+  buildProjectTemplateBlueprint,
+  detectStalledProjects,
+  evaluateProjectStalledStatus,
+  formatMinutesAsClock,
+  formatTimeblockRange,
+  parseClockToMinutes,
+  parseProjectOutlineInput,
+  parseTemplateBlueprintJson
+} from '../src/domain/v2Utils.ts';
+import { TRANSLATIONS } from '../src/i18n/translations.ts';
+import type {
+  AreaRecord,
+  CalendarEventItem,
+  ChecklistItemRecord,
+  HeadingRecord,
+  ProjectRecord,
+  ProjectTemplate,
+  TagRecord,
+  TaskRecord
+} from '../src/domain/types.ts';
+
+test('v1.7 / v1.8.1 -> v2.0.0-beta.1 .tbbackup backward-compatible import applies safe null/[] defaults with zero data loss', async () => {
+  // Construct an authentic legacy v1.8.1 payload WITHOUT projectTemplates, scheduledStartMinutes,
+  // durationMinutes, lastReviewedAt, includeBetaUpdates, or lastWeeklyReviewAt
+  const legacyV181Payload = {
+    schemaVersion: 1,
+    createdAt: 1_760_000_000_000,
+    appVersionName: '1.8.1-chromeos',
+    areas: [
+      {
+        id: 'area-work',
+        title: 'Work',
+        sortOrder: 1000,
+        tagIdsJson: '["tag-deep"]',
+        createdAt: 1_750_000_000_000,
+        updatedAt: 1_760_000_000_000
+      }
+    ],
+    projects: [
+      {
+        id: 'proj-q3',
+        areaId: 'area-work',
+        title: 'Legacy 1.8.1 Launch',
+        notes: 'Keep 100% intact across 2.0 upgrade',
+        status: 'ACTIVE',
+        scheduleState: 'ANYTIME',
+        whenDate: null,
+        deadline: 1_765_000_000_000,
+        completedAt: null,
+        sortOrder: 1000,
+        tagIdsJson: '["tag-deep"]',
+        createdAt: 1_750_000_000_000,
+        updatedAt: 1_760_000_000_000
+      }
+    ],
+    headings: [
+      {
+        id: 'head-1',
+        projectId: 'proj-q3',
+        title: 'Engineering',
+        sortOrder: 1000,
+        isArchived: false,
+        createdAt: 1_750_000_000_000,
+        updatedAt: 1_760_000_000_000
+      }
+    ],
+    tasks: [
+      {
+        id: 'task-legacy-1',
+        title: 'Ship database migration',
+        notes: 'Zero data loss required',
+        status: 'OPEN',
+        scheduleState: 'TODAY',
+        whenDate: 1_760_000_000_000,
+        deadline: null,
+        reminderTime: null,
+        completedAt: null,
+        projectId: 'proj-q3',
+        headingId: 'head-1',
+        areaId: null,
+        recurrenceRuleJson: null,
+        sortOrder: 1000,
+        tagIdsJson: '["tag-deep"]',
+        createdAt: 1_750_000_000_000,
+        updatedAt: 1_760_000_000_000
+      }
+    ],
+    checklistItems: [
+      {
+        id: 'chk-1',
+        taskId: 'task-legacy-1',
+        title: 'Verify v1 and v2 stores',
+        isCompleted: true,
+        sortOrder: 1000,
+        createdAt: 1_750_000_000_000,
+        updatedAt: 1_760_000_000_000
+      }
+    ],
+    tags: [
+      {
+        id: 'tag-deep',
+        title: 'Deep Work',
+        parentTagId: null,
+        shortcut: 'w',
+        sortOrder: 1000,
+        createdAt: 1_750_000_000_000,
+        updatedAt: 1_760_000_000_000
+      }
+    ],
+    taskTagRefs: [{ taskId: 'task-legacy-1', tagId: 'tag-deep' }],
+    projectTagRefs: [{ projectId: 'proj-q3', tagId: 'tag-deep' }],
+    preferences: {
+      sidebarVisible: true,
+      dailyDigestEnabled: false,
+      languageTag: 'en',
+      groupTodayByProjectOrArea: true
+    }
+  } as unknown as ThingsbookBackupPayload;
+
+  const archiveBytes = await encodeThingsBackup(legacyV181Payload, null, '1.8.1-chromeos', 44);
+  const inspected = await inspectThingsBackup(archiveBytes);
+  assert.equal(inspected.kind, 'plain');
+  assert.equal(inspected.summary.projectsCount, 1);
+  assert.equal(inspected.summary.tasksCount, 1);
+  assert.equal(inspected.summary.projectTemplatesCount, 0);
+
+  const decoded = await decodeThingsBackup(archiveBytes, null);
+  const normalized = normalizeBackupPayloadToEntities(decoded, false, 1_770_000_000_000);
+
+  assert.equal(normalized.areas.length, 1);
+  assert.equal(normalized.projects.length, 1);
+  assert.equal(normalized.projects[0].title, 'Legacy 1.8.1 Launch');
+  assert.equal(normalized.projects[0].lastReviewedAt, null);
+
+  assert.equal(normalized.tasks.length, 1);
+  assert.equal(normalized.tasks[0].title, 'Ship database migration');
+  assert.equal(normalized.tasks[0].scheduledStartMinutes, null);
+  assert.equal(normalized.tasks[0].durationMinutes, null);
+
+  assert.equal(normalized.checklistItems.length, 1);
+  assert.deepEqual(normalized.projectTemplates, []);
+  assert.equal(normalized.preferences.includeBetaUpdates, false);
+  assert.equal(normalized.preferences.lastWeeklyReviewAt, 0);
+});
+
+test('v2.0.0-beta.1 .tbbackup encrypted & plain roundtrip preserves projectTemplates, scheduledStartMinutes, durationMinutes, and lastReviewedAt', async () => {
+  const now = 1_775_000_000_000;
+  const tags: TagRecord[] = [
+    {
+      id: 'tag-focus',
+      title: 'Focus',
+      parentTagId: null,
+      shortcut: 'f',
+      sortOrder: 1000,
+      createdAt: now,
+      updatedAt: now,
+      isDeleted: false,
+      isDirty: false
+    }
+  ];
+  const areas: AreaRecord[] = [
+    {
+      id: 'area-prod',
+      title: 'Product',
+      sortOrder: 1000,
+      tagIds: ['tag-focus'],
+      createdAt: now,
+      updatedAt: now,
+      isDeleted: false,
+      isDirty: false
+    }
+  ];
+  const projects: ProjectRecord[] = [
+    {
+      id: 'proj-v2',
+      areaId: 'area-prod',
+      title: 'Thingsbook 2.0 Beta',
+      notes: 'Cross-platform release',
+      status: 'ACTIVE',
+      scheduleState: 'ANYTIME',
+      whenDate: null,
+      deadline: null,
+      completedAt: null,
+      lastReviewedAt: 1_774_900_000_000,
+      sortOrder: 1000,
+      tagIds: ['tag-focus'],
+      createdAt: now,
+      updatedAt: now,
+      isDeleted: false,
+      isDirty: false
+    }
+  ];
+  const headings: HeadingRecord[] = [];
+  const tasks: TaskRecord[] = [
+    {
+      id: 'task-tb-1',
+      title: 'Morning architecture review',
+      notes: '',
+      status: 'OPEN',
+      scheduleState: 'TODAY',
+      whenDate: now,
+      deadline: null,
+      reminderTime: null,
+      scheduledStartMinutes: 540, // 09:00
+      durationMinutes: 45,
+      completedAt: null,
+      projectId: 'proj-v2',
+      headingId: null,
+      areaId: null,
+      recurrenceRule: null,
+      sortOrder: 1000,
+      tagIds: ['tag-focus'],
+      createdAt: now,
+      updatedAt: now,
+      isDeleted: false,
+      isDirty: false
+    }
+  ];
+  const checklistItems: ChecklistItemRecord[] = [];
+  const projectTemplates: ProjectTemplate[] = [
+    {
+      id: 'tpl-custom-1',
+      title: 'Release Checklist Template',
+      notes: 'Reusable beta release flow',
+      defaultAreaId: 'area-prod',
+      tagIds: ['tag-focus'],
+      blueprintJson: JSON.stringify({
+        version: 1,
+        tasks: [{ title: 'Tag release', whenDaysOffset: 0, durationMinutes: 30 }],
+        headings: [{ title: 'QA', tasks: [{ title: 'Run test suite', checklistItems: ['Unit', 'Build'] }] }]
+      }),
+      sortOrder: 1000,
+      createdAt: now,
+      updatedAt: now,
+      isDeleted: false,
+      isDirty: false
+    }
+  ];
+
+  const payload = buildBackupPayloadFromEntities({
+    areas,
+    projects,
+    headings,
+    tasks,
+    checklistItems,
+    tags,
+    projectTemplates,
+    preferences: {
+      includeBetaUpdates: true,
+      lastWeeklyReviewAt: 1_774_950_000_000
+    },
+    appVersionName: '2.0.0-beta.1-chromeos'
+  });
+
+  // Test AES-256-GCM encrypted archive roundtrip
+  const encryptedBytes = await encodeThingsBackup(
+    payload,
+    'BetaVault2026!',
+    '2.0.0-beta.1-chromeos',
+    45
+  );
+  const inspectedEnc = await inspectThingsBackup(encryptedBytes);
+  assert.equal(inspectedEnc.kind, 'encrypted');
+
+  const decoded = await decodeThingsBackup(encryptedBytes, 'BetaVault2026!');
+  const restored = normalizeBackupPayloadToEntities(decoded, true, now);
+
+  assert.equal(restored.projects[0].lastReviewedAt, 1_774_900_000_000);
+  assert.equal(restored.tasks[0].scheduledStartMinutes, 540);
+  assert.equal(restored.tasks[0].durationMinutes, 45);
+  assert.equal(restored.projectTemplates.length, 1);
+  assert.equal(restored.projectTemplates[0].id, 'tpl-custom-1');
+  assert.equal(restored.projectTemplates[0].defaultAreaId, 'area-prod');
+  assert.deepEqual(restored.projectTemplates[0].tagIds, ['tag-focus']);
+  assert.equal(restored.preferences.includeBetaUpdates, true);
+  assert.equal(restored.preferences.lastWeeklyReviewAt, 1_774_950_000_000);
+
+  const parsedBp = parseTemplateBlueprintJson(restored.projectTemplates[0].blueprintJson);
+  assert.equal(parsedBp.tasks.length, 1);
+  assert.equal(parsedBp.tasks[0].durationMinutes, 30);
+  assert.equal(parsedBp.headings.length, 1);
+  assert.deepEqual(parsedBp.headings[0].tasks[0].checklistItems, ['Unit', 'Build']);
+});
+
+test('Markdown & JSON Outline Importer + Template Blueprint Builder parse # Project, ## Heading, - [ ] Task, and indented Subtasks', () => {
+  const mdOutline = `# Autumn Product Launch
+Coordinate design, engineering, and announcement blog post.
+
+- [ ] Lock launch date with leadership
+
+## Engineering & QA
+- [ ] Finalize IndexedDB v3 upgrade
+  - [ ] Verify v1 -> v3 migration
+  - [ ] Verify v2 -> v3 migration
+- [x] Configure beta auto-updater
+
+## Marketing
+1. Publish release notes
+   - Capture Chromebook screenshots`;
+
+  const parsedMd = parseProjectOutlineInput(mdOutline, 'Fallback');
+  assert.equal(parsedMd.title, 'Autumn Product Launch');
+  assert.equal(parsedMd.notes, 'Coordinate design, engineering, and announcement blog post.');
+  assert.equal(parsedMd.stats.headingsCount, 2);
+  assert.equal(parsedMd.stats.tasksCount, 4);
+  assert.equal(parsedMd.stats.subtasksCount, 3);
+  assert.equal(parsedMd.blueprint.tasks[0].title, 'Lock launch date with leadership');
+  assert.equal(parsedMd.blueprint.headings[0].title, 'Engineering & QA');
+  assert.deepEqual(parsedMd.blueprint.headings[0].tasks[0].checklistItems, [
+    'Verify v1 -> v3 migration',
+    'Verify v2 -> v3 migration'
+  ]);
+  assert.equal(parsedMd.blueprint.headings[1].title, 'Marketing');
+  assert.deepEqual(parsedMd.blueprint.headings[1].tasks[0].checklistItems, [
+    'Capture Chromebook screenshots'
+  ]);
+
+  // JSON outline parsing
+  const jsonOutline = JSON.stringify({
+    title: 'JSON Imported Sprint',
+    notes: 'Structured JSON import',
+    tasks: [{ title: 'Kickoff call', durationMinutes: 30, checklistItems: ['Agenda', 'Notes'] }],
+    headings: [{ title: 'Execution', tasks: [{ title: 'Build timeline toggle', durationMinutes: 45 }] }]
+  });
+  const parsedJson = parseProjectOutlineInput(jsonOutline, 'Untitled');
+  assert.equal(parsedJson.title, 'JSON Imported Sprint');
+  assert.equal(parsedJson.stats.headingsCount, 1);
+  assert.equal(parsedJson.stats.tasksCount, 2);
+  assert.equal(parsedJson.stats.subtasksCount, 2);
+  assert.equal(parsedJson.blueprint.headings[0].tasks[0].durationMinutes, 45);
+
+  // Verify all 4 built-in Starter GTD Templates have valid structure
+  assert.equal(STARTER_GTD_TEMPLATES.length, 4);
+  for (const tpl of STARTER_GTD_TEMPLATES) {
+    assert.ok(tpl.defaultTitle.length > 0);
+    assert.ok(tpl.blueprint.headings.length > 0);
+  }
+
+  // Verify buildProjectTemplateBlueprint captures relative offsets and durations
+  const anchorDay = new Date(2026, 10, 15, 0, 0, 0, 0).getTime();
+  const nextDay = new Date(2026, 10, 16, 0, 0, 0, 0).getTime();
+  const builtBlueprint = buildProjectTemplateBlueprint(
+    {
+      id: 'p1',
+      areaId: null,
+      title: 'Live Project',
+      notes: 'Proj notes',
+      status: 'ACTIVE',
+      scheduleState: 'ANYTIME',
+      whenDate: null,
+      deadline: null,
+      completedAt: null,
+      lastReviewedAt: null,
+      sortOrder: 1000,
+      tagIds: [],
+      createdAt: anchorDay,
+      updatedAt: anchorDay,
+      isDeleted: false,
+      isDirty: false
+    },
+    [
+      {
+        id: 'h1',
+        projectId: 'p1',
+        title: 'Phase 1',
+        sortOrder: 1000,
+        isArchived: false,
+        createdAt: anchorDay,
+        updatedAt: anchorDay,
+        isDeleted: false,
+        isDirty: false
+      }
+    ],
+    [
+      {
+        id: 't1',
+        title: 'Day 2 Task',
+        notes: 'Task note',
+        status: 'OPEN',
+        scheduleState: 'UPCOMING',
+        whenDate: nextDay,
+        deadline: null,
+        reminderTime: null,
+        scheduledStartMinutes: 600,
+        durationMinutes: 60,
+        completedAt: null,
+        projectId: 'p1',
+        headingId: 'h1',
+        areaId: null,
+        recurrenceRule: null,
+        sortOrder: 1000,
+        tagIds: [],
+        createdAt: anchorDay,
+        updatedAt: anchorDay,
+        isDeleted: false,
+        isDirty: false
+      }
+    ],
+    [
+      {
+        id: 'c1',
+        taskId: 't1',
+        title: 'Sub-step A',
+        isCompleted: false,
+        sortOrder: 1000,
+        createdAt: anchorDay,
+        updatedAt: anchorDay,
+        isDeleted: false,
+        isDirty: false
+      }
+    ],
+    anchorDay
+  );
+  const roundtrippedBp = parseTemplateBlueprintJson(JSON.stringify(builtBlueprint));
+  assert.equal(roundtrippedBp.headings[0].tasks[0].whenDaysOffset, 1);
+  assert.equal(roundtrippedBp.headings[0].tasks[0].durationMinutes, 60);
+  assert.deepEqual(roundtrippedBp.headings[0].tasks[0].checklistItems, ['Sub-step A']);
+});
+
+test('Stalled Project Detector & Timeblocking Daily Timeline interleaving + conflict detection', () => {
+  const dayMs = 86_400_000;
+  const now = 1_780_000_000_000;
+
+  const makeProject = (overrides: Partial<ProjectRecord>): ProjectRecord => ({
+    id: 'p-default',
+    areaId: null,
+    title: 'Project',
+    notes: '',
+    status: 'ACTIVE',
+    scheduleState: 'ANYTIME',
+    whenDate: null,
+    deadline: null,
+    completedAt: null,
+    lastReviewedAt: null,
+    sortOrder: 1000,
+    tagIds: [],
+    createdAt: now - 5 * dayMs,
+    updatedAt: now - 2 * dayMs,
+    isDeleted: false,
+    isDirty: false,
+    ...overrides
+  });
+
+  const makeTask = (overrides: Partial<TaskRecord>): TaskRecord => ({
+    id: 't-default',
+    title: 'Task',
+    notes: '',
+    status: 'OPEN',
+    scheduleState: 'TODAY',
+    whenDate: now,
+    deadline: null,
+    reminderTime: null,
+    scheduledStartMinutes: null,
+    durationMinutes: null,
+    completedAt: null,
+    projectId: null,
+    headingId: null,
+    areaId: null,
+    recurrenceRule: null,
+    sortOrder: 1000,
+    tagIds: [],
+    createdAt: now - 2 * dayMs,
+    updatedAt: now - 2 * dayMs,
+    isDeleted: false,
+    isDirty: false,
+    ...overrides
+  });
+
+  const projNoActions = makeProject({ id: 'p-empty', title: 'Empty Project', sortOrder: 100 });
+  const projStale16d = makeProject({
+    id: 'p-stale',
+    title: 'Untouched 16d',
+    createdAt: now - 20 * dayMs,
+    updatedAt: now - 16 * dayMs,
+    sortOrder: 200
+  });
+  const projReviewedYesterday = makeProject({
+    id: 'p-reviewed',
+    title: 'Reviewed Recently',
+    createdAt: now - 30 * dayMs,
+    updatedAt: now - 25 * dayMs,
+    lastReviewedAt: now - 1 * dayMs,
+    sortOrder: 300
+  });
+  const projSomeday = makeProject({
+    id: 'p-someday',
+    title: 'Parked Someday',
+    scheduleState: 'SOMEDAY',
+    sortOrder: 400
+  });
+
+  const tasksForStalled: TaskRecord[] = [
+    makeTask({
+      id: 'tk-stale',
+      projectId: 'p-stale',
+      updatedAt: now - 16 * dayMs,
+      createdAt: now - 20 * dayMs
+    }),
+    makeTask({
+      id: 'tk-reviewed',
+      projectId: 'p-reviewed',
+      updatedAt: now - 25 * dayMs,
+      createdAt: now - 30 * dayMs
+    })
+  ];
+
+  assert.equal(evaluateProjectStalledStatus(projNoActions, tasksForStalled, now).reason, 'no_next_action');
+  assert.equal(evaluateProjectStalledStatus(projStale16d, tasksForStalled, now).reason, 'inactive_14d');
+  assert.equal(evaluateProjectStalledStatus(projReviewedYesterday, tasksForStalled, now).isStalled, false);
+  assert.equal(evaluateProjectStalledStatus(projSomeday, tasksForStalled, now).isStalled, false);
+
+  const stalledList = detectStalledProjects(
+    [projSomeday, projReviewedYesterday, projStale16d, projNoActions],
+    tasksForStalled,
+    now
+  );
+  assert.deepEqual(
+    stalledList.map((x) => x.project.id),
+    ['p-empty', 'p-stale']
+  );
+
+  // Timeblock formatting & clock utilities
+  assert.equal(formatMinutesAsClock(540), '09:00');
+  assert.equal(parseClockToMinutes('09:45'), 585);
+  assert.equal(formatTimeblockRange(540, 45), '09:00–09:45 · 45m');
+
+  // Chronological Daily Timeline + Overlap Conflict Detection
+  const dayStart = new Date(2026, 10, 15, 0, 0, 0, 0).getTime();
+  const calStandupStart = new Date(2026, 10, 15, 9, 30, 0, 0).getTime();
+  const calStandupEnd = new Date(2026, 10, 15, 10, 0, 0, 0).getTime();
+
+  const calEvents: CalendarEventItem[] = [
+    {
+      eventId: 'ev-standup',
+      calendarId: 'cal-1',
+      title: 'Team Standup',
+      startMillis: calStandupStart,
+      endMillis: calStandupEnd,
+      isAllDay: false,
+      colorHex: '#4285F4',
+      location: 'Meet'
+    }
+  ];
+
+  const todayTasks: TaskRecord[] = [
+    makeTask({
+      id: 'tb-deep',
+      title: 'Write 2.0 Migration Spec',
+      scheduledStartMinutes: 9 * 60, // 09:00–09:45 (overlaps 09:30–10:00 Team Standup!)
+      durationMinutes: 45
+    }),
+    makeTask({
+      id: 'tb-afternoon',
+      title: 'Review Beta Feedback',
+      scheduledStartMinutes: 14 * 60, // 14:00–14:30 (no overlap)
+      durationMinutes: 30
+    }),
+    makeTask({
+      id: 'tb-unscheduled',
+      title: 'Reply to emails',
+      scheduledStartMinutes: null,
+      durationMinutes: null
+    })
+  ];
+
+  const timeline = buildDailyTimeline(todayTasks, calEvents, dayStart);
+  assert.equal(timeline.timedItems.length, 3);
+  assert.equal(timeline.unscheduledTasks.length, 1);
+  assert.equal(timeline.unscheduledTasks[0].id, 'tb-unscheduled');
+
+  // Chronological order: 09:00 task -> 09:30 calendar -> 14:00 task
+  assert.deepEqual(
+    timeline.timedItems.map((i) => i.title),
+    ['Write 2.0 Migration Spec', 'Team Standup', 'Review Beta Feedback']
+  );
+  assert.equal(timeline.timedItems[0].hasConflict, true);
+  assert.deepEqual(timeline.timedItems[0].conflictTitles, ['Team Standup']);
+  assert.equal(timeline.timedItems[1].hasConflict, true);
+  assert.deepEqual(timeline.timedItems[1].conflictTitles, ['Write 2.0 Migration Spec']);
+  assert.equal(timeline.timedItems[2].hasConflict, false);
+
+  // Verify 5-language localization parity for v2.0 UI strings
+  for (const locale of ['en', 'de', 'fr', 'it', 'es'] as const) {
+    const tr = TRANSLATIONS[locale];
+    assert.ok(tr.weeklyReviewTitle.length > 0, `${locale} weeklyReviewTitle`);
+    assert.ok(tr.templatesModalTitle.length > 0, `${locale} templatesModalTitle`);
+    assert.ok(tr.todayModeTimeline.length > 0, `${locale} todayModeTimeline`);
+    assert.ok(tr.settingsIncludeBetaTitle.length > 0, `${locale} settingsIncludeBetaTitle`);
+  }
+});

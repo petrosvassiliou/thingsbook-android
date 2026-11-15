@@ -43,6 +43,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
@@ -137,6 +138,7 @@ import com.culturedcode.things3.domain.model.ScheduleState
 import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
+import com.culturedcode.things3.domain.model.TimeblockScheduleUtils
 import com.culturedcode.things3.ui.theme.ThingsTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -193,6 +195,7 @@ fun ExpandableTaskCard(
     onScheduleWithReminderChange: ((ScheduleState, Long?, Long?) -> Unit)? = null,
     onDeadlineChange: (Long?) -> Unit,
     onRecurrenceChange: ((RecurrenceRule?) -> Unit)? = null,
+    onUpdateTimeblock: ((startMinutes: Int?, durationMinutes: Int?) -> Unit)? = null,
     onMoveTaskToContainer: ((projectId: String?, headingId: String?, areaId: String?) -> Unit)? = null,
     onUpdateTaskTags: ((List<String>) -> Unit)? = null,
     onCreateAndAssignTag: ((String) -> Unit)? = null,
@@ -273,6 +276,7 @@ fun ExpandableTaskCard(
     var showWhenDialog by remember(task.id) { mutableStateOf(false) }
     var showDeadlineDialog by remember(task.id) { mutableStateOf(false) }
     var showRepeatDialog by remember(task.id) { mutableStateOf(false) }
+    var showTimeblockDialog by remember(task.id) { mutableStateOf(false) }
     var showMoveDialog by remember(task.id) { mutableStateOf(false) }
     var showTagPickerDialog by remember(task.id) { mutableStateOf(false) }
     var showContextMenu by remember(task.id) { mutableStateOf(false) }
@@ -283,6 +287,7 @@ fun ExpandableTaskCard(
             when (externalDialogTriggerType) {
                 "WHEN" -> showWhenDialog = true
                 "DEADLINE" -> showDeadlineDialog = true
+                "TIMEBLOCK" -> showTimeblockDialog = true
                 "MOVE" -> showMoveDialog = true
             }
         }
@@ -701,6 +706,7 @@ fun ExpandableTaskCard(
                     CollapsedTaskInlineBadges(
                         task = task,
                         locale = locale,
+                        onOpenTimeblockDialog = if (onUpdateTimeblock != null) ({ showTimeblockDialog = true }) else null,
                         modifier = Modifier.padding(start = 40.dp, top = 6.dp)
                     )
                 }
@@ -768,6 +774,7 @@ fun ExpandableTaskCard(
                         onOpenWhenDialog = { showWhenDialog = true },
                         onOpenDeadlineDialog = { showDeadlineDialog = true },
                         onOpenRepeatDialog = { showRepeatDialog = true },
+                        onOpenTimeblockDialog = if (onUpdateTimeblock != null) ({ showTimeblockDialog = true }) else null,
                         onOpenMoveDialog = { showMoveDialog = true },
                         onOpenTagPickerDialog = { showTagPickerDialog = true },
                         onDuplicateTask = onDuplicateTask,
@@ -789,6 +796,7 @@ fun ExpandableTaskCard(
                 onOpenWhenDialog = { showWhenDialog = true },
                 onOpenDeadlineDialog = { showDeadlineDialog = true },
                 onOpenRepeatDialog = { showRepeatDialog = true },
+                onOpenTimeblockDialog = if (onUpdateTimeblock != null) ({ showTimeblockDialog = true }) else null,
                 onOpenMoveDialog = { showMoveDialog = true },
                 onOpenTagPickerDialog = { showTagPickerDialog = true },
                 onTriggerGeminiMagicBreakdown = onTriggerGeminiMagicBreakdown,
@@ -798,6 +806,17 @@ fun ExpandableTaskCard(
                 onDismiss = { showContextMenu = false }
             )
         }
+    }
+
+    if (showTimeblockDialog && onUpdateTimeblock != null) {
+        ThingsTimeblockPickerDialog(
+            initialStartMinutes = task.scheduledStartMinutes,
+            initialDurationMinutes = task.durationMinutes,
+            onSaveTimeblock = { startMins, durMins ->
+                onUpdateTimeblock(startMins, durMins)
+            },
+            onDismiss = { showTimeblockDialog = false }
+        )
     }
 
     TaskCardDialogsHost(
@@ -939,6 +958,8 @@ private fun CollapsedTaskTitleWithStrike(
 
 private fun hasCollapsedTaskBadges(task: TaskItem): Boolean {
     return task.scheduleState == ScheduleState.THIS_EVENING ||
+        task.scheduledStartMinutes != null ||
+        task.durationMinutes != null ||
         task.recurrenceRule != null ||
         task.reminderTime != null ||
         task.checklistItems.isNotEmpty() ||
@@ -952,6 +973,7 @@ private fun hasCollapsedTaskBadges(task: TaskItem): Boolean {
 private fun CollapsedTaskInlineBadges(
     task: TaskItem,
     locale: Locale,
+    onOpenTimeblockDialog: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     FlowRow(
@@ -964,6 +986,20 @@ private fun CollapsedTaskInlineBadges(
                 scheduleState = task.scheduleState,
                 whenDateEpochMillis = task.whenDate,
                 locale = locale
+            )
+        }
+        if (task.scheduledStartMinutes != null) {
+            ThingsTagPill(
+                title = TimeblockScheduleUtils.formatTimeblockBadge(
+                    task.scheduledStartMinutes,
+                    task.durationMinutes
+                ),
+                onClick = onOpenTimeblockDialog
+            )
+        } else if (task.durationMinutes != null) {
+            ThingsTagPill(
+                title = "⏱ ${task.durationMinutes}m",
+                onClick = onOpenTimeblockDialog
             )
         }
         task.recurrenceRule?.let { rr ->
@@ -1090,6 +1126,7 @@ private fun ExpandedTaskCardBody(
     onOpenWhenDialog: () -> Unit,
     onOpenDeadlineDialog: () -> Unit,
     onOpenRepeatDialog: () -> Unit,
+    onOpenTimeblockDialog: (() -> Unit)? = null,
     onOpenMoveDialog: () -> Unit,
     onOpenTagPickerDialog: () -> Unit,
     onDuplicateTask: (() -> Unit)? = null,
@@ -1441,6 +1478,25 @@ private fun ExpandedTaskCardBody(
                 )
             }
 
+            if (task.scheduledStartMinutes != null) {
+                ThingsTagPill(
+                    title = TimeblockScheduleUtils.formatTimeblockBadge(
+                        task.scheduledStartMinutes,
+                        task.durationMinutes
+                    ),
+                    onClick = onOpenTimeblockDialog
+                )
+            } else if (onOpenTimeblockDialog != null) {
+                ThingsTagPill(
+                    title = if (task.durationMinutes != null) {
+                        "⏱️ ${stringResource(R.string.v2_timeblock_title)} (${task.durationMinutes}m)"
+                    } else {
+                        "⏱️ ${stringResource(R.string.v2_timeblock_title)}"
+                    },
+                    onClick = onOpenTimeblockDialog
+                )
+            }
+
             if (task.recurrenceRule != null) {
                 ThingsRepeatBadge(
                     rule = task.recurrenceRule,
@@ -1552,6 +1608,25 @@ private fun ExpandedTaskCardBody(
                             tint = if (task.whenDate != null || task.reminderTime != null) colors.thingsBlue else colors.secondaryText,
                             modifier = Modifier.size(16.dp)
                         )
+                    }
+                }
+
+                if (onOpenTimeblockDialog != null) {
+                    ThingsHoverTooltip(text = stringResource(R.string.v2_timeblock_title)) {
+                        IconButton(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onOpenTimeblockDialog()
+                            },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.AccessTime,
+                                contentDescription = stringResource(R.string.v2_timeblock_title),
+                                tint = if (task.scheduledStartMinutes != null || task.durationMinutes != null) colors.thingsBlue else colors.secondaryText,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
 
@@ -1741,6 +1816,7 @@ private fun TaskContextDropdownMenu(
     onOpenWhenDialog: () -> Unit,
     onOpenDeadlineDialog: () -> Unit,
     onOpenRepeatDialog: () -> Unit,
+    onOpenTimeblockDialog: (() -> Unit)? = null,
     onOpenMoveDialog: () -> Unit,
     onOpenTagPickerDialog: () -> Unit,
     onTriggerGeminiMagicBreakdown: () -> Unit,
@@ -1849,6 +1925,29 @@ private fun TaskContextDropdownMenu(
                 onOpenWhenDialog()
             }
         )
+        if (onOpenTimeblockDialog != null) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = stringResource(R.string.v2_timeblock_title),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.primaryText
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.AccessTime,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    onDismiss()
+                    onOpenTimeblockDialog()
+                }
+            )
+        }
         DropdownMenuItem(
             text = {
                 Text(

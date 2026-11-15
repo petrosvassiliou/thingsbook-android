@@ -125,6 +125,7 @@ public struct BackupProjectDto: Codable, Equatable, Sendable {
     public var whenDate: Int64?
     public var deadline: Int64?
     public var completedAt: Int64?
+    public var lastReviewedAt: Int64?
     public var sortOrder: Double
     public var tagIdsJson: String
     public var createdAt: Int64
@@ -140,6 +141,7 @@ public struct BackupProjectDto: Codable, Equatable, Sendable {
         whenDate: Int64? = nil,
         deadline: Int64? = nil,
         completedAt: Int64? = nil,
+        lastReviewedAt: Int64? = nil,
         sortOrder: Double = 0,
         tagIdsJson: String = "[]",
         createdAt: Int64 = 0,
@@ -154,6 +156,7 @@ public struct BackupProjectDto: Codable, Equatable, Sendable {
         self.whenDate = whenDate
         self.deadline = deadline
         self.completedAt = completedAt
+        self.lastReviewedAt = lastReviewedAt
         self.sortOrder = sortOrder
         self.tagIdsJson = tagIdsJson
         self.createdAt = createdAt
@@ -171,6 +174,7 @@ public struct BackupProjectDto: Codable, Equatable, Sendable {
         self.whenDate = try? c.decodeIfPresent(Int64.self, forKey: .whenDate)
         self.deadline = try? c.decodeIfPresent(Int64.self, forKey: .deadline)
         self.completedAt = try? c.decodeIfPresent(Int64.self, forKey: .completedAt)
+        self.lastReviewedAt = try? c.decodeIfPresent(Int64.self, forKey: .lastReviewedAt)
         self.sortOrder = (try? c.decode(Double.self, forKey: .sortOrder)) ?? 0
         self.tagIdsJson = (try? c.decode(String.self, forKey: .tagIdsJson)) ?? "[]"
         self.createdAt = (try? c.decode(Int64.self, forKey: .createdAt)) ?? 0
@@ -226,6 +230,8 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
     public var whenDate: Int64?
     public var deadline: Int64?
     public var reminderTime: Int64?
+    public var scheduledStartMinutes: Int?
+    public var durationMinutes: Int?
     public var completedAt: Int64?
     public var projectId: String?
     public var headingId: String?
@@ -245,6 +251,8 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
         whenDate: Int64? = nil,
         deadline: Int64? = nil,
         reminderTime: Int64? = nil,
+        scheduledStartMinutes: Int? = nil,
+        durationMinutes: Int? = nil,
         completedAt: Int64? = nil,
         projectId: String? = nil,
         headingId: String? = nil,
@@ -263,6 +271,8 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
         self.whenDate = whenDate
         self.deadline = deadline
         self.reminderTime = reminderTime
+        self.scheduledStartMinutes = scheduledStartMinutes
+        self.durationMinutes = durationMinutes
         self.completedAt = completedAt
         self.projectId = projectId
         self.headingId = headingId
@@ -284,6 +294,8 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
         self.whenDate = try? c.decodeIfPresent(Int64.self, forKey: .whenDate)
         self.deadline = try? c.decodeIfPresent(Int64.self, forKey: .deadline)
         self.reminderTime = try? c.decodeIfPresent(Int64.self, forKey: .reminderTime)
+        self.scheduledStartMinutes = try? c.decodeIfPresent(Int.self, forKey: .scheduledStartMinutes)
+        self.durationMinutes = try? c.decodeIfPresent(Int.self, forKey: .durationMinutes)
         self.completedAt = try? c.decodeIfPresent(Int64.self, forKey: .completedAt)
         self.projectId = try? c.decodeIfPresent(String.self, forKey: .projectId)
         self.headingId = try? c.decodeIfPresent(String.self, forKey: .headingId)
@@ -445,6 +457,78 @@ public struct BackupAttachmentDto: Codable, Equatable, Sendable {
     }
 }
 
+public struct BackupProjectTemplateDto: Codable, Equatable, Sendable {
+    public var id: String
+    public var title: String
+    public var notes: String
+    public var defaultAreaId: String?
+    public var tagIdsJson: String
+    public var blueprintJson: String
+    public var sortOrder: Double
+    public var createdAt: Int64
+    public var updatedAt: Int64
+
+    public init(
+        id: String,
+        title: String,
+        notes: String = "",
+        defaultAreaId: String? = nil,
+        tagIdsJson: String = "[]",
+        blueprintJson: String = "{}",
+        sortOrder: Double = 0,
+        createdAt: Int64 = 0,
+        updatedAt: Int64 = 0
+    ) {
+        self.id = id
+        self.title = title
+        self.notes = notes
+        self.defaultAreaId = defaultAreaId
+        self.tagIdsJson = tagIdsJson
+        self.blueprintJson = blueprintJson
+        self.sortOrder = sortOrder
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, notes, defaultAreaId, tagIdsJson, tagIds, blueprintJson, sortOrder, createdAt, updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(String.self, forKey: .id)
+        self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
+        self.notes = (try? c.decodeIfPresent(String.self, forKey: .notes)) ?? ""
+        self.defaultAreaId = try? c.decodeIfPresent(String.self, forKey: .defaultAreaId)
+        if let rawJson = try? c.decodeIfPresent(String.self, forKey: .tagIdsJson) {
+            self.tagIdsJson = rawJson
+        } else if let tagArr = try? c.decodeIfPresent([String].self, forKey: .tagIds),
+                  let data = try? JSONEncoder().encode(tagArr),
+                  let s = String(data: data, encoding: .utf8) {
+            self.tagIdsJson = s
+        } else {
+            self.tagIdsJson = "[]"
+        }
+        self.blueprintJson = (try? c.decodeIfPresent(String.self, forKey: .blueprintJson)) ?? "{}"
+        self.sortOrder = (try? c.decodeIfPresent(Double.self, forKey: .sortOrder)) ?? 0
+        self.createdAt = (try? c.decodeIfPresent(Int64.self, forKey: .createdAt)) ?? 0
+        self.updatedAt = (try? c.decodeIfPresent(Int64.self, forKey: .updatedAt)) ?? 0
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(title, forKey: .title)
+        try c.encode(notes, forKey: .notes)
+        try c.encodeIfPresent(defaultAreaId, forKey: .defaultAreaId)
+        try c.encode(tagIdsJson, forKey: .tagIdsJson)
+        try c.encode(blueprintJson, forKey: .blueprintJson)
+        try c.encode(sortOrder, forKey: .sortOrder)
+        try c.encode(createdAt, forKey: .createdAt)
+        try c.encode(updatedAt, forKey: .updatedAt)
+    }
+}
+
 public struct BackupPreferencesDto: Codable, Equatable, Sendable {
     public var sidebarVisible: Bool?
     public var dailyDigestEnabled: Bool?
@@ -454,6 +538,7 @@ public struct BackupPreferencesDto: Codable, Equatable, Sendable {
     public var calendarEventsEnabled: Bool?
     public var selectedCalendarIds: [String]?
     public var groupTodayByProjectOrArea: Bool?
+    public var includeBetaUpdates: Bool?
 
     public init(
         sidebarVisible: Bool? = nil,
@@ -463,7 +548,8 @@ public struct BackupPreferencesDto: Codable, Equatable, Sendable {
         languageTag: String? = nil,
         calendarEventsEnabled: Bool? = nil,
         selectedCalendarIds: [String]? = nil,
-        groupTodayByProjectOrArea: Bool? = nil
+        groupTodayByProjectOrArea: Bool? = nil,
+        includeBetaUpdates: Bool? = nil
     ) {
         self.sidebarVisible = sidebarVisible
         self.dailyDigestEnabled = dailyDigestEnabled
@@ -473,6 +559,7 @@ public struct BackupPreferencesDto: Codable, Equatable, Sendable {
         self.calendarEventsEnabled = calendarEventsEnabled
         self.selectedCalendarIds = selectedCalendarIds
         self.groupTodayByProjectOrArea = groupTodayByProjectOrArea
+        self.includeBetaUpdates = includeBetaUpdates
     }
 }
 
@@ -489,6 +576,7 @@ public struct ThingsbookBackupPayload: Codable, Equatable, Sendable {
     public var taskTagRefs: [BackupTaskTagRefDto]
     public var projectTagRefs: [BackupProjectTagRefDto]
     public var attachments: [BackupAttachmentDto]
+    public var projectTemplates: [BackupProjectTemplateDto]
     public var preferences: BackupPreferencesDto
 
     public init(
@@ -504,6 +592,7 @@ public struct ThingsbookBackupPayload: Codable, Equatable, Sendable {
         taskTagRefs: [BackupTaskTagRefDto] = [],
         projectTagRefs: [BackupProjectTagRefDto] = [],
         attachments: [BackupAttachmentDto] = [],
+        projectTemplates: [BackupProjectTemplateDto] = [],
         preferences: BackupPreferencesDto = BackupPreferencesDto()
     ) {
         self.schemaVersion = schemaVersion
@@ -518,24 +607,26 @@ public struct ThingsbookBackupPayload: Codable, Equatable, Sendable {
         self.taskTagRefs = taskTagRefs
         self.projectTagRefs = projectTagRefs
         self.attachments = attachments
+        self.projectTemplates = projectTemplates
         self.preferences = preferences
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.schemaVersion = (try? c.decode(Int.self, forKey: .schemaVersion)) ?? 1
-        self.createdAt = (try? c.decode(Int64.self, forKey: .createdAt)) ?? 0
-        self.appVersionName = (try? c.decode(String.self, forKey: .appVersionName)) ?? ""
-        self.areas = (try? c.decode([BackupAreaDto].self, forKey: .areas)) ?? []
-        self.projects = (try? c.decode([BackupProjectDto].self, forKey: .projects)) ?? []
-        self.headings = (try? c.decode([BackupHeadingDto].self, forKey: .headings)) ?? []
-        self.tasks = (try? c.decode([BackupTaskDto].self, forKey: .tasks)) ?? []
-        self.checklistItems = (try? c.decode([BackupChecklistItemDto].self, forKey: .checklistItems)) ?? []
-        self.tags = (try? c.decode([BackupTagDto].self, forKey: .tags)) ?? []
-        self.taskTagRefs = (try? c.decode([BackupTaskTagRefDto].self, forKey: .taskTagRefs)) ?? []
-        self.projectTagRefs = (try? c.decode([BackupProjectTagRefDto].self, forKey: .projectTagRefs)) ?? []
-        self.attachments = (try? c.decode([BackupAttachmentDto].self, forKey: .attachments)) ?? []
-        self.preferences = (try? c.decode(BackupPreferencesDto.self, forKey: .preferences)) ?? BackupPreferencesDto()
+        self.schemaVersion = (try? c.decodeIfPresent(Int.self, forKey: .schemaVersion)) ?? 1
+        self.createdAt = (try? c.decodeIfPresent(Int64.self, forKey: .createdAt)) ?? 0
+        self.appVersionName = (try? c.decodeIfPresent(String.self, forKey: .appVersionName)) ?? ""
+        self.areas = (try? c.decodeIfPresent([BackupAreaDto].self, forKey: .areas)) ?? []
+        self.projects = (try? c.decodeIfPresent([BackupProjectDto].self, forKey: .projects)) ?? []
+        self.headings = (try? c.decodeIfPresent([BackupHeadingDto].self, forKey: .headings)) ?? []
+        self.tasks = (try? c.decodeIfPresent([BackupTaskDto].self, forKey: .tasks)) ?? []
+        self.checklistItems = (try? c.decodeIfPresent([BackupChecklistItemDto].self, forKey: .checklistItems)) ?? []
+        self.tags = (try? c.decodeIfPresent([BackupTagDto].self, forKey: .tags)) ?? []
+        self.taskTagRefs = (try? c.decodeIfPresent([BackupTaskTagRefDto].self, forKey: .taskTagRefs)) ?? []
+        self.projectTagRefs = (try? c.decodeIfPresent([BackupProjectTagRefDto].self, forKey: .projectTagRefs)) ?? []
+        self.attachments = (try? c.decodeIfPresent([BackupAttachmentDto].self, forKey: .attachments)) ?? []
+        self.projectTemplates = (try? c.decodeIfPresent([BackupProjectTemplateDto].self, forKey: .projectTemplates)) ?? []
+        self.preferences = (try? c.decodeIfPresent(BackupPreferencesDto.self, forKey: .preferences)) ?? BackupPreferencesDto()
     }
 }
 
@@ -550,6 +641,7 @@ public struct BackupSummary: Equatable, Sendable {
     public let checklistItemsCount: Int
     public let tagsCount: Int
     public let attachmentsCount: Int
+    public let projectTemplatesCount: Int
 
     public init(
         createdAt: Int64,
@@ -561,7 +653,8 @@ public struct BackupSummary: Equatable, Sendable {
         tasksCount: Int = 0,
         checklistItemsCount: Int = 0,
         tagsCount: Int = 0,
-        attachmentsCount: Int = 0
+        attachmentsCount: Int = 0,
+        projectTemplatesCount: Int = 0
     ) {
         self.createdAt = createdAt
         self.appVersionName = appVersionName
@@ -573,6 +666,7 @@ public struct BackupSummary: Equatable, Sendable {
         self.checklistItemsCount = checklistItemsCount
         self.tagsCount = tagsCount
         self.attachmentsCount = attachmentsCount
+        self.projectTemplatesCount = projectTemplatesCount
     }
 }
 
@@ -607,15 +701,16 @@ public enum ThingsBackupCodec {
             tasksCount: payload.tasks.count,
             checklistItemsCount: payload.checklistItems.count,
             tagsCount: payload.tags.count,
-            attachmentsCount: payload.attachments.count
+            attachmentsCount: payload.attachments.count,
+            projectTemplatesCount: payload.projectTemplates.count
         )
     }
 
     public static func encodeBackup(
         payload: ThingsbookBackupPayload,
         password: String?,
-        appVersionName: String = "1.8.1",
-        appVersionCode: Int = 44
+        appVersionName: String = AppUpdateService.currentVersion,
+        appVersionCode: Int = AppUpdateService.currentBuildNumber
     ) throws -> Data {
         let compactEncoder = JSONEncoder()
         let rawJsonData = try compactEncoder.encode(payload)

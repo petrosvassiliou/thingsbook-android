@@ -11,6 +11,7 @@ import com.culturedcode.things3.data.local.dao.AttachmentDao
 import com.culturedcode.things3.data.local.dao.ChecklistDao
 import com.culturedcode.things3.data.local.dao.HeadingDao
 import com.culturedcode.things3.data.local.dao.ProjectDao
+import com.culturedcode.things3.data.local.dao.ProjectTemplateDao
 import com.culturedcode.things3.data.local.dao.TagDao
 import com.culturedcode.things3.data.local.dao.TaskDao
 import com.google.firebase.FirebaseApp
@@ -31,13 +32,13 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object AppModule {
 
-    private val MIGRATION_1_2 = object : Migration(1, 2) {
+    internal val MIGRATION_1_2 = object : Migration(1, 2) {
         override fun migrate(db: SupportSQLiteDatabase) {
             // Schema v1 -> v2 additive safety migration; ensures user data is preserved when compatible
         }
     }
 
-    private val MIGRATION_2_3 = object : Migration(2, 3) {
+    internal val MIGRATION_2_3 = object : Migration(2, 3) {
         override fun migrate(db: SupportSQLiteDatabase) {
             db.execSQL(
                 """
@@ -61,6 +62,31 @@ object AppModule {
             db.execSQL("CREATE INDEX IF NOT EXISTS `index_attachments_projectId` ON `attachments` (`projectId`)")
             db.execSQL("CREATE INDEX IF NOT EXISTS `index_attachments_updatedAt` ON `attachments` (`updatedAt`)")
             db.execSQL("CREATE INDEX IF NOT EXISTS `index_attachments_isDirty` ON `attachments` (`isDirty`)")
+        }
+    }
+
+    internal val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE tasks ADD COLUMN scheduledStartMinutes INTEGER DEFAULT NULL")
+            db.execSQL("ALTER TABLE tasks ADD COLUMN durationMinutes INTEGER DEFAULT NULL")
+            db.execSQL("ALTER TABLE projects ADD COLUMN lastReviewedAt INTEGER DEFAULT NULL")
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS project_templates (" +
+                    "id TEXT NOT NULL, " +
+                    "title TEXT NOT NULL, " +
+                    "notes TEXT NOT NULL, " +
+                    "defaultAreaId TEXT, " +
+                    "tagIdsJson TEXT NOT NULL, " +
+                    "blueprintJson TEXT NOT NULL, " +
+                    "sortOrder REAL NOT NULL, " +
+                    "createdAt INTEGER NOT NULL, " +
+                    "updatedAt INTEGER NOT NULL, " +
+                    "isDeleted INTEGER NOT NULL, " +
+                    "isDirty INTEGER NOT NULL, " +
+                    "PRIMARY KEY(id))"
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_project_templates_updatedAt ON project_templates(updatedAt)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_project_templates_isDirty ON project_templates(isDirty)")
         }
     }
 
@@ -98,7 +124,7 @@ object AppModule {
             ThingsDatabase::class.java,
             ThingsDatabase.DATABASE_NAME
         )
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
             .addCallback(DatabaseSeeder(databaseProvider))
             .fallbackToDestructiveMigration()
             .fallbackToDestructiveMigrationOnDowngrade()
@@ -125,6 +151,9 @@ object AppModule {
 
     @Provides
     fun provideAttachmentDao(db: ThingsDatabase): AttachmentDao = db.attachmentDao()
+
+    @Provides
+    fun provideProjectTemplateDao(db: ThingsDatabase): ProjectTemplateDao = db.projectTemplateDao()
 
     @Provides
     @Singleton

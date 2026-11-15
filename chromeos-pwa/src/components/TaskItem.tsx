@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   CheckSquare,
   Circle,
+  Clock,
   Copy,
   Flag,
   FolderInput,
@@ -39,6 +40,14 @@ import {
   type TaskRecord,
   type TaskStatus
 } from '../domain/types';
+import {
+  DEFAULT_TIMEBLOCK_DURATION_MINUTES,
+  TIMEBLOCK_DURATION_PRESETS,
+  TIMEBLOCK_QUICK_START_MINUTES,
+  formatMinutesAsClock,
+  formatTimeblockRange,
+  parseClockToMinutes
+} from '../domain/v2Utils';
 import { generateMagicChecklist } from '../data/geminiService';
 import { localDb } from '../data/localDb';
 import type { TranslationStrings } from '../i18n/translations';
@@ -201,7 +210,11 @@ interface TaskItemProps {
   onOpenRepeatModal: (taskId: string) => void;
   onOpenMoveModal: (taskId: string) => void;
   onOpenTagsModal: (taskId: string) => void;
-  onStartFocusTimer: (taskId: string, taskTitle: string) => void;
+  onStartFocusTimer: (
+    taskId: string,
+    taskTitle: string,
+    durationMinutes?: number | null
+  ) => void;
   onDuplicateTask: (taskId: string) => void;
   onDropReorder: (draggedTaskId: string, targetTaskId: string) => void;
   onToast: (msg: string) => void;
@@ -247,6 +260,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const [newSubtask, setNewSubtask] = useState('');
   const [animStage, setAnimStage] = useState<'idle' | 'strike' | 'glide'>('idle');
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
+  const [timeblockOpen, setTimeblockOpen] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [fileDropOver, setFileDropOver] = useState(false);
@@ -268,6 +282,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     setPrevServerNotes(task.notes);
     setTitleDraft(task.title);
     setNotesDraft(task.notes);
+    setTimeblockOpen(false);
   } else {
     if (prevServerTitle !== task.title) {
       setPrevServerTitle(task.title);
@@ -296,6 +311,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
       flushPendingSubtaskIfNeeded();
       setIsNotesFocused(false);
       setIsTitleFocused(false);
+      setTimeblockOpen(false);
     }
     wasExpandedRef.current = isExpanded;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -446,6 +462,13 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     .map((id) => tagsMap.get(id))
     .filter((tg): tg is TagRecord => Boolean(tg));
 
+  const timeblockRangeLabel =
+    task.scheduledStartMinutes != null
+      ? formatTimeblockRange(task.scheduledStartMinutes, task.durationMinutes)
+      : '';
+  const focusDurationMins =
+    task.durationMinutes != null && task.durationMinutes > 0 ? task.durationMinutes : 25;
+
   const formatReminderClock = (ms: number) => {
     const d = new Date(ms);
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -571,6 +594,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 : t.actionWhen;
 
     const dlMeta = task.deadline != null ? renderDeadlineMeta(task.deadline) : null;
+    const currentDuration = task.durationMinutes ?? DEFAULT_TIMEBLOCK_DURATION_MINUTES;
 
     return (
       <div
@@ -602,6 +626,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({
         onKeyDown={(e) => {
           if (e.key === 'Escape') {
             e.stopPropagation();
+            if (timeblockOpen) {
+              setTimeblockOpen(false);
+              return;
+            }
             handleDoneCollapse();
           }
         }}
@@ -740,7 +768,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           </div>
         </div>
 
-        {/* Interactive Metadata Chips Row (Android ExpandableTaskCard.kt Parity: When, Reminder, Repeat, Deadline, Container, Tags) */}
+        {/* Interactive Metadata Chips Row (When, Timeblock, Reminder, Repeat, Deadline, Container, Tags) */}
         <div className="task-card-chips-row">
           {/* 1. When Pill */}
           <button
@@ -769,6 +797,24 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               <Calendar size={12} />
             )}
             <span>{whenChipText}</span>
+          </button>
+
+          {/* 1b. v2.0 Timeblock Chip */}
+          <button
+            type="button"
+            data-testid="task-timeblock-chip"
+            className={`chip-btn ${
+              task.scheduledStartMinutes != null || timeblockOpen ? 'active' : ''
+            }`}
+            onClick={() => {
+              flushDraftsIfNeeded();
+              setTimeblockOpen((v) => !v);
+            }}
+          >
+            <Clock size={12} />
+            <span>
+              {timeblockRangeLabel ? `🕐 ${timeblockRangeLabel}` : `⏱️ ${t.actionTimeblock}`}
+            </span>
           </button>
 
           {/* 2. Reminder Pill (when set) */}
@@ -865,6 +911,94 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           </button>
         </div>
 
+        {/* v2.0 Inline Interactive Timeblock Panel */}
+        {timeblockOpen && (
+          <div className="v2-timeblock-panel" data-testid="task-timeblock-panel">
+            <div className="v2-timeblock-row">
+              <span className="v2-timeblock-label">{t.timeblockStartTime}</span>
+              <input
+                type="time"
+                className="v2-inline-time-input"
+                aria-label={t.timeblockStartTime}
+                value={
+                  task.scheduledStartMinutes != null
+                    ? formatMinutesAsClock(task.scheduledStartMinutes)
+                    : ''
+                }
+                onChange={(e) => {
+                  const mins = parseClockToMinutes(e.target.value);
+                  if (mins != null) {
+                    void localDb.upsertTask({
+                      id: task.id,
+                      scheduledStartMinutes: mins,
+                      durationMinutes: task.durationMinutes ?? DEFAULT_TIMEBLOCK_DURATION_MINUTES
+                    });
+                  }
+                }}
+              />
+              <div className="v2-timeblock-slots">
+                {TIMEBLOCK_QUICK_START_MINUTES.map((mins) => (
+                  <button
+                    key={mins}
+                    type="button"
+                    className={`chip-btn ${task.scheduledStartMinutes === mins ? 'active' : ''}`}
+                    onClick={() =>
+                      void localDb.upsertTask({
+                        id: task.id,
+                        scheduledStartMinutes: mins,
+                        durationMinutes:
+                          task.durationMinutes ?? DEFAULT_TIMEBLOCK_DURATION_MINUTES
+                      })
+                    }
+                  >
+                    {formatMinutesAsClock(mins)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="v2-timeblock-row" style={{ marginTop: 8 }}>
+              <span className="v2-timeblock-label">{t.timeblockDuration}</span>
+              <div className="v2-timeblock-slots">
+                {TIMEBLOCK_DURATION_PRESETS.map((dur) => (
+                  <button
+                    key={dur}
+                    type="button"
+                    className={`chip-btn ${currentDuration === dur ? 'active' : ''}`}
+                    onClick={() =>
+                      void localDb.upsertTask({
+                        id: task.id,
+                        scheduledStartMinutes: task.scheduledStartMinutes ?? 9 * 60,
+                        durationMinutes: dur
+                      })
+                    }
+                  >
+                    {dur}m
+                  </button>
+                ))}
+              </div>
+
+              {(task.scheduledStartMinutes != null || task.durationMinutes != null) && (
+                <button
+                  type="button"
+                  className="chip-btn urgent"
+                  style={{ marginLeft: 'auto' }}
+                  onClick={() =>
+                    void localDb.upsertTask({
+                      id: task.id,
+                      scheduledStartMinutes: null,
+                      durationMinutes: null
+                    })
+                  }
+                >
+                  <X size={11.5} />
+                  <span>{t.timeblockClear}</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Bottom Action Toolbar: Left = Magic Breakdown, Right = Action Icons */}
         <div className="task-card-toolbar">
           <button
@@ -896,6 +1030,17 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               }}
             >
               <Calendar size={15.5} />
+            </button>
+            <button
+              type="button"
+              className={`icon-btn ${timeblockOpen || task.scheduledStartMinutes != null ? 'active' : ''}`}
+              title={`⏱️ ${t.actionTimeblock}`}
+              onClick={() => {
+                flushDraftsIfNeeded();
+                setTimeblockOpen((v) => !v);
+              }}
+            >
+              <Clock size={15.5} />
             </button>
             <button
               type="button"
@@ -945,11 +1090,15 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               <button
                 type="button"
                 className="icon-btn"
-                title={t.actionFocusTimer}
+                title={t.actionFocusTimerMinutes(focusDurationMins)}
                 data-testid="task-start-focus-btn"
                 onClick={() => {
                   flushDraftsIfNeeded();
-                  onStartFocusTimer(task.id, titleDraft || task.title);
+                  onStartFocusTimer(
+                    task.id,
+                    titleDraft || task.title,
+                    task.durationMinutes ?? 25
+                  );
                 }}
               >
                 <Timer size={15.5} />
@@ -1003,6 +1152,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const hasSecondRowBadges =
     task.scheduleState === 'THIS_EVENING' ||
     showCollapsedSchedulePill ||
+    Boolean(timeblockRangeLabel) ||
     task.recurrenceRule != null ||
     task.reminderTime != null ||
     activeChecklists.length > 0 ||
@@ -1113,6 +1263,13 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 ) : null
               ) : null}
 
+              {/* 1b. v2.0 Timeblock Range Pill */}
+              {timeblockRangeLabel && (
+                <span className="meta-badge v2-timeblock-pill" data-testid="task-row-timeblock-pill">
+                  <span>🕐 {timeblockRangeLabel}</span>
+                </span>
+              )}
+
               {/* 2. Repeat */}
               {task.recurrenceRule != null && (
                 <span className="meta-badge">
@@ -1174,7 +1331,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
         </span>
       </div>
 
-      {/* Right-Click TaskContextDropdownMenu (Exact v1.6.18 10-Item Menu) */}
+      {/* Right-Click TaskContextDropdownMenu */}
       {ctxMenu && !quickFindOpen && (
         <>
           <div
@@ -1304,18 +1461,18 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               <span>{t.geminiMagicBreakdown} ✨</span>
             </button>
 
-            {/* 9. Start Focus Timer (25m) */}
+            {/* 9. Start Focus Timer (task.durationMinutes ?? 25m) */}
             {task.status === 'OPEN' && (
               <button
                 type="button"
                 className="context-menu-item"
                 onClick={() => {
                   setCtxMenu(null);
-                  onStartFocusTimer(task.id, task.title);
+                  onStartFocusTimer(task.id, task.title, task.durationMinutes ?? 25);
                 }}
               >
                 <Timer size={14} style={{ color: 'var(--things-blue)' }} />
-                <span>{t.actionFocusTimer}</span>
+                <span>{t.actionFocusTimerMinutes(focusDurationMins)}</span>
               </button>
             )}
 

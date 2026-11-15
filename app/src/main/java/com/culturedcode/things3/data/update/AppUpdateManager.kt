@@ -80,7 +80,9 @@ object AppUpdateParser {
     const val GITHUB_OWNER = "petrosvassiliou"
     const val GITHUB_REPO = "thingsbook-android"
     const val LATEST_RELEASE_API_URL = "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/latest"
+    const val RELEASES_LIST_API_URL = "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases?per_page=10"
     const val RELEASES_PAGE_URL = "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases/latest"
+    const val BETA_RELEASES_PAGE_URL = "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases"
     const val RAW_GRADLE_URL = "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/main/app/build.gradle.kts"
     const val RAW_README_URL = "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/main/README.md"
 
@@ -102,7 +104,7 @@ object AppUpdateParser {
     }
 
     /**
-     * Compares two semantic version strings (e.g. "1.6.9" vs "1.6.10", "v1.8.0+1" vs "1.8.0", "1.7.0-beta.1" vs "1.7.0").
+     * Compares two semantic version strings (e.g. "1.6.9" vs "1.6.10", "v1.8.0+1" vs "1.8.0", "2.0.0-beta.2" vs "2.0.0-beta.10").
      * Returns > 0 if [v1] > [v2], < 0 if [v1] < [v2], and 0 if equal.
      */
     fun compareVersions(v1: String, v2: String): Int {
@@ -131,7 +133,7 @@ object AppUpdateParser {
 
         if (pre1.isNotEmpty() || pre2.isNotEmpty()) {
             return when {
-                pre1.isEmpty() -> 1  // Final release > pre-release
+                pre1.isEmpty() -> 1  // Final release > pre-release (e.g. 2.0.0 > 2.0.0-beta.99)
                 pre2.isEmpty() -> -1
                 else -> compareDotSeparatedTokens(pre1, pre2)
             }
@@ -145,6 +147,8 @@ object AppUpdateParser {
         }
     }
 
+    private val alphaNumTokenRegex = Regex("""\d+|\D+""")
+
     private fun compareDotSeparatedTokens(a: String, b: String): Int {
         val partsA = a.split('.')
         val partsB = b.split('.')
@@ -152,24 +156,47 @@ object AppUpdateParser {
         for (i in 0 until minLen) {
             val segA = partsA[i]
             val segB = partsB[i]
-            val numA = segA.toLongOrNull()
-            val numB = segB.toLongOrNull()
-            val cmp = when {
-                numA != null && numB != null -> numA.compareTo(numB)
-                else -> segA.compareTo(segB, ignoreCase = true)
-            }
+            val cmp = compareIdentifierSegment(segA, segB)
             if (cmp != 0) return cmp
         }
         return partsA.size.compareTo(partsB.size)
     }
 
-    fun isNewerVersion(currentVersion: String, candidateVersion: String): Boolean {
+    private fun compareIdentifierSegment(segA: String, segB: String): Int {
+        val numA = segA.toLongOrNull()
+        val numB = segB.toLongOrNull()
+        if (numA != null && numB != null) return numA.compareTo(numB)
+        if (numA != null) return -1 // SemVer 2.0: numeric identifiers have lower precedence than non-numeric
+        if (numB != null) return 1
+
+        // Also compare mixed alphanumeric segments naturally (e.g. "beta10" > "beta2")
+        val subA = alphaNumTokenRegex.findAll(segA).map { it.value }.toList()
+        val subB = alphaNumTokenRegex.findAll(segB).map { it.value }.toList()
+        val minSub = minOf(subA.size, subB.size)
+        for (idx in 0 until minSub) {
+            val sa = subA[idx]
+            val sb = subB[idx]
+            val na = sa.toLongOrNull()
+            val nb = sb.toLongOrNull()
+            val c = when {
+                na != null && nb != null -> na.compareTo(nb)
+                else -> sa.compareTo(sb, ignoreCase = true)
+            }
+            if (c != 0) return c
+        }
+        return subA.size.compareTo(subB.size)
+    }
+
+    fun isNewerVersion(
+        currentVersion: String,
+        candidateVersion: String,
+        includeBeta: Boolean = false
+    ): Boolean {
         val normalizedCurrent = normalizeVersion(currentVersion)
         val normalizedCandidate = normalizeVersion(candidateVersion)
         if (normalizedCandidate.isBlank() || !normalizedCandidate.first().isDigit()) return false
-        if (!normalizedCurrent.substringBefore('+').contains('-') &&
-            normalizedCandidate.substringBefore('+').contains('-')
-        ) {
+        val allowPreRelease = includeBeta || normalizedCurrent.substringBefore('+').contains('-')
+        if (!allowPreRelease && normalizedCandidate.substringBefore('+').contains('-')) {
             return false
         }
         return compareVersions(normalizedCandidate, normalizedCurrent) > 0
@@ -179,14 +206,46 @@ object AppUpdateParser {
         return "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases/download/v$cleanVersion/Thingsbook-v$cleanVersion-GTD-Full.apk"
     }
 
-    fun parseGitHubReleaseJson(rawJson: String): AppReleaseInfo {
-        val dto = json.decodeFromString<GitHubReleaseDto>(rawJson)
-        if (dto.draft || dto.prerelease) {
-            throw IllegalArgumentException("Skipping draft or pre-release")
+    private fun hasApkAssetOrBodyLink(dto: GitHubReleaseDto): Boolean {
+        val hasAsset = dto.assets.any { asset ->
+            (asset.browser_download_url.endsWith(".apk", ignoreCase = true) ||
+                asset.name.endsWith(".apk", ignoreCase = true)) &&
+                asset.browser_download_url.startsWith("https://")
+        }
+        return hasAsset || apkUrlInTextRegex.containsMatchIn(dto.body)
+    }
+
+    fun parseGitHubReleaseJson(rawJson: String, includeBeta: Boolean = false): AppReleaseInfo {
+        val trimmed = rawJson.trimStart()
+        val dto = if (trimmed.startsWith("[")) {
+            val releases = json.decodeFromString<List<GitHubReleaseDto>>(rawJson)
+            val eligible = releases.filter { candidate ->
+                if (candidate.draft) return@filter false
+                val rawTag = candidate.tag_name.trim()
+                if (!rawTag.startsWith("v", ignoreCase = true)) return@filter false
+                val clean = normalizeVersion(rawTag)
+                if (clean.isBlank() || !clean.first().isDigit()) return@filter false
+                val isPre = candidate.prerelease || clean.substringBefore('+').contains('-')
+                if (!includeBeta && isPre) return@filter false
+                true
+            }
+            eligible.firstOrNull { hasApkAssetOrBodyLink(it) || it.body.isNotBlank() }
+                ?: eligible.firstOrNull()
+                ?: throw IllegalArgumentException("No matching release found in releases list")
+        } else {
+            json.decodeFromString<GitHubReleaseDto>(rawJson)
+        }
+
+        if (dto.draft) {
+            throw IllegalArgumentException("Skipping draft release")
         }
         val cleanVersion = normalizeVersion(dto.tag_name)
         require(cleanVersion.isNotBlank() && cleanVersion.first().isDigit()) {
             "Invalid release tag '${dto.tag_name}'"
+        }
+        val isPreRelease = dto.prerelease || cleanVersion.substringBefore('+').contains('-')
+        if (!includeBeta && isPreRelease) {
+            throw IllegalArgumentException("Skipping draft or pre-release")
         }
 
         val assetApkUrl = dto.assets
@@ -219,14 +278,18 @@ object AppUpdateParser {
         )
     }
 
-    fun parseFallbackGradleAndReadme(gradleKts: String, readmeMarkdown: String?): AppReleaseInfo {
+    fun parseFallbackGradleAndReadme(
+        gradleKts: String,
+        readmeMarkdown: String?,
+        includeBeta: Boolean = false
+    ): AppReleaseInfo {
         val versionMatch = gradleVersionNameRegex.find(gradleKts)?.groupValues?.getOrNull(1)
             ?: throw IOException("Could not determine latest version from repository")
         val cleanVersion = normalizeVersion(versionMatch)
         require(cleanVersion.isNotBlank() && cleanVersion.first().isDigit()) {
             "Invalid fallback version '$versionMatch'"
         }
-        if (cleanVersion.substringBefore('+').contains('-')) {
+        if (!includeBeta && cleanVersion.substringBefore('+').contains('-')) {
             throw IOException("Skipping pre-release fallback version")
         }
 
@@ -291,13 +354,20 @@ class AppUpdateManager @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
 
-    suspend fun checkForUpdate(): AppReleaseInfo = withContext(Dispatchers.IO) {
+    suspend fun checkForUpdate(includeBeta: Boolean = false): AppReleaseInfo = withContext(Dispatchers.IO) {
+        val effectiveIncludeBeta = includeBeta || BuildConfig.VERSION_NAME.contains("-")
+        val apiEndpoint = if (effectiveIncludeBeta) {
+            AppUpdateParser.RELEASES_LIST_API_URL
+        } else {
+            AppUpdateParser.LATEST_RELEASE_API_URL
+        }
+
         val primaryAttempt = runCatchingCancellable {
             val body = httpGetTextFollowingRedirects(
-                url = AppUpdateParser.LATEST_RELEASE_API_URL,
+                url = apiEndpoint,
                 acceptHeader = "application/vnd.github+json"
             )
-            AppUpdateParser.parseGitHubReleaseJson(body)
+            AppUpdateParser.parseGitHubReleaseJson(body, includeBeta = effectiveIncludeBeta)
         }
 
         primaryAttempt.getOrElse { primaryError ->
@@ -310,7 +380,11 @@ class AppUpdateManager @Inject constructor(
                 httpGetTextFollowingRedirects(url = AppUpdateParser.RAW_README_URL)
             }.getOrNull()
 
-            AppUpdateParser.parseFallbackGradleAndReadme(gradleContent, readmeContent)
+            AppUpdateParser.parseFallbackGradleAndReadme(
+                gradleKts = gradleContent,
+                readmeMarkdown = readmeContent,
+                includeBeta = effectiveIncludeBeta
+            )
         }
     }
 

@@ -1,5 +1,12 @@
 import React from 'react';
-import { CheckCircle2, FolderPlus, Heading, PackagePlus, Plus } from 'lucide-react';
+import {
+  CheckCircle2,
+  ClipboardList,
+  FolderPlus,
+  Heading,
+  PackagePlus,
+  Plus
+} from 'lucide-react';
 import { MAX_AREAS, type ActiveNavigation } from '../domain/types';
 import type { TranslationStrings } from '../i18n/translations';
 
@@ -14,6 +21,7 @@ interface MagicPlusFabProps {
   onNewTodo: () => void;
   onNewHeading: () => void;
   onNewProject: () => void;
+  onOpenTemplates: () => void;
   onNewArea: () => void;
 }
 
@@ -28,6 +36,7 @@ export const MagicPlusFab: React.FC<MagicPlusFabProps> = ({
   onNewTodo,
   onNewHeading,
   onNewProject,
+  onOpenTemplates,
   onNewArea
 }) => {
   const isProjectView = activeNav.kind === 'project';
@@ -100,6 +109,24 @@ export const MagicPlusFab: React.FC<MagicPlusFabProps> = ({
                   <span className="magic-fab-shortcut-badge">Ctrl+Shift+N</span>
                 </div>
                 <div className="magic-fab-opt-sub">{t.magicProjectSub}</div>
+              </div>
+            </button>
+
+            {/* 3b. Project Templates & Outline Importer (v2.0) */}
+            <button
+              type="button"
+              className="magic-fab-option"
+              onClick={() => {
+                onClose();
+                onOpenTemplates();
+              }}
+            >
+              <span className="magic-fab-opt-icon">
+                <ClipboardList size={17} />
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="magic-fab-opt-title">{t.templatesBtn}</div>
+                <div className="magic-fab-opt-sub">{t.templatesTabImport}</div>
               </div>
             </button>
 

@@ -314,6 +314,7 @@ interface CreateOrEditProjectModalProps {
   areas: AreaRecord[];
   t: TranslationStrings;
   onSaved: (projectId: string) => void;
+  onOpenTemplates?: (areaId: string | null) => void;
   onClose: () => void;
 }
 
@@ -323,6 +324,7 @@ export const CreateOrEditProjectModal: React.FC<CreateOrEditProjectModalProps> =
   areas,
   t,
   onSaved,
+  onOpenTemplates,
   onClose
 }) => {
   const [title, setTitle] = useState(project?.title || '');
@@ -358,9 +360,23 @@ export const CreateOrEditProjectModal: React.FC<CreateOrEditProjectModalProps> =
             <Folder size={18} style={{ color: 'var(--things-blue)' }} />
             <span>{project ? t.actionEdit : t.entityNewProject}</span>
           </h3>
-          <button type="button" className="icon-btn" onClick={onClose}>
-            <X size={18} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {!project && onOpenTemplates && (
+              <button
+                type="button"
+                className="chip-btn active"
+                onClick={() => {
+                  onClose();
+                  onOpenTemplates(areaId);
+                }}
+              >
+                <span>📋 {t.templatesBtn}</span>
+              </button>
+            )}
+            <button type="button" className="icon-btn" onClick={onClose}>
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         <form onSubmit={handleSave}>

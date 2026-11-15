@@ -1241,3 +1241,159 @@ public struct ManageTagsSheetView: View {
         editingTagId = nil
     }
 }
+
+// MARK: - v2.0 Interactive Timeblock Popover
+
+public struct TimeblockPopoverView: View {
+    @ObservedObject var store: ThingsbookStore
+    let currentStartMinutes: Int?
+    let currentDurationMinutes: Int?
+    let onApply: (_ startMinutes: Int?, _ durationMinutes: Int?) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var selectedStartMinutes: Int
+    @State private var selectedDurationMinutes: Int
+    @State private var customTimeDate: Date
+
+    private static let presetStartHours: [Int] = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+    private static let presetDurations: [Int] = [15, 30, 45, 60, 90, 120]
+
+    public init(
+        store: ThingsbookStore,
+        currentStartMinutes: Int?,
+        currentDurationMinutes: Int?,
+        onApply: @escaping (_ startMinutes: Int?, _ durationMinutes: Int?) -> Void
+    ) {
+        self.store = store
+        self.currentStartMinutes = currentStartMinutes
+        self.currentDurationMinutes = currentDurationMinutes
+        self.onApply = onApply
+
+        let initialStart = currentStartMinutes ?? (9 * 60)
+        let initialDuration = currentDurationMinutes ?? 30
+        _selectedStartMinutes = State(initialValue: initialStart)
+        _selectedDurationMinutes = State(initialValue: initialDuration)
+
+        var comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        comps.hour = (initialStart / 60) % 24
+        comps.minute = initialStart % 60
+        _customTimeDate = State(initialValue: Calendar.current.date(from: comps) ?? Date())
+    }
+
+    private var formattedRangePreview: String {
+        let endMins = (selectedStartMinutes + selectedDurationMinutes) % 1440
+        return "\(TaskItem.formatMinutesOfDay(selectedStartMinutes))–\(TaskItem.formatMinutesOfDay(endMins)) · \(selectedDurationMinutes)m"
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack {
+                Label(store.tr("v2_timeblock_title"), systemImage: "clock.badge.checkmark.fill")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+
+                Spacer()
+
+                if currentStartMinutes != nil || currentDurationMinutes != nil {
+                    Button(store.tr("v2_timeblock_clear")) {
+                        onApply(nil, nil)
+                        dismiss()
+                    }
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(ThingsMacPalette.upcomingRed)
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Divider()
+
+            HStack {
+                Text(store.tr("v2_timeblock_start"))
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                DatePicker("", selection: $customTimeDate, displayedComponents: [.hourAndMinute])
+                    .labelsHidden()
+                    .frame(width: 88)
+                    .onChange(of: customTimeDate) { _, newDate in
+                        let comps = Calendar.current.dateComponents([.hour, .minute], from: newDate)
+                        selectedStartMinutes = ((comps.hour ?? 9) * 60) + (comps.minute ?? 0)
+                    }
+            }
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 4), spacing: 5) {
+                ForEach(Self.presetStartHours, id: \.self) { hour in
+                    let mins = hour * 60
+                    let isSelected = selectedStartMinutes == mins
+                    Button {
+                        selectedStartMinutes = mins
+                        syncCustomDatePicker(to: mins)
+                    } label: {
+                        Text(String(format: "%02d:00", hour))
+                            .font(.system(size: 11, weight: isSelected ? .semibold : .medium, design: .monospaced))
+                            .foregroundStyle(isSelected ? Color.white : Color.primary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 4.5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(isSelected ? ThingsMacPalette.accentBlue : Color.primary.opacity(0.06))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Text(store.tr("v2_timeblock_duration"))
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 3), spacing: 5) {
+                ForEach(Self.presetDurations, id: \.self) { dur in
+                    let isSelected = selectedDurationMinutes == dur
+                    Button {
+                        selectedDurationMinutes = dur
+                    } label: {
+                        Text("\(dur)m")
+                            .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium, design: .rounded))
+                            .foregroundStyle(isSelected ? Color.white : Color.primary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 4.5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(isSelected ? ThingsMacPalette.accentBlue : Color.primary.opacity(0.06))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Divider()
+
+            HStack {
+                Text(formattedRangePreview)
+                    .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+
+                Spacer()
+
+                Button(store.tr("action_save")) {
+                    onApply(selectedStartMinutes, selectedDurationMinutes)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+        }
+        .padding(13)
+        .frame(width: 288)
+    }
+
+    private func syncCustomDatePicker(to minutesOfDay: Int) {
+        var comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        comps.hour = (minutesOfDay / 60) % 24
+        comps.minute = minutesOfDay % 60
+        if let updated = Calendar.current.date(from: comps) {
+            customTimeDate = updated
+        }
+    }
+}

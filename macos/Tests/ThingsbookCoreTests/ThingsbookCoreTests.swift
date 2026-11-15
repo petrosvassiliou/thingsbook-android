@@ -1,4 +1,5 @@
 import XCTest
+import SQLite3
 @testable import ThingsbookCore
 
 final class ThingsbookCoreTests: XCTestCase {
@@ -189,7 +190,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "1.8.1"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.1"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -404,27 +405,39 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(searchHits.tasks.map(\.id), ["remote-sync-task-1"], "FTS5 must index remotely synced tasks")
     }
 
-    // MARK: - 7. v1.8.1 AppUpdateService Beta Isolation, DMG Filtering & Version Bump
+    // MARK: - 7. v2.0.0-beta.1 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "1.8.1")
-        XCTAssertEqual(AppUpdateService.displayVersion, "1.8.1")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 44)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.1")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.1")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 45)
+        XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
 
-        // Core [major, minor, patch] + build metadata comparisons
+        // Core [major, minor, patch] + build metadata comparisons on stable channel (includeBeta inferred false for 1.8.1)
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "1.8.1", current: "1.8.0+1"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "1.8.0+1", current: "1.8.0"))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.1", current: "1.8.1"))
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "v2.0.0-alpha.1", current: "1.8.1"))
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "v2.0.0-rc.1+2", current: "1.8.1+1"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.1", current: "1.8.1", includeBeta: false))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "v2.0.0-alpha.1", current: "1.8.1", includeBeta: false))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "v2.0.0-rc.1+2", current: "1.8.1+1", includeBeta: false))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "1.8.1", current: "1.8.1"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "v1.8.2", current: "1.8.1"))
 
-        // Pre-release channel users can still upgrade to newer pre-releases or stable 2.0.0
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.2", current: "2.0.0-beta.1"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.2"))
+        // Opt-in beta channel from stable 1.8.1 accepts 2.0.0-beta.1
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.1", current: "1.8.1", includeBeta: true))
 
-        // Release feed filtering: reject draft, prerelease, macos-build-*, v2.0.0-beta.*, and Android-only releases without .dmg
+        // Pre-release channel users upgrade across numeric pre-release tokens and to final 2.0.0
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.1", current: "2.0.0-beta.1"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "1.8.2", current: "2.0.0-beta.1"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.2", current: "2.0.0-beta.1"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.10", current: "2.0.0-beta.2"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.2", current: "2.0.0-beta.10"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.1"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.99"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.99", current: "2.0.0", includeBeta: true))
+
+        // Release feed filtering: reject draft, macos-build-*, and Android-only releases without .dmg;
+        // enforce beta isolation when includeBeta == false while allowing beta upgrades when includeBeta == true!
         let mockReleases: [[String: Any]] = [
             [
                 "tag_name": "v1.9.0",
@@ -463,14 +476,47 @@ final class ThingsbookCoreTests: XCTestCase {
             ]
         ]
 
-        let selected = AppUpdateService.selectEligibleRelease(from: mockReleases, current: "1.8.1")
-        XCTAssertNotNil(selected)
-        XCTAssertEqual(selected?.tagName, "v1.8.2")
-        XCTAssertEqual(selected?.versionString, "1.8.2")
-        XCTAssertEqual(selected?.dmgDownloadUrl, "https://example.com/Thingsbook-1.8.2.dmg")
+        // 1. Stable 1.8.1 without beta opt-in STILL strictly rejects v2.0.0-beta.1 and selects v1.8.2
+        let selectedStable = AppUpdateService.selectEligibleRelease(from: mockReleases, current: "1.8.1", includeBeta: false)
+        XCTAssertNotNil(selectedStable)
+        XCTAssertEqual(selectedStable?.tagName, "v1.8.2")
+        XCTAssertEqual(selectedStable?.versionString, "1.8.2")
+        XCTAssertEqual(selectedStable?.dmgDownloadUrl, "https://example.com/Thingsbook-1.8.2.dmg")
+        XCTAssertNil(AppUpdateService.selectEligibleRelease(from: mockReleases, current: "1.8.2", includeBeta: false))
 
-        // When already on 1.8.2, nothing newer with a DMG exists
-        XCTAssertNil(AppUpdateService.selectEligibleRelease(from: mockReleases, current: "1.8.2"))
+        // 2. Stable 1.8.1 with includeBeta: true upgrades to v2.0.0-beta.1
+        let selectedBetaOptIn = AppUpdateService.selectEligibleRelease(from: mockReleases, current: "1.8.1", includeBeta: true)
+        XCTAssertEqual(selectedBetaOptIn?.tagName, "v2.0.0-beta.1")
+        XCTAssertEqual(selectedBetaOptIn?.dmgDownloadUrl, "https://example.com/2.0.0-beta.1.dmg")
+
+        // 3. Running 2.0.0-beta.1 upgrades to highest beta (2.0.0-beta.10 > 2.0.0-beta.2) and then final 2.0.0
+        let betaProgressionFeed: [[String: Any]] = mockReleases + [
+            [
+                "tag_name": "v2.0.0-beta.2",
+                "draft": false,
+                "prerelease": true,
+                "assets": [["name": "Thingsbook-2.0.0-beta.2.dmg", "browser_download_url": "https://example.com/2.0.0-beta.2.dmg"]]
+            ],
+            [
+                "tag_name": "v2.0.0-beta.10",
+                "draft": false,
+                "prerelease": true,
+                "assets": [["name": "Thingsbook-2.0.0-beta.10.dmg", "browser_download_url": "https://example.com/2.0.0-beta.10.dmg"]]
+            ]
+        ]
+        let selectedNextBeta = AppUpdateService.selectEligibleRelease(from: betaProgressionFeed, current: "2.0.0-beta.1")
+        XCTAssertEqual(selectedNextBeta?.tagName, "v2.0.0-beta.10")
+
+        let finalFeed: [[String: Any]] = betaProgressionFeed + [
+            [
+                "tag_name": "v2.0.0",
+                "draft": false,
+                "prerelease": false,
+                "assets": [["name": "Thingsbook-2.0.0.dmg", "browser_download_url": "https://example.com/2.0.0.dmg"]]
+            ]
+        ]
+        let selectedFinal = AppUpdateService.selectEligibleRelease(from: finalFeed, current: "2.0.0-beta.1")
+        XCTAssertEqual(selectedFinal?.tagName, "v2.0.0")
     }
 
     // MARK: - 8. Out-of-Order Foreign Keys in Cloud Sync Deltas & .tbbackup Restore
@@ -871,5 +917,322 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(delFields?["dataBase64"]?["stringValue"] as? String, "")
         XCTAssertNil(deletedWrite["updateMask"])
     }
+
+    // MARK: - 13. v1.8.1 -> v2.0.0-beta.1 In-Place SQLite Migration, .tbbackup & Flagship Features
+
+    func testUpgradeFromV181SQLiteAndBackupToV200Beta1() throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("tb-v181-upgrade-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let rawDbURL = tempDir.appendingPathComponent("thingsbook.sqlite")
+
+        // 1. Construct an authentic raw v1.8.1 SQLite database WITHOUT scheduled_start_minutes,
+        //    duration_minutes, last_reviewed_at, or project_templates table.
+        do {
+            var rawHandle: OpaquePointer?
+            XCTAssertEqual(sqlite3_open(rawDbURL.path, &rawHandle), SQLITE_OK)
+            defer { if let rawHandle { sqlite3_close(rawHandle) } }
+
+            let legacyV181SchemaAndData = """
+            CREATE TABLE areas (
+                id TEXT PRIMARY KEY NOT NULL,
+                title TEXT NOT NULL,
+                sort_order REAL NOT NULL DEFAULT 0.0,
+                tag_ids_json TEXT NOT NULL DEFAULT '[]',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                is_dirty INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE projects (
+                id TEXT PRIMARY KEY NOT NULL,
+                area_id TEXT REFERENCES areas(id) ON DELETE SET NULL,
+                title TEXT NOT NULL,
+                notes TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'ACTIVE',
+                schedule_state TEXT NOT NULL DEFAULT 'ANYTIME',
+                when_date INTEGER,
+                deadline INTEGER,
+                completed_at INTEGER,
+                sort_order REAL NOT NULL DEFAULT 0.0,
+                tag_ids_json TEXT NOT NULL DEFAULT '[]',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                is_purged INTEGER NOT NULL DEFAULT 0,
+                is_dirty INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE headings (
+                id TEXT PRIMARY KEY NOT NULL,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                sort_order REAL NOT NULL DEFAULT 0.0,
+                is_archived INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                is_dirty INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE tasks (
+                id TEXT PRIMARY KEY NOT NULL,
+                title TEXT NOT NULL,
+                notes TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'OPEN',
+                schedule_state TEXT NOT NULL DEFAULT 'INBOX',
+                when_date INTEGER,
+                deadline INTEGER,
+                reminder_time INTEGER,
+                completed_at INTEGER,
+                project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+                heading_id TEXT REFERENCES headings(id) ON DELETE SET NULL,
+                area_id TEXT REFERENCES areas(id) ON DELETE SET NULL,
+                recurrence_rule TEXT,
+                sort_order REAL NOT NULL DEFAULT 0.0,
+                tag_ids_json TEXT NOT NULL DEFAULT '[]',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                is_purged INTEGER NOT NULL DEFAULT 0,
+                is_dirty INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE checklist_items (
+                id TEXT PRIMARY KEY NOT NULL,
+                task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                is_completed INTEGER NOT NULL DEFAULT 0,
+                sort_order REAL NOT NULL DEFAULT 0.0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                is_dirty INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE tags (
+                id TEXT PRIMARY KEY NOT NULL,
+                title TEXT NOT NULL,
+                parent_tag_id TEXT REFERENCES tags(id) ON DELETE SET NULL,
+                shortcut TEXT,
+                sort_order REAL NOT NULL DEFAULT 0.0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                is_dirty INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE task_tags (
+                task_id TEXT NOT NULL,
+                tag_id TEXT NOT NULL,
+                PRIMARY KEY (task_id, tag_id)
+            );
+            CREATE TABLE project_tags (
+                project_id TEXT NOT NULL,
+                tag_id TEXT NOT NULL,
+                PRIMARY KEY (project_id, tag_id)
+            );
+            CREATE TABLE attachments (
+                id TEXT PRIMARY KEY NOT NULL,
+                task_id TEXT,
+                project_id TEXT,
+                file_name TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                local_relative_path TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL DEFAULT 0,
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                is_dirty INTEGER NOT NULL DEFAULT 0
+            );
+
+            INSERT INTO areas (id, title, sort_order, tag_ids_json, created_at, updated_at, is_deleted, is_dirty)
+            VALUES ('area-1', 'Engineering', 1000.0, '[]', 1760000000000, 1760000000000, 0, 0);
+
+            INSERT INTO tags (id, title, parent_tag_id, shortcut, sort_order, created_at, updated_at, is_deleted, is_dirty)
+            VALUES ('tag-1', 'Deep Work', NULL, 'd', 100.0, 1760000000000, 1760000000000, 0, 0);
+
+            INSERT INTO projects (id, area_id, title, notes, status, schedule_state, sort_order, tag_ids_json, created_at, updated_at, is_deleted, is_purged, is_dirty)
+            VALUES ('proj-1', 'area-1', 'v1.8.1 Production App', 'Preserve every byte across 2.0 upgrade', 'ACTIVE', 'ANYTIME', 1000.0, '["tag-1"]', 1760000000000, 1760000000000, 0, 0, 0);
+
+            INSERT INTO project_tags (project_id, tag_id) VALUES ('proj-1', 'tag-1');
+
+            INSERT INTO headings (id, project_id, title, sort_order, is_archived, created_at, updated_at, is_deleted, is_dirty)
+            VALUES ('head-1', 'proj-1', 'Core Engine', 1000.0, 0, 1760000000000, 1760000000000, 0, 0);
+
+            INSERT INTO tasks (id, title, notes, status, schedule_state, when_date, project_id, heading_id, area_id, sort_order, tag_ids_json, created_at, updated_at, is_deleted, is_purged, is_dirty)
+            VALUES ('task-1', 'Verify SQLite Migration', 'Zero data loss!', 'OPEN', 'TODAY', 1760000000000, 'proj-1', 'head-1', 'area-1', 1000.0, '["tag-1"]', 1760000000000, 1760000000000, 0, 0, 0);
+
+            INSERT INTO tasks (id, title, notes, status, schedule_state, completed_at, project_id, sort_order, tag_ids_json, created_at, updated_at, is_deleted, is_purged, is_dirty)
+            VALUES ('task-done-1', 'Shipped v1.8.1', '', 'COMPLETED', 'ANYTIME', 1760000500000, 'proj-1', 2000.0, '[]', 1760000000000, 1760000500000, 0, 0, 0);
+
+            INSERT INTO task_tags (task_id, tag_id) VALUES ('task-1', 'tag-1');
+
+            INSERT INTO checklist_items (id, task_id, title, is_completed, sort_order, created_at, updated_at, is_deleted, is_dirty)
+            VALUES ('chk-1', 'task-1', 'Check tasks table columns', 1, 100.0, 1760000000000, 1760000000000, 0, 0);
+            """
+            var errMsg: UnsafeMutablePointer<CChar>?
+            let rc = sqlite3_exec(rawHandle, legacyV181SchemaAndData, nil, nil, &errMsg)
+            if let errMsg { sqlite3_free(errMsg) }
+            XCTAssertEqual(rc, SQLITE_OK)
+        }
+
+        // 2. Open the v1.8.1 SQLite file in-place with v2.0.0-beta.1 ThingsSQLiteDatabase
+        let upgradedDb = try ThingsSQLiteDatabase(path: rawDbURL.path)
+        var snap = try upgradedDb.loadWorkspaceSnapshot()
+
+        XCTAssertEqual(snap.areas.map(\.title), ["Engineering"])
+        XCTAssertEqual(snap.projects.map(\.title), ["v1.8.1 Production App"])
+        XCTAssertNil(snap.projects.first?.lastReviewedAt)
+        XCTAssertEqual(snap.headingsByProject["proj-1"]?.map(\.title), ["Core Engine"])
+        XCTAssertEqual(snap.allOpenTasks.map(\.title), ["Verify SQLite Migration"])
+        XCTAssertEqual(snap.logbookTasks.map(\.title), ["Shipped v1.8.1"])
+        XCTAssertEqual(snap.allOpenTasks.first?.checklistItems.map(\.title), ["Check tasks table columns"])
+        XCTAssertEqual(snap.allOpenTasks.first?.tags.map(\.title), ["Deep Work"])
+        XCTAssertNil(snap.allOpenTasks.first?.scheduledStartMinutes)
+        XCTAssertNil(snap.allOpenTasks.first?.durationMinutes)
+        XCTAssertTrue(snap.projectTemplates.isEmpty)
+
+        // 3. Exercise v2.0 Timeblocking, Weekly Review, Project Templates & Markdown/JSON Importer
+        try upgradedDb.setTaskTimeblock(taskId: "task-1", scheduledStartMinutes: 540, durationMinutes: 45)
+        let reviewStamp: Int64 = 1_765_000_000_000
+        try upgradedDb.markProjectReviewed(projectId: "proj-1", reviewedAt: reviewStamp)
+
+        snap = try upgradedDb.loadWorkspaceSnapshot()
+        let timeblockedTask = try XCTUnwrap(snap.allOpenTasks.first(where: { $0.id == "task-1" }))
+        XCTAssertEqual(timeblockedTask.scheduledStartMinutes, 540)
+        XCTAssertEqual(timeblockedTask.durationMinutes, 45)
+        XCTAssertEqual(timeblockedTask.formattedTimeblockPill, "09:00–09:45 · 45m")
+        XCTAssertEqual(snap.projects.first(where: { $0.id == "proj-1" })?.lastReviewedAt, reviewStamp)
+
+        // Built-in starter templates + custom saved template + instantiation
+        XCTAssertEqual(ProjectTemplate.builtInStarterTemplates.count, 4)
+        let savedTemplate = try upgradedDb.saveProjectAsTemplate(projectId: "proj-1", templateTitle: "Reusable Release Playbook")
+        snap = try upgradedDb.loadWorkspaceSnapshot()
+        XCTAssertEqual(snap.projectTemplates.map(\.title), ["Reusable Release Playbook"])
+
+        let instantiated = try upgradedDb.instantiateProjectFromTemplate(savedTemplate, titleOverride: "v2.0.0 Launch")
+        snap = try upgradedDb.loadWorkspaceSnapshot()
+        XCTAssertTrue(snap.projects.contains(where: { $0.id == instantiated.id && $0.title == "v2.0.0 Launch" }))
+        XCTAssertEqual(snap.headingsByProject[instantiated.id]?.map(\.title), ["Core Engine"])
+        let clonedTask = try XCTUnwrap(snap.allOpenTasks.first(where: { $0.projectId == instantiated.id }))
+        XCTAssertEqual(clonedTask.title, "Verify SQLite Migration")
+        XCTAssertEqual(clonedTask.scheduledStartMinutes, 540)
+        XCTAssertEqual(clonedTask.durationMinutes, 45)
+        XCTAssertEqual(clonedTask.checklistItems.map(\.title), ["Check tasks table columns"])
+
+        // Markdown & JSON Outline Importer
+        let markdownOutline = """
+        # Q4 Architecture Review
+        High-priority migration audit
+
+        - [ ] Prepare kickoff deck
+          - [ ] Gather metrics
+          - [ ] Draft slides
+        ## Security & Sync
+        - [ ] Verify Firestore rules
+        """
+        let mdProject = try upgradedDb.importProjectFromMarkdownOrJson(markdownOutline, areaId: "area-1")
+        snap = try upgradedDb.loadWorkspaceSnapshot()
+        XCTAssertEqual(mdProject.title, "Q4 Architecture Review")
+        XCTAssertEqual(snap.headingsByProject[mdProject.id]?.map(\.title), ["Security & Sync"])
+        let mdTasks = snap.allOpenTasks.filter { $0.projectId == mdProject.id }
+        XCTAssertEqual(mdTasks.count, 2)
+        XCTAssertEqual(mdTasks.first(where: { $0.title == "Prepare kickoff deck" })?.checklistItems.count, 2)
+
+        let jsonOutline = """
+        {"title":"JSON Imported Sprint","notes":"From CLI","blueprint":{"unheadedTasks":[{"title":"Audit backups","notes":"","checklistItems":["v1.7","v1.8.1"]}],"headings":[{"title":"QA","tasks":[{"title":"Run XCTest","notes":"","checklistItems":[]}]}]}}
+        """
+        let jsonProject = try upgradedDb.importProjectFromMarkdownOrJson(jsonOutline)
+        snap = try upgradedDb.loadWorkspaceSnapshot()
+        XCTAssertEqual(jsonProject.title, "JSON Imported Sprint")
+        XCTAssertEqual(snap.headingsByProject[jsonProject.id]?.map(\.title), ["QA"])
+
+        // 4. Verify v2.0 Encrypted .tbbackup Roundtrip preserves templates, timeblocks, lastReviewedAt & includeBetaUpdates
+        XCTAssertEqual(ThingsBackupCodec.backupMagic, "THINGSBOOK_BACKUP_V1")
+        XCTAssertEqual(ThingsBackupCodec.formatVersion, 1)
+        var v2Prefs = AppPreferences()
+        v2Prefs.includeBetaUpdates = true
+        let v2BackupPayload = try upgradedDb.buildBackupPayload(preferences: v2Prefs)
+        XCTAssertEqual(v2BackupPayload.projectTemplates.count, 1)
+        let v2Encrypted = try ThingsBackupCodec.encodeBackup(payload: v2BackupPayload, password: "Beta20UpgradePassword!")
+        let v2Decoded = try ThingsBackupCodec.decodeBackup(rawBytes: v2Encrypted, password: "Beta20UpgradePassword!")
+        XCTAssertEqual(v2Decoded.projectTemplates.map(\.title), ["Reusable Release Playbook"])
+        XCTAssertEqual(v2Decoded.tasks.first(where: { $0.id == "task-1" })?.scheduledStartMinutes, 540)
+        XCTAssertEqual(v2Decoded.tasks.first(where: { $0.id == "task-1" })?.durationMinutes, 45)
+        XCTAssertEqual(v2Decoded.projects.first(where: { $0.id == "proj-1" })?.lastReviewedAt, reviewStamp)
+        XCTAssertEqual(v2Decoded.preferences.includeBetaUpdates, true)
+
+        // 5. Verify authentic v1.8.1 .tbbackup archive (missing v2.0 fields) restores cleanly into v2.0.0-beta.1!
+        let v181BackupJson = """
+        {"magic":"THINGSBOOK_BACKUP_V1","formatVersion":1,"appVersionName":"1.8.1","appVersionCode":44,"createdAt":1762000000000,"encrypted":false,"payloadGzipBase64":"H4sIAAAAAAACA71U3W/aMBD/VyI/d2jsYet4SwFtmcqHCqKq2j4c9pF4JE5kO0wM8b/vDkgXojBNaFre7s53/n2csxNOJpjBAq3TuRG97o2QFsGjCj1Fnz5+eF99NwKK4nRwDBmKnuh2bjtdQQVqcaL3vBNaUZrDd5vuLZe89ikffcztOthUDS63fmIVWrqDRndouIc4Uu6bYxTi+VX8CUhZqNbK/vVGFDb/jtLX4HCmgsPQoksY7zEGuQ0OIIN7KI1MqGpyjzRNRFlBqMH4wOagMiiYhwdfcjHsz6PFkDOkpypTnFGFZ4bjp3k0Gv4N5xeOD5hexPX8EwSlTVzjz5mK6kmdqKlLJcE0AYfBBYu0C61M9AapewWpw2sxenDrGkAOm0BmiS5O+xIMRl9qPtAK6tU2oBCs/gme97bmxGQ6HLf4MJ8MwifK/0jQDA6pBt5Lypz0jJpKtm7Sf/KYuMl1qp2PPGY1IWXyW0fSNLoorocixcBruUYv2Nh+nlHGs7PelthkwkSutTo+czpuYnnAlH4eyOIldKcsaYqw4l8icOs5xA+4OgJpVwbi6Axg7VdSb774ftr6wXuQSYbm8Dc6DMQVWjSSF3kn0lxCOjHpdrAc5QrfHpXTCpdgF9rpJWt0dESBppM6RueHBqigWipf85L0+nyWG2lT8sKTTimYuISYdUd+NXQ/GgV2uGGQb2MrHGSNJFn7p1O0x0cesc3LYp4r2N5tp0dFJjYkdypExLm8Azs7DZi2qrbf/wK06zVlfwYAAA=="}
+        """
+        let freshV2Db = try ThingsSQLiteDatabase(path: ":memory:")
+        let decodedV181Backup = try ThingsBackupCodec.decodeBackup(rawBytes: Data(v181BackupJson.utf8), password: nil)
+        XCTAssertTrue(decodedV181Backup.projectTemplates.isEmpty)
+        XCTAssertNil(decodedV181Backup.tasks.first?.scheduledStartMinutes)
+        XCTAssertNil(decodedV181Backup.projects.first?.lastReviewedAt)
+        try freshV2Db.restoreBackupPayload(decodedV181Backup)
+        let restoredV181Snap = try freshV2Db.loadWorkspaceSnapshot()
+        XCTAssertEqual(restoredV181Snap.areas.map(\.title), ["Work v1.8.1"])
+        XCTAssertEqual(restoredV181Snap.projects.map(\.title), ["Legacy 1.8.1 Launch"])
+        XCTAssertEqual(restoredV181Snap.allOpenTasks.map(\.title), ["Ship v1.8.1 DMG"])
+
+        // 6. Verify Cloud Sync legacy v1.8 & v2.0 document parsing + project_templates delta sync
+        let legacyCloudTask = FirebaseCloudSyncService.parseTask([
+            "id": "cloud-v18-task",
+            "title": "From v1.8 Android",
+            "status": "OPEN",
+            "scheduleState": "TODAY",
+            "updatedAt": Int64(1_766_000_000_000)
+        ])
+        XCTAssertNil(legacyCloudTask?.0.scheduledStartMinutes)
+        XCTAssertNil(legacyCloudTask?.0.durationMinutes)
+
+        let v2CloudTask = FirebaseCloudSyncService.parseTask([
+            "id": "cloud-v20-task",
+            "title": "Timeblocked on Android 2.0",
+            "status": "OPEN",
+            "scheduleState": "TODAY",
+            "scheduledStartMinutes": Int64(630),
+            "durationMinutes": Int64(60),
+            "updatedAt": Int64(1_766_000_001_000)
+        ])
+        XCTAssertEqual(v2CloudTask?.0.scheduledStartMinutes, 630)
+        XCTAssertEqual(v2CloudTask?.0.durationMinutes, 60)
+
+        let remoteTemplate = try XCTUnwrap(FirebaseCloudSyncService.parseProjectTemplate([
+            "id": "cloud-tmpl-1",
+            "title": "Synced Sprint Template",
+            "notes": "Cross-device template",
+            "tagIds": ["tag-v181"],
+            "blueprintJson": ProjectTemplateBlueprint(unheadedTasks: [TemplateTaskSpec(title: "Sync check")]).toJSONString(),
+            "sortOrder": 500.0,
+            "createdAt": Int64(1_766_000_000_000),
+            "updatedAt": Int64(1_766_000_002_000),
+            "isDeleted": false
+        ]))
+        _ = try freshV2Db.applyRemoteDeltas(RemoteDeltaBatch(projectTemplates: [remoteTemplate]))
+        XCTAssertEqual(try freshV2Db.loadWorkspaceSnapshot().projectTemplates.map(\.title), ["Synced Sprint Template"])
+
+        // 7. Verify all 33 shared v2_* localization keys exist and are non-empty across EN/DE/FR/IT/ES
+        let requiredV2Keys = [
+            "v2_beta_badge", "v2_beta_channel_toggle", "v2_beta_channel_desc",
+            "v2_weekly_review_title", "v2_weekly_review_subtitle",
+            "v2_review_step_inbox", "v2_review_step_today", "v2_review_step_projects", "v2_review_step_someday",
+            "v2_stalled_project_badge", "v2_stalled_no_next_action", "v2_stalled_unreviewed",
+            "v2_add_next_action", "v2_mark_reviewed", "v2_complete_weekly_review", "v2_weekly_review_done_toast",
+            "v2_templates_title", "v2_save_as_template", "v2_template_saved_toast",
+            "v2_create_from_template", "v2_starter_templates", "v2_my_templates",
+            "v2_import_markdown_title", "v2_import_markdown_hint", "v2_import_create_project",
+            "v2_timeblock_title", "v2_timeblock_start", "v2_timeblock_duration", "v2_timeblock_clear",
+            "v2_timeline_view", "v2_list_view", "v2_unscheduled_today", "v2_schedule_conflict"
+        ]
+        XCTAssertEqual(requiredV2Keys.count, 33)
+        for lang in [AppLanguage.en, .de, .fr, .it, .es] {
+            for key in requiredV2Keys {
+                let text = ThingsStrings.shared.text(key, lang: lang)
+                XCTAssertFalse(text.isEmpty, "Missing \(key) in \(lang.rawValue)")
+                XCTAssertNotEqual(text, key, "Untranslated \(key) in \(lang.rawValue)")
+            }
+        }
+    }
 }
+
 

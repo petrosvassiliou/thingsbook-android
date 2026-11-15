@@ -1,7 +1,17 @@
 import { APP_VERSION } from '../domain/types.ts';
-import { compareSemver, isEligibleReleasePayload } from './versionUtils.ts';
+import {
+  compareSemver,
+  isEligibleReleasePayload,
+  isPrereleaseVersion,
+  selectLatestEligibleRelease
+} from './versionUtils.ts';
 
-export { compareSemver, isEligibleReleasePayload };
+export {
+  compareSemver,
+  isEligibleReleasePayload,
+  isPrereleaseVersion,
+  selectLatestEligibleRelease
+};
 
 let swRegistrationRef: ServiceWorkerRegistration | null = null;
 let swUpdateFn: ((reloadPage?: boolean) => Promise<void>) | null = null;
@@ -44,7 +54,8 @@ export interface UpdateCheckResult {
 }
 
 export async function checkForSwAndReleaseUpdates(
-  currentVersion: string = APP_VERSION
+  currentVersion: string = APP_VERSION,
+  includeBeta: boolean = currentVersion.split('+')[0].includes('-')
 ): Promise<UpdateCheckResult> {
   let swWaiting = swUpdateAvailable;
   try {
@@ -60,14 +71,20 @@ export async function checkForSwAndReleaseUpdates(
   }
 
   try {
-    const res = await fetch(
-      'https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases/latest',
-      { headers: { Accept: 'application/vnd.github+json' } }
-    );
+    const endpoint = includeBeta
+      ? 'https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases?per_page=10'
+      : 'https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases/latest';
+    const res = await fetch(endpoint, {
+      headers: { Accept: 'application/vnd.github+json' }
+    });
     if (res.ok) {
       const data: unknown = await res.json();
-      if (isEligibleReleasePayload(data, currentVersion)) {
-        const rec = data as Record<string, unknown>;
+      const rec = includeBeta
+        ? selectLatestEligibleRelease(data, currentVersion, true)
+        : isEligibleReleasePayload(data, currentVersion, false)
+          ? (data as Record<string, unknown>)
+          : null;
+      if (rec) {
         const rawTag = String(rec.tag_name).trim();
         const latestClean = rawTag.replace(/^[vV]/, '').trim() || currentVersion;
         const newer = compareSemver(latestClean, currentVersion) > 0;

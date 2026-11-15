@@ -509,6 +509,7 @@ fun CreateOrEditProjectDialog(
     areas: List<Area>,
     preselectedAreaId: String? = null,
     locale: Locale = Locale.getDefault(),
+    onOpenTemplatesAndImport: ((preselectedAreaId: String?) -> Unit)? = null,
     onSaveProject: (title: String, notes: String, areaId: String?, deadlineEpochMillis: Long?) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -607,6 +608,34 @@ fun CreateOrEditProjectDialog(
                             tint = colors.secondaryText,
                             modifier = Modifier.size(16.dp)
                         )
+                    }
+                }
+
+                if (existingProject == null && onOpenTemplatesAndImport != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(9.dp),
+                        color = colors.thingsBlueSoft,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                val areaSnapshot = selectedAreaId
+                                onDismiss()
+                                onOpenTemplatesAndImport(areaSnapshot)
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = "📋 ${stringResource(R.string.v2_templates_title)} →",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = colors.thingsBlue
+                            )
+                        }
                     }
                 }
 

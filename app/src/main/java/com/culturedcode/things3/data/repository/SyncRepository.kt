@@ -20,6 +20,7 @@ import com.culturedcode.things3.data.remote.dto.CloudDeltaBatchPayload
 import com.culturedcode.things3.data.remote.dto.CloudUserAuthEnvelope
 import com.culturedcode.things3.data.remote.dto.HeadingFirestoreDto
 import com.culturedcode.things3.data.remote.dto.ProjectFirestoreDto
+import com.culturedcode.things3.data.remote.dto.ProjectTemplateFirestoreDto
 import com.culturedcode.things3.data.remote.dto.TagFirestoreDto
 import com.culturedcode.things3.data.remote.dto.TaskFirestoreDto
 import com.culturedcode.things3.data.remote.dto.toFirestoreDto
@@ -605,6 +606,9 @@ class SyncRepository @Inject constructor(
     private fun attachmentsBackfillKeyForUser(userId: String) =
         booleanPreferencesKey("attachments_backfill_v1_$userId")
 
+    private fun projectTemplatesBackfillKeyForUser(userId: String) =
+        booleanPreferencesKey("project_templates_backfill_v1_$userId")
+
     private fun lastNtfyMsgIdKeyForTopic(channelTopic: String) =
         stringPreferencesKey("last_ntfy_msg_id_$channelTopic")
 
@@ -784,6 +788,9 @@ class SyncRepository @Inject constructor(
         appendSplitChunks(fullPayload.checklistItems) {
             CloudDeltaBatchPayload(userId = userId, deviceId = deviceId, batchTimestamp = batchTimestamp, checklistItems = it)
         }
+        appendSplitChunks(fullPayload.projectTemplates) {
+            CloudDeltaBatchPayload(userId = userId, deviceId = deviceId, batchTimestamp = batchTimestamp, projectTemplates = it)
+        }
         return out
     }
 
@@ -800,6 +807,7 @@ class SyncRepository @Inject constructor(
         val dirtyTasks = database.taskDao().getDirtyTasks()
         val dirtyChecklists = database.checklistDao().getDirtyChecklistItems()
         val dirtyTags = database.tagDao().getDirtyTags()
+        val dirtyTemplates = database.projectTemplateDao().getDirtyTemplates()
 
         if (
             dirtyAreas.isEmpty() &&
@@ -807,7 +815,8 @@ class SyncRepository @Inject constructor(
             dirtyHeadings.isEmpty() &&
             dirtyTasks.isEmpty() &&
             dirtyChecklists.isEmpty() &&
-            dirtyTags.isEmpty()
+            dirtyTags.isEmpty() &&
+            dirtyTemplates.isEmpty()
         ) {
             return true
         }
@@ -824,7 +833,8 @@ class SyncRepository @Inject constructor(
             projects = dirtyProjects.map { ProjectFirestoreDto.fromEntity(it) },
             headings = dirtyHeadings.map { HeadingFirestoreDto.fromEntity(it) },
             tasks = dirtyTasks.map { TaskFirestoreDto.fromEntity(it) },
-            checklistItems = dirtyChecklists.map { ChecklistItemFirestoreDto.fromEntity(it) }
+            checklistItems = dirtyChecklists.map { ChecklistItemFirestoreDto.fromEntity(it) },
+            projectTemplates = dirtyTemplates.map { ProjectTemplateFirestoreDto.fromEntity(it) }
         )
 
         val payloadsToPost = buildSafeNtfyPayloadChunks(userId, deviceId, now, fullPayload)
@@ -855,6 +865,9 @@ class SyncRepository @Inject constructor(
             }
             if (dirtyTags.isNotEmpty()) {
                 database.tagDao().markSyncedSafe(dirtyTags.map { it.id }, dirtyTags.maxOf { it.updatedAt })
+            }
+            if (dirtyTemplates.isNotEmpty()) {
+                database.projectTemplateDao().markSyncedSafe(dirtyTemplates.map { it.id }, dirtyTemplates.maxOf { it.updatedAt })
             }
         }
         return allSucceeded
@@ -984,6 +997,16 @@ class SyncRepository @Inject constructor(
                 val local = database.checklistDao().getById(dto.id)
                 if (local == null || dto.updatedAt >= local.updatedAt) {
                     database.checklistDao().upsert(dto.toEntity())
+                }
+                val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
+                if (clamped > maxTimestamp) maxTimestamp = clamped
+            }
+
+            for (dto in batch.projectTemplates) {
+                if (dto.id.isBlank()) continue
+                val local = database.projectTemplateDao().getById(dto.id)
+                if (local == null || dto.updatedAt >= local.updatedAt) {
+                    database.projectTemplateDao().upsert(dto.toEntity())
                 }
                 val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
                 if (clamped > maxTimestamp) maxTimestamp = clamped
@@ -1145,6 +1168,7 @@ class SyncRepository @Inject constructor(
         val dirtyTasks = database.taskDao().getDirtyTasks()
         val dirtyChecklists = database.checklistDao().getDirtyChecklistItems()
         val dirtyTags = database.tagDao().getDirtyTags()
+        val dirtyTemplates = database.projectTemplateDao().getDirtyTemplates()
         val dirtyAttachments = database.attachmentDao().getDirtyAttachments()
 
         data class BatchOp(val collectionName: String, val docId: String, val dataMap: Map<String, Any?>)
@@ -1156,6 +1180,7 @@ class SyncRepository @Inject constructor(
             dirtyTasks.forEach { add(BatchOp("tasks", it.id, TaskFirestoreDto.fromEntity(it).toFirestoreMap())) }
             dirtyChecklists.forEach { add(BatchOp("checklist_items", it.id, ChecklistItemFirestoreDto.fromEntity(it).toFirestoreMap())) }
             dirtyTags.forEach { add(BatchOp("tags", it.id, TagFirestoreDto.fromEntity(it).toFirestoreMap())) }
+            dirtyTemplates.forEach { add(BatchOp("project_templates", it.id, ProjectTemplateFirestoreDto.fromEntity(it).toFirestoreMap())) }
         }
 
         if (allOps.isEmpty() && dirtyAttachments.isEmpty()) return
@@ -1210,6 +1235,9 @@ class SyncRepository @Inject constructor(
             if (dirtyTags.isNotEmpty()) {
                 database.tagDao().markSyncedSafe(dirtyTags.map { it.id }, dirtyTags.maxOf { it.updatedAt })
             }
+            if (dirtyTemplates.isNotEmpty()) {
+                database.projectTemplateDao().markSyncedSafe(dirtyTemplates.map { it.id }, dirtyTemplates.maxOf { it.updatedAt })
+            }
             if (dirtyAttachments.isNotEmpty()) {
                 database.attachmentDao().markSyncedSafe(dirtyAttachments.map { it.id }, dirtyAttachments.maxOf { it.updatedAt })
             }
@@ -1226,6 +1254,7 @@ class SyncRepository @Inject constructor(
             .catch { emit(emptyPreferences()) }
             .first()
         val needsAttachmentsBackfill = prefs[attachmentsBackfillKeyForUser(userId)] != true
+        val needsTemplatesBackfill = prefs[projectTemplatesBackfillKeyForUser(userId)] != true
 
         val tagSnapshots = userDoc.collection("tags")
             .whereGreaterThan("updatedAt", queryFloor)
@@ -1262,6 +1291,13 @@ class SyncRepository @Inject constructor(
                 .get()
                 .await()
         }
+        val templateSnapshots = runCatchingCancellable {
+            val floor = if (needsTemplatesBackfill) 0L else queryFloor
+            userDoc.collection("project_templates")
+                .whereGreaterThan("updatedAt", floor)
+                .get()
+                .await()
+        }.getOrNull()
 
         val nowMillis = System.currentTimeMillis()
         dbApplyMutex.withLock {
@@ -1333,6 +1369,19 @@ class SyncRepository @Inject constructor(
                 if (clamped > maxTimestamp) maxTimestamp = clamped
             }
 
+            if (templateSnapshots != null) {
+                for (doc in templateSnapshots.documents) {
+                    val dto = runCatching { ProjectTemplateFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
+                    if (dto.id.isBlank()) continue
+                    val local = database.projectTemplateDao().getById(dto.id)
+                    if (local == null || dto.updatedAt >= local.updatedAt) {
+                        database.projectTemplateDao().upsert(dto.toEntity())
+                    }
+                    val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
+                    if (clamped > maxTimestamp) maxTimestamp = clamped
+                }
+            }
+
             for (doc in attachmentSnapshots.documents) {
                 val dto = runCatching { AttachmentFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
                 if (dto.id.isBlank()) continue
@@ -1342,10 +1391,15 @@ class SyncRepository @Inject constructor(
             }
         }
 
-        if (needsAttachmentsBackfill) {
+        if (needsAttachmentsBackfill || (needsTemplatesBackfill && templateSnapshots != null)) {
             runCatchingCancellable {
                 context.syncDataStore.edit { editPrefs ->
-                    editPrefs[attachmentsBackfillKeyForUser(userId)] = true
+                    if (needsAttachmentsBackfill) {
+                        editPrefs[attachmentsBackfillKeyForUser(userId)] = true
+                    }
+                    if (needsTemplatesBackfill && templateSnapshots != null) {
+                        editPrefs[projectTemplatesBackfillKeyForUser(userId)] = true
+                    }
                 }
             }
         }
@@ -1538,6 +1592,37 @@ class SyncRepository @Inject constructor(
                                             val local = database.tagDao().getById(dto.id)
                                             if (local == null || dto.updatedAt >= local.updatedAt) {
                                                 database.tagDao().upsert(dto.toEntity())
+                                            }
+                                            val clamped = clampRemoteTimestamp(dto.updatedAt)
+                                            if (clamped > maxTs) {
+                                                maxTs = clamped
+                                                changed = true
+                                            }
+                                        }
+                                    }
+                                }
+                                if (changed) saveLastSyncTimestamp(userId, maxTs)
+                            }
+                        }
+                    } catch (_: Throwable) {}
+                }
+
+            activeListeners += userDoc.collection("project_templates")
+                .whereGreaterThan("updatedAt", queryFloor)
+                .addSnapshotListener { snapshot, error ->
+                    try {
+                        if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
+                        scope.launch {
+                            dbApplyMutex.withLock {
+                                var maxTs = getLastSyncTimestamp(userId)
+                                var changed = false
+                                for (change in snapshot.documentChanges) {
+                                    runCatchingCancellable {
+                                        val dto = ProjectTemplateFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
+                                        if (dto.id.isNotBlank()) {
+                                            val local = database.projectTemplateDao().getById(dto.id)
+                                            if (local == null || dto.updatedAt >= local.updatedAt) {
+                                                database.projectTemplateDao().upsert(dto.toEntity())
                                             }
                                             val clamped = clampRemoteTimestamp(dto.updatedAt)
                                             if (clamped > maxTs) {

@@ -39,12 +39,14 @@ import com.culturedcode.things3.domain.model.DeviceCalendarInfo
 import com.culturedcode.things3.domain.model.Heading
 import com.culturedcode.things3.domain.model.Project
 import com.culturedcode.things3.domain.model.ProjectStatus
+import com.culturedcode.things3.domain.model.ProjectTemplate
 import com.culturedcode.things3.domain.model.RecurrenceRule
 import com.culturedcode.things3.domain.model.ScheduleState
 import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskAttachment
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
+import com.culturedcode.things3.domain.model.TimeblockScheduleUtils
 import com.culturedcode.things3.domain.util.runCatchingCancellable
 import com.culturedcode.things3.ui.components.FocusTimerUiState
 import com.culturedcode.things3.ui.components.QuickShareDraft
@@ -312,6 +314,10 @@ class ThingsbookViewModel @Inject constructor(
         .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val allTags: StateFlow<List<Tag>> = repository.observeAllTags()
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val userProjectTemplates: StateFlow<List<ProjectTemplate>> = repository.observeUserProjectTemplates()
         .catch { emit(emptyList()) }
         .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -1914,7 +1920,9 @@ class ThingsbookViewModel @Inject constructor(
             languageTag = langTag,
             calendarEventsEnabled = _calendarEventsEnabled.value,
             selectedCalendarIds = _selectedCalendarIds.value.sorted(),
-            groupTodayByProjectOrArea = _groupTodayByProjectOrArea.value
+            groupTodayByProjectOrArea = _groupTodayByProjectOrArea.value,
+            lastWeeklyReviewAt = _lastWeeklyReviewAt.value,
+            includeBetaUpdates = _includeBetaUpdates.value
         )
     }
 
@@ -2127,6 +2135,12 @@ class ThingsbookViewModel @Inject constructor(
                     restoredPrefs.groupTodayByProjectOrArea?.let { grouped ->
                         setGroupTodayByProjectOrArea(grouped)
                     }
+                    restoredPrefs.lastWeeklyReviewAt?.let { reviewedAt ->
+                        setLastWeeklyReviewAt(reviewedAt)
+                    }
+                    restoredPrefs.includeBetaUpdates?.let { betaEnabled ->
+                        setIncludeBetaUpdates(betaEnabled, triggerCheck = false)
+                    }
                     if (
                         restoredPrefs.dailyDigestEnabled != null &&
                         restoredPrefs.dailyDigestHour != null &&
@@ -2303,6 +2317,14 @@ class ThingsbookViewModel @Inject constructor(
                 cancelPendingAccountSetupMerge()
                 true
             }
+            _isWeeklyReviewModalOpen.value -> {
+                _isWeeklyReviewModalOpen.value = false
+                true
+            }
+            _isTemplatesModalOpen.value -> {
+                _isTemplatesModalOpen.value = false
+                true
+            }
             _isMagicPlusMenuOpen.value -> {
                 _isMagicPlusMenuOpen.value = false
                 true
@@ -2364,6 +2386,11 @@ class ThingsbookViewModel @Inject constructor(
     )
     val autoCheckUpdatesEnabled: StateFlow<Boolean> = _autoCheckUpdatesEnabled.asStateFlow()
 
+    private val _includeBetaUpdates = MutableStateFlow(
+        coreSettingsPrefs.getBoolean(PREF_INCLUDE_BETA_UPDATES, BuildConfig.VERSION_NAME.contains("-"))
+    )
+    val includeBetaUpdates: StateFlow<Boolean> = _includeBetaUpdates.asStateFlow()
+
     private val _appUpdateState = MutableStateFlow<AppUpdateUiState>(AppUpdateUiState.Idle)
     val appUpdateState: StateFlow<AppUpdateUiState> = _appUpdateState.asStateFlow()
 
@@ -2379,17 +2406,37 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
+    fun setIncludeBetaUpdates(enabled: Boolean, triggerCheck: Boolean = true) {
+        _includeBetaUpdates.value = enabled
+        runCatching {
+            coreSettingsPrefs.edit().putBoolean(PREF_INCLUDE_BETA_UPDATES, enabled).apply()
+        }
+        if (_appUpdateState.value is AppUpdateUiState.UpToDate || _appUpdateState.value is AppUpdateUiState.UpdateAvailable) {
+            _appUpdateState.value = AppUpdateUiState.Idle
+        }
+        if (enabled && triggerCheck) {
+            checkForAppUpdates(manual = false)
+        }
+    }
+
     fun checkForAppUpdates(manual: Boolean) {
         val current = _appUpdateState.value
         if (current is AppUpdateUiState.Checking || current is AppUpdateUiState.Downloading) return
 
+        val effectiveIncludeBeta = _includeBetaUpdates.value || BuildConfig.VERSION_NAME.contains("-")
         activeUpdateJob?.cancel()
         activeUpdateJob = safeVmScope.launch {
             _appUpdateState.value = AppUpdateUiState.Checking(isManual = manual)
             runCatchingCancellable {
-                appUpdateManager.checkForUpdate()
+                appUpdateManager.checkForUpdate(includeBeta = effectiveIncludeBeta)
             }.onSuccess { release ->
-                if (AppUpdateParser.isNewerVersion(BuildConfig.VERSION_NAME, release.versionName)) {
+                if (
+                    AppUpdateParser.isNewerVersion(
+                        currentVersion = BuildConfig.VERSION_NAME,
+                        candidateVersion = release.versionName,
+                        includeBeta = effectiveIncludeBeta
+                    )
+                ) {
                     _appUpdateState.value = AppUpdateUiState.UpdateAvailable(
                         release = release,
                         showPromptBanner = true
@@ -2727,9 +2774,24 @@ class ThingsbookViewModel @Inject constructor(
     val focusTimerState: StateFlow<FocusTimerUiState?> = _focusTimerState.asStateFlow()
     private var focusTimerJob: Job? = null
 
-    fun startFocusTimer(taskId: String, taskTitle: String, durationMinutes: Int = 25) {
+    private fun findLoadedTaskDurationMinutes(taskId: String): Int? {
+        return (todayDaytimeTasks.value.firstOrNull { it.id == taskId }
+            ?: thisEveningTasks.value.firstOrNull { it.id == taskId }
+            ?: activeProjectTasks.value.firstOrNull { it.id == taskId }
+            ?: activeAreaTasks.value.firstOrNull { it.id == taskId }
+            ?: inboxTasks.value.firstOrNull { it.id == taskId }
+            ?: anytimeTasks.value.firstOrNull { it.id == taskId }
+            ?: upcomingTasks.value.firstOrNull { it.id == taskId }
+            ?: somedayTasks.value.firstOrNull { it.id == taskId })
+            ?.durationMinutes
+    }
+
+    fun startFocusTimer(taskId: String, taskTitle: String, durationMinutes: Int? = null) {
         focusTimerJob?.cancel()
-        val totalSecs = (durationMinutes.coerceIn(1, 180)) * 60
+        val resolvedMins = (durationMinutes
+            ?: findLoadedTaskDurationMinutes(taskId)
+            ?: TimeblockScheduleUtils.DEFAULT_FOCUS_DURATION_MINUTES).coerceIn(1, 240)
+        val totalSecs = resolvedMins * 60
         val initial = FocusTimerUiState(
             taskId = taskId,
             taskTitle = taskTitle,
@@ -3157,6 +3219,211 @@ class ThingsbookViewModel @Inject constructor(
         appUpdateManager.openReleasePageInBrowser(url)
     }
 
+    // =========================================================================
+    // v2.0 Flagship Features: Weekly Review, Templates & Import, Timeblocking
+    // =========================================================================
+
+    private val _celebrationToastMessage = MutableStateFlow<String?>(null)
+    val celebrationToastMessage: StateFlow<String?> = _celebrationToastMessage.asStateFlow()
+    private var celebrationToastJob: Job? = null
+
+    fun showCelebrationToast(message: String) {
+        if (message.isBlank()) return
+        celebrationToastJob?.cancel()
+        _celebrationToastMessage.value = message
+        celebrationToastJob = safeVmScope.launch {
+            delay(4_500L)
+            _celebrationToastMessage.value = null
+        }
+    }
+
+    fun dismissCelebrationToast() {
+        celebrationToastJob?.cancel()
+        _celebrationToastMessage.value = null
+    }
+
+    // Pillar 1: Guided GTD Weekly Review + Stalled Project Detection
+    private val _isWeeklyReviewModalOpen = MutableStateFlow(false)
+    val isWeeklyReviewModalOpen: StateFlow<Boolean> = _isWeeklyReviewModalOpen.asStateFlow()
+
+    private val _weeklyReviewInitialStep = MutableStateFlow(0)
+    val weeklyReviewInitialStep: StateFlow<Int> = _weeklyReviewInitialStep.asStateFlow()
+
+    private val _lastWeeklyReviewAt = MutableStateFlow<Long?>(
+        coreSettingsPrefs.getLong(PREF_LAST_WEEKLY_REVIEW_AT, -1L).takeIf { it > 0L }
+    )
+    val lastWeeklyReviewAt: StateFlow<Long?> = _lastWeeklyReviewAt.asStateFlow()
+
+    fun openWeeklyReviewModal(initialStep: Int = 0) {
+        _weeklyReviewInitialStep.value = initialStep.coerceIn(0, 3)
+        _isWeeklyReviewModalOpen.value = true
+    }
+
+    fun closeWeeklyReviewModal() {
+        _isWeeklyReviewModalOpen.value = false
+    }
+
+    private fun setLastWeeklyReviewAt(timestampMillis: Long) {
+        if (timestampMillis <= 0L) return
+        _lastWeeklyReviewAt.value = timestampMillis
+        runCatching {
+            coreSettingsPrefs.edit().putLong(PREF_LAST_WEEKLY_REVIEW_AT, timestampMillis).apply()
+        }
+    }
+
+    fun completeWeeklyReview(toastMessage: String) {
+        val now = System.currentTimeMillis()
+        setLastWeeklyReviewAt(now)
+        _isWeeklyReviewModalOpen.value = false
+        showCelebrationToast(toastMessage)
+    }
+
+    fun markProjectReviewed(projectId: String) {
+        safeVmScope.launch {
+            repository.markProjectReviewed(projectId)
+        }
+    }
+
+    fun moveProjectToSomeday(projectId: String) {
+        safeVmScope.launch {
+            repository.moveProjectToSomeday(projectId)
+        }
+    }
+
+    fun activateSomedayProjectToAnytime(projectId: String) {
+        safeVmScope.launch {
+            val proj = activeProjects.value.firstOrNull { it.id == projectId } ?: return@launch
+            repository.createOrUpdateProject(
+                id = proj.id,
+                title = proj.title,
+                notes = proj.notes,
+                areaId = proj.areaId,
+                status = proj.status,
+                scheduleState = ScheduleState.ANYTIME,
+                whenDate = null,
+                deadline = proj.deadline,
+                tagIds = proj.tagIds
+            )
+            repository.markProjectReviewed(projectId)
+        }
+    }
+
+    fun addNextActionToProject(projectId: String, title: String) {
+        val cleanTitle = title.trim()
+        if (cleanTitle.isEmpty()) return
+        safeVmScope.launch {
+            val proj = activeProjects.value.firstOrNull { it.id == projectId }
+            repository.createOrUpdateTask(
+                title = cleanTitle,
+                notes = "",
+                status = TaskStatus.OPEN,
+                scheduleState = ScheduleState.ANYTIME,
+                whenDate = null,
+                projectId = projectId,
+                headingId = null,
+                areaId = proj?.areaId,
+                sortOrder = 500.0
+            )
+            repository.markProjectReviewed(projectId)
+        }
+    }
+
+    // Pillar 2: Reusable Project Templates & Markdown / JSON Outline Importer
+    private val _isTemplatesModalOpen = MutableStateFlow(false)
+    val isTemplatesModalOpen: StateFlow<Boolean> = _isTemplatesModalOpen.asStateFlow()
+
+    private val _templatesModalInitialTab = MutableStateFlow(0)
+    val templatesModalInitialTab: StateFlow<Int> = _templatesModalInitialTab.asStateFlow()
+
+    private val _templatesModalDefaultAreaId = MutableStateFlow<String?>(null)
+    val templatesModalDefaultAreaId: StateFlow<String?> = _templatesModalDefaultAreaId.asStateFlow()
+
+    fun openTemplatesModal(initialTab: Int = 0, defaultAreaId: String? = null) {
+        _templatesModalInitialTab.value = initialTab.coerceIn(0, 1)
+        _templatesModalDefaultAreaId.value = defaultAreaId
+        _isTemplatesModalOpen.value = true
+    }
+
+    fun closeTemplatesModal() {
+        _isTemplatesModalOpen.value = false
+    }
+
+    fun saveProjectAsTemplate(projectId: String, toastMessage: String) {
+        safeVmScope.launch {
+            val savedId = repository.saveProjectAsTemplate(projectId)
+            if (savedId != null) {
+                showCelebrationToast(toastMessage)
+            }
+        }
+    }
+
+    fun createProjectFromTemplate(template: ProjectTemplate, areaIdOverride: String? = null) {
+        safeVmScope.launch {
+            val createdProjectId = repository.createProjectFromTemplateBlueprint(
+                blueprint = template.blueprint,
+                areaIdOverride = areaIdOverride,
+                defaultAreaId = template.defaultAreaId,
+                templateTagIds = template.tagIds
+            )
+            _isTemplatesModalOpen.value = false
+            _expandedTaskId.value = null
+            _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(createdProjectId)
+        }
+    }
+
+    fun deleteProjectTemplate(templateId: String) {
+        if (templateId.isBlank()) return
+        safeVmScope.launch {
+            repository.deleteProjectTemplate(templateId)
+        }
+    }
+
+    fun importProjectFromOutline(rawOutline: String, areaId: String? = null) {
+        if (rawOutline.isBlank()) return
+        safeVmScope.launch {
+            val createdProjectId = repository.importProjectFromOutline(rawOutline, areaId)
+            _isTemplatesModalOpen.value = false
+            _expandedTaskId.value = null
+            _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(createdProjectId)
+        }
+    }
+
+    // Pillar 3: Interactive Timeblocking & Daily Timeline in Today
+    private val _isTodayTimelineMode = MutableStateFlow(
+        coreSettingsPrefs.getBoolean(PREF_TODAY_TIMELINE_MODE, false)
+    )
+    val isTodayTimelineMode: StateFlow<Boolean> = _isTodayTimelineMode.asStateFlow()
+
+    fun setTodayTimelineMode(timelineMode: Boolean) {
+        _isTodayTimelineMode.value = timelineMode
+        runCatching {
+            coreSettingsPrefs.edit().putBoolean(PREF_TODAY_TIMELINE_MODE, timelineMode).apply()
+        }
+    }
+
+    fun updateTaskTimeblock(taskId: String, startMinutes: Int?, durationMinutes: Int?) {
+        safeVmScope.launch {
+            repository.updateTaskTimeblock(
+                taskId = taskId,
+                scheduledStartMinutes = startMinutes,
+                durationMinutes = durationMinutes
+            )
+        }
+    }
+
+    fun shiftTaskTimeblock(taskId: String, deltaMinutes: Int) {
+        safeVmScope.launch {
+            val entity = repository.getTaskEntityById(taskId) ?: return@launch
+            val currentStart = entity.scheduledStartMinutes ?: (9 * 60)
+            val nextStart = (currentStart + deltaMinutes).coerceIn(0, 23 * 60 + 45)
+            repository.updateTaskTimeblock(
+                taskId = taskId,
+                scheduledStartMinutes = nextStart,
+                durationMinutes = entity.durationMinutes ?: TimeblockScheduleUtils.DEFAULT_TIMEBLOCK_DURATION_MINUTES
+            )
+        }
+    }
+
     init {
         runCatching {
             val savedKey = coreSettingsPrefs.getString("gemini_api_key", "")?.trim().orEmpty()
@@ -3246,6 +3513,9 @@ class ThingsbookViewModel @Inject constructor(
         private const val PREF_CALENDAR_IDS_INITIALIZED = "calendar_ids_initialized"
         private const val PREF_GROUP_TODAY_BY_PROJECT_OR_AREA = "group_today_by_project_or_area"
         private const val PREF_BIOMETRIC_APP_LOCK_ENABLED = "biometric_app_lock_enabled"
+        private const val PREF_INCLUDE_BETA_UPDATES = "include_beta_updates"
+        private const val PREF_LAST_WEEKLY_REVIEW_AT = "last_weekly_review_at"
+        private const val PREF_TODAY_TIMELINE_MODE = "today_timeline_mode"
         private const val UPCOMING_CALENDAR_HORIZON_DAYS = 30L
     }
 }

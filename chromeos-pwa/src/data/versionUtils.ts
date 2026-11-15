@@ -81,13 +81,22 @@ export function compareSemver(a: string, b: string): number {
   return 0;
 }
 
+export function isPrereleaseVersion(version: string): boolean {
+  const cleaned = String(version || '')
+    .trim()
+    .replace(/^[vV]/, '');
+  return cleaned.split('+')[0].includes('-');
+}
+
 export function isEligibleReleasePayload(
   data: unknown,
-  currentVersion: string = APP_VERSION
+  currentVersion: string = APP_VERSION,
+  includeBeta: boolean = isPrereleaseVersion(currentVersion)
 ): boolean {
   if (!data || typeof data !== 'object') return false;
   const rec = data as Record<string, unknown>;
-  if (rec.draft === true || rec.prerelease === true) return false;
+  if (rec.draft === true) return false;
+  if (!includeBeta && rec.prerelease === true) return false;
   if (typeof rec.tag_name !== 'string') return false;
 
   const rawTag = rec.tag_name.trim();
@@ -96,14 +105,34 @@ export function isEligibleReleasePayload(
   const cleanCandidate = rawTag.replace(/^[vV]/, '').trim();
   if (!/^\d+\.\d+\.\d+/.test(cleanCandidate)) return false;
 
-  const cleanCurrent = String(currentVersion || '')
-    .trim()
-    .replace(/^[vV]/, '');
-  const currentIsStable = !cleanCurrent.split('+')[0].includes('-');
   const candidateIsPrerelease = cleanCandidate.split('+')[0].includes('-');
-  if (currentIsStable && candidateIsPrerelease) {
+  if (!includeBeta && candidateIsPrerelease) {
     return false;
   }
 
   return true;
+}
+
+export function selectLatestEligibleRelease(
+  releases: unknown,
+  currentVersion: string = APP_VERSION,
+  includeBeta: boolean = isPrereleaseVersion(currentVersion)
+): Record<string, unknown> | null {
+  if (!Array.isArray(releases)) {
+    return isEligibleReleasePayload(releases, currentVersion, includeBeta)
+      ? (releases as Record<string, unknown>)
+      : null;
+  }
+  let best: Record<string, unknown> | null = null;
+  let bestVersion = '';
+  for (const item of releases) {
+    if (!isEligibleReleasePayload(item, currentVersion, includeBeta)) continue;
+    const rec = item as Record<string, unknown>;
+    const candidate = String(rec.tag_name).trim().replace(/^[vV]/, '').trim();
+    if (!best || compareSemver(candidate, bestVersion) > 0) {
+      best = rec;
+      bestVersion = candidate;
+    }
+  }
+  return best;
 }

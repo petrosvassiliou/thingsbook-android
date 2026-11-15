@@ -43,6 +43,7 @@ import {
   checkForSwAndReleaseUpdates,
   type UpdateCheckResult
 } from '../data/pwaUpdater';
+import { isPrereleaseVersion } from '../data/versionUtils';
 import type { TranslationStrings } from '../i18n/translations';
 
 // ==================== BackupCreateModal ====================
@@ -278,7 +279,7 @@ const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
         syncAfter
       );
 
-      // Apply restored preferences (exact Android v1.6.21 parity)
+      // Apply restored preferences (exact Android v1.6.21 + v2.0 parity)
       if (result.preferences) {
         const p = result.preferences;
         const nextLang = p.languageTag?.trim().slice(0, 2).toLowerCase();
@@ -302,6 +303,12 @@ const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
         }
         if (p.groupTodayByProjectOrArea != null) {
           restoredPatch.groupTodayByProjectOrArea = Boolean(p.groupTodayByProjectOrArea);
+        }
+        if (p.includeBetaUpdates != null) {
+          restoredPatch.includeBetaUpdates = Boolean(p.includeBetaUpdates);
+        }
+        if (typeof p.lastWeeklyReviewAt === 'number' && Number.isFinite(p.lastWeeklyReviewAt)) {
+          restoredPatch.lastWeeklyReviewAt = p.lastWeeklyReviewAt;
         }
         if (Array.isArray(p.selectedCalendarIds)) {
           restoredPatch.selectedCalendarIds = p.selectedCalendarIds.filter(
@@ -505,6 +512,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(initialUpdateInfo);
   const [connectingGcal, setConnectingGcal] = useState(false);
+  const isBetaBuild = isPrereleaseVersion(APP_VERSION);
+  const effectiveIncludeBeta = Boolean(prefs.includeBetaUpdates) || isBetaBuild;
 
   const backupInputRef = useRef<HTMLInputElement | null>(null);
   const csvInputRef = useRef<HTMLInputElement | null>(null);
@@ -582,10 +591,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const handleSearchUpdates = async () => {
+  const handleSearchUpdates = async (overrideIncludeBeta?: boolean) => {
     setCheckingUpdate(true);
     try {
-      const res = await checkForSwAndReleaseUpdates(APP_VERSION);
+      const res = await checkForSwAndReleaseUpdates(
+        APP_VERSION,
+        overrideIncludeBeta ?? effectiveIncludeBeta
+      );
       setUpdateInfo(res);
       onUpdateInfoChange?.(res.hasUpdate ? res : null);
     } finally {
@@ -1235,7 +1247,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
 
-          {/* 5. App Updates Section (v1.6.16) */}
+          {/* 5. App Updates Section (v2.0 Beta Channel Support) */}
           <div
             style={{
               padding: '12px 14px',
@@ -1245,8 +1257,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               marginBottom: 16
             }}
           >
-            <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>
-              {t.settingsUpdatesSection}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>
+              <span>{t.settingsUpdatesSection}</span>
+              {isBetaBuild && <span className="v2-beta-pill">{t.betaChannelBadge}</span>}
             </div>
             <div
               style={{
@@ -1269,12 +1282,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </button>
             </div>
 
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 10,
+                marginBottom: 12
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>{t.settingsIncludeBetaTitle}</div>
+                <div style={{ fontSize: 11.8, color: 'var(--text-secondary)', marginTop: 2 }}>
+                  {t.settingsIncludeBetaDesc}
+                </div>
+              </div>
+              <button
+                type="button"
+                data-testid="settings-include-beta-toggle"
+                className={`toggle-switch ${effectiveIncludeBeta ? 'on' : ''}`}
+                disabled={isBetaBuild}
+                title={isBetaBuild ? t.betaChannelBadge : t.settingsIncludeBetaTitle}
+                onClick={() => {
+                  const nextIncludeBeta = !prefs.includeBetaUpdates;
+                  onUpdatePrefs({ includeBetaUpdates: nextIncludeBeta });
+                  void handleSearchUpdates(nextIncludeBeta);
+                }}
+              >
+                <span className="toggle-switch-knob" />
+              </button>
+            </div>
+
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <button
                 type="button"
                 className="btn-secondary"
                 disabled={checkingUpdate}
-                onClick={handleSearchUpdates}
+                onClick={() => void handleSearchUpdates()}
               >
                 <RefreshCw size={13.5} />
                 <span>
@@ -1503,8 +1547,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               color: 'var(--text-muted)'
             }}
           >
-            <span>
-              Thingsbook v{APP_VERSION} (Build {APP_BUILD_CODE})
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span>Thingsbook v{APP_VERSION} (Build {APP_BUILD_CODE})</span>
+              {isBetaBuild && <span className="v2-beta-pill">{t.betaChannelBadge}</span>}
             </span>
             <button type="button" className="btn-primary" onClick={onClose}>
               {t.actionDone}

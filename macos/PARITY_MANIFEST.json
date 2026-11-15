@@ -2,9 +2,9 @@
   "platform": "macOS",
   "minimumMacOSVersion": "14.0",
   "bundleIdentifier": "com.thingsbook.macos",
-  "macosVersion": "1.8.1",
-  "syncedAndroidVersionName": "1.8.1",
-  "syncedAndroidVersionCode": 44,
+  "macosVersion": "2.0.0-beta.1",
+  "syncedAndroidVersionName": "2.0.0-beta.1",
+  "syncedAndroidVersionCode": 45,
   "supportedLanguages": ["en", "de", "fr", "it", "es"],
   "backupFormatMagic": "THINGSBOOK_BACKUP_V1",
   "backupFormatVersion": 1,
@@ -15,7 +15,8 @@
     "headings",
     "tasks",
     "checklist_items",
-    "attachments"
+    "attachments",
+    "project_templates"
   ],
   "features": {
     "smartViews": [
@@ -78,6 +79,12 @@
       "in_app_zoomable_image_and_pdfkit_viewer_plus_share",
       "attachments_sqlite_tbbackup_and_firestore_sync",
       "location_and_apple_maps_chips_in_markdown_notes"
+    ],
+    "v2_0_0_beta_reviewTemplatesAndTimeblocking": [
+      "beta_channel_auto_updater_and_install_beta_script",
+      "guided_gtd_weekly_review_and_stalled_project_detection",
+      "reusable_project_templates_and_markdown_outline_importer",
+      "interactive_timeblocking_and_today_daily_timeline"
     ]
   }
 }

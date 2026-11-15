@@ -58,6 +58,7 @@ data class ThingsbookBackupPayload(
     val taskTagRefs: List<BackupTaskTagRefDto> = emptyList(),
     val projectTagRefs: List<BackupProjectTagRefDto> = emptyList(),
     val attachments: List<BackupAttachmentDto> = emptyList(),
+    val projectTemplates: List<BackupProjectTemplateDto> = emptyList(),
     val preferences: BackupPreferencesDto = BackupPreferencesDto()
 )
 
@@ -82,6 +83,7 @@ data class BackupProjectDto(
     val whenDate: Long? = null,
     val deadline: Long? = null,
     val completedAt: Long? = null,
+    val lastReviewedAt: Long? = null,
     val sortOrder: Double = 0.0,
     val tagIdsJson: String = "[]",
     val createdAt: Long = 0L,
@@ -109,6 +111,8 @@ data class BackupTaskDto(
     val whenDate: Long? = null,
     val deadline: Long? = null,
     val reminderTime: Long? = null,
+    val scheduledStartMinutes: Int? = null,
+    val durationMinutes: Int? = null,
     val completedAt: Long? = null,
     val projectId: String? = null,
     val headingId: String? = null,
@@ -169,6 +173,19 @@ data class BackupAttachmentDto(
 )
 
 @Serializable
+data class BackupProjectTemplateDto(
+    val id: String,
+    val title: String,
+    val notes: String = "",
+    val defaultAreaId: String? = null,
+    val tagIdsJson: String = "[]",
+    val blueprintJson: String = "{}",
+    val sortOrder: Double = 0.0,
+    val createdAt: Long = 0L,
+    val updatedAt: Long = 0L
+)
+
+@Serializable
 data class BackupPreferencesDto(
     val sidebarVisible: Boolean? = null,
     val dailyDigestEnabled: Boolean? = null,
@@ -177,7 +194,9 @@ data class BackupPreferencesDto(
     val languageTag: String? = null,
     val calendarEventsEnabled: Boolean? = null,
     val selectedCalendarIds: List<String>? = null,
-    val groupTodayByProjectOrArea: Boolean? = null
+    val groupTodayByProjectOrArea: Boolean? = null,
+    val lastWeeklyReviewAt: Long? = null,
+    val includeBetaUpdates: Boolean? = null
 )
 
 data class BackupSummary(
@@ -190,7 +209,8 @@ data class BackupSummary(
     val tasksCount: Int = 0,
     val checklistItemsCount: Int = 0,
     val tagsCount: Int = 0,
-    val attachmentsCount: Int = 0
+    val attachmentsCount: Int = 0,
+    val projectTemplatesCount: Int = 0
 )
 
 sealed interface BackupInspectionResult {
@@ -262,7 +282,8 @@ object ThingsBackupCodec {
             tasksCount = payload.tasks.size,
             checklistItemsCount = payload.checklistItems.size,
             tagsCount = payload.tags.size,
-            attachmentsCount = payload.attachments.size
+            attachmentsCount = payload.attachments.size,
+            projectTemplatesCount = payload.projectTemplates.size
         )
 
     fun encodeBackup(

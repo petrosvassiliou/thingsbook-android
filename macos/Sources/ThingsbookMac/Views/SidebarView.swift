@@ -31,6 +31,15 @@ public struct SidebarView: View {
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(.primary)
 
+                if AppUpdateService.currentVersionIsPrerelease {
+                    Text(store.tr("v2_beta_badge"))
+                        .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                        .foregroundStyle(ThingsMacPalette.accentBlue)
+                        .padding(.horizontal, 5.5)
+                        .padding(.vertical, 1.5)
+                        .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.14)))
+                }
+
                 Spacer()
             }
             .padding(.horizontal, 16)
@@ -47,6 +56,8 @@ public struct SidebarView: View {
                     smartViewRow(.upcoming, count: store.upcomingTasks.count)
                     smartViewRow(.anytime, count: store.anytimeTasks.count)
                     smartViewRow(.someday, count: store.somedayTasks.count)
+
+                    weeklyReviewRow
 
                     Divider()
                         .padding(.vertical, 8)
@@ -92,6 +103,20 @@ public struct SidebarView: View {
                         store.isNewProjectSheetPresented = true
                     } label: {
                         Label(store.tr("entity_new_project"), systemImage: "folder.badge.plus")
+                    }
+
+                    Button {
+                        store.templatesInitialTab = .gallery
+                        store.isTemplatesSheetPresented = true
+                    } label: {
+                        Label(store.tr("v2_templates_title"), systemImage: "square.on.square")
+                    }
+
+                    Button {
+                        store.templatesInitialTab = .importOutline
+                        store.isTemplatesSheetPresented = true
+                    } label: {
+                        Label(store.tr("v2_import_markdown_title"), systemImage: "arrow.down.doc")
                     }
 
                     Button {
@@ -142,6 +167,41 @@ public struct SidebarView: View {
             .padding(.vertical, 10)
         }
         .background(.ultraThinMaterial)
+    }
+
+    private var weeklyReviewRow: some View {
+        let stalledCount = store.stalledProjects.count
+        return Button {
+            store.isWeeklyReviewPresented = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "checklist.checked")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                    .frame(width: 20)
+
+                Text(store.tr("v2_weekly_review_title"))
+                    .font(.system(size: 13.5, weight: .regular))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Spacer()
+
+                if stalledCount > 0 {
+                    Text("\(stalledCount)")
+                        .font(.system(size: 11.5, weight: .bold, design: .rounded))
+                        .foregroundStyle(ThingsMacPalette.somedayAmber)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(ThingsMacPalette.somedayAmber.opacity(0.14)))
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6.5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(store.tr("v2_weekly_review_title") + " (⇧⌘R)")
     }
 
     private func smartViewRow(_ view: SmartView, count: Int) -> some View {
@@ -256,6 +316,7 @@ public struct SidebarView: View {
         let dest = NavigationDestination.project(proj.id)
         let selected = store.selectedDestination == dest
         let openCount = max(0, proj.totalTaskCount - proj.completedTaskCount)
+        let isStalled = store.projectStalledInfo(proj).isStalled
 
         return Button {
             store.selectedDestination = dest
@@ -275,6 +336,12 @@ public struct SidebarView: View {
                     .lineLimit(1)
 
                 Spacer(minLength: 4)
+
+                if isStalled {
+                    Circle()
+                        .fill(ThingsMacPalette.somedayAmber)
+                        .frame(width: 6, height: 6)
+                }
 
                 if proj.deadline != nil {
                     Image(systemName: "flag")
@@ -302,6 +369,12 @@ public struct SidebarView: View {
         .contextMenu {
             Button(store.tr("project_edit_title")) {
                 store.editingProject = proj
+            }
+            Button(store.tr("v2_save_as_template")) {
+                store.saveProjectAsTemplate(proj.id)
+            }
+            Button(store.tr("v2_mark_reviewed")) {
+                store.markProjectReviewed(proj.id)
             }
             Button(store.tr("action_duplicate_project")) {
                 if let copy = try? store.database.duplicateProject(proj.id, copySuffix: store.tr("macos_copy_suffix")) {

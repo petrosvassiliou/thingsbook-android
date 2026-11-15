@@ -112,6 +112,27 @@ public struct MainWorkspaceView: View {
                         .disabled(store.isLocked)
                         .help(store.tr("gemini_hub_title") + " (⌘G)")
 
+                        // Guided Weekly Review (v2.0)
+                        Button {
+                            guard !store.isLocked else { return }
+                            store.isWeeklyReviewPresented = true
+                        } label: {
+                            Image(systemName: "checklist.checked")
+                        }
+                        .disabled(store.isLocked)
+                        .help(store.tr("v2_weekly_review_title") + " (⇧⌘R)")
+
+                        // Project Templates & Markdown Import (v2.0)
+                        Button {
+                            guard !store.isLocked else { return }
+                            store.templatesInitialTab = .gallery
+                            store.isTemplatesSheetPresented = true
+                        } label: {
+                            Image(systemName: "square.on.square")
+                        }
+                        .disabled(store.isLocked)
+                        .help(store.tr("v2_templates_title"))
+
                         // Quick Entry
                         Button {
                             guard !store.isLocked else { return }
@@ -236,6 +257,14 @@ public struct MainWorkspaceView: View {
         }
         .sheet(isPresented: $store.isGeminiSheetPresented) {
             GeminiAssistantSheet(store: store)
+        }
+        .sheet(isPresented: $store.isWeeklyReviewPresented) {
+            WeeklyReviewSheetView()
+                .environmentObject(store)
+        }
+        .sheet(isPresented: $store.isTemplatesSheetPresented) {
+            TemplatesAndImportSheetView()
+                .environmentObject(store)
         }
         .sheet(isPresented: $store.isSettingsPresented) {
             SettingsWindowView(store: store, showCloseButton: true)
@@ -439,6 +468,18 @@ public struct MainWorkspaceView: View {
                         store.newProjectDefaultAreaId = nil
                     }
                     store.isNewProjectSheetPresented = true
+                }
+
+                magicPlusItem(
+                    icon: "square.on.square",
+                    tint: ThingsMacPalette.anytimeTeal,
+                    title: store.tr("v2_templates_title"),
+                    subtitle: store.tr("v2_import_markdown_title"),
+                    shortcut: nil
+                ) {
+                    isMagicPlusMenuOpen = false
+                    store.templatesInitialTab = .gallery
+                    store.isTemplatesSheetPresented = true
                 }
 
                 magicPlusItem(

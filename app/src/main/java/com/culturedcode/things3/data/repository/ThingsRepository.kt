@@ -9,6 +9,7 @@ import com.culturedcode.things3.data.backup.BackupInspectionResult
 import com.culturedcode.things3.data.backup.BackupPreferencesDto
 import com.culturedcode.things3.data.backup.BackupProjectDto
 import com.culturedcode.things3.data.backup.BackupProjectTagRefDto
+import com.culturedcode.things3.data.backup.BackupProjectTemplateDto
 import com.culturedcode.things3.data.backup.BackupSummary
 import com.culturedcode.things3.data.backup.BackupTagDto
 import com.culturedcode.things3.data.backup.BackupTaskDto
@@ -23,6 +24,7 @@ import com.culturedcode.things3.data.local.entity.ChecklistItemEntity
 import com.culturedcode.things3.data.local.entity.HeadingEntity
 import com.culturedcode.things3.data.local.entity.ProjectEntity
 import com.culturedcode.things3.data.local.entity.ProjectTagCrossRef
+import com.culturedcode.things3.data.local.entity.ProjectTemplateEntity
 import com.culturedcode.things3.data.local.entity.ProjectWithProgressTuple
 import com.culturedcode.things3.data.local.entity.TagEntity
 import com.culturedcode.things3.data.local.entity.TaskEntity
@@ -33,7 +35,11 @@ import com.culturedcode.things3.domain.model.Area
 import com.culturedcode.things3.domain.model.ChecklistItem
 import com.culturedcode.things3.domain.model.Heading
 import com.culturedcode.things3.domain.model.Project
+import com.culturedcode.things3.domain.model.ProjectOutlineImporter
 import com.culturedcode.things3.domain.model.ProjectStatus
+import com.culturedcode.things3.domain.model.ProjectTemplate
+import com.culturedcode.things3.domain.model.ProjectTemplateBlueprint
+import com.culturedcode.things3.domain.model.ProjectTemplateCodec
 import com.culturedcode.things3.domain.model.RecurrenceMode
 import com.culturedcode.things3.domain.model.RecurrenceRule
 import com.culturedcode.things3.domain.model.RecurrenceUnit
@@ -42,6 +48,8 @@ import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskAttachment
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
+import com.culturedcode.things3.domain.model.TemplateHeadingBlueprint
+import com.culturedcode.things3.domain.model.TemplateTaskBlueprint
 import com.culturedcode.things3.domain.util.runCatchingCancellable
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -197,6 +205,7 @@ class ThingsRepository @Inject constructor(
                             whenDate = entity.whenDate,
                             deadline = entity.deadline,
                             completedAt = entity.completedAt,
+                            lastReviewedAt = entity.lastReviewedAt,
                             sortOrder = entity.sortOrder,
                             tagIds = decodeStringList(entity.tagIdsJson),
                             createdAt = entity.createdAt,
@@ -206,6 +215,11 @@ class ThingsRepository @Inject constructor(
                     }.getOrNull()
                 }.distinctBy { it.id }
             }
+            .catch { emit(emptyList()) }
+
+    fun observeUserProjectTemplates(): Flow<List<ProjectTemplate>> =
+        database.projectTemplateDao().observeActiveTemplates()
+            .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
             .catch { emit(emptyList()) }
 
     fun observeTasksForProject(projectId: String): Flow<List<TaskItem>> =
@@ -331,6 +345,7 @@ class ThingsRepository @Inject constructor(
                             whenDate = entity.whenDate,
                             deadline = entity.deadline,
                             completedAt = entity.completedAt,
+                            lastReviewedAt = entity.lastReviewedAt,
                             sortOrder = entity.sortOrder,
                             tagIds = decodeStringList(entity.tagIdsJson),
                             createdAt = entity.createdAt,
@@ -364,6 +379,9 @@ class ThingsRepository @Inject constructor(
         whenDate: Long? = null,
         deadline: Long? = null,
         reminderTime: Long? = null,
+        scheduledStartMinutes: Int? = null,
+        durationMinutes: Int? = null,
+        preserveExistingTimeblock: Boolean = true,
         projectId: String? = null,
         headingId: String? = null,
         areaId: String? = null,
@@ -389,6 +407,9 @@ class ThingsRepository @Inject constructor(
             scheduleState
         }
 
+        val resolvedStartMins = scheduledStartMinutes ?: if (preserveExistingTimeblock) existing?.scheduledStartMinutes else null
+        val resolvedDurationMins = durationMinutes ?: if (preserveExistingTimeblock) existing?.durationMinutes else null
+
         val entity = TaskEntity(
             id = id,
             title = title,
@@ -398,6 +419,8 @@ class ThingsRepository @Inject constructor(
             whenDate = whenDate,
             deadline = deadline,
             reminderTime = reminderTime,
+            scheduledStartMinutes = resolvedStartMins?.takeIf { it in 0..1439 },
+            durationMinutes = resolvedDurationMins?.takeIf { it in 1..1440 },
             completedAt = completedAt,
             projectId = projectId,
             headingId = headingId,
@@ -1013,12 +1036,54 @@ class ThingsRepository @Inject constructor(
         syncRepository.triggerBackgroundSync()
     }
 
+    suspend fun updateTaskTimeblock(
+        taskId: String,
+        scheduledStartMinutes: Int?,
+        durationMinutes: Int?
+    ) {
+        val existing = database.taskDao().getById(taskId) ?: return
+        val now = System.currentTimeMillis()
+        val cleanStart = scheduledStartMinutes?.takeIf { it in 0..1439 }
+        val cleanDuration = if (cleanStart == null && durationMinutes == null) {
+            null
+        } else {
+            durationMinutes?.coerceIn(5, 720) ?: existing.durationMinutes ?: 30
+        }
+        val zone = ZoneId.systemDefault()
+        val todayEpoch = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
+        val updatedSchedule = if (
+            cleanStart != null &&
+            (existing.scheduleState == ScheduleState.INBOX || existing.scheduleState == ScheduleState.ANYTIME || existing.scheduleState == ScheduleState.SOMEDAY)
+        ) {
+            ScheduleState.TODAY
+        } else {
+            existing.scheduleState
+        }
+        val updatedWhen = if (cleanStart != null && existing.whenDate == null && updatedSchedule == ScheduleState.TODAY) {
+            todayEpoch
+        } else {
+            existing.whenDate
+        }
+        database.taskDao().upsert(
+            existing.copy(
+                scheduleState = updatedSchedule,
+                whenDate = updatedWhen,
+                scheduledStartMinutes = cleanStart,
+                durationMinutes = if (cleanStart != null) cleanDuration else durationMinutes?.coerceIn(5, 720),
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.triggerBackgroundSync()
+    }
+
     suspend fun softDeleteArea(areaId: String) {
         val existing = database.areaDao().getById(areaId) ?: return
         val now = System.currentTimeMillis()
         database.withTransaction {
             database.projectDao().clearAreaFromProjects(areaId, now)
             database.taskDao().clearAreaFromTasks(areaId, now)
+            database.projectTemplateDao().clearAreaFromTemplates(areaId, now)
             database.areaDao().upsert(
                 existing.copy(
                     isDeleted = true,
@@ -1061,6 +1126,7 @@ class ThingsRepository @Inject constructor(
             whenDate = whenDate,
             deadline = deadline,
             completedAt = completedAt,
+            lastReviewedAt = if (existing != null) existing.lastReviewedAt else now,
             sortOrder = existing?.sortOrder ?: (maxSort + 1000.0),
             tagIdsJson = json.encodeToString(tagIds),
             createdAt = existing?.createdAt ?: now,
@@ -1071,6 +1137,33 @@ class ThingsRepository @Inject constructor(
         database.projectDao().upsertProjectWithTags(entity, tagIds)
         syncRepository.triggerBackgroundSync()
         return id
+    }
+
+    suspend fun markProjectReviewed(projectId: String, reviewedAtMillis: Long = System.currentTimeMillis()) {
+        val existing = database.projectDao().getById(projectId) ?: return
+        database.projectDao().upsert(
+            existing.copy(
+                lastReviewedAt = reviewedAtMillis,
+                updatedAt = reviewedAtMillis,
+                isDirty = true
+            )
+        )
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun moveProjectToSomeday(projectId: String) {
+        val existing = database.projectDao().getById(projectId) ?: return
+        val now = System.currentTimeMillis()
+        database.projectDao().upsert(
+            existing.copy(
+                scheduleState = ScheduleState.SOMEDAY,
+                whenDate = null,
+                lastReviewedAt = now,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.triggerBackgroundSync()
     }
 
     suspend fun updateProjectDeadline(projectId: String, deadline: Long?) {
@@ -1974,6 +2067,272 @@ class ThingsRepository @Inject constructor(
     }
 
     // =========================================================================
+    // v2.0 Project Templates & Markdown / JSON Outline Importer
+    // =========================================================================
+
+    suspend fun saveProjectAsTemplate(projectId: String, customTitle: String? = null): String? {
+        val project = database.projectDao().getById(projectId) ?: return null
+        if (project.isDeleted) return null
+        val now = System.currentTimeMillis()
+        val zone = ZoneId.systemDefault()
+        val anchorDate = project.whenDate?.let {
+            runCatching { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() }.getOrNull()
+        } ?: LocalDate.now(zone)
+
+        val headings = database.headingDao().getHeadingsForProjectList(projectId).sortedBy { it.sortOrder }
+        val openTasks = database.taskDao().getAllNonDeletedTasksList()
+            .filter { it.projectId == projectId && it.status == TaskStatus.OPEN }
+            .sortedBy { it.sortOrder }
+
+        suspend fun TaskEntity.toTaskBlueprint(): TemplateTaskBlueprint {
+            val checklists = database.checklistDao().getForTaskSync(id)
+                .filter { !it.isDeleted }
+                .sortedBy { it.sortOrder }
+                .map { it.title }
+            val dayOffset = whenDate?.let { epoch ->
+                runCatching {
+                    val taskDate = Instant.ofEpochMilli(epoch).atZone(zone).toLocalDate()
+                    java.time.temporal.ChronoUnit.DAYS.between(anchorDate, taskDate).toInt().coerceIn(-365, 3650)
+                }.getOrNull()
+            }
+            val deadlineOffset = deadline?.let { epoch ->
+                runCatching {
+                    val dlDate = Instant.ofEpochMilli(epoch).atZone(zone).toLocalDate()
+                    java.time.temporal.ChronoUnit.DAYS.between(anchorDate, dlDate).toInt().coerceIn(0, 3650)
+                }.getOrNull()
+            }
+            return TemplateTaskBlueprint(
+                title = title,
+                notes = notes,
+                checklistItems = checklists,
+                dayOffset = dayOffset,
+                deadlineDayOffset = deadlineOffset,
+                scheduledStartMinutes = scheduledStartMinutes,
+                durationMinutes = durationMinutes,
+                isEvening = scheduleState == ScheduleState.THIS_EVENING,
+                tagIds = decodeStringList(tagIdsJson)
+            )
+        }
+
+        val validHeadingIds = headings.mapTo(HashSet()) { it.id }
+        val unheadedBlueprints = openTasks
+            .filter { it.headingId == null || it.headingId !in validHeadingIds }
+            .map { it.toTaskBlueprint() }
+
+        val headingBlueprints = headings.map { heading ->
+            val hTasks = openTasks.filter { it.headingId == heading.id }.map { it.toTaskBlueprint() }
+            TemplateHeadingBlueprint(
+                title = heading.title,
+                tasks = hTasks
+            )
+        }
+
+        val projDeadlineOffset = project.deadline?.let { epoch ->
+            runCatching {
+                val dlDate = Instant.ofEpochMilli(epoch).atZone(zone).toLocalDate()
+                java.time.temporal.ChronoUnit.DAYS.between(anchorDate, dlDate).toInt().coerceIn(0, 3650)
+            }.getOrNull()
+        }
+
+        val projTagIds = decodeStringList(project.tagIdsJson)
+        val templateTitle = customTitle?.trim()?.takeIf { it.isNotEmpty() } ?: project.title
+        val blueprint = ProjectTemplateBlueprint(
+            title = templateTitle,
+            notes = project.notes,
+            deadlineDayOffset = projDeadlineOffset,
+            unheadedTasks = unheadedBlueprints,
+            headings = headingBlueprints,
+            tagIds = projTagIds
+        )
+
+        val templateId = UUID.randomUUID().toString()
+        val existingTemplates = database.projectTemplateDao().getAllNonDeletedTemplatesList()
+        val nextSortOrder = (existingTemplates.maxOfOrNull { it.sortOrder } ?: 0.0) + 1000.0
+        val templateEntity = ProjectTemplateEntity(
+            id = templateId,
+            title = templateTitle,
+            notes = project.notes,
+            defaultAreaId = project.areaId,
+            tagIdsJson = json.encodeToString(projTagIds),
+            blueprintJson = ProjectTemplateCodec.encodeBlueprint(blueprint),
+            sortOrder = nextSortOrder,
+            createdAt = now,
+            updatedAt = now,
+            isDeleted = false,
+            isDirty = true
+        )
+
+        database.projectTemplateDao().upsert(templateEntity)
+        syncRepository.triggerBackgroundSync()
+        return templateId
+    }
+
+    suspend fun createProjectFromTemplateBlueprint(
+        blueprint: ProjectTemplateBlueprint,
+        areaIdOverride: String? = null,
+        defaultAreaId: String? = null,
+        templateTagIds: List<String> = emptyList(),
+        anchorDate: LocalDate = LocalDate.now(ZoneId.systemDefault())
+    ): String {
+        val now = System.currentTimeMillis()
+        val zone = ZoneId.systemDefault()
+        val todayDate = LocalDate.now(zone)
+        val endOfToday = todayDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1L
+        val anchorEpoch = anchorDate.atStartOfDay(zone).toInstant().toEpochMilli()
+        val projectId = UUID.randomUUID().toString()
+
+        database.withTransaction {
+            val validAreaIds = database.areaDao().getActiveAreasList().mapTo(HashSet()) { it.id }
+            val validTagIds = database.tagDao().getAllNonDeletedTagsList().mapTo(HashSet()) { it.id }
+            val resolvedAreaId = (areaIdOverride ?: defaultAreaId)?.takeIf { it in validAreaIds }
+            val resolvedProjTags = (blueprint.tagIds + templateTagIds).filter { it in validTagIds }.distinct()
+            val projDeadline = blueprint.deadlineDayOffset?.let { offset ->
+                anchorDate.plusDays(offset.toLong()).atStartOfDay(zone).toInstant().toEpochMilli()
+            }
+            val maxProjSort = database.projectDao().getActiveProjectsList().maxOfOrNull { it.sortOrder } ?: 0.0
+
+            val projectEntity = ProjectEntity(
+                id = projectId,
+                areaId = resolvedAreaId,
+                title = blueprint.title.trim().ifEmpty { "New Project" },
+                notes = blueprint.notes,
+                status = ProjectStatus.ACTIVE,
+                scheduleState = if (anchorEpoch <= endOfToday) ScheduleState.TODAY else ScheduleState.UPCOMING,
+                whenDate = anchorEpoch,
+                deadline = projDeadline,
+                completedAt = null,
+                lastReviewedAt = now,
+                sortOrder = maxProjSort + 1000.0,
+                tagIdsJson = json.encodeToString(resolvedProjTags),
+                createdAt = now,
+                updatedAt = now,
+                isDeleted = false,
+                isDirty = true
+            )
+            database.projectDao().upsertProjectWithTags(projectEntity, resolvedProjTags)
+
+            suspend fun insertBlueprintTask(
+                taskBp: TemplateTaskBlueprint,
+                headingId: String?,
+                sortOrder: Double
+            ) {
+                val cleanTitle = taskBp.title.trim()
+                if (cleanTitle.isEmpty()) return
+                val taskId = UUID.randomUUID().toString()
+                val taskWhen = taskBp.dayOffset?.let { offset ->
+                    anchorDate.plusDays(offset.toLong()).atStartOfDay(zone).toInstant().toEpochMilli()
+                }
+                val taskDeadline = taskBp.deadlineDayOffset?.let { offset ->
+                    anchorDate.plusDays(offset.toLong()).atStartOfDay(zone).toInstant().toEpochMilli()
+                }
+                val taskSchedule = when {
+                    taskWhen != null && taskWhen > endOfToday -> ScheduleState.UPCOMING
+                    taskBp.isEvening -> ScheduleState.THIS_EVENING
+                    taskWhen != null || taskBp.scheduledStartMinutes != null -> ScheduleState.TODAY
+                    else -> ScheduleState.ANYTIME
+                }
+                val resolvedWhen = if (taskSchedule == ScheduleState.TODAY && taskWhen == null) {
+                    anchorEpoch
+                } else {
+                    taskWhen
+                }
+                val validTaskTags = taskBp.tagIds.filter { it in validTagIds }.distinct()
+                val taskEntity = TaskEntity(
+                    id = taskId,
+                    title = cleanTitle,
+                    notes = taskBp.notes,
+                    status = TaskStatus.OPEN,
+                    scheduleState = taskSchedule,
+                    whenDate = resolvedWhen,
+                    deadline = taskDeadline,
+                    reminderTime = null,
+                    scheduledStartMinutes = taskBp.scheduledStartMinutes?.takeIf { it in 0..1439 },
+                    durationMinutes = taskBp.durationMinutes?.takeIf { it in 1..1440 },
+                    completedAt = null,
+                    projectId = projectId,
+                    headingId = headingId,
+                    areaId = resolvedAreaId,
+                    recurrenceRuleJson = null,
+                    sortOrder = sortOrder,
+                    tagIdsJson = json.encodeToString(validTaskTags),
+                    createdAt = now,
+                    updatedAt = now,
+                    isDeleted = false,
+                    isDirty = true
+                )
+                database.taskDao().upsertTaskWithTags(taskEntity, validTaskTags)
+
+                val subtasks = taskBp.checklistItems
+                    .mapNotNull { it.trim().takeIf(String::isNotEmpty) }
+                    .mapIndexed { idx, subTitle ->
+                        ChecklistItemEntity(
+                            id = UUID.randomUUID().toString(),
+                            taskId = taskId,
+                            title = subTitle,
+                            isCompleted = false,
+                            sortOrder = (idx + 1) * 100.0,
+                            createdAt = now,
+                            updatedAt = now,
+                            isDeleted = false,
+                            isDirty = true
+                        )
+                    }
+                if (subtasks.isNotEmpty()) {
+                    database.checklistDao().upsertAll(subtasks)
+                }
+            }
+
+            blueprint.unheadedTasks.forEachIndexed { idx, taskBp ->
+                insertBlueprintTask(taskBp, headingId = null, sortOrder = (idx + 1) * 100.0)
+            }
+
+            blueprint.headings.forEachIndexed { hIdx, headingBp ->
+                val headingId = UUID.randomUUID().toString()
+                val hSort = (hIdx + 1) * 1000.0 + blueprint.unheadedTasks.size * 100.0
+                database.headingDao().upsert(
+                    HeadingEntity(
+                        id = headingId,
+                        projectId = projectId,
+                        title = headingBp.title.trim().ifEmpty { "Section ${hIdx + 1}" },
+                        sortOrder = hSort,
+                        isArchived = false,
+                        createdAt = now,
+                        updatedAt = now,
+                        isDeleted = false,
+                        isDirty = true
+                    )
+                )
+                headingBp.tasks.forEachIndexed { tIdx, taskBp ->
+                    insertBlueprintTask(taskBp, headingId = headingId, sortOrder = hSort + (tIdx + 1) * 100.0)
+                }
+            }
+        }
+
+        syncRepository.triggerBackgroundSync()
+        return projectId
+    }
+
+    suspend fun deleteProjectTemplate(templateId: String) {
+        val existing = database.projectTemplateDao().getById(templateId) ?: return
+        val now = System.currentTimeMillis()
+        val keepSyncTombstones = !syncRepository.isLocalOnlyDbModeEnabled() && syncRepository.hasActiveCloudAccount()
+        if (keepSyncTombstones) {
+            database.projectTemplateDao().softDeleteById(existing.id, now)
+            syncRepository.triggerBackgroundSync()
+        } else {
+            database.projectTemplateDao().hardDeleteByIds(listOf(existing.id))
+        }
+    }
+
+    suspend fun importProjectFromOutline(rawOutline: String, areaId: String? = null): String {
+        val blueprint = ProjectOutlineImporter.parseOutline(rawOutline)
+        return createProjectFromTemplateBlueprint(
+            blueprint = blueprint,
+            areaIdOverride = areaId
+        )
+    }
+
+    // =========================================================================
     // CSV Export & Import (Tasks, Areas, Projects, Tags, Dates, Checklist)
     // =========================================================================
 
@@ -2356,6 +2715,7 @@ class ThingsRepository @Inject constructor(
                 database.checklistDao().markAllActiveDirty()
                 database.tagDao().markAllActiveDirty()
                 database.attachmentDao().markAllActiveDirty()
+                database.projectTemplateDao().markAllActiveDirty()
             }
         }
     }
@@ -2378,6 +2738,7 @@ class ThingsRepository @Inject constructor(
 
         database.withTransaction {
             database.attachmentDao().hardDeleteAll()
+            database.projectTemplateDao().hardDeleteAll()
             database.checklistDao().hardDeleteAll()
             database.taskDao().hardDeleteAllTaskTags()
             database.taskDao().hardDeleteAll()
@@ -2408,6 +2769,7 @@ class ThingsRepository @Inject constructor(
             val checklistItems = database.checklistDao().getAllNonDeletedChecklistItemsList()
             val tags = database.tagDao().getAllNonDeletedTagsList()
             val attachments = database.attachmentDao().getAllNonDeletedAttachmentsList()
+            val projectTemplates = database.projectTemplateDao().getAllNonDeletedTemplatesList()
 
             val activeTaskIds = tasks.mapTo(HashSet()) { it.id }
             val activeProjectIds = projects.mapTo(HashSet()) { it.id }
@@ -2448,6 +2810,7 @@ class ThingsRepository @Inject constructor(
                         whenDate = p.whenDate,
                         deadline = p.deadline,
                         completedAt = p.completedAt,
+                        lastReviewedAt = p.lastReviewedAt,
                         sortOrder = if (p.sortOrder.isFinite()) p.sortOrder else 0.0,
                         tagIdsJson = p.tagIdsJson,
                         createdAt = p.createdAt,
@@ -2475,6 +2838,8 @@ class ThingsRepository @Inject constructor(
                         whenDate = t.whenDate,
                         deadline = t.deadline,
                         reminderTime = t.reminderTime,
+                        scheduledStartMinutes = t.scheduledStartMinutes,
+                        durationMinutes = t.durationMinutes,
                         completedAt = t.completedAt,
                         projectId = t.projectId,
                         headingId = t.headingId,
@@ -2524,6 +2889,19 @@ class ThingsRepository @Inject constructor(
                         updatedAt = att.updatedAt
                     )
                 },
+                projectTemplates = projectTemplates.map { tpl ->
+                    BackupProjectTemplateDto(
+                        id = tpl.id,
+                        title = tpl.title,
+                        notes = tpl.notes,
+                        defaultAreaId = tpl.defaultAreaId,
+                        tagIdsJson = tpl.tagIdsJson,
+                        blueprintJson = tpl.blueprintJson,
+                        sortOrder = if (tpl.sortOrder.isFinite()) tpl.sortOrder else 0.0,
+                        createdAt = tpl.createdAt,
+                        updatedAt = tpl.updatedAt
+                    )
+                },
                 preferences = preferences
             )
         }
@@ -2544,7 +2922,7 @@ class ThingsRepository @Inject constructor(
 
     /**
      * Decrypts (if password-protected), validates, and atomically replaces all local entities
-     * (`areas`, `tags`, `projects`, `project_tags`, `headings`, `tasks`, `task_tags`, `checklist_items`, `attachments`).
+     * (`areas`, `tags`, `projects`, `project_tags`, `headings`, `tasks`, `task_tags`, `checklist_items`, `attachments`, `project_templates`).
      * If password verification or format parsing fails, throws BEFORE touching the database.
      */
     suspend fun restoreFullBackupFromBytes(
@@ -2618,6 +2996,7 @@ class ThingsRepository @Inject constructor(
                     whenDate = p.whenDate,
                     deadline = p.deadline,
                     completedAt = p.completedAt,
+                    lastReviewedAt = p.lastReviewedAt,
                     sortOrder = if (p.sortOrder.isFinite()) p.sortOrder else 0.0,
                     tagIdsJson = json.encodeToString(combinedTagIds),
                     createdAt = p.createdAt.takeIf { it > 0L } ?: now,
@@ -2693,6 +3072,8 @@ class ThingsRepository @Inject constructor(
                     whenDate = t.whenDate,
                     deadline = t.deadline,
                     reminderTime = t.reminderTime,
+                    scheduledStartMinutes = t.scheduledStartMinutes?.takeIf { it in 0..1439 },
+                    durationMinutes = t.durationMinutes?.takeIf { it in 1..1440 },
                     completedAt = t.completedAt,
                     projectId = cleanProjectId,
                     headingId = cleanHeadingId,
@@ -2726,6 +3107,26 @@ class ThingsRepository @Inject constructor(
                     sortOrder = if (c.sortOrder.isFinite()) c.sortOrder else 0.0,
                     createdAt = c.createdAt.takeIf { it > 0L } ?: now,
                     updatedAt = c.updatedAt.takeIf { it > 0L } ?: now,
+                    isDeleted = false,
+                    isDirty = syncAfterRestore
+                )
+            }
+
+        val restoredProjectTemplates = payload.projectTemplates
+            .filter { it.id.isNotBlank() && it.title.isNotBlank() }
+            .distinctBy { it.id }
+            .map { tpl ->
+                val cleanTplTags = decodeStringList(tpl.tagIdsJson).filter { it in validTagIds }.distinct()
+                ProjectTemplateEntity(
+                    id = tpl.id,
+                    title = tpl.title.trim(),
+                    notes = tpl.notes,
+                    defaultAreaId = tpl.defaultAreaId?.takeIf { it in validAreaIds },
+                    tagIdsJson = json.encodeToString(cleanTplTags),
+                    blueprintJson = tpl.blueprintJson.ifBlank { "{}" },
+                    sortOrder = if (tpl.sortOrder.isFinite()) tpl.sortOrder else 0.0,
+                    createdAt = tpl.createdAt.takeIf { it > 0L } ?: now,
+                    updatedAt = tpl.updatedAt.takeIf { it > 0L } ?: now,
                     isDeleted = false,
                     isDirty = syncAfterRestore
                 )
@@ -2773,6 +3174,7 @@ class ThingsRepository @Inject constructor(
         // 4. Atomic full swap inside a single Room SQLite transaction
         database.withTransaction {
             database.attachmentDao().hardDeleteAll()
+            database.projectTemplateDao().hardDeleteAll()
             database.checklistDao().hardDeleteAll()
             database.taskDao().hardDeleteAllTaskTags()
             database.taskDao().hardDeleteAll()
@@ -2791,6 +3193,7 @@ class ThingsRepository @Inject constructor(
             if (restoredTaskTagRefs.isNotEmpty()) database.taskDao().insertTaskTagCrossRefs(restoredTaskTagRefs)
             if (restoredChecklistItems.isNotEmpty()) database.checklistDao().upsertAll(restoredChecklistItems)
             if (restoredAttachments.isNotEmpty()) database.attachmentDao().upsertAll(restoredAttachments)
+            if (restoredProjectTemplates.isNotEmpty()) database.projectTemplateDao().upsertAll(restoredProjectTemplates)
         }
 
         // 5. Reschedule future reminders for restored open tasks & trigger cloud sync if active
@@ -2809,7 +3212,8 @@ class ThingsRepository @Inject constructor(
             tasksCount = restoredTasks.size,
             checklistItemsCount = restoredChecklistItems.size,
             tagsCount = restoredTags.size,
-            attachmentsCount = restoredAttachments.size
+            attachmentsCount = restoredAttachments.size,
+            projectTemplatesCount = restoredProjectTemplates.size
         )
         return summary to payload.preferences
     }
@@ -2826,6 +3230,8 @@ class ThingsRepository @Inject constructor(
         whenDate = task.whenDate,
         deadline = task.deadline,
         reminderTime = task.reminderTime,
+        scheduledStartMinutes = task.scheduledStartMinutes,
+        durationMinutes = task.durationMinutes,
         completedAt = task.completedAt,
         projectId = task.projectId,
         headingId = task.headingId,
@@ -2906,6 +3312,7 @@ class ThingsRepository @Inject constructor(
         whenDate = project.whenDate,
         deadline = project.deadline,
         completedAt = project.completedAt,
+        lastReviewedAt = project.lastReviewedAt,
         sortOrder = project.sortOrder,
         tagIds = decodeStringList(project.tagIdsJson),
         totalTaskCount = totalTaskCount,
@@ -2913,6 +3320,20 @@ class ThingsRepository @Inject constructor(
         createdAt = project.createdAt,
         updatedAt = project.updatedAt,
         isDeleted = project.isDeleted
+    )
+
+    private fun ProjectTemplateEntity.toDomain(): ProjectTemplate = ProjectTemplate(
+        id = id,
+        title = title,
+        notes = notes,
+        defaultAreaId = defaultAreaId,
+        tagIds = decodeStringList(tagIdsJson),
+        blueprint = ProjectTemplateCodec.decodeBlueprint(blueprintJson, fallbackTitle = title, fallbackNotes = notes),
+        sortOrder = sortOrder,
+        createdAt = createdAt,
+        updatedAt = updatedAt,
+        isBuiltIn = false,
+        isDeleted = isDeleted
     )
 }
 

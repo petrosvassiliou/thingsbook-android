@@ -61,6 +61,29 @@ public struct ThingsCommandMenus: Commands {
             .keyboardShortcut("n", modifiers: [.command, .option])
             .disabled(store.isLocked)
 
+            Button(store.tr("v2_templates_title")) {
+                guard !store.isLocked else { return }
+                store.templatesInitialTab = .gallery
+                store.isTemplatesSheetPresented = true
+            }
+            .disabled(store.isLocked)
+
+            Button(store.tr("v2_import_markdown_title")) {
+                guard !store.isLocked else { return }
+                store.templatesInitialTab = .importOutline
+                store.isTemplatesSheetPresented = true
+            }
+            .disabled(store.isLocked)
+
+            Button(store.tr("v2_save_as_template")) {
+                guard !store.isLocked, case .project(let pid) = store.selectedDestination else { return }
+                store.saveProjectAsTemplate(pid)
+            }
+            .disabled(store.isLocked || {
+                if case .project = store.selectedDestination { return false }
+                return true
+            }())
+
             Button(store.tr("entity_new_area")) {
                 guard !store.isLocked else { return }
                 store.isNewAreaSheetPresented = true
@@ -199,6 +222,13 @@ public struct ThingsCommandMenus: Commands {
             .keyboardShortcut("f", modifiers: [.command])
             .disabled(store.isLocked)
 
+            Button(store.tr("v2_weekly_review_title")) {
+                guard !store.isLocked else { return }
+                store.isWeeklyReviewPresented = true
+            }
+            .keyboardShortcut("r", modifiers: [.command, .shift])
+            .disabled(store.isLocked)
+
             Divider()
 
             Button(store.tr("view_inbox")) {
@@ -278,7 +308,7 @@ public struct ThingsCommandMenus: Commands {
                 guard !store.isLocked else { return }
                 store.syncNow()
             }
-            .keyboardShortcut("r", modifiers: [.command, .shift])
+            .keyboardShortcut("r", modifiers: [.command, .option])
             .disabled(store.isLocked)
         }
     }

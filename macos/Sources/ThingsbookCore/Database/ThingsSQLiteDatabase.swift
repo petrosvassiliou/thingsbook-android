@@ -37,6 +37,27 @@ public struct SyncDirtyBatch: Sendable {
     public var tasks: [TaskItem]
     public var checklistItems: [ChecklistItem]
     public var attachments: [TaskAttachment]
+    public var projectTemplates: [ProjectTemplate]
+
+    public init(
+        tags: [Tag] = [],
+        areas: [Area] = [],
+        projects: [Project] = [],
+        headings: [Heading] = [],
+        tasks: [TaskItem] = [],
+        checklistItems: [ChecklistItem] = [],
+        attachments: [TaskAttachment] = [],
+        projectTemplates: [ProjectTemplate] = []
+    ) {
+        self.tags = tags
+        self.areas = areas
+        self.projects = projects
+        self.headings = headings
+        self.tasks = tasks
+        self.checklistItems = checklistItems
+        self.attachments = attachments
+        self.projectTemplates = projectTemplates
+    }
 }
 
 public struct RemoteDeltaBatch: Sendable {
@@ -48,6 +69,7 @@ public struct RemoteDeltaBatch: Sendable {
     public var taskTagIdsByTaskId: [String: [String]]
     public var checklistItems: [ChecklistItem]
     public var attachments: [RemoteAttachmentDelta]
+    public var projectTemplates: [ProjectTemplate]
 
     public init(
         tags: [Tag] = [],
@@ -57,7 +79,8 @@ public struct RemoteDeltaBatch: Sendable {
         tasks: [TaskItem] = [],
         taskTagIdsByTaskId: [String: [String]] = [:],
         checklistItems: [ChecklistItem] = [],
-        attachments: [RemoteAttachmentDelta] = []
+        attachments: [RemoteAttachmentDelta] = [],
+        projectTemplates: [ProjectTemplate] = []
     ) {
         self.tags = tags
         self.areas = areas
@@ -67,6 +90,7 @@ public struct RemoteDeltaBatch: Sendable {
         self.taskTagIdsByTaskId = taskTagIdsByTaskId
         self.checklistItems = checklistItems
         self.attachments = attachments
+        self.projectTemplates = projectTemplates
     }
 }
 
@@ -75,6 +99,7 @@ public struct WorkspaceSnapshot: Sendable {
     public var projects: [Project]
     public var headingsByProject: [String: [Heading]]
     public var projectAttachments: [String: [TaskAttachment]]
+    public var projectTemplates: [ProjectTemplate]
     public var tags: [Tag]
     public var inboxTasks: [TaskItem]
     public var todayDaytimeTasks: [TaskItem]
@@ -95,6 +120,7 @@ public struct WorkspaceSnapshot: Sendable {
         projects: [Project],
         headingsByProject: [String: [Heading]],
         projectAttachments: [String: [TaskAttachment]],
+        projectTemplates: [ProjectTemplate] = [],
         tags: [Tag],
         inboxTasks: [TaskItem],
         todayDaytimeTasks: [TaskItem],
@@ -114,6 +140,7 @@ public struct WorkspaceSnapshot: Sendable {
         self.projects = projects
         self.headingsByProject = headingsByProject
         self.projectAttachments = projectAttachments
+        self.projectTemplates = projectTemplates
         self.tags = tags
         self.inboxTasks = inboxTasks
         self.todayDaytimeTasks = todayDaytimeTasks
@@ -224,6 +251,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             when_date INTEGER,
             deadline INTEGER,
             completed_at INTEGER,
+            last_reviewed_at INTEGER DEFAULT NULL,
             sort_order REAL NOT NULL DEFAULT 0.0,
             tag_ids_json TEXT NOT NULL DEFAULT '[]',
             created_at INTEGER NOT NULL,
@@ -257,6 +285,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             when_date INTEGER,
             deadline INTEGER,
             reminder_time INTEGER,
+            scheduled_start_minutes INTEGER DEFAULT NULL,
+            duration_minutes INTEGER DEFAULT NULL,
             completed_at INTEGER,
             project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
             heading_id TEXT REFERENCES headings(id) ON DELETE SET NULL,
@@ -336,6 +366,22 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         CREATE INDEX IF NOT EXISTS idx_attachments_updated ON attachments(updated_at);
         CREATE INDEX IF NOT EXISTS idx_attachments_dirty ON attachments(is_dirty);
 
+        CREATE TABLE IF NOT EXISTS project_templates (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL DEFAULT '',
+            notes TEXT NOT NULL DEFAULT '',
+            default_area_id TEXT,
+            tag_ids_json TEXT NOT NULL DEFAULT '[]',
+            blueprint_json TEXT NOT NULL DEFAULT '{}',
+            sort_order REAL NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL DEFAULT 0,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            is_dirty INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_templates_sort ON project_templates(is_deleted, sort_order);
+        CREATE INDEX IF NOT EXISTS idx_project_templates_dirty ON project_templates(is_dirty);
+
         CREATE TABLE IF NOT EXISTS detached_project_tasks (
             project_id TEXT NOT NULL,
             task_id TEXT NOT NULL,
@@ -347,6 +393,11 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         // Safe v1.8.1 column migrations for pre-existing databases
         try? execLocked("ALTER TABLE tasks ADD COLUMN is_purged INTEGER NOT NULL DEFAULT 0;")
         try? execLocked("ALTER TABLE projects ADD COLUMN is_purged INTEGER NOT NULL DEFAULT 0;")
+
+        // Safe non-destructive v2.0.0 column migrations for pre-existing v1.7 / v1.8 databases
+        try? execLocked("ALTER TABLE tasks ADD COLUMN scheduled_start_minutes INTEGER DEFAULT NULL;")
+        try? execLocked("ALTER TABLE tasks ADD COLUMN duration_minutes INTEGER DEFAULT NULL;")
+        try? execLocked("ALTER TABLE projects ADD COLUMN last_reviewed_at INTEGER DEFAULT NULL;")
 
         try installFts5Locked()
     }
@@ -564,6 +615,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
             let checklistsByTask = try fetchAllActiveChecklistItemsByTaskLocked()
             let (attachmentsByTask, projectAttachments) = try fetchAllActiveAttachmentsGroupedLocked()
+            let projectTemplates = try fetchActiveProjectTemplatesLocked()
             let tagIdsByTask = try fetchAllTaskTagIdsLocked()
 
             let endOfToday = DateEpochConverter.endOfDayMillis(for: referenceDate, calendar: calendar)
@@ -656,6 +708,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 projects: projects,
                 headingsByProject: headingsByProject,
                 projectAttachments: projectAttachments,
+                projectTemplates: projectTemplates,
                 tags: tags,
                 inboxTasks: inbox,
                 todayDaytimeTasks: todayDaytime,
@@ -690,7 +743,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             let taskStmt = try prepareLocked("""
                 SELECT t.id, t.title, t.notes, t.status, t.schedule_state, t.when_date, t.deadline,
                        t.reminder_time, t.completed_at, t.project_id, t.heading_id, t.area_id,
-                       t.recurrence_rule, t.sort_order, t.tag_ids_json, t.created_at, t.updated_at, t.is_deleted
+                       t.recurrence_rule, t.sort_order, t.tag_ids_json, t.created_at, t.updated_at, t.is_deleted,
+                       t.scheduled_start_minutes, t.duration_minutes
                 FROM tasks t
                 JOIN tasks_fts fts ON t.rowid = fts.rowid
                 WHERE tasks_fts MATCH ? AND t.is_deleted = 0
@@ -717,7 +771,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 SELECT p.id, p.area_id, p.title, p.notes, p.status, p.schedule_state, p.when_date,
                        p.deadline, p.completed_at, p.sort_order, p.tag_ids_json, p.created_at, p.updated_at, p.is_deleted,
                        (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status != 'CANCELED') AS total_cnt,
-                       (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status = 'COMPLETED') AS comp_cnt
+                       (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status = 'COMPLETED') AS comp_cnt,
+                       p.last_reviewed_at
                 FROM projects p
                 JOIN projects_fts fts ON p.rowid = fts.rowid
                 WHERE projects_fts MATCH ? AND p.is_deleted = 0
@@ -841,6 +896,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         whenDate: Int64? = nil,
         deadline: Int64? = nil,
         reminderTime: Int64? = nil,
+        scheduledStartMinutes: Int? = nil,
+        durationMinutes: Int? = nil,
         projectId: String? = nil,
         headingId: String? = nil,
         areaId: String? = nil,
@@ -884,6 +941,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     whenDate: whenDate,
                     deadline: deadline,
                     reminderTime: reminderTime,
+                    scheduledStartMinutes: scheduledStartMinutes,
+                    durationMinutes: durationMinutes,
                     projectId: projectId,
                     headingId: headingId,
                     areaId: resolvedAreaId,
@@ -903,6 +962,36 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         }
         notifyMutation()
         return created
+    }
+
+    public func setTaskTimeblock(
+        taskId: String,
+        scheduledStartMinutes: Int?,
+        durationMinutes: Int?
+    ) throws {
+        try queue.sync {
+            let now = nowMillis()
+            let normalizedStart = scheduledStartMinutes.map { (($0 % 1440) + 1440) % 1440 }
+            let normalizedDuration: Int? = {
+                if let d = durationMinutes, d > 0 { return min(d, 720) }
+                if normalizedStart != nil { return 30 }
+                return nil
+            }()
+            let stmt = try prepareLocked("""
+                UPDATE tasks
+                SET scheduled_start_minutes = ?, duration_minutes = ?, updated_at = ?, is_dirty = 1
+                WHERE id = ?;
+            """)
+            defer { sqlite3_finalize(stmt) }
+            bindInt64(stmt, 1, normalizedStart.map(Int64.init))
+            bindInt64(stmt, 2, normalizedDuration.map(Int64.init))
+            bindInt64(stmt, 3, now)
+            bindText(stmt, 4, taskId)
+            if sqlite3_step(stmt) != SQLITE_DONE {
+                throw ThingsDatabaseError.sqlError(currentErrorMessageLocked())
+            }
+        }
+        notifyMutation()
     }
 
     public func updateTask(_ task: TaskItem, tagIds: [String]? = nil) throws {
@@ -1016,6 +1105,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             whenDate: nextWhenEpoch,
             deadline: nextDeadline,
             reminderTime: nextReminder,
+            scheduledStartMinutes: completedTask.scheduledStartMinutes,
+            durationMinutes: completedTask.durationMinutes,
             completedAt: nil,
             projectId: completedTask.projectId,
             headingId: completedTask.headingId,
@@ -1155,7 +1246,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         bindText(ttStmt, 1, taskId)
         _ = sqlite3_step(ttStmt)
 
-        let stmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 1, is_dirty = 1, title = '', notes = '', tag_ids_json = '[]', updated_at = ? WHERE id = ?;")
+        let stmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 1, is_dirty = 1, title = '', notes = '', tag_ids_json = '[]', scheduled_start_minutes = NULL, duration_minutes = NULL, updated_at = ? WHERE id = ?;")
         defer { sqlite3_finalize(stmt) }
         bindInt64(stmt, 1, now)
         bindText(stmt, 2, taskId)
@@ -1229,6 +1320,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     whenDate: source.whenDate,
                     deadline: source.deadline,
                     reminderTime: source.reminderTime,
+                    scheduledStartMinutes: source.scheduledStartMinutes,
+                    durationMinutes: source.durationMinutes,
                     completedAt: nil,
                     projectId: source.projectId,
                     headingId: source.headingId,
@@ -1507,6 +1600,12 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 bindText(s2, 2, areaId)
                 _ = sqlite3_step(s2)
 
+                let sTmpl = try prepareLocked("UPDATE project_templates SET default_area_id = NULL, updated_at = ?, is_dirty = 1 WHERE default_area_id = ?;")
+                defer { sqlite3_finalize(sTmpl) }
+                bindInt64(sTmpl, 1, now)
+                bindText(sTmpl, 2, areaId)
+                _ = sqlite3_step(sTmpl)
+
                 let s3 = try prepareLocked("UPDATE areas SET is_deleted = 1, updated_at = ?, is_dirty = 1 WHERE id = ?;")
                 defer { sqlite3_finalize(s3) }
                 bindInt64(s3, 1, now)
@@ -1776,6 +1875,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         whenDate: t.whenDate,
                         deadline: t.deadline,
                         reminderTime: t.reminderTime,
+                        scheduledStartMinutes: t.scheduledStartMinutes,
+                        durationMinutes: t.durationMinutes,
                         projectId: newProjId,
                         headingId: mappedHid,
                         areaId: newProject.areaId,
@@ -1797,6 +1898,483 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         }
         if duplicated != nil { notifyMutation() }
         return duplicated
+    }
+
+    // MARK: - v2.0 Project Review, Templates & Outline Importer
+
+    public func markProjectReviewed(projectId: String, reviewedAt: Int64? = nil) throws {
+        try queue.sync {
+            guard var p = try fetchProjectByIdLocked(projectId) else { return }
+            let now = nowMillis()
+            p.lastReviewedAt = reviewedAt ?? now
+            p.updatedAt = now
+            try inTransactionLocked {
+                try upsertProjectLocked(p, isDirty: true)
+            }
+        }
+        notifyMutation()
+    }
+
+    public func markMultipleProjectsReviewed(_ projectIds: [String], reviewedAt: Int64? = nil) throws {
+        guard !projectIds.isEmpty else { return }
+        try queue.sync {
+            let now = nowMillis()
+            let stamp = reviewedAt ?? now
+            try inTransactionLocked {
+                for pid in Set(projectIds) {
+                    guard var p = try fetchProjectByIdLocked(pid) else { continue }
+                    p.lastReviewedAt = stamp
+                    p.updatedAt = now
+                    try upsertProjectLocked(p, isDirty: true)
+                }
+            }
+        }
+        notifyMutation()
+    }
+
+    @discardableResult
+    public func createOrUpdateProjectTemplate(_ template: ProjectTemplate) throws -> ProjectTemplate {
+        let saved = try queue.sync { () -> ProjectTemplate in
+            let now = nowMillis()
+            var copy = template
+            copy.title = copy.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if copy.title.isEmpty { copy.title = "Project Template" }
+            if copy.createdAt <= 0 { copy.createdAt = now }
+            if copy.sortOrder == 0 {
+                let maxOrd = (try? maxSortOrderLocked(table: "project_templates")) ?? 0
+                copy.sortOrder = maxOrd + 1000.0
+            }
+            copy.updatedAt = now
+            copy.isDeleted = false
+            copy.isDirty = true
+            try inTransactionLocked {
+                try upsertProjectTemplateLocked(copy, isDirty: true)
+            }
+            return copy
+        }
+        notifyMutation()
+        return saved
+    }
+
+    public func deleteProjectTemplate(_ templateId: String) throws {
+        try queue.sync {
+            let now = nowMillis()
+            try inTransactionLocked {
+                let stmt = try prepareLocked("UPDATE project_templates SET is_deleted = 1, updated_at = ?, is_dirty = 1 WHERE id = ?;")
+                defer { sqlite3_finalize(stmt) }
+                bindInt64(stmt, 1, now)
+                bindText(stmt, 2, templateId)
+                _ = sqlite3_step(stmt)
+            }
+        }
+        notifyMutation()
+    }
+
+    @discardableResult
+    public func saveProjectAsTemplate(projectId: String, templateTitle: String? = nil) throws -> ProjectTemplate {
+        let created = try queue.sync { () -> ProjectTemplate in
+            guard let source = try fetchProjectByIdLocked(projectId) else {
+                throw ThingsDatabaseError.notFound("Project \(projectId) not found.")
+            }
+            let now = nowMillis()
+            let allHeadings = try fetchAllActiveHeadingsLocked()
+                .filter { $0.projectId == projectId && !$0.isArchived }
+                .sorted { $0.sortOrder < $1.sortOrder }
+
+            let tags = try fetchActiveTagsLocked()
+            let tagsById = Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0) })
+            let checklistsByTask = try fetchAllActiveChecklistItemsByTaskLocked()
+            let tagIdsByTask = try fetchAllTaskTagIdsLocked()
+
+            let openTasks = try fetchTasksWhereLocked(
+                whereClause: "project_id = ? AND is_deleted = 0 AND status = 'OPEN'",
+                bind: { stmt in self.bindText(stmt, 1, projectId) },
+                orderBy: "sort_order ASC",
+                tagsById: tagsById,
+                tagIdsByTask: tagIdsByTask,
+                checklistsByTask: checklistsByTask
+            )
+
+            let validHeadingIds = Set(allHeadings.map(\.id))
+            func toSpec(_ t: TaskItem) -> TemplateTaskSpec {
+                TemplateTaskSpec(
+                    title: t.title,
+                    notes: t.notes,
+                    checklistItems: t.checklistItems.sorted { $0.sortOrder < $1.sortOrder }.map(\.title),
+                    scheduledStartMinutes: t.scheduledStartMinutes,
+                    durationMinutes: t.durationMinutes
+                )
+            }
+
+            let unheaded = openTasks
+                .filter { task in
+                    guard let hid = task.headingId else { return true }
+                    return !validHeadingIds.contains(hid)
+                }
+                .map(toSpec)
+
+            let headingSpecs = allHeadings.map { h in
+                TemplateHeadingSpec(
+                    title: h.title,
+                    tasks: openTasks.filter { $0.headingId == h.id }.map(toSpec)
+                )
+            }
+
+            let blueprint = ProjectTemplateBlueprint(
+                unheadedTasks: unheaded,
+                headings: headingSpecs
+            )
+            let maxOrd = (try? maxSortOrderLocked(table: "project_templates")) ?? 0
+            let cleanOverride = templateTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let finalTitle = cleanOverride.isEmpty ? source.title : cleanOverride
+
+            let tmpl = ProjectTemplate(
+                id: UUID().uuidString,
+                title: finalTitle.isEmpty ? "Project Template" : finalTitle,
+                notes: source.notes,
+                defaultAreaId: source.areaId,
+                tagIds: source.tagIds,
+                blueprintJson: blueprint.toJSONString(),
+                sortOrder: maxOrd + 1000.0,
+                createdAt: now,
+                updatedAt: now,
+                isDeleted: false,
+                isDirty: true
+            )
+            try inTransactionLocked {
+                try upsertProjectTemplateLocked(tmpl, isDirty: true)
+            }
+            return tmpl
+        }
+        notifyMutation()
+        return created
+    }
+
+    @discardableResult
+    public func instantiateProjectFromTemplate(
+        _ template: ProjectTemplate,
+        titleOverride: String? = nil,
+        areaIdOverride: String? = nil
+    ) throws -> Project {
+        let created = try queue.sync { () -> Project in
+            let now = nowMillis()
+            let blueprint = template.blueprint
+            let cleanTitle = (titleOverride?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+                ?? (template.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "New Project" : template.title)
+            let validAreas = Set((try fetchActiveAreasLocked()).map(\.id))
+            let candidateArea = areaIdOverride ?? template.defaultAreaId
+            let resolvedAreaId = candidateArea.flatMap { validAreas.contains($0) ? $0 : nil }
+            let validTags = Set((try fetchActiveTagsLocked()).map(\.id))
+            let resolvedTagIds = template.tagIds.filter { validTags.contains($0) }
+
+            return try instantiateBlueprintLocked(
+                title: cleanTitle,
+                notes: template.notes,
+                areaId: resolvedAreaId,
+                tagIds: resolvedTagIds,
+                blueprint: blueprint,
+                now: now
+            )
+        }
+        notifyMutation()
+        return created
+    }
+
+    @discardableResult
+    public func importProjectFromMarkdownOrJson(
+        _ rawInput: String,
+        defaultTitle: String = "Imported Project",
+        areaId: String? = nil
+    ) throws -> Project {
+        let parsed = Self.parseOutlineToBlueprint(rawInput, defaultTitle: defaultTitle)
+        let created = try queue.sync { () -> Project in
+            let now = nowMillis()
+            let validAreas = Set((try fetchActiveAreasLocked()).map(\.id))
+            let resolvedAreaId = areaId.flatMap { validAreas.contains($0) ? $0 : nil }
+            return try instantiateBlueprintLocked(
+                title: parsed.title,
+                notes: parsed.notes,
+                areaId: resolvedAreaId,
+                tagIds: [],
+                blueprint: parsed.blueprint,
+                now: now
+            )
+        }
+        notifyMutation()
+        return created
+    }
+
+    private func instantiateBlueprintLocked(
+        title: String,
+        notes: String,
+        areaId: String?,
+        tagIds: [String],
+        blueprint: ProjectTemplateBlueprint,
+        now: Int64
+    ) throws -> Project {
+        try inTransactionLocked {
+            let newProjId = UUID().uuidString
+            let maxProjOrd = try maxSortOrderLocked(table: "projects")
+            let project = Project(
+                id: newProjId,
+                areaId: areaId,
+                title: title,
+                notes: notes,
+                status: .active,
+                scheduleState: .anytime,
+                lastReviewedAt: now,
+                sortOrder: maxProjOrd + 1000.0,
+                tagIds: tagIds,
+                createdAt: now,
+                updatedAt: now
+            )
+            try upsertProjectLocked(project, isDirty: true)
+
+            var nextTaskOrder = (try maxSortOrderLocked(table: "tasks")) + 1000.0
+
+            func insertTaskSpec(_ spec: TemplateTaskSpec, headingId: String?) throws {
+                let cleanTaskTitle = spec.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !cleanTaskTitle.isEmpty else { return }
+                let tid = UUID().uuidString
+                let checklists = spec.checklistItems.enumerated().compactMap { (idx, itemTitle) -> ChecklistItem? in
+                    let trimmed = itemTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { return nil }
+                    return ChecklistItem(
+                        id: UUID().uuidString,
+                        taskId: tid,
+                        title: trimmed,
+                        isCompleted: false,
+                        sortOrder: Double((idx + 1) * 100),
+                        createdAt: now,
+                        updatedAt: now
+                    )
+                }
+                let task = TaskItem(
+                    id: tid,
+                    title: cleanTaskTitle,
+                    notes: spec.notes,
+                    status: .open,
+                    scheduleState: .anytime,
+                    scheduledStartMinutes: spec.scheduledStartMinutes,
+                    durationMinutes: spec.durationMinutes,
+                    projectId: newProjId,
+                    headingId: headingId,
+                    areaId: areaId,
+                    sortOrder: nextTaskOrder,
+                    checklistItems: checklists,
+                    createdAt: now,
+                    updatedAt: now
+                )
+                nextTaskOrder += 1000.0
+                try upsertTaskLocked(task, tagIds: [], isDirty: true)
+                for chk in checklists {
+                    try upsertChecklistItemLocked(chk, isDirty: true)
+                }
+            }
+
+            for spec in blueprint.unheadedTasks {
+                try insertTaskSpec(spec, headingId: nil)
+            }
+
+            for (hIdx, hSpec) in blueprint.headings.enumerated() {
+                let cleanHTitle = hSpec.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                let hid: String?
+                if cleanHTitle.isEmpty {
+                    hid = nil
+                } else {
+                    let newHid = UUID().uuidString
+                    let heading = Heading(
+                        id: newHid,
+                        projectId: newProjId,
+                        title: cleanHTitle,
+                        sortOrder: Double((hIdx + 1) * 1000),
+                        createdAt: now,
+                        updatedAt: now
+                    )
+                    try upsertHeadingLocked(heading, isDirty: true)
+                    hid = newHid
+                }
+                for tSpec in hSpec.tasks {
+                    try insertTaskSpec(tSpec, headingId: hid)
+                }
+            }
+
+            return try fetchProjectByIdLocked(newProjId) ?? project
+        }
+    }
+
+    public static func parseOutlineToBlueprint(
+        _ rawInput: String,
+        defaultTitle: String = "Imported Project"
+    ) -> (title: String, notes: String, blueprint: ProjectTemplateBlueprint) {
+        let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return (defaultTitle, "", ProjectTemplateBlueprint())
+        }
+
+        // 1. JSON outline / template format support
+        if (trimmed.hasPrefix("{") || trimmed.hasPrefix("[")),
+           let data = trimmed.data(using: .utf8),
+           let jsonObj = try? JSONSerialization.jsonObject(with: data) {
+            if let dict = jsonObj as? [String: Any] {
+                let title = ((dict["title"] as? String) ?? (dict["name"] as? String) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let notes = (dict["notes"] as? String) ?? (dict["description"] as? String) ?? ""
+                if let bpStr = dict["blueprintJson"] as? String {
+                    let bp = ProjectTemplateBlueprint.decode(from: bpStr)
+                    return (title.isEmpty ? defaultTitle : title, notes, bp)
+                }
+                if let bpDict = dict["blueprint"] as? [String: Any],
+                   let bpData = try? JSONSerialization.data(withJSONObject: bpDict),
+                   let bp = try? JSONDecoder().decode(ProjectTemplateBlueprint.self, from: bpData) {
+                    return (title.isEmpty ? defaultTitle : title, notes, bp)
+                }
+                if let bp = try? JSONDecoder().decode(ProjectTemplateBlueprint.self, from: data) {
+                    return (title.isEmpty ? defaultTitle : title, notes, bp)
+                }
+            } else if let arr = jsonObj as? [Any] {
+                var tasks: [TemplateTaskSpec] = []
+                for elem in arr {
+                    if let s = elem as? String {
+                        let clean = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !clean.isEmpty { tasks.append(TemplateTaskSpec(title: clean)) }
+                    } else if let d = elem as? [String: Any],
+                              let dData = try? JSONSerialization.data(withJSONObject: d),
+                              let spec = try? JSONDecoder().decode(TemplateTaskSpec.self, from: dData) {
+                        if !spec.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            tasks.append(spec)
+                        }
+                    }
+                }
+                return (defaultTitle, "", ProjectTemplateBlueprint(unheadedTasks: tasks))
+            }
+        }
+
+        // 2. Markdown / indented outline parser (`# Project`, `## Heading`, `- [ ] Task`, `  - [ ] Subtask`)
+        var projectTitle: String? = nil
+        var projectNotesLines: [String] = []
+        var unheadedTasks: [TemplateTaskSpec] = []
+        var headings: [TemplateHeadingSpec] = []
+        var currentHeadingIndex: Int? = nil
+
+        func stripBulletMarker(_ line: String) -> String? {
+            let s = line.trimmingCharacters(in: .whitespaces)
+            let checkboxPrefixes = ["- [ ] ", "- [x] ", "- [X] ", "* [ ] ", "* [x] ", "* [X] ", "+ [ ] ", "+ [x] ", "+ [X] "]
+            for p in checkboxPrefixes where s.hasPrefix(p) {
+                return String(s.dropFirst(p.count)).trimmingCharacters(in: .whitespaces)
+            }
+            let simplePrefixes = ["- ", "* ", "+ ", "• "]
+            for p in simplePrefixes where s.hasPrefix(p) {
+                return String(s.dropFirst(p.count)).trimmingCharacters(in: .whitespaces)
+            }
+            if let dotIdx = s.firstIndex(of: "."), dotIdx > s.startIndex {
+                let prefix = s[..<dotIdx]
+                if prefix.allSatisfy(\.isNumber) {
+                    let rest = s[s.index(after: dotIdx)...]
+                    if rest.hasPrefix(" ") {
+                        return rest.trimmingCharacters(in: .whitespaces)
+                    }
+                }
+            }
+            return nil
+        }
+
+        func appendSubtaskOrNote(subtask: String?, note: String?) -> Bool {
+            if let hIdx = currentHeadingIndex {
+                guard !headings[hIdx].tasks.isEmpty else { return false }
+                let tIdx = headings[hIdx].tasks.count - 1
+                if let sub = subtask, !sub.isEmpty {
+                    headings[hIdx].tasks[tIdx].checklistItems.append(sub)
+                    return true
+                }
+                if let n = note, !n.isEmpty {
+                    let prev = headings[hIdx].tasks[tIdx].notes
+                    headings[hIdx].tasks[tIdx].notes = prev.isEmpty ? n : "\(prev)\n\(n)"
+                    return true
+                }
+            } else {
+                guard !unheadedTasks.isEmpty else { return false }
+                let tIdx = unheadedTasks.count - 1
+                if let sub = subtask, !sub.isEmpty {
+                    unheadedTasks[tIdx].checklistItems.append(sub)
+                    return true
+                }
+                if let n = note, !n.isEmpty {
+                    let prev = unheadedTasks[tIdx].notes
+                    unheadedTasks[tIdx].notes = prev.isEmpty ? n : "\(prev)\n\(n)"
+                    return true
+                }
+            }
+            return false
+        }
+
+        let rawLines = trimmed.components(separatedBy: .newlines)
+        for rawLine in rawLines {
+            let lineWithoutCR = rawLine.replacingOccurrences(of: "\r", with: "")
+            let cleanLine = lineWithoutCR.trimmingCharacters(in: .whitespaces)
+            if cleanLine.isEmpty { continue }
+
+            var leadingIndentColumns = 0
+            for ch in lineWithoutCR {
+                if ch == " " { leadingIndentColumns += 1 }
+                else if ch == "\t" { leadingIndentColumns += 4 }
+                else { break }
+            }
+            let isIndented = leadingIndentColumns >= 2
+
+            if !isIndented && cleanLine.hasPrefix("# ") {
+                let h1 = String(cleanLine.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+                if !h1.isEmpty {
+                    if projectTitle == nil {
+                        projectTitle = h1
+                    } else {
+                        headings.append(TemplateHeadingSpec(title: h1))
+                        currentHeadingIndex = headings.count - 1
+                    }
+                }
+                continue
+            }
+
+            if !isIndented && (cleanLine.hasPrefix("## ") || cleanLine.hasPrefix("### ")) {
+                let dropCount = cleanLine.hasPrefix("### ") ? 4 : 3
+                let hTitle = String(cleanLine.dropFirst(dropCount)).trimmingCharacters(in: .whitespaces)
+                if !hTitle.isEmpty {
+                    headings.append(TemplateHeadingSpec(title: hTitle))
+                    currentHeadingIndex = headings.count - 1
+                }
+                continue
+            }
+
+            if let itemText = stripBulletMarker(cleanLine) {
+                guard !itemText.isEmpty else { continue }
+                if isIndented && appendSubtaskOrNote(subtask: itemText, note: nil) {
+                    continue
+                }
+                let spec = TemplateTaskSpec(title: itemText)
+                if let hIdx = currentHeadingIndex {
+                    headings[hIdx].tasks.append(spec)
+                } else {
+                    unheadedTasks.append(spec)
+                }
+                continue
+            }
+
+            if isIndented && appendSubtaskOrNote(subtask: nil, note: cleanLine) {
+                continue
+            }
+
+            if projectTitle != nil && headings.isEmpty && unheadedTasks.isEmpty {
+                projectNotesLines.append(cleanLine)
+            } else if let hIdx = currentHeadingIndex {
+                headings[hIdx].tasks.append(TemplateTaskSpec(title: cleanLine))
+            } else {
+                unheadedTasks.append(TemplateTaskSpec(title: cleanLine))
+            }
+        }
+
+        let resolvedTitle = (projectTitle?.isEmpty == false) ? projectTitle! : defaultTitle
+        let resolvedNotes = projectNotesLines.joined(separator: "\n")
+        return (resolvedTitle, resolvedNotes, ProjectTemplateBlueprint(unheadedTasks: unheadedTasks, headings: headings))
     }
 
     @discardableResult
@@ -1917,7 +2495,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             _ = sqlite3_step(childStmt)
         }
 
-        for table in ["tasks", "projects", "areas"] {
+        for table in ["tasks", "projects", "areas", "project_templates"] {
             try removeTagIdFromJsonColumnLocked(table: table, tagId: tagId, now: now, markDirty: markParentsDirty)
         }
     }
@@ -2016,6 +2594,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     DELETE FROM checklist_items;
                     DELETE FROM task_tags;
                     DELETE FROM project_tags;
+                    DELETE FROM project_templates;
                     DELETE FROM tasks;
                     DELETE FROM headings;
                     DELETE FROM projects;
@@ -2165,7 +2744,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
     // MARK: - Full `.tbbackup` Export & Atomic Restore
 
-    public func buildBackupPayload(preferences: AppPreferences, appVersionName: String = "1.8.1") throws -> ThingsbookBackupPayload {
+    public func buildBackupPayload(preferences: AppPreferences, appVersionName: String = AppUpdateService.currentVersion) throws -> ThingsbookBackupPayload {
         try queue.sync {
             let now = nowMillis()
             let areas = try fetchActiveAreasLocked().map {
@@ -2190,6 +2769,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     whenDate: $0.whenDate,
                     deadline: $0.deadline,
                     completedAt: $0.completedAt,
+                    lastReviewedAt: $0.lastReviewedAt,
                     sortOrder: $0.sortOrder,
                     tagIdsJson: encodeStringArray($0.tagIds),
                     createdAt: $0.createdAt,
@@ -2233,6 +2813,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     whenDate: t.whenDate,
                     deadline: t.deadline,
                     reminderTime: t.reminderTime,
+                    scheduledStartMinutes: t.scheduledStartMinutes,
+                    durationMinutes: t.durationMinutes,
                     completedAt: t.completedAt,
                     projectId: t.projectId,
                     headingId: t.headingId,
@@ -2303,6 +2885,20 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 )
             }
 
+            let templateDtos = try fetchActiveProjectTemplatesLocked().map { tmpl in
+                BackupProjectTemplateDto(
+                    id: tmpl.id,
+                    title: tmpl.title,
+                    notes: tmpl.notes,
+                    defaultAreaId: tmpl.defaultAreaId,
+                    tagIdsJson: encodeStringArray(tmpl.tagIds),
+                    blueprintJson: tmpl.blueprintJson,
+                    sortOrder: tmpl.sortOrder,
+                    createdAt: tmpl.createdAt,
+                    updatedAt: tmpl.updatedAt
+                )
+            }
+
             let prefsDto = BackupPreferencesDto(
                 sidebarVisible: preferences.sidebarVisible,
                 dailyDigestEnabled: preferences.dailyDigestEnabled,
@@ -2311,7 +2907,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 languageTag: preferences.language == .system ? "" : preferences.language.rawValue,
                 calendarEventsEnabled: preferences.calendarEventsEnabled,
                 selectedCalendarIds: preferences.selectedCalendarIds,
-                groupTodayByProjectOrArea: preferences.groupTodayByProjectOrArea
+                groupTodayByProjectOrArea: preferences.groupTodayByProjectOrArea,
+                includeBetaUpdates: preferences.includeBetaUpdates
             )
 
             return ThingsbookBackupPayload(
@@ -2327,6 +2924,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 taskTagRefs: taskTagRefs,
                 projectTagRefs: projectTagRefs,
                 attachments: attachmentDtos,
+                projectTemplates: templateDtos,
                 preferences: prefsDto
             )
         }
@@ -2354,6 +2952,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     DELETE FROM checklist_items;
                     DELETE FROM task_tags;
                     DELETE FROM project_tags;
+                    DELETE FROM project_templates;
                     DELETE FROM tasks;
                     DELETE FROM headings;
                     DELETE FROM projects;
@@ -2408,6 +3007,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         whenDate: dto.whenDate,
                         deadline: dto.deadline,
                         completedAt: dto.completedAt,
+                        lastReviewedAt: dto.lastReviewedAt,
                         sortOrder: dto.sortOrder,
                         tagIds: mergedTags,
                         createdAt: dto.createdAt,
@@ -2442,6 +3042,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         whenDate: dto.whenDate,
                         deadline: dto.deadline,
                         reminderTime: dto.reminderTime,
+                        scheduledStartMinutes: dto.scheduledStartMinutes,
+                        durationMinutes: dto.durationMinutes,
                         completedAt: dto.completedAt,
                         projectId: dto.projectId.flatMap { validProjectIds.contains($0) ? $0 : nil },
                         headingId: dto.headingId.flatMap { validHeadingIds.contains($0) ? $0 : nil },
@@ -2489,6 +3091,23 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     )
                     try upsertAttachmentLocked(att, isDirty: true)
                 }
+
+                for dto in payload.projectTemplates {
+                    let tmpl = ProjectTemplate(
+                        id: dto.id,
+                        title: dto.title,
+                        notes: dto.notes,
+                        defaultAreaId: dto.defaultAreaId.flatMap { validAreaIds.contains($0) ? $0 : nil },
+                        tagIds: decodeStringArray(dto.tagIdsJson).filter { validTagIds.contains($0) },
+                        blueprintJson: dto.blueprintJson,
+                        sortOrder: dto.sortOrder,
+                        createdAt: dto.createdAt,
+                        updatedAt: dto.updatedAt,
+                        isDeleted: false,
+                        isDirty: true
+                    )
+                    try upsertProjectTemplateLocked(tmpl, isDirty: true)
+                }
             }
             rebuildFtsLocked()
         }
@@ -2516,6 +3135,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             )
             let checklistItems = try fetchChecklistsWhereLocked("is_dirty = 1")
             let attachments = try fetchAttachmentsWhereLocked("is_dirty = 1")
+            let projectTemplates = try fetchProjectTemplatesWhereLocked("is_dirty = 1")
             return SyncDirtyBatch(
                 tags: tags,
                 areas: areas,
@@ -2523,7 +3143,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 headings: headings,
                 tasks: tasks,
                 checklistItems: checklistItems,
-                attachments: attachments
+                attachments: attachments,
+                projectTemplates: projectTemplates
             )
         }
     }
@@ -2538,6 +3159,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 for t in batch.tasks { try clearDirtyIfUnchangedLocked(table: "tasks", id: t.id, maxUpdatedAt: t.updatedAt) }
                 for c in batch.checklistItems { try clearDirtyIfUnchangedLocked(table: "checklist_items", id: c.id, maxUpdatedAt: c.updatedAt) }
                 for att in batch.attachments { try clearDirtyIfUnchangedLocked(table: "attachments", id: att.id, maxUpdatedAt: att.updatedAt) }
+                for tmpl in batch.projectTemplates { try clearDirtyIfUnchangedLocked(table: "project_templates", id: tmpl.id, maxUpdatedAt: tmpl.updatedAt) }
             }
         }
     }
@@ -2617,7 +3239,14 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         appliedCount += 1
                     }
                 }
-                // Also detach any newly-arrived tasks referencing containers tombstoned locally or in this batch
+                for remote in deltas.projectTemplates {
+                    maxTimestamp = max(maxTimestamp, remote.updatedAt)
+                    if shouldApplyRemoteLocked(table: "project_templates", id: remote.id, remoteUpdatedAt: remote.updatedAt) {
+                        try upsertProjectTemplateLocked(remote, isDirty: false)
+                        appliedCount += 1
+                    }
+                }
+                // Also detach any newly-arrived tasks/templates referencing containers tombstoned locally or in this batch
                 appliedCount += try detachChildrenOfDeletedContainersLocked()
 
                 for remote in deltas.checklistItems {
@@ -2716,6 +3345,13 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         if sqlite3_step(s2) == SQLITE_DONE {
             changes += Int(sqlite3_changes(db))
         }
+
+        let s3 = try prepareLocked("UPDATE project_templates SET default_area_id = NULL WHERE default_area_id = ?;")
+        defer { sqlite3_finalize(s3) }
+        bindText(s3, 1, areaId)
+        if sqlite3_step(s3) == SQLITE_DONE {
+            changes += Int(sqlite3_changes(db))
+        }
         return changes
     }
 
@@ -2744,6 +3380,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         let queries = [
             "UPDATE projects SET area_id = NULL WHERE area_id IS NOT NULL AND area_id IN (SELECT id FROM areas WHERE is_deleted = 1);",
             "UPDATE tasks SET area_id = NULL WHERE area_id IS NOT NULL AND area_id IN (SELECT id FROM areas WHERE is_deleted = 1);",
+            "UPDATE project_templates SET default_area_id = NULL WHERE default_area_id IS NOT NULL AND default_area_id IN (SELECT id FROM areas WHERE is_deleted = 1);",
             "UPDATE tasks SET project_id = NULL, heading_id = NULL WHERE is_deleted = 0 AND project_id IS NOT NULL AND project_id IN (SELECT id FROM projects WHERE is_deleted = 1);",
             "UPDATE tasks SET heading_id = NULL WHERE is_deleted = 0 AND heading_id IS NOT NULL AND heading_id IN (SELECT id FROM headings WHERE is_deleted = 1);"
         ]
@@ -2864,8 +3501,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         let stmt = try prepareLocked("""
             INSERT INTO projects (
                 id, area_id, title, notes, status, schedule_state, when_date, deadline,
-                completed_at, sort_order, tag_ids_json, created_at, updated_at, is_deleted, is_purged, is_dirty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                completed_at, last_reviewed_at, sort_order, tag_ids_json, created_at, updated_at, is_deleted, is_purged, is_dirty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 area_id = excluded.area_id,
                 title = excluded.title,
@@ -2875,6 +3512,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 when_date = excluded.when_date,
                 deadline = excluded.deadline,
                 completed_at = excluded.completed_at,
+                last_reviewed_at = excluded.last_reviewed_at,
                 sort_order = excluded.sort_order,
                 tag_ids_json = excluded.tag_ids_json,
                 updated_at = excluded.updated_at,
@@ -2896,13 +3534,14 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         bindInt64(stmt, 7, project.whenDate)
         bindInt64(stmt, 8, project.deadline)
         bindInt64(stmt, 9, project.completedAt)
-        sqlite3_bind_double(stmt, 10, project.sortOrder)
-        bindText(stmt, 11, encodeStringArray(uniqueTags))
-        bindInt64(stmt, 12, project.createdAt)
-        bindInt64(stmt, 13, project.updatedAt)
-        bindBool(stmt, 14, project.isDeleted)
-        bindBool(stmt, 15, isPurgedTombstone)
-        bindBool(stmt, 16, isDirty)
+        bindInt64(stmt, 10, project.lastReviewedAt)
+        sqlite3_bind_double(stmt, 11, project.sortOrder)
+        bindText(stmt, 12, encodeStringArray(uniqueTags))
+        bindInt64(stmt, 13, project.createdAt)
+        bindInt64(stmt, 14, project.updatedAt)
+        bindBool(stmt, 15, project.isDeleted)
+        bindBool(stmt, 16, isPurgedTombstone)
+        bindBool(stmt, 17, isDirty)
         if sqlite3_step(stmt) != SQLITE_DONE {
             throw ThingsDatabaseError.sqlError(currentErrorMessageLocked())
         }
@@ -2920,6 +3559,41 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 bindText(refStmt, 2, tagId)
                 _ = sqlite3_step(refStmt)
             }
+        }
+    }
+
+    private func upsertProjectTemplateLocked(_ template: ProjectTemplate, isDirty: Bool) throws {
+        let uniqueTags = template.isDeleted ? [] : Array(Set(template.tagIds))
+        let stmt = try prepareLocked("""
+            INSERT INTO project_templates (
+                id, title, notes, default_area_id, tag_ids_json, blueprint_json,
+                sort_order, created_at, updated_at, is_deleted, is_dirty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                notes = excluded.notes,
+                default_area_id = excluded.default_area_id,
+                tag_ids_json = excluded.tag_ids_json,
+                blueprint_json = excluded.blueprint_json,
+                sort_order = excluded.sort_order,
+                updated_at = excluded.updated_at,
+                is_deleted = excluded.is_deleted,
+                is_dirty = excluded.is_dirty;
+        """)
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, template.id)
+        bindText(stmt, 2, template.title)
+        bindText(stmt, 3, template.notes)
+        bindText(stmt, 4, template.defaultAreaId)
+        bindText(stmt, 5, encodeStringArray(uniqueTags))
+        bindText(stmt, 6, template.blueprintJson)
+        sqlite3_bind_double(stmt, 7, template.sortOrder)
+        bindInt64(stmt, 8, template.createdAt)
+        bindInt64(stmt, 9, template.updatedAt)
+        bindBool(stmt, 10, template.isDeleted)
+        bindBool(stmt, 11, isDirty)
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            throw ThingsDatabaseError.sqlError(currentErrorMessageLocked())
         }
     }
 
@@ -2957,9 +3631,10 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         let stmt = try prepareLocked("""
             INSERT INTO tasks (
                 id, title, notes, status, schedule_state, when_date, deadline, reminder_time,
+                scheduled_start_minutes, duration_minutes,
                 completed_at, project_id, heading_id, area_id, recurrence_rule, sort_order,
                 tag_ids_json, created_at, updated_at, is_deleted, is_purged, is_dirty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 notes = excluded.notes,
@@ -2968,6 +3643,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 when_date = excluded.when_date,
                 deadline = excluded.deadline,
                 reminder_time = excluded.reminder_time,
+                scheduled_start_minutes = excluded.scheduled_start_minutes,
+                duration_minutes = excluded.duration_minutes,
                 completed_at = excluded.completed_at,
                 project_id = excluded.project_id,
                 heading_id = excluded.heading_id,
@@ -2993,18 +3670,20 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         bindInt64(stmt, 6, task.whenDate)
         bindInt64(stmt, 7, task.deadline)
         bindInt64(stmt, 8, task.reminderTime)
-        bindInt64(stmt, 9, task.completedAt)
-        bindText(stmt, 10, task.projectId)
-        bindText(stmt, 11, task.headingId)
-        bindText(stmt, 12, task.areaId)
-        bindText(stmt, 13, encodeRecurrence(task.recurrenceRule))
-        sqlite3_bind_double(stmt, 14, task.sortOrder)
-        bindText(stmt, 15, encodeStringArray(uniqueTags))
-        bindInt64(stmt, 16, task.createdAt)
-        bindInt64(stmt, 17, task.updatedAt)
-        bindBool(stmt, 18, task.isDeleted)
-        bindBool(stmt, 19, isPurgedTombstone)
-        bindBool(stmt, 20, isDirty)
+        bindInt64(stmt, 9, task.scheduledStartMinutes.map(Int64.init))
+        bindInt64(stmt, 10, task.durationMinutes.map(Int64.init))
+        bindInt64(stmt, 11, task.completedAt)
+        bindText(stmt, 12, task.projectId)
+        bindText(stmt, 13, task.headingId)
+        bindText(stmt, 14, task.areaId)
+        bindText(stmt, 15, encodeRecurrence(task.recurrenceRule))
+        sqlite3_bind_double(stmt, 16, task.sortOrder)
+        bindText(stmt, 17, encodeStringArray(uniqueTags))
+        bindInt64(stmt, 18, task.createdAt)
+        bindInt64(stmt, 19, task.updatedAt)
+        bindBool(stmt, 20, task.isDeleted)
+        bindBool(stmt, 21, isPurgedTombstone)
+        bindBool(stmt, 22, isDirty)
         if sqlite3_step(stmt) != SQLITE_DONE {
             throw ThingsDatabaseError.sqlError(currentErrorMessageLocked())
         }
@@ -3138,7 +3817,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             SELECT p.id, p.area_id, p.title, p.notes, p.status, p.schedule_state, p.when_date,
                    p.deadline, p.completed_at, p.sort_order, p.tag_ids_json, p.created_at, p.updated_at, p.is_deleted,
                    (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status != 'CANCELED') AS total_cnt,
-                   (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status = 'COMPLETED') AS comp_cnt
+                   (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status = 'COMPLETED') AS comp_cnt,
+                   p.last_reviewed_at
             FROM projects p WHERE p.id = ? LIMIT 1;
         """)
         defer { sqlite3_finalize(stmt) }
@@ -3160,7 +3840,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             SELECT p.id, p.area_id, p.title, p.notes, p.status, p.schedule_state, p.when_date,
                    p.deadline, p.completed_at, p.sort_order, p.tag_ids_json, p.created_at, p.updated_at, p.is_deleted,
                    (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status != 'CANCELED') AS total_cnt,
-                   (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status = 'COMPLETED') AS comp_cnt
+                   (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status = 'COMPLETED') AS comp_cnt,
+                   p.last_reviewed_at
             FROM projects p WHERE \(whereClause) ORDER BY p.sort_order ASC;
         """)
         defer { sqlite3_finalize(stmt) }
@@ -3204,6 +3885,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             whenDate: colInt64(stmt, 6),
             deadline: colInt64(stmt, 7),
             completedAt: colInt64(stmt, 8),
+            lastReviewedAt: colInt64(stmt, 16),
             sortOrder: sqlite3_column_double(stmt, 9),
             tagIds: resolvedTagIds,
             totalTaskCount: Int(sqlite3_column_int(stmt, 14)),
@@ -3212,6 +3894,41 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             updatedAt: sqlite3_column_int64(stmt, 12),
             isDeleted: isDeleted
         )
+    }
+
+    private func fetchActiveProjectTemplatesLocked() throws -> [ProjectTemplate] {
+        try fetchProjectTemplatesWhereLocked("is_deleted = 0")
+    }
+
+    private func fetchProjectTemplatesWhereLocked(_ whereClause: String) throws -> [ProjectTemplate] {
+        let activeTagIds = Set((try fetchActiveTagsLocked()).map(\.id))
+        let stmt = try prepareLocked("""
+            SELECT id, title, notes, default_area_id, tag_ids_json, blueprint_json,
+                   sort_order, created_at, updated_at, is_deleted, is_dirty
+            FROM project_templates WHERE \(whereClause) ORDER BY sort_order ASC, created_at ASC;
+        """)
+        defer { sqlite3_finalize(stmt) }
+        var out: [ProjectTemplate] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let isDeleted = colBool(stmt, 9)
+            let decodedTags = decodeStringArray(colString(stmt, 4)).filter { activeTagIds.contains($0) }
+            out.append(
+                ProjectTemplate(
+                    id: colString(stmt, 0) ?? "",
+                    title: colString(stmt, 1) ?? "",
+                    notes: colString(stmt, 2) ?? "",
+                    defaultAreaId: colString(stmt, 3),
+                    tagIds: isDeleted ? [] : decodedTags,
+                    blueprintJson: colString(stmt, 5) ?? "{}",
+                    sortOrder: sqlite3_column_double(stmt, 6),
+                    createdAt: sqlite3_column_int64(stmt, 7),
+                    updatedAt: sqlite3_column_int64(stmt, 8),
+                    isDeleted: isDeleted,
+                    isDirty: colBool(stmt, 10)
+                )
+            )
+        }
+        return out
     }
 
     private func fetchAllActiveHeadingsLocked() throws -> [Heading] {
@@ -3402,7 +4119,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         let stmt = try prepareLocked("""
             SELECT id, title, notes, status, schedule_state, when_date, deadline, reminder_time,
                    completed_at, project_id, heading_id, area_id, recurrence_rule, sort_order,
-                   tag_ids_json, created_at, updated_at, is_deleted
+                   tag_ids_json, created_at, updated_at, is_deleted,
+                   scheduled_start_minutes, duration_minutes
             FROM tasks WHERE \(whereClause) ORDER BY \(orderBy);
         """)
         defer { sqlite3_finalize(stmt) }
@@ -3444,6 +4162,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             whenDate: colInt64(stmt, 5),
             deadline: colInt64(stmt, 6),
             reminderTime: colInt64(stmt, 7),
+            scheduledStartMinutes: colInt64(stmt, 18).map(Int.init),
+            durationMinutes: colInt64(stmt, 19).map(Int.init),
             completedAt: colInt64(stmt, 8),
             projectId: colString(stmt, 9),
             headingId: colString(stmt, 10),
@@ -3490,7 +4210,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             scalar("SELECT COUNT(*) FROM headings;") +
             scalar("SELECT COUNT(*) FROM checklist_items;") +
             scalar("SELECT COUNT(*) FROM tags;") +
-            scalar("SELECT COUNT(*) FROM attachments;")
+            scalar("SELECT COUNT(*) FROM attachments;") +
+            scalar("SELECT COUNT(*) FROM project_templates;")
 
         return DatabaseStatistics(
             openTasks: openTasks,

@@ -160,9 +160,11 @@ import com.culturedcode.things3.domain.model.Project
 import com.culturedcode.things3.domain.model.RecurrenceMode
 import com.culturedcode.things3.domain.model.RecurrenceUnit
 import com.culturedcode.things3.domain.model.ScheduleState
+import com.culturedcode.things3.domain.model.StalledProjectDetector
 import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
+import com.culturedcode.things3.domain.model.TimeblockScheduleUtils
 import com.culturedcode.things3.ui.components.AttachmentImportOutcome
 import com.culturedcode.things3.ui.components.CreateOrEditProjectDialog
 import com.culturedcode.things3.ui.components.DeadlineDatePickerDialog
@@ -186,6 +188,7 @@ import com.culturedcode.things3.ui.components.ThingsAuthAndSyncModal
 import com.culturedcode.things3.ui.components.ThingsBackupCreateDialog
 import com.culturedcode.things3.ui.components.ThingsBackupRestoreDialog
 import com.culturedcode.things3.ui.components.ThingsBiometricLockOverlay
+import com.culturedcode.things3.ui.components.ThingsCelebrationSnackbarBanner
 import com.culturedcode.things3.ui.components.ThingsDeadlineBadge
 import com.culturedcode.things3.ui.components.ThingsEmptyTrashConfirmDialog
 import com.culturedcode.things3.ui.components.ThingsFocusTimerBanner
@@ -198,8 +201,12 @@ import com.culturedcode.things3.ui.components.ThingsRepeatBadge
 import com.culturedcode.things3.ui.components.ThingsSettingsModal
 import com.culturedcode.things3.ui.components.ThingsTagManagerModal
 import com.culturedcode.things3.ui.components.ThingsTagPill
+import com.culturedcode.things3.ui.components.ThingsTemplatesAndImportModal
+import com.culturedcode.things3.ui.components.ThingsTodayModeSegmentedToggle
+import com.culturedcode.things3.ui.components.ThingsTodayTimelineSection
 import com.culturedcode.things3.ui.components.ThingsTrashItemCard
 import com.culturedcode.things3.ui.components.ThingsUndoSnackbarBanner
+import com.culturedcode.things3.ui.components.ThingsWeeklyReviewModal
 import com.culturedcode.things3.ui.components.ThingsWhenBadge
 import com.culturedcode.things3.ui.components.ThingsbookBrandSymbol
 import com.culturedcode.things3.ui.components.ThisEveningHeaderBadge
@@ -295,6 +302,8 @@ fun ThingsSmartViewScreen(
     val deletedTasks by viewModel.deletedTasks.collectAsState()
     val deletedProjects by viewModel.deletedProjects.collectAsState()
     val undoSnackbarMessage by viewModel.undoSnackbarMessage.collectAsState()
+    val celebrationToastMessage by viewModel.celebrationToastMessage.collectAsState()
+    val isTodayTimelineMode by viewModel.isTodayTimelineMode.collectAsState()
     val focusTimerState by viewModel.focusTimerState.collectAsState()
     val biometricAppLockEnabled by viewModel.biometricAppLockEnabled.collectAsState()
     val isAppUnlocked by viewModel.isAppUnlocked.collectAsState()
@@ -669,6 +678,13 @@ fun ThingsSmartViewScreen(
                         projectDialogPreselectedAreaId = areaId
                         editingProject = null
                         showCreateProjectDialog = true
+                    },
+                    onOpenWeeklyReview = { viewModel.openWeeklyReviewModal() },
+                    onOpenTemplatesAndImport = {
+                        viewModel.openTemplatesModal(
+                            initialTab = 0,
+                            defaultAreaId = currentArea?.id ?: currentProject?.areaId
+                        )
                     }
                 )
                 VerticalDivider(
@@ -730,6 +746,13 @@ fun ThingsSmartViewScreen(
                                 projectDialogPreselectedAreaId = currentArea?.id
                                 editingProject = null
                                 showCreateProjectDialog = true
+                            },
+                            onOpenWeeklyReview = { viewModel.openWeeklyReviewModal() },
+                            onOpenTemplatesAndImport = {
+                                viewModel.openTemplatesModal(
+                                    initialTab = 0,
+                                    defaultAreaId = currentArea?.id ?: currentProject?.areaId
+                                )
                             }
                         )
                     }
@@ -744,6 +767,17 @@ fun ThingsSmartViewScreen(
                         projectAttachments = projectAttachments,
                         locale = activeLocale,
                         trashItemCount = deletedTasks.size + deletedProjects.size,
+                        isTodayTimelineMode = isTodayTimelineMode,
+                        onToggleTodayTimelineMode = { viewModel.setTodayTimelineMode(it) },
+                        onSaveProjectAsTemplate = { pId, toastMsg ->
+                            viewModel.saveProjectAsTemplate(pId, toastMsg)
+                        },
+                        onOpenStalledProjectReview = {
+                            viewModel.openWeeklyReviewModal(initialStep = 2)
+                        },
+                        onMarkProjectReviewed = { pId ->
+                            viewModel.markProjectReviewed(pId)
+                        },
                         onUpdateProjectDeadline = { pId, dl -> viewModel.updateProjectDeadline(pId, dl) },
                         onUpdateProjectArea = { pId, aId -> viewModel.updateProjectArea(pId, aId) },
                         onEditProject = { proj ->
@@ -882,6 +916,21 @@ fun ThingsSmartViewScreen(
                 .padding(bottom = if (selectedTaskIds.isNotEmpty()) 76.dp else 18.dp)
         )
 
+        // v2 Celebration Toast / Snackbar (Weekly Review completed, Template saved, etc.)
+        ThingsCelebrationSnackbarBanner(
+            message = celebrationToastMessage,
+            onDismiss = { viewModel.dismissCelebrationToast() },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(
+                    bottom = when {
+                        !undoSnackbarMessage.isNullOrBlank() && selectedTaskIds.isNotEmpty() -> 132.dp
+                        !undoSnackbarMessage.isNullOrBlank() || selectedTaskIds.isNotEmpty() -> 76.dp
+                        else -> 22.dp
+                    }
+                )
+        )
+
         // Expandable Context-Sensitive "Magic Plus" Menu + Drag & Drop FAB (bottom-right)
         MagicPlusOverlaySection(
             viewModel = viewModel,
@@ -959,6 +1008,17 @@ fun ThingsSmartViewScreen(
                             editingProject = null
                             showCreateProjectDialog = true
                         },
+                        onOpenWeeklyReview = {
+                            isMobileDrawerOpen = false
+                            viewModel.openWeeklyReviewModal()
+                        },
+                        onOpenTemplatesAndImport = {
+                            isMobileDrawerOpen = false
+                            viewModel.openTemplatesModal(
+                                initialTab = 0,
+                                defaultAreaId = currentArea?.id ?: currentProject?.areaId
+                            )
+                        },
                         onCloseDrawer = { isMobileDrawerOpen = false }
                     )
                     VerticalDivider(
@@ -977,6 +1037,13 @@ fun ThingsSmartViewScreen(
                 activeProjects = activeProjects,
                 allTags = allTags,
                 allVisibleViewTasks = allVisibleViewTasks,
+                inboxTasks = inboxTasks,
+                todayTasks = todayTasks,
+                eveningTasks = eveningTasks,
+                upcomingTasks = upcomingTasks,
+                anytimeTasks = anytimeTasks,
+                somedayTasks = somedayTasks,
+                logbookTasks = logbookTasks,
                 activeLocale = activeLocale,
                 showBatchMoveDialog = showBatchMoveDialog,
                 onDismissBatchMoveDialog = { showBatchMoveDialog = false },
@@ -1372,7 +1439,7 @@ private fun ThingsTopHeaderAndQuickFindSection(
 
     val showSidebar = isWideScreen && isSidebarVisible
 
-    // Top Utility & Navigation Bar (Sidebar/Hamburger Toggle, Thingsbook Symbol when sidebar hidden, Quick Find, Voice 🎙️, Gemini AI ✨, Areas 📦, Tags 🏷️, Notifications 🔔, Language, Cloud Sync, Settings ⚙️)
+    // Top Utility & Navigation Bar (Sidebar/Hamburger Toggle, Thingsbook Symbol when sidebar hidden, Quick Find, Voice 🎙️, Weekly Review 🧭, Gemini AI ✨, Areas 📦, Tags 🏷️, Notifications 🔔, Language, Cloud Sync, Settings ⚙️)
     TopThingsbookBar(
         isWideScreen = isWideScreen,
         isSidebarVisible = if (isWideScreen) isSidebarVisible else isMobileDrawerOpen,
@@ -1396,6 +1463,7 @@ private fun ThingsTopHeaderAndQuickFindSection(
         },
         onOpenQuickFind = { viewModel.setQuickFindOpen(!isQuickFindOpen) },
         onOpenVoiceCapture = { viewModel.openVoiceQuickCapture() },
+        onOpenWeeklyReview = { viewModel.openWeeklyReviewModal() },
         onOpenGeminiHub = { viewModel.setGeminiModalOpen(true) },
         onOpenAreaManager = { viewModel.setAreaManagerOpen(true) },
         onOpenTagManager = { viewModel.setTagManagerOpen(true) },
@@ -1547,6 +1615,7 @@ private fun ThingsTaskRowItem(
             },
             onDeadlineChange = { dl -> viewModel.updateTaskDeadline(task, dl) },
             onRecurrenceChange = { rule -> viewModel.updateTaskRecurrence(task.id, rule) },
+            onUpdateTimeblock = { s, d -> viewModel.updateTaskTimeblock(task.id, s, d) },
             onMoveTaskToContainer = { pId, hId, aId ->
                 viewModel.moveTaskToContainer(task.id, pId, hId, aId)
             },
@@ -1565,7 +1634,7 @@ private fun ThingsTaskRowItem(
                 viewModel.triggerGeminiMagicBreakdown(task, activeLocale)
             },
             onDuplicateTask = { viewModel.duplicateTask(task.id) },
-            onStartFocusTimer = { viewModel.startFocusTimer(task.id, task.title) },
+            onStartFocusTimer = { viewModel.startFocusTimer(task.id, task.title, task.durationMinutes) },
             onAddTaskAttachment = { fName, mime, bytes ->
                 viewModel.addTaskAttachment(task.id, fName, mime, bytes)
             },
@@ -1632,6 +1701,36 @@ private fun ThingsMainTaskLazyList(
     val deletedTasks by viewModel.deletedTasks.collectAsState()
     val deletedProjects by viewModel.deletedProjects.collectAsState()
     val groupTodayByProjectOrArea by viewModel.groupTodayByProjectOrArea.collectAsState()
+    val isTodayTimelineMode by viewModel.isTodayTimelineMode.collectAsState()
+
+    if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) &&
+        isTodayTimelineMode &&
+        !isQuickFindOpen
+    ) {
+        val combinedTodayTasks = remember(primaryTasks, filteredEveningTasks) {
+            (primaryTasks + filteredEveningTasks).distinctBy { it.id }
+        }
+        ThingsTodayTimelineSection(
+            todayTasks = combinedTodayTasks,
+            todayCalendarEvents = if (calendarEventsEnabled) todayCalendarEvents else emptyList(),
+            onCompleteTask = { taskId -> viewModel.updateTaskStatus(taskId, TaskStatus.COMPLETED) },
+            onUpdateTimeblock = { taskId, startMins, durMins ->
+                viewModel.updateTaskTimeblock(taskId, startMins, durMins)
+            },
+            onShiftTimeblock = { taskId, deltaMins ->
+                viewModel.shiftTaskTimeblock(taskId, deltaMins)
+            },
+            onStartFocusTimer = { targetTask ->
+                viewModel.startFocusTimer(targetTask.id, targetTask.title, targetTask.durationMinutes)
+            },
+            onOpenTask = { taskId ->
+                viewModel.setTodayTimelineMode(false)
+                viewModel.toggleTaskExpansion(taskId)
+            },
+            modifier = modifier.imePadding()
+        )
+        return
+    }
 
     val listState = rememberLazyListState()
     var focusScrollRequestTick by remember { mutableIntStateOf(0) }
@@ -2395,6 +2494,13 @@ private fun ThingsModalsOverlay(
     activeProjects: List<Project>,
     allTags: List<Tag>,
     allVisibleViewTasks: List<TaskItem>,
+    inboxTasks: List<TaskItem> = emptyList(),
+    todayTasks: List<TaskItem> = emptyList(),
+    eveningTasks: List<TaskItem> = emptyList(),
+    upcomingTasks: List<TaskItem> = emptyList(),
+    anytimeTasks: List<TaskItem> = emptyList(),
+    somedayTasks: List<TaskItem> = emptyList(),
+    logbookTasks: List<TaskItem> = emptyList(),
     activeLocale: Locale,
     showBatchMoveDialog: Boolean,
     onDismissBatchMoveDialog: () -> Unit,
@@ -2433,6 +2539,15 @@ private fun ThingsModalsOverlay(
     val isNotificationSettingsOpen by viewModel.isNotificationSettingsOpen.collectAsState()
     val dailyDigestConfig by viewModel.dailyDigestConfig.collectAsState()
 
+    // v2 Modals State
+    val isWeeklyReviewModalOpen by viewModel.isWeeklyReviewModalOpen.collectAsState()
+    val weeklyReviewInitialStep by viewModel.weeklyReviewInitialStep.collectAsState()
+    val lastWeeklyReviewAt by viewModel.lastWeeklyReviewAt.collectAsState()
+    val isTemplatesModalOpen by viewModel.isTemplatesModalOpen.collectAsState()
+    val templatesModalInitialTab by viewModel.templatesModalInitialTab.collectAsState()
+    val templatesModalDefaultAreaId by viewModel.templatesModalDefaultAreaId.collectAsState()
+    val userProjectTemplates by viewModel.userProjectTemplates.collectAsState()
+
     // Batch Move Dialog for Multi-Selection
     if (showBatchMoveDialog) {
         MoveTaskToProjectOrAreaDialog(
@@ -2458,6 +2573,7 @@ private fun ThingsModalsOverlay(
         val availableCalendars by viewModel.availableCalendars.collectAsState()
         val selectedCalendarIds by viewModel.selectedCalendarIds.collectAsState()
         val autoCheckUpdatesEnabled by viewModel.autoCheckUpdatesEnabled.collectAsState()
+        val includeBetaUpdates by viewModel.includeBetaUpdates.collectAsState()
         val appUpdateState by viewModel.appUpdateState.collectAsState()
         val groupTodayByProjectOrArea by viewModel.groupTodayByProjectOrArea.collectAsState()
         val biometricAppLockEnabled by viewModel.biometricAppLockEnabled.collectAsState()
@@ -2480,8 +2596,10 @@ private fun ThingsModalsOverlay(
             onSetAllCalendarsSelected = { viewModel.setAllCalendarsSelected(it) },
             onRefreshCalendars = { viewModel.refreshCalendarsAndEvents(selectDefaultIfFirstTime = false) },
             autoCheckUpdatesEnabled = autoCheckUpdatesEnabled,
+            includeBetaUpdates = includeBetaUpdates,
             appUpdateState = appUpdateState,
             onSetAutoCheckUpdatesEnabled = { viewModel.setAutoCheckUpdatesEnabled(it) },
+            onSetIncludeBetaUpdates = { viewModel.setIncludeBetaUpdates(it) },
             onSearchForUpdates = { viewModel.checkForAppUpdates(manual = true) },
             onDownloadAndInstallUpdate = { release -> viewModel.startUpdateDownloadAndInstall(release) },
             onInstallDownloadedUpdate = { viewModel.installDownloadedUpdate() },
@@ -2608,7 +2726,7 @@ private fun ThingsModalsOverlay(
         )
     }
 
-    // Create or Edit Project Dialog (with Target Date / Deadline & Area Assignment)
+    // Create or Edit Project Dialog (with Target Date / Deadline, Area Assignment & v2 Templates/Import trigger)
     if (showCreateProjectDialog) {
         CreateOrEditProjectDialog(
             existingProject = editingProject,
@@ -2625,7 +2743,77 @@ private fun ThingsModalsOverlay(
                     navigateToProject = editingProject == null
                 )
             },
+            onOpenTemplatesAndImport = { preAreaId ->
+                viewModel.openTemplatesModal(initialTab = 0, defaultAreaId = preAreaId)
+            },
             onDismiss = onDismissCreateProjectDialog
+        )
+    }
+
+    // v2 Pillar 1: Guided 4-Step GTD Weekly Review + Stalled Project Detection Modal
+    if (isWeeklyReviewModalOpen) {
+        val combinedTodayTasks = remember(todayTasks, eveningTasks) {
+            (todayTasks + eveningTasks).distinctBy { it.id }
+        }
+        ThingsWeeklyReviewModal(
+            initialStep = weeklyReviewInitialStep,
+            inboxTasks = inboxTasks,
+            todayTasks = combinedTodayTasks,
+            upcomingTasks = upcomingTasks,
+            anytimeTasks = anytimeTasks,
+            somedayTasks = somedayTasks,
+            logbookTasks = logbookTasks,
+            activeProjects = activeProjects,
+            lastWeeklyReviewAt = lastWeeklyReviewAt,
+            locale = activeLocale,
+            onScheduleTask = { task, schedule, whenDate ->
+                viewModel.updateTaskSchedule(task, schedule, whenDate)
+            },
+            onCompleteTask = { taskId ->
+                viewModel.updateTaskStatus(taskId, TaskStatus.COMPLETED)
+            },
+            onDeleteTask = { taskId ->
+                viewModel.deleteTask(taskId)
+            },
+            onAddNextActionToProject = { projectId, title ->
+                viewModel.addNextActionToProject(projectId, title)
+            },
+            onMarkProjectReviewed = { projectId ->
+                viewModel.markProjectReviewed(projectId)
+            },
+            onMoveProjectToSomeday = { projectId ->
+                viewModel.moveProjectToSomeday(projectId)
+            },
+            onActivateSomedayProject = { projectId ->
+                viewModel.activateSomedayProjectToAnytime(projectId)
+            },
+            onOpenProject = { projectId ->
+                viewModel.selectProject(projectId)
+            },
+            onCompleteWeeklyReview = { toastMsg ->
+                viewModel.completeWeeklyReview(toastMsg)
+            },
+            onDismiss = { viewModel.closeWeeklyReviewModal() }
+        )
+    }
+
+    // v2 Pillar 2: Reusable Project Templates & Markdown / JSON Outline Importer Modal
+    if (isTemplatesModalOpen) {
+        ThingsTemplatesAndImportModal(
+            initialTab = templatesModalInitialTab,
+            defaultAreaId = templatesModalDefaultAreaId,
+            areas = areas,
+            userTemplates = userProjectTemplates,
+            onCreateFromTemplate = { template, areaOverride ->
+                viewModel.createProjectFromTemplate(template, areaOverride)
+            },
+            onDeleteUserTemplate = { templateId ->
+                viewModel.deleteProjectTemplate(templateId)
+            },
+            onImportOutline = { rawOutline, areaId ->
+                viewModel.importProjectFromOutline(rawOutline, areaId)
+            },
+            onDismiss = { viewModel.closeTemplatesModal() }
         )
     }
 
@@ -2866,6 +3054,7 @@ private fun AreaProjectOverviewRow(
 ) {
     val colors = ThingsTheme.colors
     var showDeadlinePicker by remember(project.id) { mutableStateOf(false) }
+    val isStalled = remember(project) { StalledProjectDetector.evaluateProject(project)?.isStalled == true }
 
     Surface(
         modifier = Modifier
@@ -2891,11 +3080,29 @@ private fun AreaProjectOverviewRow(
             ) {
                 ProjectProgressRing(progress = project.progress, size = 20.dp)
                 Column {
-                    Text(
-                        text = project.title,
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
-                        color = colors.primaryText
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = project.title,
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
+                            color = colors.primaryText
+                        )
+                        if (isStalled) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = colors.todayStarYellow.copy(alpha = 0.22f)
+                            ) {
+                                Text(
+                                    text = "⚠️ ${stringResource(R.string.v2_stalled_project_badge)}",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                                    color = colors.somedayWarmAmber,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                                )
+                            }
+                        }
+                    }
                     Text(
                         text = "${project.completedTaskCount}/${project.totalTaskCount} • ${if (project.totalTaskCount == 1) stringResource(R.string.entity_todo) else stringResource(R.string.entity_todos)}",
                         style = MaterialTheme.typography.labelSmall,
@@ -2984,6 +3191,7 @@ private fun TopThingsbookBar(
     onSelectLanguage: (String) -> Unit,
     onOpenQuickFind: () -> Unit,
     onOpenVoiceCapture: () -> Unit,
+    onOpenWeeklyReview: () -> Unit = {},
     onOpenGeminiHub: () -> Unit,
     onOpenAreaManager: () -> Unit,
     onOpenTagManager: () -> Unit,
@@ -3092,6 +3300,32 @@ private fun TopThingsbookBar(
                             tint = colors.thingsBlue,
                             modifier = Modifier.size(iconGlyphSize)
                         )
+                    }
+                }
+
+                // Guided GTD Weekly Review Button 🧭
+                ThingsHoverTooltip(text = stringResource(R.string.v2_weekly_review_title)) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(colors.tagPillBg)
+                            .clickable(onClick = onOpenWeeklyReview)
+                            .padding(
+                                horizontal = if (isWideScreen) 10.dp else 8.dp,
+                                vertical = if (isWideScreen) 6.dp else 5.dp
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(text = "🧭", fontSize = if (isWideScreen) 13.sp else 12.sp)
+                        if (isWideScreen) {
+                            Text(
+                                text = stringResource(R.string.v2_weekly_review_title),
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.primaryText,
+                                maxLines = 1
+                            )
+                        }
                     }
                 }
 
@@ -3352,7 +3586,9 @@ private fun SmartViewNavigationStrip(
     onSelectArea: (String) -> Unit,
     onSelectProject: (String) -> Unit,
     onOpenAreaManager: () -> Unit,
-    onCreateNewProject: () -> Unit
+    onCreateNewProject: () -> Unit,
+    onOpenWeeklyReview: () -> Unit = {},
+    onOpenTemplatesAndImport: () -> Unit = {}
 ) {
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
@@ -3388,6 +3624,51 @@ private fun SmartViewNavigationStrip(
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
                     ),
                     color = if (selected) colors.primaryText else colors.secondaryText
+                )
+            }
+        }
+
+        // 1b. Weekly Review & Templates Quick Triggers
+        item(key = "nav_weekly_review") {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(colors.thingsBlueSoft)
+                    .clickable {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onOpenWeeklyReview()
+                    }
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Text(text = "🧭", fontSize = 13.sp)
+                Text(
+                    text = stringResource(R.string.v2_weekly_review_title),
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = colors.thingsBlue
+                )
+            }
+        }
+
+        item(key = "nav_templates_import") {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(colors.tagPillBg)
+                    .clickable {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onOpenTemplatesAndImport()
+                    }
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Text(text = "📋", fontSize = 13.sp)
+                Text(
+                    text = stringResource(R.string.v2_templates_title),
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                    color = colors.primaryText
                 )
             }
         }
@@ -3526,6 +3807,11 @@ private fun ViewTitleHeader(
     projectAttachments: List<TaskAttachment> = emptyList(),
     locale: Locale,
     trashItemCount: Int = 0,
+    isTodayTimelineMode: Boolean = false,
+    onToggleTodayTimelineMode: (Boolean) -> Unit = {},
+    onSaveProjectAsTemplate: (String, String) -> Unit = { _, _ -> },
+    onOpenStalledProjectReview: () -> Unit = {},
+    onMarkProjectReviewed: (String) -> Unit = {},
     onUpdateProjectDeadline: (String, Long?) -> Unit,
     onUpdateProjectArea: (String, String?) -> Unit,
     onEditProject: (Project) -> Unit,
@@ -3552,6 +3838,10 @@ private fun ViewTitleHeader(
     var showProjectAttachMenu by remember(currentProject?.id) { mutableStateOf(false) }
     val tooLargeMsg = stringResource(R.string.attachment_too_large)
     val attachmentImportErrorMsg = stringResource(R.string.attachment_import_error)
+    val templateSavedToastMsg = stringResource(R.string.v2_template_saved_toast)
+    val stalledStatus = remember(currentProject) {
+        currentProject?.let { StalledProjectDetector.evaluateProject(it) }
+    }
 
     val projectFilePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -3670,8 +3960,27 @@ private fun ViewTitleHeader(
                         Text(
                             text = currentProject?.title ?: stringResource(R.string.entity_project),
                             style = MaterialTheme.typography.headlineLarge,
-                            color = colors.primaryText
+                            color = colors.primaryText,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
+                        if (stalledStatus?.isStalled == true) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = colors.todayStarYellow.copy(alpha = 0.24f),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable(onClick = onOpenStalledProjectReview)
+                            ) {
+                                Text(
+                                    text = "⚠️ ${stringResource(R.string.v2_stalled_project_badge)}",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = colors.somedayWarmAmber,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
                     }
                     is ActiveNavigationTarget.AreaDetail -> {
                         Icon(
@@ -3739,8 +4048,13 @@ private fun ViewTitleHeader(
                 }
             }
 
-            // Quick Actions for Project, Area, or Trash in Header
-            if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TRASH) && trashItemCount > 0) {
+            // Quick Actions for Today (List | Timeline toggle), Project, Area, or Trash in Header
+            if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY)) {
+                ThingsTodayModeSegmentedToggle(
+                    isTimelineMode = isTodayTimelineMode,
+                    onModeChange = onToggleTodayTimelineMode
+                )
+            } else if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TRASH) && trashItemCount > 0) {
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(10.dp))
@@ -4070,6 +4384,24 @@ private fun ViewTitleHeader(
                     title = "+ ${stringResource(R.string.entity_heading)}",
                     onClick = onAddHeadingInProject
                 )
+
+                // v2 Pillar 2: "Save as Template"
+                ThingsTagPill(
+                    title = "📋 ${stringResource(R.string.v2_save_as_template)}",
+                    onClick = {
+                        onSaveProjectAsTemplate(currentProject.id, templateSavedToastMsg)
+                    }
+                )
+
+                // v2 Pillar 1: Quick "Mark Reviewed ✓" pill when project is unreviewed/stalled
+                if (stalledStatus?.isStalled == true) {
+                    ThingsTagPill(
+                        title = "✓ ${stringResource(R.string.v2_mark_reviewed)}",
+                        onClick = {
+                            onMarkProjectReviewed(currentProject.id)
+                        }
+                    )
+                }
             }
 
             if (showProjectDeadlineDialog) {
@@ -4659,11 +4991,16 @@ private fun ThingsChromebookSidebar(
     onSelectProject: (String) -> Unit,
     onOpenAreaManager: () -> Unit,
     onCreateNewProject: (String?) -> Unit,
+    onOpenWeeklyReview: () -> Unit = {},
+    onOpenTemplatesAndImport: () -> Unit = {},
     onCloseDrawer: (() -> Unit)? = null
 ) {
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
     val areasLabel = stringResource(R.string.entity_areas)
+    val stalledCount = remember(projects) {
+        StalledProjectDetector.detectStalledProjects(projects).size
+    }
 
     Column(
         modifier = Modifier
@@ -4753,9 +5090,80 @@ private fun ThingsChromebookSidebar(
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
-        HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
+        // v2 GTD Weekly Review & Project Templates / Markdown Importer quick rows
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(9.dp))
+                .background(colors.thingsBlueSoft.copy(alpha = 0.65f))
+                .clickable {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onOpenWeeklyReview()
+                }
+                .padding(horizontal = 10.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(9.dp)
+            ) {
+                Text(text = "🧭", fontSize = 14.sp)
+                Text(
+                    text = stringResource(R.string.v2_weekly_review_title),
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.thingsBlue
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (stalledCount > 0) {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = colors.todayStarYellow.copy(alpha = 0.28f)
+                ) {
+                    Text(
+                        text = "⚠️ $stalledCount",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        ),
+                        color = colors.somedayWarmAmber,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                    )
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(9.dp))
+                .clickable {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onOpenTemplatesAndImport()
+                }
+                .padding(horizontal = 10.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(9.dp)
+        ) {
+            Text(text = "📋", fontSize = 14.sp)
+            Text(
+                text = stringResource(R.string.v2_templates_title),
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.Medium,
+                    color = colors.primaryText
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
         Spacer(modifier = Modifier.height(6.dp))
+        HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
+        Spacer(modifier = Modifier.height(4.dp))
 
         // Areas & Projects Hierarchy (Things for Mac Sidebar style)
         LazyColumn(
@@ -4818,6 +5226,7 @@ private fun ThingsChromebookSidebar(
                     // Indented Projects inside this Area
                     areaProjects.forEach { project ->
                         val selected = navTarget == ActiveNavigationTarget.ProjectDetail(project.id)
+                        val isStalled = StalledProjectDetector.evaluateProject(project)?.isStalled == true
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -4844,16 +5253,25 @@ private fun ThingsChromebookSidebar(
                                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                                         color = if (selected) colors.thingsBlue else colors.primaryText
                                     ),
-                                    maxLines = 1
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
-                            if (project.deadline != null) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Flag,
-                                    contentDescription = null,
-                                    tint = colors.deadlineUrgentRed,
-                                    modifier = Modifier.size(12.dp)
-                                )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                if (isStalled) {
+                                    Text(text = "⚠️", fontSize = 10.sp)
+                                }
+                                if (project.deadline != null) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Flag,
+                                        contentDescription = null,
+                                        tint = colors.deadlineUrgentRed,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -4864,6 +5282,7 @@ private fun ThingsChromebookSidebar(
             val unassignedProjects = projects.filter { it.areaId == null }
             items(unassignedProjects, key = { "sidebar_proj_unassigned_${it.id}" }) { project ->
                 val selected = navTarget == ActiveNavigationTarget.ProjectDetail(project.id)
+                val isStalled = StalledProjectDetector.evaluateProject(project)?.isStalled == true
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -4893,13 +5312,21 @@ private fun ThingsChromebookSidebar(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    if (project.deadline != null) {
-                        Icon(
-                            imageVector = Icons.Outlined.Flag,
-                            contentDescription = null,
-                            tint = colors.deadlineUrgentRed,
-                            modifier = Modifier.size(12.dp)
-                        )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (isStalled) {
+                            Text(text = "⚠️", fontSize = 10.sp)
+                        }
+                        if (project.deadline != null) {
+                            Icon(
+                                imageVector = Icons.Outlined.Flag,
+                                contentDescription = null,
+                                tint = colors.deadlineUrgentRed,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -4966,16 +5393,37 @@ private fun ThingsChromebookSidebar(
             }
         }
 
-        // App Version displayed at the bottom-left of the Sidebar
-        Text(
-            text = "Thingsbook v${BuildConfig.VERSION_NAME}",
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontSize = 10.5.sp,
-                fontWeight = FontWeight.Medium
-            ),
-            color = colors.tertiaryText,
+        // App Version displayed at the bottom-left of the Sidebar (with BETA badge when running pre-release)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier.padding(start = 8.dp, top = 2.dp)
-        )
+        ) {
+            Text(
+                text = "Thingsbook v${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Medium
+                ),
+                color = colors.tertiaryText
+            )
+            if (BuildConfig.VERSION_NAME.contains("-")) {
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = colors.todayStarYellow.copy(alpha = 0.24f)
+                ) {
+                    Text(
+                        text = stringResource(R.string.v2_beta_badge),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        ),
+                        color = colors.somedayWarmAmber,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
+                }
+            }
+        }
     }
 }
 

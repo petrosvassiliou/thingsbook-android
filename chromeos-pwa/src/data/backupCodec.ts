@@ -1,16 +1,18 @@
-import type {
-  AreaRecord,
-  AttachmentRecord,
-  ChecklistItemRecord,
-  HeadingRecord,
-  ProjectRecord,
-  ProjectStatus,
-  RecurrenceRule,
-  ScheduleState,
-  TagRecord,
-  TaskRecord,
-  TaskStatus
-} from '../domain/types';
+import {
+  MAX_AREAS,
+  type AreaRecord,
+  type AttachmentRecord,
+  type ChecklistItemRecord,
+  type HeadingRecord,
+  type ProjectRecord,
+  type ProjectStatus,
+  type ProjectTemplate,
+  type RecurrenceRule,
+  type ScheduleState,
+  type TagRecord,
+  type TaskRecord,
+  type TaskStatus
+} from '../domain/types.ts';
 
 export const BACKUP_MAGIC = 'THINGSBOOK_BACKUP_V1';
 export const FORMAT_VERSION = 1;
@@ -49,6 +51,8 @@ export interface BackupPreferencesDto {
   calendarEventsEnabled?: boolean | null;
   selectedCalendarIds?: string[] | null;
   groupTodayByProjectOrArea?: boolean | null;
+  includeBetaUpdates?: boolean | null;
+  lastWeeklyReviewAt?: number | null;
 }
 
 export interface ThingsbookBackupPayload {
@@ -73,6 +77,7 @@ export interface ThingsbookBackupPayload {
     whenDate: number | null;
     deadline: number | null;
     completedAt: number | null;
+    lastReviewedAt?: number | null;
     sortOrder: number;
     tagIdsJson: string;
     createdAt: number;
@@ -96,6 +101,8 @@ export interface ThingsbookBackupPayload {
     whenDate: number | null;
     deadline: number | null;
     reminderTime: number | null;
+    scheduledStartMinutes?: number | null;
+    durationMinutes?: number | null;
     completedAt: number | null;
     projectId: string | null;
     headingId: string | null;
@@ -139,6 +146,18 @@ export interface ThingsbookBackupPayload {
     createdAt: number;
     updatedAt: number;
   }>;
+  projectTemplates?: Array<{
+    id: string;
+    title: string;
+    notes: string;
+    defaultAreaId: string | null;
+    tagIdsJson?: string;
+    tagIds?: string[];
+    blueprintJson: string;
+    sortOrder: number;
+    createdAt: number;
+    updatedAt: number;
+  }>;
   preferences: BackupPreferencesDto;
 }
 
@@ -153,6 +172,7 @@ export interface BackupSummary {
   checklistItemsCount: number;
   tagsCount: number;
   attachmentsCount?: number;
+  projectTemplatesCount?: number;
 }
 
 export type BackupInspection =
@@ -268,7 +288,8 @@ export function summarizeBackupPayload(
     tasksCount: (payload.tasks || []).length,
     checklistItemsCount: (payload.checklistItems || []).length,
     tagsCount: (payload.tags || []).length,
-    attachmentsCount: (payload.attachments || []).length
+    attachmentsCount: (payload.attachments || []).length,
+    projectTemplatesCount: (payload.projectTemplates || []).length
   };
 }
 
@@ -280,6 +301,7 @@ export function buildBackupPayloadFromEntities(params: {
   checklistItems: ChecklistItemRecord[];
   tags: TagRecord[];
   attachments?: AttachmentRecord[];
+  projectTemplates?: ProjectTemplate[];
   preferences: BackupPreferencesDto;
   appVersionName: string;
 }): ThingsbookBackupPayload {
@@ -293,6 +315,7 @@ export function buildBackupPayloadFromEntities(params: {
   const validTagIds = new Set(tags.map((tg) => tg.id));
   const validTaskIds = new Set(tasks.map((t) => t.id));
   const validProjectIds = new Set(projects.map((p) => p.id));
+  const validAreaIds = new Set(areas.map((a) => a.id));
   const attachments = (params.attachments || []).filter(
     (att) =>
       !att.isDeleted &&
@@ -300,6 +323,7 @@ export function buildBackupPayloadFromEntities(params: {
       ((att.taskId && validTaskIds.has(att.taskId)) ||
         (att.projectId && validProjectIds.has(att.projectId)))
   );
+  const projectTemplates = (params.projectTemplates || []).filter((tpl) => !tpl.isDeleted);
 
   const taskTagRefs: Array<{ taskId: string; tagId: string }> = [];
   for (const t of tasks) {
@@ -337,6 +361,7 @@ export function buildBackupPayloadFromEntities(params: {
       whenDate: p.whenDate,
       deadline: p.deadline,
       completedAt: p.completedAt,
+      lastReviewedAt: p.lastReviewedAt ?? null,
       sortOrder: Number.isFinite(p.sortOrder) ? p.sortOrder : 0,
       tagIdsJson: JSON.stringify(p.tagIds || []),
       createdAt: p.createdAt,
@@ -360,6 +385,8 @@ export function buildBackupPayloadFromEntities(params: {
       whenDate: t.whenDate,
       deadline: t.deadline,
       reminderTime: t.reminderTime,
+      scheduledStartMinutes: t.scheduledStartMinutes ?? null,
+      durationMinutes: t.durationMinutes ?? null,
       completedAt: t.completedAt,
       projectId: t.projectId,
       headingId: t.headingId,
@@ -402,6 +429,22 @@ export function buildBackupPayloadFromEntities(params: {
       createdAt: att.createdAt,
       updatedAt: att.updatedAt
     })),
+    projectTemplates: projectTemplates.map((tpl) => {
+      const cleanTags = (tpl.tagIds || []).filter((id) => validTagIds.has(id));
+      return {
+        id: tpl.id,
+        title: tpl.title,
+        notes: tpl.notes || '',
+        defaultAreaId:
+          tpl.defaultAreaId && validAreaIds.has(tpl.defaultAreaId) ? tpl.defaultAreaId : null,
+        tagIdsJson: JSON.stringify(cleanTags),
+        tagIds: cleanTags,
+        blueprintJson: tpl.blueprintJson || '{}',
+        sortOrder: Number.isFinite(tpl.sortOrder) ? tpl.sortOrder : 0,
+        createdAt: tpl.createdAt,
+        updatedAt: tpl.updatedAt
+      };
+    }),
     preferences: params.preferences
   };
 }
@@ -409,8 +452,8 @@ export function buildBackupPayloadFromEntities(params: {
 export async function encodeThingsBackup(
   payload: ThingsbookBackupPayload,
   password: string | null,
-  appVersionName = '1.8.1-chromeos',
-  appVersionCode = 44
+  appVersionName: string = payload.appVersionName || '2.0.0-beta.1-chromeos',
+  appVersionCode = 45
 ): Promise<Uint8Array> {
   const jsonBytes = new TextEncoder().encode(JSON.stringify(payload));
   const compressed = await gzipCompress(jsonBytes);
@@ -618,4 +661,266 @@ export function normalizeScheduleState(val: string | undefined, fallback: Schedu
     return up;
   }
   return fallback;
+}
+
+export interface NormalizedBackupEntities {
+  tags: TagRecord[];
+  areas: AreaRecord[];
+  projects: ProjectRecord[];
+  headings: HeadingRecord[];
+  tasks: TaskRecord[];
+  checklistItems: ChecklistItemRecord[];
+  attachments: AttachmentRecord[];
+  projectTemplates: ProjectTemplate[];
+  preferences: {
+    includeBetaUpdates: boolean;
+    lastWeeklyReviewAt: number;
+  };
+}
+
+/**
+ * Normalizes any v1.7, v1.8, or v2.0 `.tbbackup` payload into clean local entities,
+ * safely applying `null` / `[]` / `0` defaults for missing v2.0 fields.
+ */
+export function normalizeBackupPayloadToEntities(
+  payload: ThingsbookBackupPayload,
+  syncAfterRestore = false,
+  now: number = Date.now()
+): NormalizedBackupEntities {
+  const validTags = (payload.tags || []).filter((t) => t && t.id && t.title);
+  const validTagIds = new Set(validTags.map((t) => t.id));
+  const tags: TagRecord[] = validTags.map((tg) => ({
+    id: tg.id,
+    title: tg.title.trim(),
+    parentTagId:
+      tg.parentTagId && validTagIds.has(tg.parentTagId) && tg.parentTagId !== tg.id
+        ? tg.parentTagId
+        : null,
+    shortcut: tg.shortcut?.trim() || null,
+    sortOrder: Number.isFinite(tg.sortOrder) ? tg.sortOrder : 0,
+    createdAt: tg.createdAt || now,
+    updatedAt: tg.updatedAt || now,
+    isDeleted: false,
+    isDirty: syncAfterRestore
+  }));
+
+  const areas: AreaRecord[] = (payload.areas || [])
+    .filter((a) => a && a.id && a.title)
+    .slice(0, MAX_AREAS)
+    .map((a) => ({
+      id: a.id,
+      title: a.title.trim(),
+      sortOrder: Number.isFinite(a.sortOrder) ? a.sortOrder : 0,
+      tagIds: safeParseTagList(a.tagIdsJson).filter((id) => validTagIds.has(id)),
+      createdAt: a.createdAt || now,
+      updatedAt: a.updatedAt || now,
+      isDeleted: false,
+      isDirty: syncAfterRestore
+    }));
+  const validAreaIds = new Set(areas.map((a) => a.id));
+
+  const projRefMap = new Map<string, string[]>();
+  for (const ref of payload.projectTagRefs || []) {
+    if (ref && validTagIds.has(ref.tagId)) {
+      const list = projRefMap.get(ref.projectId) || [];
+      list.push(ref.tagId);
+      projRefMap.set(ref.projectId, list);
+    }
+  }
+
+  const projects: ProjectRecord[] = (payload.projects || [])
+    .filter((p) => p && p.id)
+    .map((p) => {
+      const mergedTags = Array.from(
+        new Set([...safeParseTagList(p.tagIdsJson), ...(projRefMap.get(p.id) || [])])
+      ).filter((id) => validTagIds.has(id));
+      const lastReviewedAt =
+        p.lastReviewedAt != null && Number.isFinite(p.lastReviewedAt)
+          ? Math.trunc(p.lastReviewedAt)
+          : null;
+      return {
+        id: p.id,
+        areaId: p.areaId && validAreaIds.has(p.areaId) ? p.areaId : null,
+        title: p.title || '',
+        notes: p.notes || '',
+        status: normalizeProjectStatus(p.status),
+        scheduleState: normalizeScheduleState(p.scheduleState, 'ANYTIME'),
+        whenDate: p.whenDate ?? null,
+        deadline: p.deadline ?? null,
+        completedAt: p.completedAt ?? null,
+        lastReviewedAt,
+        sortOrder: Number.isFinite(p.sortOrder) ? p.sortOrder : 0,
+        tagIds: mergedTags,
+        createdAt: p.createdAt || now,
+        updatedAt: p.updatedAt || now,
+        isDeleted: false,
+        isDirty: syncAfterRestore
+      };
+    });
+  const validProjectIds = new Set(projects.map((p) => p.id));
+
+  const headings: HeadingRecord[] = (payload.headings || [])
+    .filter((h) => h && h.id && validProjectIds.has(h.projectId))
+    .map((h) => ({
+      id: h.id,
+      projectId: h.projectId,
+      title: h.title || '',
+      sortOrder: Number.isFinite(h.sortOrder) ? h.sortOrder : 0,
+      isArchived: Boolean(h.isArchived),
+      createdAt: h.createdAt || now,
+      updatedAt: h.updatedAt || now,
+      isDeleted: false,
+      isDirty: syncAfterRestore
+    }));
+  const headingProjectMap = new Map(headings.map((h) => [h.id, h.projectId]));
+
+  const taskRefMap = new Map<string, string[]>();
+  for (const ref of payload.taskTagRefs || []) {
+    if (ref && validTagIds.has(ref.tagId)) {
+      const list = taskRefMap.get(ref.taskId) || [];
+      list.push(ref.tagId);
+      taskRefMap.set(ref.taskId, list);
+    }
+  }
+
+  const tasks: TaskRecord[] = (payload.tasks || [])
+    .filter((t) => t && t.id)
+    .map((t) => {
+      const cleanProjId = t.projectId && validProjectIds.has(t.projectId) ? t.projectId : null;
+      const cleanHeadId =
+        cleanProjId && t.headingId && headingProjectMap.get(t.headingId) === cleanProjId
+          ? t.headingId
+          : null;
+      const cleanAreaId = t.areaId && validAreaIds.has(t.areaId) ? t.areaId : null;
+      const mergedTags = Array.from(
+        new Set([...safeParseTagList(t.tagIdsJson), ...(taskRefMap.get(t.id) || [])])
+      ).filter((id) => validTagIds.has(id));
+      const parsedRecurrence = safeParseRecurrence(t.recurrenceRuleJson);
+      const rawSchedule = normalizeScheduleState(t.scheduleState, 'INBOX');
+      const normalizedSchedule: ScheduleState =
+        rawSchedule === 'INBOX' &&
+        t.whenDate == null &&
+        parsedRecurrence == null &&
+        (cleanProjId != null || cleanAreaId != null)
+          ? 'ANYTIME'
+          : rawSchedule;
+
+      const scheduledStartMinutes =
+        t.scheduledStartMinutes != null && Number.isFinite(t.scheduledStartMinutes)
+          ? Math.max(0, Math.min(1439, Math.trunc(t.scheduledStartMinutes)))
+          : null;
+      const durationMinutes =
+        t.durationMinutes != null && Number.isFinite(t.durationMinutes) && t.durationMinutes > 0
+          ? Math.max(5, Math.min(720, Math.trunc(t.durationMinutes)))
+          : null;
+
+      return {
+        id: t.id,
+        title: t.title || '',
+        notes: t.notes || '',
+        status: normalizeTaskStatus(t.status),
+        scheduleState: normalizedSchedule,
+        whenDate: t.whenDate ?? null,
+        deadline: t.deadline ?? null,
+        reminderTime: t.reminderTime ?? null,
+        scheduledStartMinutes,
+        durationMinutes,
+        completedAt: t.completedAt ?? null,
+        projectId: cleanProjId,
+        headingId: cleanHeadId,
+        areaId: cleanAreaId,
+        recurrenceRule: parsedRecurrence,
+        sortOrder: Number.isFinite(t.sortOrder) ? t.sortOrder : 0,
+        tagIds: mergedTags,
+        createdAt: t.createdAt || now,
+        updatedAt: t.updatedAt || now,
+        isDeleted: false,
+        isDirty: syncAfterRestore
+      };
+    });
+  const validTaskIds = new Set(tasks.map((t) => t.id));
+
+  const checklistItems: ChecklistItemRecord[] = (payload.checklistItems || [])
+    .filter((c) => c && c.id && validTaskIds.has(c.taskId))
+    .map((c) => ({
+      id: c.id,
+      taskId: c.taskId,
+      title: c.title || '',
+      isCompleted: Boolean(c.isCompleted),
+      sortOrder: Number.isFinite(c.sortOrder) ? c.sortOrder : 0,
+      createdAt: c.createdAt || now,
+      updatedAt: c.updatedAt || now,
+      isDeleted: false,
+      isDirty: syncAfterRestore
+    }));
+
+  const attachments: AttachmentRecord[] = (payload.attachments || [])
+    .filter((att) => {
+      if (!att || !att.id || !att.dataBase64) return false;
+      const hasValidTask = Boolean(att.taskId && validTaskIds.has(att.taskId));
+      const hasValidProj = Boolean(att.projectId && validProjectIds.has(att.projectId));
+      return hasValidTask || hasValidProj;
+    })
+    .map((att) => ({
+      id: att.id,
+      taskId: att.taskId && validTaskIds.has(att.taskId) ? att.taskId : null,
+      projectId: att.projectId && validProjectIds.has(att.projectId) ? att.projectId : null,
+      fileName: att.fileName || 'attachment',
+      mimeType: att.mimeType || 'application/octet-stream',
+      sizeBytes: Number.isFinite(att.sizeBytes) ? att.sizeBytes : 0,
+      dataBase64: att.dataBase64,
+      sortOrder: Number.isFinite(att.sortOrder) ? Number(att.sortOrder) : (att.createdAt || now),
+      createdAt: att.createdAt || now,
+      updatedAt: att.updatedAt || now,
+      isDeleted: false,
+      isDirty: syncAfterRestore
+    }));
+
+  const projectTemplates: ProjectTemplate[] = (payload.projectTemplates || [])
+    .filter((tpl) => tpl && tpl.id && tpl.title)
+    .map((tpl) => {
+      const fromJson = safeParseTagList(tpl.tagIdsJson);
+      const fromArr = Array.isArray(tpl.tagIds)
+        ? tpl.tagIds.filter((x): x is string => typeof x === 'string')
+        : [];
+      const mergedTags = Array.from(new Set([...fromJson, ...fromArr])).filter((id) =>
+        validTagIds.has(id)
+      );
+      return {
+        id: tpl.id,
+        title: tpl.title.trim(),
+        notes: tpl.notes || '',
+        defaultAreaId:
+          tpl.defaultAreaId && validAreaIds.has(tpl.defaultAreaId) ? tpl.defaultAreaId : null,
+        tagIds: mergedTags,
+        blueprintJson:
+          typeof tpl.blueprintJson === 'string' && tpl.blueprintJson.trim()
+            ? tpl.blueprintJson
+            : '{}',
+        sortOrder: Number.isFinite(tpl.sortOrder) ? tpl.sortOrder : 0,
+        createdAt: tpl.createdAt || now,
+        updatedAt: tpl.updatedAt || now,
+        isDeleted: false,
+        isDirty: syncAfterRestore
+      };
+    });
+
+  return {
+    tags,
+    areas,
+    projects,
+    headings,
+    tasks,
+    checklistItems,
+    attachments,
+    projectTemplates,
+    preferences: {
+      includeBetaUpdates: Boolean(payload.preferences?.includeBetaUpdates),
+      lastWeeklyReviewAt:
+        payload.preferences?.lastWeeklyReviewAt != null &&
+        Number.isFinite(payload.preferences.lastWeeklyReviewAt)
+          ? Math.max(0, Math.trunc(payload.preferences.lastWeeklyReviewAt))
+          : 0
+    }
+  };
 }

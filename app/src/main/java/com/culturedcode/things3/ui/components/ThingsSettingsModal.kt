@@ -122,8 +122,10 @@ fun ThingsSettingsModal(
     biometricAppLockEnabled: Boolean = false,
     onSetBiometricAppLockEnabled: (Boolean) -> Unit = {},
     autoCheckUpdatesEnabled: Boolean = true,
+    includeBetaUpdates: Boolean = BuildConfig.VERSION_NAME.contains("-"),
     appUpdateState: AppUpdateUiState = AppUpdateUiState.Idle,
     onSetAutoCheckUpdatesEnabled: (Boolean) -> Unit = {},
+    onSetIncludeBetaUpdates: (Boolean) -> Unit = {},
     onSearchForUpdates: () -> Unit = {},
     onDownloadAndInstallUpdate: (AppReleaseInfo) -> Unit = {},
     onInstallDownloadedUpdate: () -> Unit = {},
@@ -751,8 +753,10 @@ fun ThingsSettingsModal(
                 // =============================================================
                 AppUpdateSettingsSection(
                     autoCheckUpdatesEnabled = autoCheckUpdatesEnabled,
+                    includeBetaUpdates = includeBetaUpdates,
                     appUpdateState = appUpdateState,
                     onSetAutoCheckUpdatesEnabled = onSetAutoCheckUpdatesEnabled,
+                    onSetIncludeBetaUpdates = onSetIncludeBetaUpdates,
                     onSearchForUpdates = onSearchForUpdates,
                     onDownloadAndInstallUpdate = onDownloadAndInstallUpdate,
                     onInstallDownloadedUpdate = onInstallDownloadedUpdate,
@@ -1112,8 +1116,10 @@ private fun StatDetailRow(
 @Composable
 private fun AppUpdateSettingsSection(
     autoCheckUpdatesEnabled: Boolean,
+    includeBetaUpdates: Boolean,
     appUpdateState: AppUpdateUiState,
     onSetAutoCheckUpdatesEnabled: (Boolean) -> Unit,
+    onSetIncludeBetaUpdates: (Boolean) -> Unit,
     onSearchForUpdates: () -> Unit,
     onDownloadAndInstallUpdate: (AppReleaseInfo) -> Unit,
     onInstallDownloadedUpdate: () -> Unit,
@@ -1123,6 +1129,7 @@ private fun AppUpdateSettingsSection(
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
     val isBusy = appUpdateState is AppUpdateUiState.Checking || appUpdateState is AppUpdateUiState.Downloading
+    val isPreReleaseBuild = BuildConfig.VERSION_NAME.contains("-")
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -1133,16 +1140,34 @@ private fun AppUpdateSettingsSection(
             icon = Icons.Outlined.SystemUpdateAlt,
             title = stringResource(R.string.settings_updates_section)
         )
-        Surface(
-            shape = RoundedCornerShape(7.dp),
-            color = colors.thingsBlueSoft
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text(
-                text = "v${BuildConfig.VERSION_NAME}",
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                color = colors.thingsBlue,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-            )
+            if (isPreReleaseBuild) {
+                Surface(
+                    shape = RoundedCornerShape(7.dp),
+                    color = colors.todayStarYellow.copy(alpha = 0.22f)
+                ) {
+                    Text(
+                        text = stringResource(R.string.v2_beta_badge),
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold),
+                        color = colors.somedayWarmAmber,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                    )
+                }
+            }
+            Surface(
+                shape = RoundedCornerShape(7.dp),
+                color = colors.thingsBlueSoft
+            ) {
+                Text(
+                    text = "v${BuildConfig.VERSION_NAME}",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = colors.thingsBlue,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                )
+            }
         }
     }
 
@@ -1180,6 +1205,50 @@ private fun AppUpdateSettingsSection(
             onCheckedChange = { enabled ->
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onSetAutoCheckUpdatesEnabled(enabled)
+            },
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = colors.thingsBlue,
+                uncheckedThumbColor = colors.secondaryText,
+                uncheckedTrackColor = colors.hairlineDivider
+            )
+        )
+    }
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    // Beta-Channel Updates Toggle Row
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(11.dp))
+            .background(colors.tagPillBg.copy(alpha = 0.6f))
+            .clickable {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onSetIncludeBetaUpdates(!includeBetaUpdates)
+            }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.v2_beta_channel_toggle),
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                color = colors.primaryText
+            )
+            Text(
+                text = stringResource(R.string.v2_beta_channel_desc),
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
+                color = colors.secondaryText
+            )
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Switch(
+            checked = includeBetaUpdates,
+            onCheckedChange = { enabled ->
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onSetIncludeBetaUpdates(enabled)
             },
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,

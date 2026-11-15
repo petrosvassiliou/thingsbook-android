@@ -15,6 +15,9 @@ import {
   type HeadingRecord,
   type ProjectRecord,
   type ProjectStatus,
+  type ProjectTemplate,
+  type ProjectTemplateBlueprint,
+  type ProjectTemplateTaskBlueprint,
   type RecurrenceRule,
   type ScheduleState,
   type SupportedLang,
@@ -23,16 +26,13 @@ import {
   type TaskStatus,
   type ThingsbookStatistics
 } from '../domain/types';
+import { buildProjectTemplateBlueprint } from '../domain/v2Utils';
 import {
   buildBackupPayloadFromEntities,
   decodeThingsBackup,
   encodeThingsBackup,
   inspectThingsBackup,
-  normalizeProjectStatus,
-  normalizeScheduleState,
-  normalizeTaskStatus,
-  safeParseRecurrence,
-  safeParseTagList,
+  normalizeBackupPayloadToEntities,
   summarizeBackupPayload,
   type BackupInspection,
   type BackupPreferencesDto,
@@ -50,7 +50,7 @@ import {
 import { resolveLanguage } from '../i18n/translations';
 
 const DB_NAME = 'thingsbook_chromeos_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const PREFS_STORAGE_KEY = 'thingsbook_chromeos_prefs_v1';
 
 export interface DataSnapshot {
@@ -61,6 +61,7 @@ export interface DataSnapshot {
   checklistItems: ChecklistItemRecord[];
   tags: TagRecord[];
   attachments: AttachmentRecord[];
+  projectTemplates: ProjectTemplate[];
   hasSampleTasks: boolean;
 }
 
@@ -127,6 +128,8 @@ const DEFAULT_PREFS: AppPreferences = {
   dailyDigestHour: 8,
   dailyDigestMinute: 30,
   autoCheckUpdatesEnabled: true,
+  includeBetaUpdates: false,
+  lastWeeklyReviewAt: 0,
   geminiApiKey: '',
   calendarEventsEnabled: false,
   selectedCalendarIds: [],
@@ -187,6 +190,7 @@ class ThingsLocalDb {
     checklistItems: [],
     tags: [],
     attachments: [],
+    projectTemplates: [],
     hasSampleTasks: false
   };
 
@@ -225,6 +229,12 @@ class ThingsLocalDb {
             db.createObjectStore('attachments', { keyPath: 'id' });
           }
           if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
+          if (!db.objectStoreNames.contains('projectTemplates')) {
+            const tplStore = db.createObjectStore('projectTemplates', { keyPath: 'id' });
+            tplStore.createIndex('updatedAt', 'updatedAt');
+            tplStore.createIndex('isDirty', 'isDirty');
+            tplStore.createIndex('sortOrder', 'sortOrder');
+          }
         }
       });
     }
@@ -473,15 +483,17 @@ class ThingsLocalDb {
 
   async refreshSnapshot(): Promise<DataSnapshot> {
     const db = await this.getDb();
-    const [areas, projects, headings, tasks, checklistItems, tags, attachments] = await Promise.all([
-      db.getAll('areas') as Promise<AreaRecord[]>,
-      db.getAll('projects') as Promise<ProjectRecord[]>,
-      db.getAll('headings') as Promise<HeadingRecord[]>,
-      db.getAll('tasks') as Promise<TaskRecord[]>,
-      db.getAll('checklist_items') as Promise<ChecklistItemRecord[]>,
-      db.getAll('tags') as Promise<TagRecord[]>,
-      db.getAll('attachments') as Promise<AttachmentRecord[]>
-    ]);
+    const [areas, projects, headings, tasks, checklistItems, tags, attachments, projectTemplates] =
+      await Promise.all([
+        db.getAll('areas') as Promise<AreaRecord[]>,
+        db.getAll('projects') as Promise<ProjectRecord[]>,
+        db.getAll('headings') as Promise<HeadingRecord[]>,
+        db.getAll('tasks') as Promise<TaskRecord[]>,
+        db.getAll('checklist_items') as Promise<ChecklistItemRecord[]>,
+        db.getAll('tags') as Promise<TagRecord[]>,
+        db.getAll('attachments') as Promise<AttachmentRecord[]>,
+        db.getAll('projectTemplates') as Promise<ProjectTemplate[]>
+      ]);
 
     const hasSampleTasks = tasks.some((t) => !t.isDeleted && SAMPLE_TASK_IDS.has(t.id));
 
@@ -493,6 +505,9 @@ class ThingsLocalDb {
       checklistItems: checklistItems.sort((a, b) => a.sortOrder - b.sortOrder),
       tags: tags.sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title)),
       attachments: attachments.sort((a, b) => a.createdAt - b.createdAt),
+      projectTemplates: projectTemplates.sort(
+        (a, b) => a.sortOrder - b.sortOrder || b.updatedAt - a.updatedAt
+      ),
       hasSampleTasks
     };
 
@@ -526,6 +541,8 @@ class ThingsLocalDb {
     whenDate?: number | null;
     deadline?: number | null;
     reminderTime?: number | null;
+    scheduledStartMinutes?: number | null;
+    durationMinutes?: number | null;
     projectId?: string | null;
     headingId?: string | null;
     areaId?: string | null;
@@ -613,6 +630,24 @@ class ThingsLocalDb {
     const resolvedTitle =
       params.title !== undefined ? params.title : (existing?.title ?? '');
 
+    const rawScheduledStart =
+      params.scheduledStartMinutes !== undefined
+        ? params.scheduledStartMinutes
+        : (existing?.scheduledStartMinutes ?? null);
+    const scheduledStartMinutes =
+      rawScheduledStart != null && Number.isFinite(rawScheduledStart)
+        ? Math.max(0, Math.min(1439, Math.trunc(rawScheduledStart)))
+        : null;
+
+    const rawDuration =
+      params.durationMinutes !== undefined
+        ? params.durationMinutes
+        : (existing?.durationMinutes ?? null);
+    const durationMinutes =
+      rawDuration != null && Number.isFinite(rawDuration) && rawDuration > 0
+        ? Math.max(5, Math.min(720, Math.trunc(rawDuration)))
+        : null;
+
     const record: TaskRecord = {
       id,
       title: resolvedTitle,
@@ -625,6 +660,8 @@ class ThingsLocalDb {
         status === 'OPEN'
           ? (params.reminderTime !== undefined ? params.reminderTime : (existing?.reminderTime ?? null))
           : null,
+      scheduledStartMinutes,
+      durationMinutes,
       completedAt,
       projectId,
       headingId,
@@ -689,6 +726,8 @@ class ThingsLocalDb {
     whenDate?: number | null;
     deadline?: number | null;
     reminderTime?: number | null;
+    scheduledStartMinutes?: number | null;
+    durationMinutes?: number | null;
     projectId?: string | null;
     headingId?: string | null;
     areaId?: string | null;
@@ -710,6 +749,8 @@ class ThingsLocalDb {
       status?: TaskStatus;
       scheduleState?: ScheduleState;
       whenDate?: number | null;
+      scheduledStartMinutes?: number | null;
+      durationMinutes?: number | null;
       projectId?: string | null;
       headingId?: string | null;
       areaId?: string | null;
@@ -1052,6 +1093,8 @@ class ThingsLocalDb {
           title: '',
           notes: '',
           reminderTime: null,
+          scheduledStartMinutes: null,
+          durationMinutes: null,
           recurrenceRule: null,
           tagIds: [],
           isDeleted: true,
@@ -1141,6 +1184,7 @@ class ThingsLocalDb {
           ...proj,
           title: '',
           notes: '',
+          lastReviewedAt: null,
           tagIds: [],
           detachedTaskSnapshots: undefined,
           isDeleted: true,
@@ -1193,6 +1237,8 @@ class ThingsLocalDb {
             title: '',
             notes: '',
             reminderTime: null,
+            scheduledStartMinutes: null,
+            durationMinutes: null,
             recurrenceRule: null,
             tagIds: [],
             isDeleted: true,
@@ -1472,6 +1518,7 @@ class ThingsLocalDb {
     scheduleState?: ScheduleState;
     whenDate?: number | null;
     deadline?: number | null;
+    lastReviewedAt?: number | null;
     tagIds?: string[];
     sortOrder?: number;
   }): Promise<ProjectRecord> {
@@ -1482,6 +1529,10 @@ class ThingsLocalDb {
       const tx = db.transaction('projects', 'readwrite');
       const existing = (await tx.store.get(id)) as ProjectRecord | undefined;
       const status = params.status ?? existing?.status ?? 'ACTIVE';
+      const lastReviewedAt =
+        params.lastReviewedAt !== undefined
+          ? params.lastReviewedAt
+          : (existing?.lastReviewedAt ?? null);
       const record: ProjectRecord = {
         id,
         areaId: params.areaId !== undefined ? params.areaId : (existing?.areaId ?? null),
@@ -1492,6 +1543,7 @@ class ThingsLocalDb {
         whenDate: params.whenDate !== undefined ? params.whenDate : (existing?.whenDate ?? null),
         deadline: params.deadline !== undefined ? params.deadline : (existing?.deadline ?? null),
         completedAt: status === 'COMPLETED' || status === 'CANCELED' ? (existing?.completedAt ?? now) : null,
+        lastReviewedAt,
         sortOrder:
           params.sortOrder !== undefined && Number.isFinite(params.sortOrder)
             ? params.sortOrder
@@ -1507,6 +1559,261 @@ class ThingsLocalDb {
       await this.refreshSnapshot();
       this.triggerSync();
       return record;
+    });
+  }
+
+  async markProjectReviewed(projectId: string, reviewedAt: number = Date.now()): Promise<void> {
+    await this.upsertProject({ id: projectId, lastReviewedAt: reviewedAt });
+  }
+
+  async saveProjectAsTemplate(
+    projectId: string,
+    customTitle?: string
+  ): Promise<ProjectTemplate | null> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const project = (await db.get('projects', projectId)) as ProjectRecord | undefined;
+      if (!project || project.isDeleted) return null;
+
+      const [headings, tasks, checklistItems] = await Promise.all([
+        db.getAll('headings') as Promise<HeadingRecord[]>,
+        db.getAll('tasks') as Promise<TaskRecord[]>,
+        db.getAll('checklist_items') as Promise<ChecklistItemRecord[]>
+      ]);
+
+      const now = Date.now();
+      const baseDay =
+        project.whenDate != null ? startOfDayEpoch(new Date(project.whenDate)) : startOfDayEpoch();
+      const blueprint = buildProjectTemplateBlueprint(
+        project,
+        headings,
+        tasks,
+        checklistItems,
+        baseDay
+      );
+
+      const template: ProjectTemplate = {
+        id: crypto.randomUUID(),
+        title: (customTitle?.trim() || project.title.trim()) || 'Project Template',
+        notes: project.notes || '',
+        defaultAreaId: project.areaId ?? null,
+        tagIds: [...(project.tagIds || [])],
+        blueprintJson: JSON.stringify(blueprint),
+        sortOrder: now,
+        createdAt: now,
+        updatedAt: now,
+        isDeleted: false,
+        isDirty: true
+      };
+
+      const tx = db.transaction('projectTemplates', 'readwrite');
+      await tx.store.put(template);
+      await tx.done;
+      await this.refreshSnapshot();
+      this.triggerSync();
+      return template;
+    });
+  }
+
+  async upsertProjectTemplate(params: {
+    id?: string;
+    title: string;
+    notes?: string;
+    defaultAreaId?: string | null;
+    tagIds?: string[];
+    blueprintJson: string;
+    sortOrder?: number;
+  }): Promise<ProjectTemplate> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const id = params.id || crypto.randomUUID();
+      const tx = db.transaction('projectTemplates', 'readwrite');
+      const existing = (await tx.store.get(id)) as ProjectTemplate | undefined;
+      const record: ProjectTemplate = {
+        id,
+        title: params.title.trim() || 'Project Template',
+        notes: params.notes !== undefined ? params.notes : (existing?.notes ?? ''),
+        defaultAreaId:
+          params.defaultAreaId !== undefined
+            ? params.defaultAreaId
+            : (existing?.defaultAreaId ?? null),
+        tagIds: params.tagIds !== undefined ? params.tagIds : (existing?.tagIds ?? []),
+        blueprintJson: params.blueprintJson || existing?.blueprintJson || '{}',
+        sortOrder: params.sortOrder ?? existing?.sortOrder ?? now,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+        isDeleted: false,
+        isDirty: true
+      };
+      await tx.store.put(record);
+      await tx.done;
+      await this.refreshSnapshot();
+      this.triggerSync();
+      return record;
+    });
+  }
+
+  async deleteProjectTemplate(templateId: string): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const tx = db.transaction('projectTemplates', 'readwrite');
+      const existing = (await tx.store.get(templateId)) as ProjectTemplate | undefined;
+      if (existing && !existing.isDeleted) {
+        await tx.store.put({
+          ...existing,
+          isDeleted: true,
+          updatedAt: now,
+          isDirty: true
+        });
+      }
+      await tx.done;
+      await this.refreshSnapshot();
+      this.triggerSync();
+    });
+  }
+
+  async instantiateProjectFromBlueprint(params: {
+    title: string;
+    notes?: string;
+    areaId?: string | null;
+    tagIds?: string[];
+    blueprint: ProjectTemplateBlueprint;
+  }): Promise<string> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const todayEpoch = startOfDayEpoch(new Date(now));
+      const projectId = crypto.randomUUID();
+
+      const tx = db.transaction(
+        ['projects', 'headings', 'tasks', 'checklist_items'],
+        'readwrite'
+      );
+
+      await tx.objectStore('projects').put({
+        id: projectId,
+        areaId: params.areaId ?? null,
+        title: params.title.trim() || 'New Project',
+        notes: params.notes ?? params.blueprint.notes ?? '',
+        status: 'ACTIVE',
+        scheduleState: 'TODAY',
+        whenDate: todayEpoch,
+        deadline: null,
+        completedAt: null,
+        lastReviewedAt: now,
+        sortOrder: now,
+        tagIds: params.tagIds ?? [],
+        createdAt: now,
+        updatedAt: now,
+        isDeleted: false,
+        isDirty: true
+      } satisfies ProjectRecord);
+
+      let createdAnyTask = false;
+      const writeTask = async (
+        bpTask: ProjectTemplateTaskBlueprint,
+        headingId: string | null,
+        sortOrder: number
+      ) => {
+        const title = bpTask.title.trim();
+        if (!title) return;
+        const isFirstTask = !createdAnyTask;
+        createdAnyTask = true;
+
+        let whenDate: number | null = null;
+        let scheduleState: ScheduleState = bpTask.scheduleState ?? 'ANYTIME';
+
+        if (bpTask.whenDaysOffset != null && Number.isFinite(bpTask.whenDaysOffset)) {
+          const offset = Math.max(0, Math.trunc(bpTask.whenDaysOffset));
+          whenDate = addDaysLocal(todayEpoch, offset);
+          scheduleState = offset === 0 ? (scheduleState === 'THIS_EVENING' ? 'THIS_EVENING' : 'TODAY') : 'UPCOMING';
+        } else if (scheduleState === 'TODAY' || scheduleState === 'THIS_EVENING') {
+          whenDate = todayEpoch;
+        } else if (isFirstTask && bpTask.scheduleState === undefined) {
+          scheduleState = 'TODAY';
+          whenDate = todayEpoch;
+        }
+
+        const deadline =
+          bpTask.deadlineDaysOffset != null && Number.isFinite(bpTask.deadlineDaysOffset)
+            ? addDaysLocal(todayEpoch, Math.max(0, Math.trunc(bpTask.deadlineDaysOffset)))
+            : null;
+
+        const taskId = crypto.randomUUID();
+        await tx.objectStore('tasks').put({
+          id: taskId,
+          title,
+          notes: bpTask.notes ?? '',
+          status: 'OPEN',
+          scheduleState,
+          whenDate,
+          deadline,
+          reminderTime: null,
+          scheduledStartMinutes: bpTask.scheduledStartMinutes ?? null,
+          durationMinutes: bpTask.durationMinutes ?? null,
+          completedAt: null,
+          projectId,
+          headingId,
+          areaId: null,
+          recurrenceRule: null,
+          sortOrder,
+          tagIds: [],
+          createdAt: now,
+          updatedAt: now,
+          isDeleted: false,
+          isDirty: true,
+          purgedFromTrash: false
+        } satisfies TaskRecord);
+
+        const subtasks = bpTask.checklistItems ?? [];
+        for (let cIdx = 0; cIdx < subtasks.length; cIdx++) {
+          const subTitle = subtasks[cIdx].trim();
+          if (!subTitle) continue;
+          await tx.objectStore('checklist_items').put({
+            id: crypto.randomUUID(),
+            taskId,
+            title: subTitle,
+            isCompleted: false,
+            sortOrder: (cIdx + 1) * 100,
+            createdAt: now,
+            updatedAt: now,
+            isDeleted: false,
+            isDirty: true
+          } satisfies ChecklistItemRecord);
+        }
+      };
+
+      const topTasks = params.blueprint.tasks ?? [];
+      for (let tIdx = 0; tIdx < topTasks.length; tIdx++) {
+        await writeTask(topTasks[tIdx], null, (tIdx + 1) * 100);
+      }
+
+      for (let hIdx = 0; hIdx < params.blueprint.headings.length; hIdx++) {
+        const h = params.blueprint.headings[hIdx];
+        const headingId = crypto.randomUUID();
+        await tx.objectStore('headings').put({
+          id: headingId,
+          projectId,
+          title: h.title.trim() || `Section ${hIdx + 1}`,
+          sortOrder: (hIdx + 1) * 1000,
+          isArchived: false,
+          createdAt: now,
+          updatedAt: now,
+          isDeleted: false,
+          isDirty: true
+        } satisfies HeadingRecord);
+
+        for (let tIdx = 0; tIdx < h.tasks.length; tIdx++) {
+          await writeTask(h.tasks[tIdx], headingId, (hIdx + 1) * 1000 + (tIdx + 1) * 100);
+        }
+      }
+
+      await tx.done;
+      await this.refreshSnapshot();
+      this.triggerSync();
+      return projectId;
     });
   }
 
@@ -1924,7 +2231,7 @@ class ThingsLocalDb {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
       const now = Date.now();
-      const tx = db.transaction(['areas', 'projects', 'tasks'], 'readwrite');
+      const tx = db.transaction(['areas', 'projects', 'tasks', 'projectTemplates'], 'readwrite');
       const area = (await tx.objectStore('areas').get(areaId)) as AreaRecord | undefined;
       if (area) {
         await tx.objectStore('areas').put({ ...area, isDeleted: true, updatedAt: now, isDirty: true });
@@ -1939,6 +2246,14 @@ class ThingsLocalDb {
       for (const t of tasks) {
         if (t.areaId === areaId && !t.isDeleted) {
           await tx.objectStore('tasks').put({ ...t, areaId: null, updatedAt: now, isDirty: true });
+        }
+      }
+      const templates = (await tx.objectStore('projectTemplates').getAll()) as ProjectTemplate[];
+      for (const tpl of templates) {
+        if (tpl.defaultAreaId === areaId && !tpl.isDeleted) {
+          await tx
+            .objectStore('projectTemplates')
+            .put({ ...tpl, defaultAreaId: null, updatedAt: now, isDirty: true });
         }
       }
       await tx.done;
@@ -1982,7 +2297,10 @@ class ThingsLocalDb {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
       const now = Date.now();
-      const tx = db.transaction(['tags', 'tasks', 'projects', 'areas'], 'readwrite');
+      const tx = db.transaction(
+        ['tags', 'tasks', 'projects', 'areas', 'projectTemplates'],
+        'readwrite'
+      );
       const tag = (await tx.objectStore('tags').get(tagId)) as TagRecord | undefined;
       if (tag) {
         await tx.objectStore('tags').put({ ...tag, isDeleted: true, updatedAt: now, isDirty: true });
@@ -2015,6 +2333,17 @@ class ThingsLocalDb {
           await tx.objectStore('areas').put({
             ...a,
             tagIds: a.tagIds.filter((id) => id !== tagId),
+            updatedAt: now,
+            isDirty: true
+          });
+        }
+      }
+      const templates = (await tx.objectStore('projectTemplates').getAll()) as ProjectTemplate[];
+      for (const tpl of templates) {
+        if (!tpl.isDeleted && tpl.tagIds.includes(tagId)) {
+          await tx.objectStore('projectTemplates').put({
+            ...tpl,
+            tagIds: tpl.tagIds.filter((id) => id !== tagId),
             updatedAt: now,
             isDirty: true
           });
@@ -2094,7 +2423,16 @@ class ThingsLocalDb {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
       const tx = db.transaction(
-        ['tasks', 'checklist_items', 'headings', 'projects', 'tags', 'areas', 'attachments'],
+        [
+          'tasks',
+          'checklist_items',
+          'headings',
+          'projects',
+          'tags',
+          'areas',
+          'attachments',
+          'projectTemplates'
+        ],
         'readwrite'
       );
 
@@ -2137,7 +2475,16 @@ class ThingsLocalDb {
       }
 
       if (markRemainingDirtyForMerge) {
-        const stores = ['areas', 'projects', 'headings', 'tasks', 'checklist_items', 'tags', 'attachments'] as const;
+        const stores = [
+          'areas',
+          'projects',
+          'headings',
+          'tasks',
+          'checklist_items',
+          'tags',
+          'attachments',
+          'projectTemplates'
+        ] as const;
         for (const sName of stores) {
           const all = await tx.objectStore(sName).getAll();
           for (const rec of all) {
@@ -2157,7 +2504,16 @@ class ThingsLocalDb {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
       const tx = db.transaction(
-        ['areas', 'projects', 'headings', 'tasks', 'checklist_items', 'tags', 'attachments'],
+        [
+          'areas',
+          'projects',
+          'headings',
+          'tasks',
+          'checklist_items',
+          'tags',
+          'attachments',
+          'projectTemplates'
+        ],
         'readwrite'
       );
       await tx.objectStore('attachments').clear();
@@ -2167,6 +2523,7 @@ class ThingsLocalDb {
       await tx.objectStore('projects').clear();
       await tx.objectStore('areas').clear();
       await tx.objectStore('tags').clear();
+      await tx.objectStore('projectTemplates').clear();
       await tx.done;
       await this.refreshSnapshot();
     });
@@ -2176,14 +2533,24 @@ class ThingsLocalDb {
 
   async getDirtyEntities() {
     const db = await this.getDb();
-    const [areas, projects, headings, tasks, checklistItems, tags, attachments] = await Promise.all([
+    const [
+      areas,
+      projects,
+      headings,
+      tasks,
+      checklistItems,
+      tags,
+      attachments,
+      projectTemplates
+    ] = await Promise.all([
       db.getAll('areas') as Promise<AreaRecord[]>,
       db.getAll('projects') as Promise<ProjectRecord[]>,
       db.getAll('headings') as Promise<HeadingRecord[]>,
       db.getAll('tasks') as Promise<TaskRecord[]>,
       db.getAll('checklist_items') as Promise<ChecklistItemRecord[]>,
       db.getAll('tags') as Promise<TagRecord[]>,
-      db.getAll('attachments') as Promise<AttachmentRecord[]>
+      db.getAll('attachments') as Promise<AttachmentRecord[]>,
+      db.getAll('projectTemplates') as Promise<ProjectTemplate[]>
     ]);
     return {
       areas: areas.filter((x) => x.isDirty),
@@ -2192,7 +2559,8 @@ class ThingsLocalDb {
       tasks: tasks.filter((x) => x.isDirty),
       checklistItems: checklistItems.filter((x) => x.isDirty),
       tags: tags.filter((x) => x.isDirty),
-      attachments: attachments.filter((x) => x.isDirty)
+      attachments: attachments.filter((x) => x.isDirty),
+      projectTemplates: projectTemplates.filter((x) => x.isDirty)
     };
   }
 
@@ -2204,11 +2572,21 @@ class ThingsLocalDb {
     checklistItems?: { ids: string[]; maxUpdatedAt?: number };
     tags?: { ids: string[]; maxUpdatedAt?: number };
     attachments?: { ids: string[]; maxUpdatedAt?: number };
+    projectTemplates?: { ids: string[]; maxUpdatedAt?: number };
   }): Promise<void> {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
       const tx = db.transaction(
-        ['areas', 'projects', 'headings', 'tasks', 'checklist_items', 'tags', 'attachments'],
+        [
+          'areas',
+          'projects',
+          'headings',
+          'tasks',
+          'checklist_items',
+          'tags',
+          'attachments',
+          'projectTemplates'
+        ],
         'readwrite'
       );
       const map: Array<[string, { ids: string[]; maxUpdatedAt?: number } | undefined]> = [
@@ -2218,7 +2596,8 @@ class ThingsLocalDb {
         ['tasks', idsByStore.tasks],
         ['checklist_items', idsByStore.checklistItems],
         ['tags', idsByStore.tags],
-        ['attachments', idsByStore.attachments]
+        ['attachments', idsByStore.attachments],
+        ['projectTemplates', idsByStore.projectTemplates]
       ];
       for (const [storeName, spec] of map) {
         if (!spec || spec.ids.length === 0) continue;
@@ -2243,12 +2622,22 @@ class ThingsLocalDb {
     tasks?: TaskRecord[];
     checklistItems?: ChecklistItemRecord[];
     attachments?: AttachmentRecord[];
+    projectTemplates?: ProjectTemplate[];
   }): Promise<number> {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
       let maxUpdatedAt = 0;
       const tx = db.transaction(
-        ['tags', 'areas', 'projects', 'headings', 'tasks', 'checklist_items', 'attachments'],
+        [
+          'tags',
+          'areas',
+          'projects',
+          'headings',
+          'tasks',
+          'checklist_items',
+          'attachments',
+          'projectTemplates'
+        ],
         'readwrite'
       );
 
@@ -2295,6 +2684,7 @@ class ThingsLocalDb {
         }
         return remote;
       });
+      await applyList('projectTemplates', batch.projectTemplates);
 
       await tx.done;
 
@@ -2325,6 +2715,7 @@ class ThingsLocalDb {
       checklistItems: snap.checklistItems,
       tags: snap.tags,
       attachments: snap.attachments,
+      projectTemplates: snap.projectTemplates,
       preferences: {
         sidebarVisible: prefs.sidebarVisible,
         dailyDigestEnabled: prefs.dailyDigestEnabled,
@@ -2333,9 +2724,11 @@ class ThingsLocalDb {
         languageTag: prefs.language === 'system' ? '' : prefs.language,
         calendarEventsEnabled: prefs.calendarEventsEnabled,
         selectedCalendarIds: prefs.selectedCalendarIds,
-        groupTodayByProjectOrArea: prefs.groupTodayByProjectOrArea
+        groupTodayByProjectOrArea: prefs.groupTodayByProjectOrArea,
+        includeBetaUpdates: Boolean(prefs.includeBetaUpdates),
+        lastWeeklyReviewAt: prefs.lastWeeklyReviewAt || 0
       },
-      appVersionName: '1.8.1-chromeos'
+      appVersionName: '2.0.0-beta.1-chromeos'
     });
     const bytes = await encodeThingsBackup(payload, password);
     return {
@@ -2359,180 +2752,30 @@ class ThingsLocalDb {
   }> {
     const payload = await decodeThingsBackup(rawBytes, password);
     const now = Date.now();
-
-    const validTags = (payload.tags || []).filter((t) => t.id && t.title);
-    const validTagIds = new Set(validTags.map((t) => t.id));
-    const tags: TagRecord[] = validTags.map((tg) => ({
-      id: tg.id,
-      title: tg.title.trim(),
-      parentTagId: tg.parentTagId && validTagIds.has(tg.parentTagId) && tg.parentTagId !== tg.id ? tg.parentTagId : null,
-      shortcut: tg.shortcut?.trim() || null,
-      sortOrder: Number.isFinite(tg.sortOrder) ? tg.sortOrder : 0,
-      createdAt: tg.createdAt || now,
-      updatedAt: tg.updatedAt || now,
-      isDeleted: false,
-      isDirty: syncAfterRestore
-    }));
-
-    const areas: AreaRecord[] = (payload.areas || [])
-      .filter((a) => a.id && a.title)
-      .slice(0, MAX_AREAS)
-      .map((a) => ({
-        id: a.id,
-        title: a.title.trim(),
-        sortOrder: Number.isFinite(a.sortOrder) ? a.sortOrder : 0,
-        tagIds: safeParseTagList(a.tagIdsJson).filter((id) => validTagIds.has(id)),
-        createdAt: a.createdAt || now,
-        updatedAt: a.updatedAt || now,
-        isDeleted: false,
-        isDirty: syncAfterRestore
-      }));
-    const validAreaIds = new Set(areas.map((a) => a.id));
-
-    const projRefMap = new Map<string, string[]>();
-    for (const ref of payload.projectTagRefs || []) {
-      if (validTagIds.has(ref.tagId)) {
-        const list = projRefMap.get(ref.projectId) || [];
-        list.push(ref.tagId);
-        projRefMap.set(ref.projectId, list);
-      }
-    }
-
-    const projects: ProjectRecord[] = (payload.projects || [])
-      .filter((p) => p.id)
-      .map((p) => {
-        const mergedTags = Array.from(
-          new Set([...safeParseTagList(p.tagIdsJson), ...(projRefMap.get(p.id) || [])])
-        ).filter((id) => validTagIds.has(id));
-        return {
-          id: p.id,
-          areaId: p.areaId && validAreaIds.has(p.areaId) ? p.areaId : null,
-          title: p.title || '',
-          notes: p.notes || '',
-          status: normalizeProjectStatus(p.status),
-          scheduleState: normalizeScheduleState(p.scheduleState, 'ANYTIME'),
-          whenDate: p.whenDate ?? null,
-          deadline: p.deadline ?? null,
-          completedAt: p.completedAt ?? null,
-          sortOrder: Number.isFinite(p.sortOrder) ? p.sortOrder : 0,
-          tagIds: mergedTags,
-          createdAt: p.createdAt || now,
-          updatedAt: p.updatedAt || now,
-          isDeleted: false,
-          isDirty: syncAfterRestore
-        };
-      });
-    const validProjectIds = new Set(projects.map((p) => p.id));
-
-    const headings: HeadingRecord[] = (payload.headings || [])
-      .filter((h) => h.id && validProjectIds.has(h.projectId))
-      .map((h) => ({
-        id: h.id,
-        projectId: h.projectId,
-        title: h.title || '',
-        sortOrder: Number.isFinite(h.sortOrder) ? h.sortOrder : 0,
-        isArchived: Boolean(h.isArchived),
-        createdAt: h.createdAt || now,
-        updatedAt: h.updatedAt || now,
-        isDeleted: false,
-        isDirty: syncAfterRestore
-      }));
-    const headingProjectMap = new Map(headings.map((h) => [h.id, h.projectId]));
-
-    const taskRefMap = new Map<string, string[]>();
-    for (const ref of payload.taskTagRefs || []) {
-      if (validTagIds.has(ref.tagId)) {
-        const list = taskRefMap.get(ref.taskId) || [];
-        list.push(ref.tagId);
-        taskRefMap.set(ref.taskId, list);
-      }
-    }
-
-    const tasks: TaskRecord[] = (payload.tasks || [])
-      .filter((t) => t.id)
-      .map((t) => {
-        const cleanProjId = t.projectId && validProjectIds.has(t.projectId) ? t.projectId : null;
-        const cleanHeadId =
-          cleanProjId && t.headingId && headingProjectMap.get(t.headingId) === cleanProjId
-            ? t.headingId
-            : null;
-        const cleanAreaId = t.areaId && validAreaIds.has(t.areaId) ? t.areaId : null;
-        const mergedTags = Array.from(
-          new Set([...safeParseTagList(t.tagIdsJson), ...(taskRefMap.get(t.id) || [])])
-        ).filter((id) => validTagIds.has(id));
-        const parsedRecurrence = safeParseRecurrence(t.recurrenceRuleJson);
-        const rawSchedule = normalizeScheduleState(t.scheduleState, 'INBOX');
-        const normalizedSchedule: ScheduleState =
-          rawSchedule === 'INBOX' &&
-          t.whenDate == null &&
-          parsedRecurrence == null &&
-          (cleanProjId != null || cleanAreaId != null)
-            ? 'ANYTIME'
-            : rawSchedule;
-
-        return {
-          id: t.id,
-          title: t.title || '',
-          notes: t.notes || '',
-          status: normalizeTaskStatus(t.status),
-          scheduleState: normalizedSchedule,
-          whenDate: t.whenDate ?? null,
-          deadline: t.deadline ?? null,
-          reminderTime: t.reminderTime ?? null,
-          completedAt: t.completedAt ?? null,
-          projectId: cleanProjId,
-          headingId: cleanHeadId,
-          areaId: cleanAreaId,
-          recurrenceRule: parsedRecurrence,
-          sortOrder: Number.isFinite(t.sortOrder) ? t.sortOrder : 0,
-          tagIds: mergedTags,
-          createdAt: t.createdAt || now,
-          updatedAt: t.updatedAt || now,
-          isDeleted: false,
-          isDirty: syncAfterRestore
-        };
-      });
-    const validTaskIds = new Set(tasks.map((t) => t.id));
-
-    const checklistItems: ChecklistItemRecord[] = (payload.checklistItems || [])
-      .filter((c) => c.id && validTaskIds.has(c.taskId))
-      .map((c) => ({
-        id: c.id,
-        taskId: c.taskId,
-        title: c.title || '',
-        isCompleted: Boolean(c.isCompleted),
-        sortOrder: Number.isFinite(c.sortOrder) ? c.sortOrder : 0,
-        createdAt: c.createdAt || now,
-        updatedAt: c.updatedAt || now,
-        isDeleted: false,
-        isDirty: syncAfterRestore
-      }));
-
-    const attachments: AttachmentRecord[] = (payload.attachments || [])
-      .filter((att) => {
-        if (!att.id || !att.dataBase64) return false;
-        const hasValidTask = Boolean(att.taskId && validTaskIds.has(att.taskId));
-        const hasValidProj = Boolean(att.projectId && validProjectIds.has(att.projectId));
-        return hasValidTask || hasValidProj;
-      })
-      .map((att) => ({
-        id: att.id,
-        taskId: att.taskId && validTaskIds.has(att.taskId) ? att.taskId : null,
-        projectId: att.projectId && validProjectIds.has(att.projectId) ? att.projectId : null,
-        fileName: att.fileName || 'attachment',
-        mimeType: att.mimeType || 'application/octet-stream',
-        sizeBytes: Number.isFinite(att.sizeBytes) ? att.sizeBytes : 0,
-        dataBase64: att.dataBase64,
-        sortOrder: Number.isFinite(att.sortOrder) ? Number(att.sortOrder) : (att.createdAt || now),
-        createdAt: att.createdAt || now,
-        updatedAt: att.updatedAt || now,
-        isDeleted: false,
-        isDirty: syncAfterRestore
-      }));
+    const normalized = normalizeBackupPayloadToEntities(payload, syncAfterRestore, now);
+    const {
+      tags,
+      areas,
+      projects,
+      headings,
+      tasks,
+      checklistItems,
+      attachments,
+      projectTemplates
+    } = normalized;
 
     const db = await this.getDb();
     const tx = db.transaction(
-      ['areas', 'projects', 'headings', 'tasks', 'checklist_items', 'tags', 'attachments'],
+      [
+        'areas',
+        'projects',
+        'headings',
+        'tasks',
+        'checklist_items',
+        'tags',
+        'attachments',
+        'projectTemplates'
+      ],
       'readwrite'
     );
     await tx.objectStore('attachments').clear();
@@ -2542,6 +2785,7 @@ class ThingsLocalDb {
     await tx.objectStore('projects').clear();
     await tx.objectStore('areas').clear();
     await tx.objectStore('tags').clear();
+    await tx.objectStore('projectTemplates').clear();
 
     for (const a of areas) await tx.objectStore('areas').put(a);
     for (const tg of tags) await tx.objectStore('tags').put(tg);
@@ -2550,6 +2794,7 @@ class ThingsLocalDb {
     for (const t of tasks) await tx.objectStore('tasks').put(t);
     for (const c of checklistItems) await tx.objectStore('checklist_items').put(c);
     for (const att of attachments) await tx.objectStore('attachments').put(att);
+    for (const tpl of projectTemplates) await tx.objectStore('projectTemplates').put(tpl);
     await tx.done;
 
     await this.refreshSnapshot();
@@ -2568,7 +2813,8 @@ class ThingsLocalDb {
         tasksCount: tasks.length,
         checklistItemsCount: checklistItems.length,
         tagsCount: tags.length,
-        attachmentsCount: attachments.length
+        attachmentsCount: attachments.length,
+        projectTemplatesCount: projectTemplates.length
       },
       languageTag: payload.preferences?.languageTag,
       preferences: payload.preferences ?? null

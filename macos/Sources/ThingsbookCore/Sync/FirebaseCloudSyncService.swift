@@ -110,6 +110,9 @@ public actor FirebaseCloudSyncService {
     public static func attachmentBackfillDefaultsKey(uid: String) -> String {
         "thingsbook.sync.attBackfillV1.\(uid)"
     }
+    public static func templateBackfillDefaultsKey(uid: String) -> String {
+        "thingsbook.sync.tmplBackfillV1.\(uid)"
+    }
 
     private static let keychainAccount = "firebase_auth_session_v1"
     private static let lastSyncCursorPrefix = "thingsbook_macos_last_sync_ts_"
@@ -435,7 +438,7 @@ public actor FirebaseCloudSyncService {
             let dirty = try database.fetchDirtyBatch()
             let hasAny = !dirty.tags.isEmpty || !dirty.areas.isEmpty || !dirty.projects.isEmpty
                 || !dirty.headings.isEmpty || !dirty.tasks.isEmpty || !dirty.checklistItems.isEmpty
-                || !dirty.attachments.isEmpty
+                || !dirty.attachments.isEmpty || !dirty.projectTemplates.isEmpty
             guard hasAny else { return }
             let validToken = try await validIdToken()
             let config = FirebaseConfig.loadActive()
@@ -624,6 +627,7 @@ public actor FirebaseCloudSyncService {
                 "whenDate": Self.fsNullableInt(proj.whenDate),
                 "deadline": Self.fsNullableInt(proj.deadline),
                 "completedAt": Self.fsNullableInt(proj.completedAt),
+                "lastReviewedAt": Self.fsNullableInt(proj.lastReviewedAt),
                 "sortOrder": Self.fsDouble(proj.sortOrder),
                 "tagIds": Self.fsStringArray(proj.tagIds),
                 "createdAt": Self.fsInt(proj.createdAt),
@@ -660,6 +664,8 @@ public actor FirebaseCloudSyncService {
                 "whenDate": Self.fsNullableInt(task.whenDate),
                 "deadline": Self.fsNullableInt(task.deadline),
                 "reminderTime": Self.fsNullableInt(task.reminderTime),
+                "scheduledStartMinutes": Self.fsNullableInt(task.scheduledStartMinutes.map(Int64.init)),
+                "durationMinutes": Self.fsNullableInt(task.durationMinutes.map(Int64.init)),
                 "completedAt": Self.fsNullableInt(task.completedAt),
                 "projectId": Self.fsNullableString(task.projectId),
                 "headingId": Self.fsNullableString(task.headingId),
@@ -683,6 +689,21 @@ public actor FirebaseCloudSyncService {
                 "createdAt": Self.fsInt(chk.createdAt),
                 "updatedAt": Self.fsInt(chk.updatedAt),
                 "isDeleted": Self.fsBool(chk.isDeleted)
+            ]))
+        }
+
+        for tmpl in dirty.projectTemplates {
+            writes.append(Self.makeUpdateWrite(path: "\(baseDocPrefix)/project_templates/\(tmpl.id)", fields: [
+                "id": Self.fsString(tmpl.id),
+                "title": Self.fsString(tmpl.title),
+                "notes": Self.fsString(tmpl.notes),
+                "defaultAreaId": Self.fsNullableString(tmpl.defaultAreaId),
+                "tagIds": Self.fsStringArray(tmpl.tagIds),
+                "blueprintJson": Self.fsString(tmpl.blueprintJson),
+                "sortOrder": Self.fsDouble(tmpl.sortOrder),
+                "createdAt": Self.fsInt(tmpl.createdAt),
+                "updatedAt": Self.fsInt(tmpl.updatedAt),
+                "isDeleted": Self.fsBool(tmpl.isDeleted)
             ]))
         }
 
@@ -742,6 +763,7 @@ public actor FirebaseCloudSyncService {
     private func pushDirtyBatchToNtfyRelay(dirty: SyncDirtyBatch, uid: String, topic: String, deviceId: String) async {
         let hasEntities = !dirty.tags.isEmpty || !dirty.areas.isEmpty || !dirty.projects.isEmpty
             || !dirty.headings.isEmpty || !dirty.tasks.isEmpty || !dirty.checklistItems.isEmpty
+            || !dirty.projectTemplates.isEmpty
         guard hasEntities,
               let encoded = topic.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
               let url = URL(string: "https://ntfy.sh/\(encoded)") else { return }
@@ -783,6 +805,7 @@ public actor FirebaseCloudSyncService {
                 "whenDate": proj.whenDate as Any,
                 "deadline": proj.deadline as Any,
                 "completedAt": proj.completedAt as Any,
+                "lastReviewedAt": proj.lastReviewedAt as Any,
                 "sortOrder": proj.sortOrder,
                 "tagIds": proj.tagIds,
                 "createdAt": proj.createdAt,
@@ -816,6 +839,8 @@ public actor FirebaseCloudSyncService {
                 "whenDate": task.whenDate as Any,
                 "deadline": task.deadline as Any,
                 "reminderTime": task.reminderTime as Any,
+                "scheduledStartMinutes": task.scheduledStartMinutes as Any,
+                "durationMinutes": task.durationMinutes as Any,
                 "completedAt": task.completedAt as Any,
                 "projectId": task.projectId as Any,
                 "headingId": task.headingId as Any,
@@ -838,6 +863,20 @@ public actor FirebaseCloudSyncService {
                 "createdAt": chk.createdAt,
                 "updatedAt": chk.updatedAt,
                 "isDeleted": chk.isDeleted
+            ]
+        }
+        let tmplMaps: [[String: Any]] = dirty.projectTemplates.map { tmpl in
+            [
+                "id": tmpl.id,
+                "title": tmpl.title,
+                "notes": tmpl.notes,
+                "defaultAreaId": tmpl.defaultAreaId as Any,
+                "tagIds": tmpl.tagIds,
+                "blueprintJson": tmpl.blueprintJson,
+                "sortOrder": tmpl.sortOrder,
+                "createdAt": tmpl.createdAt,
+                "updatedAt": tmpl.updatedAt,
+                "isDeleted": tmpl.isDeleted
             ]
         }
 
@@ -867,14 +906,15 @@ public actor FirebaseCloudSyncService {
             "projects": projMaps.map(sanitize),
             "headings": headMaps.map(sanitize),
             "tasks": taskMaps.map(sanitize),
-            "checklistItems": chkMaps.map(sanitize)
+            "checklistItems": chkMaps.map(sanitize),
+            "projectTemplates": tmplMaps.map(sanitize)
         ]
 
         var payloads: [Data] = []
         if let single = try? JSONSerialization.data(withJSONObject: fullBatch), single.count <= 3800 {
             payloads.append(single)
         } else {
-            if !tagMaps.isEmpty || !areaMaps.isEmpty || !projMaps.isEmpty || !headMaps.isEmpty {
+            if !tagMaps.isEmpty || !areaMaps.isEmpty || !projMaps.isEmpty || !headMaps.isEmpty || !tmplMaps.isEmpty {
                 let metaBatch: [String: Any] = [
                     "userId": uid,
                     "deviceId": deviceId,
@@ -882,7 +922,8 @@ public actor FirebaseCloudSyncService {
                     "tags": tagMaps.map(sanitize),
                     "areas": areaMaps.map(sanitize),
                     "projects": projMaps.map(sanitize),
-                    "headings": headMaps.map(sanitize)
+                    "headings": headMaps.map(sanitize),
+                    "projectTemplates": tmplMaps.map(sanitize)
                 ]
                 if let d = try? JSONSerialization.data(withJSONObject: metaBatch) { payloads.append(d) }
             }
@@ -920,6 +961,10 @@ public actor FirebaseCloudSyncService {
         let needsAttBackfill = !UserDefaults.standard.bool(forKey: attBackfillKey)
         let attSince: Int64 = needsAttBackfill ? 0 : sinceTimestamp
 
+        let tmplBackfillKey = Self.templateBackfillDefaultsKey(uid: uid)
+        let needsTmplBackfill = !UserDefaults.standard.bool(forKey: tmplBackfillKey)
+        let tmplSince: Int64 = needsTmplBackfill ? 0 : sinceTimestamp
+
         async let rawTags = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "tags", since: sinceTimestamp)
         async let rawAreas = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "areas", since: sinceTimestamp)
         async let rawProjects = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "projects", since: sinceTimestamp)
@@ -927,9 +972,10 @@ public actor FirebaseCloudSyncService {
         async let rawTasks = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "tasks", since: sinceTimestamp)
         async let rawChecklists = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "checklist_items", since: sinceTimestamp)
         async let rawAttachments = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "attachments", since: attSince)
+        async let rawTemplates = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "project_templates", since: tmplSince)
 
-        let (tagMaps, areaMaps, projMaps, headMaps, taskMaps, chkMaps, attMaps) = try await (
-            rawTags, rawAreas, rawProjects, rawHeadings, rawTasks, rawChecklists, rawAttachments
+        let (tagMaps, areaMaps, projMaps, headMaps, taskMaps, chkMaps, attMaps, tmplMaps) = try await (
+            rawTags, rawAreas, rawProjects, rawHeadings, rawTasks, rawChecklists, rawAttachments, rawTemplates
         )
 
         let tags = tagMaps.compactMap(Self.parseTag)
@@ -944,10 +990,14 @@ public actor FirebaseCloudSyncService {
         }
         let checklists = chkMaps.compactMap(Self.parseChecklist)
         let attachments = attMaps.compactMap(Self.parseAttachment)
+        let projectTemplates = tmplMaps.compactMap(Self.parseProjectTemplate)
 
-        if tags.isEmpty && areas.isEmpty && projects.isEmpty && headings.isEmpty && tasks.isEmpty && checklists.isEmpty && attachments.isEmpty {
+        if tags.isEmpty && areas.isEmpty && projects.isEmpty && headings.isEmpty && tasks.isEmpty && checklists.isEmpty && attachments.isEmpty && projectTemplates.isEmpty {
             if needsAttBackfill {
                 UserDefaults.standard.set(true, forKey: attBackfillKey)
+            }
+            if needsTmplBackfill {
+                UserDefaults.standard.set(true, forKey: tmplBackfillKey)
             }
             return sinceTimestamp
         }
@@ -960,11 +1010,15 @@ public actor FirebaseCloudSyncService {
             tasks: tasks,
             taskTagIdsByTaskId: taskTagIds,
             checklistItems: checklists,
-            attachments: attachments
+            attachments: attachments,
+            projectTemplates: projectTemplates
         )
         let appliedMax = try database.applyRemoteDeltas(batch)
         if needsAttBackfill {
             UserDefaults.standard.set(true, forKey: attBackfillKey)
+        }
+        if needsTmplBackfill {
+            UserDefaults.standard.set(true, forKey: tmplBackfillKey)
         }
         return appliedMax
     }
@@ -1072,6 +1126,7 @@ public actor FirebaseCloudSyncService {
             }
             let checklists = (batch["checklistItems"] as? [[String: Any]] ?? []).compactMap(Self.parseChecklist)
             let attachments = (batch["attachments"] as? [[String: Any]] ?? []).compactMap(Self.parseAttachment)
+            let projectTemplates = (batch["projectTemplates"] as? [[String: Any]] ?? []).compactMap(Self.parseProjectTemplate)
 
             if let batchMax = try? database.applyRemoteDeltas(
                 RemoteDeltaBatch(
@@ -1082,7 +1137,8 @@ public actor FirebaseCloudSyncService {
                     tasks: tasks,
                     taskTagIdsByTaskId: taskTags,
                     checklistItems: checklists,
-                    attachments: attachments
+                    attachments: attachments,
+                    projectTemplates: projectTemplates
                 )
             ) {
                 maxApplied = max(maxApplied, max(batchMax, batchTs))
@@ -1526,6 +1582,7 @@ public actor FirebaseCloudSyncService {
             whenDate: asInt64(map["whenDate"]),
             deadline: asInt64(map["deadline"]),
             completedAt: asInt64(map["completedAt"]),
+            lastReviewedAt: asInt64(map["lastReviewedAt"]),
             sortOrder: asDouble(map["sortOrder"]),
             tagIds: asStringList(map["tagIds"]),
             createdAt: asInt64(map["createdAt"]) ?? 0,
@@ -1564,6 +1621,8 @@ public actor FirebaseCloudSyncService {
             whenDate: asInt64(map["whenDate"]),
             deadline: asInt64(map["deadline"]),
             reminderTime: asInt64(map["reminderTime"]),
+            scheduledStartMinutes: asInt64(map["scheduledStartMinutes"]).map(Int.init),
+            durationMinutes: asInt64(map["durationMinutes"]).map(Int.init),
             completedAt: asInt64(map["completedAt"]),
             projectId: asString(map["projectId"]),
             headingId: asString(map["headingId"]),
@@ -1608,5 +1667,29 @@ public actor FirebaseCloudSyncService {
         )
         let dataB64 = (map["dataBase64"] as? String) ?? ""
         return RemoteAttachmentDelta(attachment: att, dataBase64: dataB64)
+    }
+
+    public static func parseProjectTemplate(_ map: [String: Any]) -> ProjectTemplate? {
+        guard let id = asString(map["id"]) else { return nil }
+        var tids = asStringList(map["tagIds"])
+        if tids.isEmpty,
+           let rawJson = asString(map["tagIdsJson"]),
+           let data = rawJson.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode([String].self, from: data) {
+            tids = decoded
+        }
+        return ProjectTemplate(
+            id: id,
+            title: (map["title"] as? String) ?? "",
+            notes: (map["notes"] as? String) ?? "",
+            defaultAreaId: asString(map["defaultAreaId"]),
+            tagIds: tids,
+            blueprintJson: (map["blueprintJson"] as? String) ?? "{}",
+            sortOrder: asDouble(map["sortOrder"]),
+            createdAt: asInt64(map["createdAt"]) ?? 0,
+            updatedAt: asInt64(map["updatedAt"]) ?? 0,
+            isDeleted: asBool(map["isDeleted"]),
+            isDirty: false
+        )
     }
 }

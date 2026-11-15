@@ -4,6 +4,8 @@ import {
   BookOpenCheck,
   CalendarDays,
   CheckSquare,
+  ClipboardList,
+  Compass,
   Download,
   Flag,
   Inbox,
@@ -23,6 +25,7 @@ import {
   type SmartViewType,
   type TaskRecord
 } from '../domain/types';
+import { isPrereleaseVersion } from '../data/versionUtils';
 import type { TranslationStrings } from '../i18n/translations';
 import { ProjectProgressRing } from './ProjectProgressRing';
 
@@ -40,12 +43,15 @@ interface SidebarProps {
     someday: number;
     trash?: number;
   };
+  stalledProjectsCount?: number;
   canInstallPwa: boolean;
   isStandalonePwa: boolean;
   t: TranslationStrings;
   onSelectNav: (nav: ActiveNavigation) => void;
   onCloseMobile: () => void;
   onCreateProjectInArea: (areaId: string | null) => void;
+  onOpenTemplates: (areaId: string | null) => void;
+  onOpenWeeklyReview: () => void;
   onOpenManageAreas: () => void;
   onDropTaskOnTarget: (
     taskId: string,
@@ -64,12 +70,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   projects,
   tasks,
   counts,
+  stalledProjectsCount = 0,
   canInstallPwa,
   isStandalonePwa,
   t,
   onSelectNav,
   onCloseMobile,
   onCreateProjectInArea,
+  onOpenTemplates,
+  onOpenWeeklyReview,
   onOpenManageAreas,
   onDropTaskOnTarget,
   onTriggerInstallPwa
@@ -81,6 +90,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const unassignedProjects = activeProjects.filter(
     (p) => !p.areaId || !activeAreas.some((a) => a.id === p.areaId)
   );
+  const isBetaBuild = isPrereleaseVersion(APP_VERSION);
 
   const projectProgress = (projectId: string) => {
     const projTasks = tasks.filter(
@@ -89,6 +99,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const done = projTasks.filter((tk) => tk.status === 'COMPLETED').length;
     return { done, total: projTasks.length };
   };
+
+  const resolveCurrentAreaId = (): string | null =>
+    activeNav.kind === 'area'
+      ? activeNav.areaId
+      : activeNav.kind === 'project'
+        ? (projects.find((p) => p.id === activeNav.projectId)?.areaId ?? null)
+        : null;
 
   const makeDropHandlers = (
     key: string,
@@ -185,6 +202,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <CheckSquare size={14} strokeWidth={2.6} />
             </span>
             <span className="brand-name">{t.appName}</span>
+            {isBetaBuild && <span className="v2-beta-pill">{t.betaChannelBadge}</span>}
           </button>
           <button
             type="button"
@@ -255,6 +273,43 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
             );
           })()}
+
+          {/* v2.0 Guided GTD Weekly Review & Templates Launchers */}
+          <div style={{ height: 6 }} />
+          <button
+            type="button"
+            className="nav-item"
+            data-testid="sidebar-weekly-review-btn"
+            title={`${t.weeklyReviewTitle} (Ctrl+Shift+R)`}
+            onClick={() => {
+              onCloseMobile();
+              onOpenWeeklyReview();
+            }}
+          >
+            <span className="nav-item-icon">
+              <Compass size={16.5} style={{ color: 'var(--things-blue)' }} />
+            </span>
+            <span className="nav-item-label">🧭 {t.weeklyReviewBtn}</span>
+            {stalledProjectsCount > 0 && (
+              <span className="nav-item-count v2-warn-count">{stalledProjectsCount}</span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            className="nav-item"
+            data-testid="sidebar-templates-btn"
+            title={t.templatesModalTitle}
+            onClick={() => {
+              onCloseMobile();
+              onOpenTemplates(resolveCurrentAreaId());
+            }}
+          >
+            <span className="nav-item-icon">
+              <ClipboardList size={16.5} style={{ color: 'var(--gemini-violet)' }} />
+            </span>
+            <span className="nav-item-label">📋 {t.templatesBtn}</span>
+          </button>
 
           {(activeAreas.length > 0 || unassignedProjects.length > 0) && (
             <div className="sidebar-divider" />
@@ -374,15 +429,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             type="button"
             className="sidebar-footer-btn"
             title={`${t.entityNewProject} (Ctrl+Shift+N)`}
-            onClick={() => {
-              const preselectedAreaId =
-                activeNav.kind === 'area'
-                  ? activeNav.areaId
-                  : activeNav.kind === 'project'
-                    ? (projects.find((p) => p.id === activeNav.projectId)?.areaId ?? null)
-                    : null;
-              onCreateProjectInArea(preselectedAreaId);
-            }}
+            onClick={() => onCreateProjectInArea(resolveCurrentAreaId())}
           >
             <Plus size={14} />
             <span>{t.entityNewProject}</span>
@@ -395,7 +442,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
 
-        <div className="sidebar-version-row">Thingsbook v{APP_VERSION}</div>
+        <div className="sidebar-version-row">
+          <span>Thingsbook v{APP_VERSION}</span>
+          {isBetaBuild && <span className="v2-beta-pill">{t.betaChannelBadge}</span>}
+        </div>
       </aside>
     </>
   );
@@ -418,6 +468,8 @@ interface SmartViewNavigationStripProps {
   isSoftKeyboardOpen?: boolean;
   onSelectNav: (nav: ActiveNavigation) => void;
   onCreateProject: () => void;
+  onOpenTemplates: () => void;
+  onOpenWeeklyReview: () => void;
   onOpenManageAreas: () => void;
 }
 
@@ -431,6 +483,8 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
   isSoftKeyboardOpen = false,
   onSelectNav,
   onCreateProject,
+  onOpenTemplates,
+  onOpenWeeklyReview,
   onOpenManageAreas
 }) => {
   const activeAreas = areas.filter((a) => !a.isDeleted);
@@ -513,6 +567,14 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
             </button>
           );
         })}
+
+        <span className="strip-divider" />
+        <button type="button" className="strip-pill" onClick={onOpenWeeklyReview}>
+          <span>🧭 {t.weeklyReviewBtn}</span>
+        </button>
+        <button type="button" className="strip-pill" onClick={onOpenTemplates}>
+          <span>📋 {t.templatesBtn}</span>
+        </button>
 
         {activeAreas.length > 0 && <span className="strip-divider" />}
         {activeAreas.map((area) => {

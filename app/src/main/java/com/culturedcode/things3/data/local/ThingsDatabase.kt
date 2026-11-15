@@ -11,6 +11,7 @@ import com.culturedcode.things3.data.local.dao.AttachmentDao
 import com.culturedcode.things3.data.local.dao.ChecklistDao
 import com.culturedcode.things3.data.local.dao.HeadingDao
 import com.culturedcode.things3.data.local.dao.ProjectDao
+import com.culturedcode.things3.data.local.dao.ProjectTemplateDao
 import com.culturedcode.things3.data.local.dao.TagDao
 import com.culturedcode.things3.data.local.dao.TaskDao
 import com.culturedcode.things3.data.local.entity.AreaEntity
@@ -19,6 +20,7 @@ import com.culturedcode.things3.data.local.entity.ChecklistItemEntity
 import com.culturedcode.things3.data.local.entity.HeadingEntity
 import com.culturedcode.things3.data.local.entity.ProjectEntity
 import com.culturedcode.things3.data.local.entity.ProjectTagCrossRef
+import com.culturedcode.things3.data.local.entity.ProjectTemplateEntity
 import com.culturedcode.things3.data.local.entity.TagEntity
 import com.culturedcode.things3.data.local.entity.TaskEntity
 import com.culturedcode.things3.data.local.entity.TaskTagCrossRef
@@ -33,9 +35,10 @@ import com.culturedcode.things3.data.local.entity.TaskTagCrossRef
         TagEntity::class,
         TaskTagCrossRef::class,
         ProjectTagCrossRef::class,
-        AttachmentEntity::class
+        AttachmentEntity::class,
+        ProjectTemplateEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 @TypeConverters(ThingsTypeConverters::class)
@@ -47,6 +50,7 @@ abstract class ThingsDatabase : RoomDatabase() {
     abstract fun checklistDao(): ChecklistDao
     abstract fun tagDao(): TagDao
     abstract fun attachmentDao(): AttachmentDao
+    abstract fun projectTemplateDao(): ProjectTemplateDao
 
     companion object {
         const val DATABASE_NAME = "thingsbook_v5_mac_edition.db"

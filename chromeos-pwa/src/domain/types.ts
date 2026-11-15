@@ -1,5 +1,5 @@
-export const APP_VERSION = '1.8.1';
-export const APP_BUILD_CODE = 44;
+export const APP_VERSION = '2.0.0-beta.1';
+export const APP_BUILD_CODE = 45;
 export const MAX_AREAS = 8;
 
 export type ScheduleState =
@@ -67,6 +67,7 @@ export interface ProjectRecord {
   whenDate: number | null;
   deadline: number | null;
   completedAt: number | null;
+  lastReviewedAt?: number | null;
   sortOrder: number;
   tagIds: string[];
   createdAt: number;
@@ -76,6 +77,8 @@ export interface ProjectRecord {
   purgedFromTrash?: boolean;
   detachedTaskSnapshots?: DetachedProjectTaskSnapshot[];
 }
+
+export type Project = ProjectRecord;
 
 export interface HeadingRecord {
   id: string;
@@ -98,6 +101,8 @@ export interface TaskRecord {
   whenDate: number | null;
   deadline: number | null;
   reminderTime: number | null;
+  scheduledStartMinutes?: number | null;
+  durationMinutes?: number | null;
   completedAt: number | null;
   projectId: string | null;
   headingId: string | null;
@@ -111,6 +116,47 @@ export interface TaskRecord {
   isDirty: boolean;
   purgedFromTrash?: boolean;
 }
+
+export type TaskItem = TaskRecord;
+
+export interface ProjectTemplateTaskBlueprint {
+  title: string;
+  notes?: string;
+  checklistItems?: string[];
+  whenDaysOffset?: number | null;
+  deadlineDaysOffset?: number | null;
+  scheduleState?: ScheduleState;
+  scheduledStartMinutes?: number | null;
+  durationMinutes?: number | null;
+}
+
+export interface ProjectTemplateHeadingBlueprint {
+  title: string;
+  tasks: ProjectTemplateTaskBlueprint[];
+}
+
+export interface ProjectTemplateBlueprint {
+  version?: number;
+  notes?: string;
+  tasks?: ProjectTemplateTaskBlueprint[];
+  headings: ProjectTemplateHeadingBlueprint[];
+}
+
+export interface ProjectTemplate {
+  id: string;
+  title: string;
+  notes: string;
+  defaultAreaId: string | null;
+  tagIds: string[];
+  blueprintJson: string;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+  isDeleted: boolean;
+  isDirty: boolean;
+}
+
+export type ProjectTemplateRecord = ProjectTemplate;
 
 export interface ChecklistItemRecord {
   id: string;
@@ -132,6 +178,7 @@ export interface AttachmentRecord {
   mimeType: string;
   sizeBytes: number;
   dataBase64: string;
+  localRelativePath?: string;
   sortOrder: number;
   createdAt: number;
   updatedAt: number;
@@ -169,6 +216,8 @@ export interface AppPreferences {
   dailyDigestHour: number;
   dailyDigestMinute: number;
   autoCheckUpdatesEnabled: boolean;
+  includeBetaUpdates?: boolean;
+  lastWeeklyReviewAt?: number;
   geminiApiKey: string;
   calendarEventsEnabled: boolean;
   selectedCalendarIds: string[];
@@ -178,6 +227,8 @@ export interface AppPreferences {
   appLockPinHash: string;
   appLockWebAuthnCredId: string;
 }
+
+export type AppSettings = AppPreferences;
 
 export interface QuickShareDraft {
   initialTitle: string;

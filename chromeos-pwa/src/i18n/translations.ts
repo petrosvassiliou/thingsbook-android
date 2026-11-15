@@ -250,6 +250,74 @@ export interface TranslationStrings {
   voiceListeningHint: string;
   voiceSmartParseBtn: string;
   notesActionMap: string;
+  betaChannelBadge: string;
+  settingsIncludeBetaTitle: string;
+  settingsIncludeBetaDesc: string;
+  weeklyReviewBtn: string;
+  weeklyReviewTitle: string;
+  weeklyReviewSubtitle: string;
+  weeklyReviewStep1Title: string;
+  weeklyReviewStep1Desc: string;
+  weeklyReviewStep2Title: string;
+  weeklyReviewStep2Desc: string;
+  weeklyReviewStep3Title: string;
+  weeklyReviewStep3Desc: string;
+  weeklyReviewStep4Title: string;
+  weeklyReviewStep4Desc: string;
+  weeklyReviewInboxZero: string;
+  weeklyReviewNoUrgentDeadlines: string;
+  weeklyReviewNoStalledProjects: string;
+  weeklyReviewNoSomedayItems: string;
+  weeklyReviewAddNextActionPlaceholder: string;
+  weeklyReviewAddBtn: string;
+  weeklyReviewMarkReviewed: string;
+  weeklyReviewMoveSomeday: string;
+  weeklyReviewActivateToday: string;
+  weeklyReviewActivateAnytime: string;
+  weeklyReviewCompleted7dSummary: (count: number) => string;
+  weeklyReviewLastCompleted: (dateStr: string | number) => string;
+  weeklyReviewPrevStep: string;
+  weeklyReviewNextStep: string;
+  weeklyReviewCompleteBtn: string;
+  weeklyReviewCompletedToast: string;
+  projectStalledBadge: string;
+  projectStalledNoActionHint: string;
+  projectStalledInactiveHint: (days: number) => string;
+  templatesBtn: string;
+  templatesModalTitle: string;
+  templatesModalSubtitle: string;
+  templatesTabGallery: string;
+  templatesTabImport: string;
+  templatesStarterSection: string;
+  templatesSavedSection: string;
+  templatesSavedEmpty: string;
+  templatesCreateProjectBtn: string;
+  projectSaveAsTemplateBtn: string;
+  projectSavedAsTemplateToast: (title: string | number) => string;
+  starterTplTripTitle: string;
+  starterTplTripDesc: string;
+  starterTplLaunchTitle: string;
+  starterTplLaunchDesc: string;
+  starterTplClientTitle: string;
+  starterTplClientDesc: string;
+  starterTplSprintTitle: string;
+  starterTplSprintDesc: string;
+  templatesImportLabel: string;
+  templatesImportSampleBtn: string;
+  templatesImportCreateBtn: string;
+  templatesTargetAreaLabel: string;
+  actionTimeblock: string;
+  timeblockStartTime: string;
+  timeblockDuration: string;
+  timeblockClear: string;
+  todayModeList: string;
+  todayModeTimeline: string;
+  timelineConflictBadge: string;
+  timelineShiftPlus15m: string;
+  timelineUnscheduledTitle: string;
+  timelineUnscheduledDesc: string;
+  timelineEmptyScheduled: string;
+  actionFocusTimerMinutes: (mins: number) => string;
 }
 
 export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
@@ -515,7 +583,79 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     voiceDictationLabel: 'Voice Dictation',
     voiceListeningHint: 'Listening… Speak your To-Do or brain dump',
     voiceSmartParseBtn: '✨ Smart Parse with Gemini',
-    notesActionMap: 'Map'
+    notesActionMap: 'Map',
+    betaChannelBadge: 'BETA',
+    settingsIncludeBetaTitle: 'Include 2.0 Beta Updates',
+    settingsIncludeBetaDesc:
+      'Receive pre-release 2.0 beta builds from GitHub Releases alongside stable updates.',
+    weeklyReviewBtn: 'Weekly Review',
+    weeklyReviewTitle: 'Guided Weekly Review',
+    weeklyReviewSubtitle: 'Get clear, get current, and get creative in 4 calm GTD steps.',
+    weeklyReviewStep1Title: '1. Clear Inbox',
+    weeklyReviewStep1Desc: 'Triage unprocessed Inbox items — schedule, complete, or trash.',
+    weeklyReviewStep2Title: '2. Today & Deadlines',
+    weeklyReviewStep2Desc: 'Review overdue and due-soon commitments.',
+    weeklyReviewStep3Title: '3. Stalled Projects',
+    weeklyReviewStep3Desc: 'Open projects with 0 next actions or untouched for 14+ days.',
+    weeklyReviewStep4Title: '4. Someday & Wrap-Up',
+    weeklyReviewStep4Desc: 'Activate Someday ideas and celebrate your 7-day progress.',
+    weeklyReviewInboxZero: 'Inbox Zero! Every item has been triaged.',
+    weeklyReviewNoUrgentDeadlines: 'All clear! No overdue or urgent deadlines.',
+    weeklyReviewNoStalledProjects: 'Every active project has momentum and a clear next action.',
+    weeklyReviewNoSomedayItems: 'No Someday items waiting for activation.',
+    weeklyReviewAddNextActionPlaceholder: 'Add next action…',
+    weeklyReviewAddBtn: 'Add',
+    weeklyReviewMarkReviewed: 'Mark Reviewed ✓',
+    weeklyReviewMoveSomeday: 'Move to Someday',
+    weeklyReviewActivateToday: 'Activate Today',
+    weeklyReviewActivateAnytime: 'Move to Anytime',
+    weeklyReviewCompleted7dSummary: (count) => `${count} To-Dos completed in the last 7 days`,
+    weeklyReviewLastCompleted: (dateStr) => `Last reviewed: ${dateStr}`,
+    weeklyReviewPrevStep: 'Back',
+    weeklyReviewNextStep: 'Next Step',
+    weeklyReviewCompleteBtn: 'Complete Weekly Review',
+    weeklyReviewCompletedToast: 'Weekly Review complete! Your GTD system is up to date.',
+    projectStalledBadge: '⚠️ Stalled',
+    projectStalledNoActionHint: '0 open next actions',
+    projectStalledInactiveHint: (days) => `No updates in ${days}d`,
+    templatesBtn: 'Templates & Import',
+    templatesModalTitle: 'Project Templates & Outline Importer',
+    templatesModalSubtitle:
+      'Launch a structured GTD project from a reusable template or paste a Markdown/JSON outline.',
+    templatesTabGallery: 'Templates Gallery',
+    templatesTabImport: 'Import Markdown / Outline',
+    templatesStarterSection: 'Starter GTD Templates',
+    templatesSavedSection: 'My Saved Templates',
+    templatesSavedEmpty: 'Save any project as a template from its header actions to reuse it here.',
+    templatesCreateProjectBtn: 'Use Template',
+    projectSaveAsTemplateBtn: 'Save as Template',
+    projectSavedAsTemplateToast: (title) => `Saved "${title}" to Project Templates`,
+    starterTplTripTitle: 'Trip & Packing',
+    starterTplTripDesc: 'Bookings, travel documents, packing checklist, and home departure prep.',
+    starterTplLaunchTitle: 'Product Launch',
+    starterTplLaunchDesc: 'Positioning, QA sign-off, launch day execution, and post-launch follow-up.',
+    starterTplClientTitle: 'Client Onboarding',
+    starterTplClientDesc: 'Kickoff agreements, workspace provisioning, and first 30-day milestone.',
+    starterTplSprintTitle: 'Weekly Sprint',
+    starterTplSprintDesc: 'Focused 5-day execution sprint with top outcomes, deep work, and retro.',
+    templatesImportLabel:
+      'Paste Markdown (# Project, ## Heading, - [ ] Task, indented - [ ] Subtask) or JSON outline:',
+    templatesImportSampleBtn: 'Load Sample Outline',
+    templatesImportCreateBtn: 'Create Project from Outline',
+    templatesTargetAreaLabel: 'Assign to Area',
+    actionTimeblock: 'Timeblock',
+    timeblockStartTime: 'Start Time',
+    timeblockDuration: 'Duration',
+    timeblockClear: 'Clear Timeblock',
+    todayModeList: 'List',
+    todayModeTimeline: 'Timeline',
+    timelineConflictBadge: 'Conflict',
+    timelineShiftPlus15m: '+15m',
+    timelineUnscheduledTitle: 'Unscheduled Today',
+    timelineUnscheduledDesc: 'Assign a time slot to place tasks onto your daily timeline.',
+    timelineEmptyScheduled:
+      'No calendar events or timeblocked tasks yet — pick a slot below to build your day.',
+    actionFocusTimerMinutes: (mins) => `Start Focus Timer (${mins}m)`
   },
   de: {
     appName: 'Thingsbook',
@@ -781,7 +921,80 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     voiceDictationLabel: 'Spracheingabe',
     voiceListeningHint: 'Höre zu… Sprich deine Aufgabe oder deinen Brain Dump',
     voiceSmartParseBtn: '✨ Mit Gemini aufteilen',
-    notesActionMap: 'Karte'
+    notesActionMap: 'Karte',
+    betaChannelBadge: 'BETA',
+    settingsIncludeBetaTitle: '2.0-Beta-Updates einbeziehen',
+    settingsIncludeBetaDesc:
+      'Vorabversionen von Thingsbook 2.0 Beta aus GitHub Releases neben stabilen Updates erhalten.',
+    weeklyReviewBtn: 'Wochenrückblick',
+    weeklyReviewTitle: 'Geführter GTD-Wochenrückblick',
+    weeklyReviewSubtitle: 'Klarheit schaffen, aktuell bleiben und Projekte voranbringen in 4 Schritten.',
+    weeklyReviewStep1Title: '1. Eingang leeren',
+    weeklyReviewStep1Desc: 'Unverarbeitete Eingänge planen, erledigen oder löschen.',
+    weeklyReviewStep2Title: '2. Heute & Fristen',
+    weeklyReviewStep2Desc: 'Überfällige und bald fällige Aufgaben überprüfen.',
+    weeklyReviewStep3Title: '3. Stockende Projekte',
+    weeklyReviewStep3Desc: 'Aktive Projekte ohne nächste Aktion oder seit 14+ Tagen unverändert.',
+    weeklyReviewStep4Title: '4. Irgendwann & Abschluss',
+    weeklyReviewStep4Desc: 'Ideen aktivieren und den Fortschritt der letzten 7 Tage feiern.',
+    weeklyReviewInboxZero: 'Inbox Zero! Alle Eingänge wurden verarbeitet.',
+    weeklyReviewNoUrgentDeadlines: 'Alles im grünen Bereich! Keine überfälligen Fristen.',
+    weeklyReviewNoStalledProjects: 'Jedes aktive Projekt hat Schwung und eine klare nächste Aktion.',
+    weeklyReviewNoSomedayItems: 'Keine „Irgendwann“-Einträge warten auf Aktivierung.',
+    weeklyReviewAddNextActionPlaceholder: 'Nächste Aktion hinzufügen…',
+    weeklyReviewAddBtn: 'Hinzufügen',
+    weeklyReviewMarkReviewed: 'Als geprüft markieren ✓',
+    weeklyReviewMoveSomeday: 'Auf Irgendwann setzen',
+    weeklyReviewActivateToday: 'Für Heute aktivieren',
+    weeklyReviewActivateAnytime: 'Auf Jederzeit setzen',
+    weeklyReviewCompleted7dSummary: (count) => `${count} Aufgaben in den letzten 7 Tagen erledigt`,
+    weeklyReviewLastCompleted: (dateStr) => `Zuletzt geprüft: ${dateStr}`,
+    weeklyReviewPrevStep: 'Zurück',
+    weeklyReviewNextStep: 'Nächster Schritt',
+    weeklyReviewCompleteBtn: 'Wochenrückblick abschließen',
+    weeklyReviewCompletedToast: 'Wochenrückblick abgeschlossen! Dein GTD-System ist aktuell.',
+    projectStalledBadge: '⚠️ Stockt',
+    projectStalledNoActionHint: '0 offene nächste Aktionen',
+    projectStalledInactiveHint: (days) => `Seit ${days}T unverändert`,
+    templatesBtn: 'Vorlagen & Import',
+    templatesModalTitle: 'Projektvorlagen & Gliederungs-Import',
+    templatesModalSubtitle:
+      'Starte ein GTD-Projekt aus einer Vorlage oder füge eine Markdown-/JSON-Gliederung ein.',
+    templatesTabGallery: 'Vorlagen-Galerie',
+    templatesTabImport: 'Markdown / Gliederung importieren',
+    templatesStarterSection: 'GTD-Startervorlagen',
+    templatesSavedSection: 'Meine gespeicherten Vorlagen',
+    templatesSavedEmpty:
+      'Speichere ein Projekt über seine Kopfzeile als Vorlage, um es hier wiederzuverwenden.',
+    templatesCreateProjectBtn: 'Vorlage nutzen',
+    projectSaveAsTemplateBtn: 'Als Vorlage speichern',
+    projectSavedAsTemplateToast: (title) => `„${title}“ als Projektvorlage gespeichert`,
+    starterTplTripTitle: 'Reise & Packliste',
+    starterTplTripDesc: 'Buchungen, Reisedokumente, Packliste und Vorbereitung vor der Abreise.',
+    starterTplLaunchTitle: 'Produkt-Launch',
+    starterTplLaunchDesc: 'Positionierung, QA-Freigabe, Launch-Tag und Nachbereitung.',
+    starterTplClientTitle: 'Kunden-Onboarding',
+    starterTplClientDesc: 'Kickoff, Zugänge einrichten und erster 30-Tage-Meilenstein.',
+    starterTplSprintTitle: 'Wochen-Sprint',
+    starterTplSprintDesc: 'Fokussierter 5-Tage-Sprint mit Top-Zielen, Deep Work und Retrospektive.',
+    templatesImportLabel:
+      'Markdown (# Projekt, ## Überschrift, - [ ] Aufgabe, eingerückt - [ ] Unteraufgabe) oder JSON einfügen:',
+    templatesImportSampleBtn: 'Beispiel laden',
+    templatesImportCreateBtn: 'Projekt aus Gliederung erstellen',
+    templatesTargetAreaLabel: 'Bereich zuweisen',
+    actionTimeblock: 'Zeitblock',
+    timeblockStartTime: 'Startzeit',
+    timeblockDuration: 'Dauer',
+    timeblockClear: 'Zeitblock löschen',
+    todayModeList: 'Liste',
+    todayModeTimeline: 'Zeitachse',
+    timelineConflictBadge: 'Konflikt',
+    timelineShiftPlus15m: '+15m',
+    timelineUnscheduledTitle: 'Heute noch ohne Uhrzeit',
+    timelineUnscheduledDesc: 'Weise ein Zeitfenster zu, um Aufgaben auf der Tages-Zeitachse einzuplanen.',
+    timelineEmptyScheduled:
+      'Noch keine Termine oder Zeitblöcke — wähle unten ein Zeitfenster für deinen Tag.',
+    actionFocusTimerMinutes: (mins) => `Fokus-Timer starten (${mins}m)`
   },
   fr: {
     appName: 'Thingsbook',
@@ -1044,7 +1257,81 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     voiceDictationLabel: 'Dictée vocale',
     voiceListeningHint: 'Écoute en cours… Dictez votre tâche ou vos idées',
     voiceSmartParseBtn: '✨ Analyser avec Gemini',
-    notesActionMap: 'Carte'
+    notesActionMap: 'Carte',
+    betaChannelBadge: 'BÊTA',
+    settingsIncludeBetaTitle: 'Inclure les mises à jour Bêta 2.0',
+    settingsIncludeBetaDesc:
+      'Recevoir les préversions Thingsbook 2.0 Bêta depuis GitHub Releases en plus des versions stables.',
+    weeklyReviewBtn: 'Revue hebdo',
+    weeklyReviewTitle: 'Revue hebdomadaire GTD guidée',
+    weeklyReviewSubtitle: 'Clarifiez, mettez à jour et relancez vos projets en 4 étapes sereines.',
+    weeklyReviewStep1Title: '1. Vider la boîte de réception',
+    weeklyReviewStep1Desc: 'Triez les éléments non traités — planifier, terminer ou supprimer.',
+    weeklyReviewStep2Title: "2. Aujourd'hui & Échéances",
+    weeklyReviewStep2Desc: 'Vérifiez les engagements en retard ou imminents.',
+    weeklyReviewStep3Title: '3. Projets en pause',
+    weeklyReviewStep3Desc: 'Projets actifs sans prochaine action ou intouchés depuis 14+ jours.',
+    weeklyReviewStep4Title: '4. Un jour & Bilan',
+    weeklyReviewStep4Desc: 'Activez vos idées « Un jour » et célébrez vos 7 derniers jours.',
+    weeklyReviewInboxZero: 'Inbox Zero ! Chaque élément a été trié.',
+    weeklyReviewNoUrgentDeadlines: 'Tout est à jour ! Aucune échéance urgente ou en retard.',
+    weeklyReviewNoStalledProjects: 'Chaque projet actif avance avec une prochaine action claire.',
+    weeklyReviewNoSomedayItems: 'Aucun élément « Un jour » en attente d’activation.',
+    weeklyReviewAddNextActionPlaceholder: 'Ajouter la prochaine action…',
+    weeklyReviewAddBtn: 'Ajouter',
+    weeklyReviewMarkReviewed: 'Marquer comme revu ✓',
+    weeklyReviewMoveSomeday: 'Déplacer vers Un jour',
+    weeklyReviewActivateToday: "Activer Aujourd'hui",
+    weeklyReviewActivateAnytime: 'Déplacer vers À tout moment',
+    weeklyReviewCompleted7dSummary: (count) =>
+      `${count} tâches terminées au cours des 7 derniers jours`,
+    weeklyReviewLastCompleted: (dateStr) => `Dernière revue : ${dateStr}`,
+    weeklyReviewPrevStep: 'Retour',
+    weeklyReviewNextStep: 'Étape suivante',
+    weeklyReviewCompleteBtn: 'Terminer la revue hebdomadaire',
+    weeklyReviewCompletedToast: 'Revue hebdomadaire terminée ! Votre système GTD est à jour.',
+    projectStalledBadge: '⚠️ En pause',
+    projectStalledNoActionHint: '0 prochaine action ouverte',
+    projectStalledInactiveHint: (days) => `Sans mise à jour depuis ${days}j`,
+    templatesBtn: 'Modèles & Import',
+    templatesModalTitle: 'Modèles de projets & Import de plan',
+    templatesModalSubtitle:
+      'Lancez un projet GTD structuré depuis un modèle ou collez un plan Markdown/JSON.',
+    templatesTabGallery: 'Galerie de modèles',
+    templatesTabImport: 'Importer Markdown / Plan',
+    templatesStarterSection: 'Modèles GTD de départ',
+    templatesSavedSection: 'Mes modèles enregistrés',
+    templatesSavedEmpty:
+      'Enregistrez un projet comme modèle depuis son en-tête pour le réutiliser ici.',
+    templatesCreateProjectBtn: 'Utiliser ce modèle',
+    projectSaveAsTemplateBtn: 'Enregistrer comme modèle',
+    projectSavedAsTemplateToast: (title) => `« ${title} » enregistré dans les modèles`,
+    starterTplTripTitle: 'Voyage & Bagages',
+    starterTplTripDesc: 'Réservations, documents, liste de bagages et préparation du départ.',
+    starterTplLaunchTitle: 'Lancement de produit',
+    starterTplLaunchDesc: 'Positionnement, validation QA, jour J et suivi post-lancement.',
+    starterTplClientTitle: 'Intégration client',
+    starterTplClientDesc: 'Accords de lancement, accès partagés et premier jalon à 30 jours.',
+    starterTplSprintTitle: 'Sprint hebdomadaire',
+    starterTplSprintDesc: 'Sprint ciblé de 5 jours avec objectifs clés, travail profond et rétro.',
+    templatesImportLabel:
+      'Collez un plan Markdown (# Projet, ## Section, - [ ] Tâche, indenté - [ ] Sous-tâche) ou JSON :',
+    templatesImportSampleBtn: 'Charger un exemple',
+    templatesImportCreateBtn: 'Créer le projet depuis le plan',
+    templatesTargetAreaLabel: 'Attribuer au domaine',
+    actionTimeblock: 'Créneau',
+    timeblockStartTime: 'Heure de début',
+    timeblockDuration: 'Durée',
+    timeblockClear: 'Effacer le créneau',
+    todayModeList: 'Liste',
+    todayModeTimeline: 'Chronologie',
+    timelineConflictBadge: 'Conflit',
+    timelineShiftPlus15m: '+15m',
+    timelineUnscheduledTitle: "Aujourd'hui sans horaire",
+    timelineUnscheduledDesc: 'Attribuez un créneau pour placer vos tâches sur la chronologie du jour.',
+    timelineEmptyScheduled:
+      'Aucun événement ni créneau planifié — choisissez un horaire ci-dessous.',
+    actionFocusTimerMinutes: (mins) => `Démarrer le minuteur Focus (${mins}m)`
   },
   it: {
     appName: 'Thingsbook',
@@ -1307,7 +1594,81 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     voiceDictationLabel: 'Dettatura vocale',
     voiceListeningHint: 'In ascolto… Detta la tua attività o le tue idee',
     voiceSmartParseBtn: '✨ Analizza con Gemini',
-    notesActionMap: 'Mappa'
+    notesActionMap: 'Mappa',
+    betaChannelBadge: 'BETA',
+    settingsIncludeBetaTitle: 'Includi aggiornamenti Beta 2.0',
+    settingsIncludeBetaDesc:
+      'Ricevi le versioni preliminari di Thingsbook 2.0 Beta da GitHub Releases oltre agli aggiornamenti stabili.',
+    weeklyReviewBtn: 'Revisione settimanale',
+    weeklyReviewTitle: 'Revisione settimanale GTD guidata',
+    weeklyReviewSubtitle: 'Fai chiarezza, aggiorna tutto e sblocca i progetti in 4 passaggi.',
+    weeklyReviewStep1Title: '1. Svuota Entrata',
+    weeklyReviewStep1Desc: 'Smista gli elementi in Entrata — pianifica, completa o cestina.',
+    weeklyReviewStep2Title: '2. Oggi & Scadenze',
+    weeklyReviewStep2Desc: 'Controlla gli impegni scaduti o in scadenza a breve.',
+    weeklyReviewStep3Title: '3. Progetti fermi',
+    weeklyReviewStep3Desc: 'Progetti attivi con 0 prossime azioni o fermi da oltre 14 giorni.',
+    weeklyReviewStep4Title: '4. Prima o poi & Riepilogo',
+    weeklyReviewStep4Desc: 'Attiva le idee in Prima o poi e celebra i progressi degli ultimi 7 giorni.',
+    weeklyReviewInboxZero: 'Inbox Zero! Ogni elemento è stato smistato.',
+    weeklyReviewNoUrgentDeadlines: 'Tutto sotto controllo! Nessuna scadenza urgente o in ritardo.',
+    weeklyReviewNoStalledProjects: 'Ogni progetto attivo procede con una prossima azione chiara.',
+    weeklyReviewNoSomedayItems: 'Nessun elemento in Prima o poi in attesa di attivazione.',
+    weeklyReviewAddNextActionPlaceholder: 'Aggiungi prossima azione…',
+    weeklyReviewAddBtn: 'Aggiungi',
+    weeklyReviewMarkReviewed: 'Segna come revisionato ✓',
+    weeklyReviewMoveSomeday: 'Sposta in Prima o poi',
+    weeklyReviewActivateToday: 'Attiva per Oggi',
+    weeklyReviewActivateAnytime: 'Sposta in Qualsiasi momento',
+    weeklyReviewCompleted7dSummary: (count) =>
+      `${count} attività completate negli ultimi 7 giorni`,
+    weeklyReviewLastCompleted: (dateStr) => `Ultima revisione: ${dateStr}`,
+    weeklyReviewPrevStep: 'Indietro',
+    weeklyReviewNextStep: 'Passo successivo',
+    weeklyReviewCompleteBtn: 'Completa revisione settimanale',
+    weeklyReviewCompletedToast: 'Revisione settimanale completata! Il tuo sistema GTD è aggiornato.',
+    projectStalledBadge: '⚠️ Fermo',
+    projectStalledNoActionHint: '0 prossime azioni aperte',
+    projectStalledInactiveHint: (days) => `Nessun aggiornamento da ${days}g`,
+    templatesBtn: 'Modelli & Importa',
+    templatesModalTitle: 'Modelli di progetto & Importazione scaletta',
+    templatesModalSubtitle:
+      'Avvia un progetto GTD strutturato da un modello o incolla una scaletta Markdown/JSON.',
+    templatesTabGallery: 'Galleria modelli',
+    templatesTabImport: 'Importa Markdown / Scaletta',
+    templatesStarterSection: 'Modelli GTD iniziali',
+    templatesSavedSection: 'I miei modelli salvati',
+    templatesSavedEmpty:
+      'Salva qualsiasi progetto come modello dalla sua intestazione per riutilizzarlo qui.',
+    templatesCreateProjectBtn: 'Usa modello',
+    projectSaveAsTemplateBtn: 'Salva come modello',
+    projectSavedAsTemplateToast: (title) => `«${title}» salvato nei modelli di progetto`,
+    starterTplTripTitle: 'Viaggio & Valigia',
+    starterTplTripDesc: 'Prenotazioni, documenti di viaggio, lista bagagli e partenza da casa.',
+    starterTplLaunchTitle: 'Lancio prodotto',
+    starterTplLaunchDesc: 'Posizionamento, verifica QA, esecuzione del lancio e follow-up.',
+    starterTplClientTitle: 'Onboarding cliente',
+    starterTplClientDesc: 'Accordi iniziali, accessi condivisi e primo traguardo a 30 giorni.',
+    starterTplSprintTitle: 'Sprint settimanale',
+    starterTplSprintDesc: 'Sprint focalizzato di 5 giorni con obiettivi chiave, deep work e retro.',
+    templatesImportLabel:
+      'Incolla scaletta Markdown (# Progetto, ## Sezione, - [ ] Attività, indentato - [ ] Sottoattività) o JSON:',
+    templatesImportSampleBtn: 'Carica esempio',
+    templatesImportCreateBtn: 'Crea progetto dalla scaletta',
+    templatesTargetAreaLabel: 'Assegna all’area',
+    actionTimeblock: 'Blocco orario',
+    timeblockStartTime: 'Ora di inizio',
+    timeblockDuration: 'Durata',
+    timeblockClear: 'Rimuovi orario',
+    todayModeList: 'Elenco',
+    todayModeTimeline: 'Timeline',
+    timelineConflictBadge: 'Conflitto',
+    timelineShiftPlus15m: '+15m',
+    timelineUnscheduledTitle: 'Oggi senza orario',
+    timelineUnscheduledDesc: 'Assegna una fascia oraria per inserire le attività nella timeline.',
+    timelineEmptyScheduled:
+      'Nessun evento o blocco orario pianificato — scegli uno slot qui sotto.',
+    actionFocusTimerMinutes: (mins) => `Avvia timer Focus (${mins}m)`
   },
   es: {
     appName: 'Thingsbook',
@@ -1570,7 +1931,81 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     voiceDictationLabel: 'Dictado por voz',
     voiceListeningHint: 'Escuchando… Dicta tu tarea o lluvia de ideas',
     voiceSmartParseBtn: '✨ Analizar con Gemini',
-    notesActionMap: 'Mapa'
+    notesActionMap: 'Mapa',
+    betaChannelBadge: 'BETA',
+    settingsIncludeBetaTitle: 'Incluir actualizaciones Beta 2.0',
+    settingsIncludeBetaDesc:
+      'Recibir versiones preliminares de Thingsbook 2.0 Beta desde GitHub Releases junto con versiones estables.',
+    weeklyReviewBtn: 'Revisión semanal',
+    weeklyReviewTitle: 'Revisión semanal GTD guiada',
+    weeklyReviewSubtitle: 'Aclara, actualiza y reactiva tus proyectos en 4 pasos tranquilos.',
+    weeklyReviewStep1Title: '1. Vaciar Entrada',
+    weeklyReviewStep1Desc: 'Clasifica los elementos sin procesar — programar, completar o eliminar.',
+    weeklyReviewStep2Title: '2. Hoy y Fechas límite',
+    weeklyReviewStep2Desc: 'Revisa compromisos vencidos o próximos a vencer.',
+    weeklyReviewStep3Title: '3. Proyectos estancados',
+    weeklyReviewStep3Desc: 'Proyectos activos sin próxima acción o sin cambios en 14+ días.',
+    weeklyReviewStep4Title: '4. Algún día y Cierre',
+    weeklyReviewStep4Desc: 'Activa ideas de Algún día y celebra tu progreso de los últimos 7 días.',
+    weeklyReviewInboxZero: '¡Inbox Zero! Todos los elementos han sido procesados.',
+    weeklyReviewNoUrgentDeadlines: '¡Todo al día! Sin fechas límite vencidas ni urgentes.',
+    weeklyReviewNoStalledProjects: 'Cada proyecto activo tiene impulso y una próxima acción clara.',
+    weeklyReviewNoSomedayItems: 'No hay elementos en Algún día esperando activación.',
+    weeklyReviewAddNextActionPlaceholder: 'Añadir próxima acción…',
+    weeklyReviewAddBtn: 'Añadir',
+    weeklyReviewMarkReviewed: 'Marcar como revisado ✓',
+    weeklyReviewMoveSomeday: 'Mover a Algún día',
+    weeklyReviewActivateToday: 'Activar para Hoy',
+    weeklyReviewActivateAnytime: 'Mover a En cualquier momento',
+    weeklyReviewCompleted7dSummary: (count) =>
+      `${count} tareas completadas en los últimos 7 días`,
+    weeklyReviewLastCompleted: (dateStr) => `Última revisión: ${dateStr}`,
+    weeklyReviewPrevStep: 'Atrás',
+    weeklyReviewNextStep: 'Siguiente paso',
+    weeklyReviewCompleteBtn: 'Completar revisión semanal',
+    weeklyReviewCompletedToast: '¡Revisión semanal completada! Tu sistema GTD está al día.',
+    projectStalledBadge: '⚠️ Estancado',
+    projectStalledNoActionHint: '0 próximas acciones abiertas',
+    projectStalledInactiveHint: (days) => `Sin cambios en ${days}d`,
+    templatesBtn: 'Plantillas e Importar',
+    templatesModalTitle: 'Plantillas de proyectos e Importador de esquemas',
+    templatesModalSubtitle:
+      'Inicia un proyecto GTD estructurado desde una plantilla o pega un esquema Markdown/JSON.',
+    templatesTabGallery: 'Galería de plantillas',
+    templatesTabImport: 'Importar Markdown / Esquema',
+    templatesStarterSection: 'Plantillas GTD iniciales',
+    templatesSavedSection: 'Mis plantillas guardadas',
+    templatesSavedEmpty:
+      'Guarda cualquier proyecto como plantilla desde su encabezado para reutilizarlo aquí.',
+    templatesCreateProjectBtn: 'Usar plantilla',
+    projectSaveAsTemplateBtn: 'Guardar como plantilla',
+    projectSavedAsTemplateToast: (title) => `«${title}» guardado en plantillas de proyectos`,
+    starterTplTripTitle: 'Viaje y Equipaje',
+    starterTplTripDesc: 'Reservas, documentos de viaje, lista de equipaje y salida de casa.',
+    starterTplLaunchTitle: 'Lanzamiento de producto',
+    starterTplLaunchDesc: 'Posicionamiento, validación QA, día de lanzamiento y seguimiento.',
+    starterTplClientTitle: 'Incorporación de cliente',
+    starterTplClientDesc: 'Acuerdos iniciales, accesos compartidos y primer hito de 30 días.',
+    starterTplSprintTitle: 'Sprint semanal',
+    starterTplSprintDesc: 'Sprint enfocado de 5 días con resultados clave, trabajo profundo y retro.',
+    templatesImportLabel:
+      'Pega un esquema Markdown (# Proyecto, ## Sección, - [ ] Tarea, sangrado - [ ] Subtarea) o JSON:',
+    templatesImportSampleBtn: 'Cargar ejemplo',
+    templatesImportCreateBtn: 'Crear proyecto desde esquema',
+    templatesTargetAreaLabel: 'Asignar al área',
+    actionTimeblock: 'Bloque horario',
+    timeblockStartTime: 'Hora de inicio',
+    timeblockDuration: 'Duración',
+    timeblockClear: 'Borrar horario',
+    todayModeList: 'Lista',
+    todayModeTimeline: 'Cronología',
+    timelineConflictBadge: 'Conflicto',
+    timelineShiftPlus15m: '+15m',
+    timelineUnscheduledTitle: 'Hoy sin horario',
+    timelineUnscheduledDesc: 'Asigna una franja horaria para ubicar tareas en tu cronología diaria.',
+    timelineEmptyScheduled:
+      'Aún no hay eventos ni bloques horarios — elige una hora abajo para organizar tu día.',
+    actionFocusTimerMinutes: (mins) => `Iniciar temporizador Focus (${mins}m)`
   }
 };
 

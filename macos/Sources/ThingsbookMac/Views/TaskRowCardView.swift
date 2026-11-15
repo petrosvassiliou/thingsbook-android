@@ -17,6 +17,8 @@ public struct TaskRowCardView: View {
     @State private var isRepeatPopoverOpen = false
     @State private var isMovePopoverOpen = false
     @State private var isTagPopoverOpen = false
+    @State private var isTimeblockPopoverOpen = false
+    @State private var isCollapsedTimeblockPopoverOpen = false
     @State private var isGeneratingChecklist = false
     @State private var isEditingNotes = false
     @State private var isHoveringRow = false
@@ -160,6 +162,33 @@ public struct TaskRowCardView: View {
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2.5)
                     .background(Capsule().fill(Color.primary.opacity(0.055)))
+                }
+
+                if let tbPill = task.formattedTimeblockPill {
+                    Button {
+                        isCollapsedTimeblockPopoverOpen = true
+                    } label: {
+                        HStack(spacing: 3.5) {
+                            Image(systemName: "clock.badge.checkmark")
+                                .font(.system(size: 10, weight: .semibold))
+                            Text(tbPill)
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        }
+                        .foregroundStyle(ThingsMacPalette.anytimeTeal)
+                        .padding(.horizontal, 7.5)
+                        .padding(.vertical, 2.5)
+                        .background(Capsule().fill(ThingsMacPalette.anytimeTeal.opacity(0.12)))
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $isCollapsedTimeblockPopoverOpen) {
+                        TimeblockPopoverView(
+                            store: store,
+                            currentStartMinutes: latestTask.scheduledStartMinutes,
+                            currentDurationMinutes: latestTask.durationMinutes
+                        ) { startMins, durMins in
+                            store.setTaskTimeblock(latestTask.id, startMinutes: startMins, durationMinutes: durMins)
+                        }
+                    }
                 }
 
                 if let rem = task.reminderTime {
@@ -482,7 +511,7 @@ public struct TaskRowCardView: View {
 
             // Active Badges Summary Row
             let hasContext = contextBreadcrumb != nil
-            if task.whenDate != nil || task.reminderTime != nil || task.deadline != nil || task.recurrenceRule != nil || hasContext || !task.tags.isEmpty {
+            if task.whenDate != nil || task.formattedTimeblockPill != nil || task.reminderTime != nil || task.deadline != nil || task.recurrenceRule != nil || hasContext || !task.tags.isEmpty {
                 HStack(spacing: 6) {
                     if let whenStr = whenSummaryLabel {
                         HStack(spacing: 4) {
@@ -496,6 +525,19 @@ public struct TaskRowCardView: View {
                         .padding(.horizontal, 9)
                         .padding(.vertical, 3.5)
                         .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.10)))
+                    }
+
+                    if let tbPill = task.formattedTimeblockPill {
+                        HStack(spacing: 4) {
+                            Image(systemName: "clock.badge.checkmark")
+                                .font(.system(size: 10.5, weight: .semibold))
+                            Text(tbPill)
+                                .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                        }
+                        .foregroundStyle(ThingsMacPalette.anytimeTeal)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 3.5)
+                        .background(Capsule().fill(ThingsMacPalette.anytimeTeal.opacity(0.12)))
                     }
 
                     if let rem = task.reminderTime {
@@ -663,6 +705,30 @@ public struct TaskRowCardView: View {
 
                 Button {
                     commitDraftEditsIfNeeded()
+                    isTimeblockPopoverOpen = true
+                } label: {
+                    Label(store.tr("v2_timeblock_title"), systemImage: "clock.badge.checkmark")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .popover(isPresented: $isTimeblockPopoverOpen) {
+                    TimeblockPopoverView(
+                        store: store,
+                        currentStartMinutes: latestTask.scheduledStartMinutes,
+                        currentDurationMinutes: latestTask.durationMinutes
+                    ) { startMins, durMins in
+                        var copy = latestTask
+                        copy.title = draftTitle
+                        copy.notes = draftNotes
+                        copy.scheduledStartMinutes = startMins
+                        copy.durationMinutes = durMins
+                        store.updateTask(copy)
+                    }
+                }
+
+                Button {
+                    commitDraftEditsIfNeeded()
                     store.pickAndAttachFiles(taskId: task.id)
                 } label: {
                     Image(systemName: "paperclip")
@@ -762,6 +828,18 @@ public struct TaskRowCardView: View {
             copy.scheduleState = .someday
             copy.whenDate = nil
             store.updateTask(copy)
+        }
+        Menu(store.tr("v2_timeblock_title")) {
+            Button("09:00 · 30m") { store.setTaskTimeblock(latestTask.id, startMinutes: 9 * 60, durationMinutes: 30) }
+            Button("11:00 · 45m") { store.setTaskTimeblock(latestTask.id, startMinutes: 11 * 60, durationMinutes: 45) }
+            Button("14:00 · 60m") { store.setTaskTimeblock(latestTask.id, startMinutes: 14 * 60, durationMinutes: 60) }
+            Button("16:00 · 45m") { store.setTaskTimeblock(latestTask.id, startMinutes: 16 * 60, durationMinutes: 45) }
+            if latestTask.scheduledStartMinutes != nil || latestTask.durationMinutes != nil {
+                Divider()
+                Button(store.tr("v2_timeblock_clear"), role: .destructive) {
+                    store.setTaskTimeblock(latestTask.id, startMinutes: nil, durationMinutes: nil)
+                }
+            }
         }
         Divider()
         Button(store.tr("action_attach_file")) {

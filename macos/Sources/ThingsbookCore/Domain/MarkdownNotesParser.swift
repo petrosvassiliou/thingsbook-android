@@ -47,10 +47,10 @@ public enum MarkdownNotesParser {
         pattern: #"(?<!\d)(-?\d{1,2}\.\d{3,8}\s*,\s*-?\d{1,3}\.\d{3,8})(?!\d)"#
     )
     private static let euStreetAddressRegex = try! NSRegularExpression(
-        pattern: #"(?im)(?:^|(?:[-*•]|\bat)\s+)([A-ZÄÖÜ][A-Za-zÄÖÜäöüßéèêàùç.\-\s]{2,34}(?:straße|strasse|str\.|weg|platz|allee|gasse|ring|damm|ufer|rue|avenue|boulevard|via|piazza|calle|avenida)\s+\d{1,4}[a-zA-Z]?(?:\s*,\s*\d{4,5}\s+[A-ZÄÖÜa-zäöüß\-\s]{2,25})?)"#
+        pattern: #"(?im)(?:^|(?:[-*•:]|\bat|\bin|\bbei)[ \t]+)([A-ZÄÖÜ][A-Za-zÄÖÜäöüßéèêàùç.\- ]{2,34}(?:straße|strasse|str\.|weg|platz|allee|gasse|ring|damm|ufer|rue|avenue|boulevard|via|piazza|calle|avenida)[ \t]+\d{1,4}[a-zA-Z]?(?:[ \t]*,[ \t]*\d{4,5}[ \t]+[A-ZÄÖÜa-zäöüß\- ]{2,25})?)"#
     )
     private static let usStreetAddressRegex = try! NSRegularExpression(
-        pattern: #"(?m)\b(\d{1,5}\s+[A-Z][A-Za-z0-9.\-\s]{2,30}\s+(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Boulevard|Dr|Drive|Ln|Lane|Way|Ct|Court|Pl|Place|Pkwy|Parkway|Hwy|Highway)\b(?:\s*,\s*[A-Za-z.\-\s]{2,25})?)"#
+        pattern: #"(?m)\b(\d{1,5}[ \t]+[A-Z][A-Za-z0-9.\- ]{2,30}[ \t]+(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Boulevard|Dr|Drive|Ln|Lane|Way|Ct|Court|Pl|Place|Ter|Terrace|Pkwy|Parkway|Hwy|Highway)\b(?:[ \t]*,[ \t]*[A-Za-z.\- ]{2,25})?)"#
     )
     private static let isoDateGuardRegex = try! NSRegularExpression(
         pattern: #"^\d{4}-\d{2}-\d{2}$"#

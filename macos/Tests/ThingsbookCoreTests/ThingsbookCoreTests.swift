@@ -375,19 +375,27 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(parsedTask?.0.sortOrder, 7.0)
 
         // 4. Verify applyRemoteDeltas triggers onRemoteSyncApplied (NOT onMutation), leaves dirty batch empty, and indexes FTS5
+        final class CounterBox: @unchecked Sendable {
+            var mutations = 0
+            var remoteApplies = 0
+        }
+        let box = CounterBox()
         let db = try ThingsSQLiteDatabase(path: ":memory:")
-        var mutationCalls = 0
-        var remoteSyncCalls = 0
-        db.onMutation = { mutationCalls += 1 }
-        db.onRemoteSyncApplied = { remoteSyncCalls += 1 }
+        db.onMutation = { box.mutations += 1 }
+        db.onRemoteSyncApplied = { box.remoteApplies += 1 }
 
         if let (remoteItem, remoteTags) = parsedTask {
-            let applied = try db.applyRemoteDeltas(RemoteDeltaBatch(tasks: [(remoteItem, remoteTags)]))
+            let applied = try db.applyRemoteDeltas(
+                RemoteDeltaBatch(
+                    tasks: [remoteItem],
+                    taskTagIdsByTaskId: [remoteItem.id: remoteTags]
+                )
+            )
             XCTAssertTrue(applied)
         }
-        XCTAssertEqual(mutationCalls, 0, "Remote delta apply must not mark local DB mutated or bounce sync")
-        XCTAssertEqual(remoteSyncCalls, 1, "Remote delta apply must notify UI observer immediately")
-        XCTAssertTrue(try db.fetchDirtyBatch().isEmpty, "Remote delta records must have syncDirty = 0")
+        XCTAssertEqual(box.mutations, 0, "Remote delta apply must not mark local DB mutated or bounce sync")
+        XCTAssertEqual(box.remoteApplies, 1, "Remote delta apply must notify UI observer immediately")
+        XCTAssertTrue(try db.fetchDirtyBatch().tasks.isEmpty, "Remote delta records must have syncDirty = 0")
 
         let searchHits = try db.searchQuickFind(rawQuery: "ChromeOS")
         XCTAssertEqual(searchHits.tasks.map(\.id), ["remote-sync-task-1"], "FTS5 must index remotely synced tasks")

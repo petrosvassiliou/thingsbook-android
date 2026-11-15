@@ -1,0 +1,66 @@
+name: Build & Verify Thingsbook for macOS
+
+on:
+  push:
+    branches:
+      - macOS
+  pull_request:
+    branches:
+      - macOS
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-macos:
+    name: Parity Gate, Swift Tests & Universal DMG (macOS 15)
+    runs-on: macos-15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Sync & Verify Android <-> macOS Feature, Localization & Version Parity
+        run: |
+          python3 macos/scripts/sync-strings-from-android.py
+          python3 macos/scripts/verify-android-parity.py
+
+      - name: Run ThingsbookCore Swift Unit & Cross-Platform Vector Tests
+        working-directory: macos
+        run: swift test -v
+
+      - name: Package Universal Thingsbook.app & DMG (arm64 + x86_64)
+        run: |
+          chmod +x macos/scripts/build-dmg.sh
+          ./macos/scripts/build-dmg.sh
+          cp -f macos/dist/Thingsbook-macOS-v*-Universal.dmg macos/dist/Thingsbook-macOS-Universal.dmg
+
+      - name: Upload Universal macOS DMG Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Thingsbook-macOS-Universal-DMG
+          path: macos/dist/*.dmg
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish macOS Universal DMG Pre-Release (Compatible with GitHub Immutable Releases)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/macOS'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="macos-build-${{ github.run_number }}"
+          gh release create "$TAG" macos/dist/*.dmg \
+            --draft \
+            --prerelease \
+            --target "${{ github.sha }}" \
+            --title "Thingsbook for macOS (Universal Build #${{ github.run_number }})" \
+            --notes "Universal (Apple Silicon + Intel) macOS DMG built from \`macOS\`. Install or update in one command without Gatekeeper prompts:
+
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/macOS/macos/install.sh | bash
+          \`\`\`"
+          gh release edit "$TAG" --draft=false --prerelease

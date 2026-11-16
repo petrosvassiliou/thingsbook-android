@@ -4,10 +4,14 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -37,38 +41,48 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.roundToIntRect
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.culturedcode.things3.ui.theme.ThingsTheme
 import kotlinx.coroutines.delay
 
 /**
- * Pure deterministic timing policy shared across Android hover & touch-preview tooltips:
+ * Pure deterministic timing & placement policy shared across Android hover & touch-preview tooltips:
  * - Cold pointer entry waits [DEFAULT_INITIAL_DELAY_MS] (160ms) so casual cursor sweeps never flicker.
  * - Moving between adjacent controls while a tooltip is visible or within [DEFAULT_WARM_HANDOFF_WINDOW_MS] (450ms)
  *   switches in `0ms` so tooltips never lag behind the cursor or show stale labels.
- * - Stationary touch long-press previews appear after [DEFAULT_TOUCH_LONG_PRESS_MS] (380ms) without consuming
- *   any pointer events, keeping taps, drags, and list scrolling 100% instant.
+ * - Stationary touch long-press previews appear after [DEFAULT_TOUCH_LONG_PRESS_MS] (380ms) with haptic feedback,
+ *   suppress accidental button `onClick` on finger lift, and remain readable for [DEFAULT_TOUCH_RELEASE_HIDE_MS]
+ *   (1800ms) after the finger moves out of the way (or until the next tap/scroll anywhere on screen).
  */
 object TooltipTimingPolicy {
     const val DEFAULT_INITIAL_DELAY_MS = 160L
     const val DEFAULT_WARM_HANDOFF_WINDOW_MS = 450L
     const val DEFAULT_TOUCH_LONG_PRESS_MS = 380L
-    const val DEFAULT_AUTO_HIDE_MS = 4000L
+    const val DEFAULT_TOUCH_RELEASE_HIDE_MS = 1800L
+    const val DEFAULT_TOUCH_MAX_VISIBLE_MS = 4000L
 
     fun effectiveHoverDelayMs(
         isCurrentlyShowingAny: Boolean,
@@ -82,6 +96,63 @@ object TooltipTimingPolicy {
             return 0L
         }
         return coldDelayMs.coerceAtLeast(0L)
+    }
+
+    /**
+     * Returns true when a pointer event represents an unpressed hover cursor/stylus/trackpad signal,
+     * independent of `PointerType` (ChromeOS ARCVM & Android multi-touch trackpads frequently emit
+     * `ACTION_HOVER_ENTER` / `ACTION_HOVER_MOVE` with `PointerType.Touch` or `PointerType.Unknown`).
+     */
+    fun isUnpressedHoverEvent(
+        eventType: PointerEventType,
+        hasChanges: Boolean,
+        anyPressed: Boolean,
+        anyPreviousPressed: Boolean
+    ): Boolean {
+        if (!hasChanges || anyPressed || anyPreviousPressed) return false
+        return eventType == PointerEventType.Enter || eventType == PointerEventType.Move
+    }
+
+    /**
+     * Computes clamped window-local `(x, y)` coordinates for a tooltip bubble while respecting
+     * edge-to-edge system bar insets (`rootSafeTopPx` / `rootSafeBottomPx`) so top-bar tooltips
+     * cleanly flip below the toolbar instead of colliding with the Android status bar or camera cutout.
+     */
+    fun computeTooltipPlacement(
+        anchorBounds: IntRect,
+        hostBoundsInRoot: IntRect,
+        hostSize: IntSize,
+        tooltipSize: IntSize,
+        rootSafeTopPx: Int,
+        rootSafeBottomPx: Int,
+        verticalGapPx: Int,
+        screenMarginPx: Int
+    ): IntOffset {
+        val localLeft = anchorBounds.left - hostBoundsInRoot.left
+        val localTop = anchorBounds.top - hostBoundsInRoot.top
+        val localBottom = anchorBounds.bottom - hostBoundsInRoot.top
+
+        val minX = screenMarginPx
+        val maxX = (hostSize.width - tooltipSize.width - screenMarginPx).coerceAtLeast(minX)
+        val centeredX = localLeft + (anchorBounds.width - tooltipSize.width) / 2
+        val finalX = centeredX.coerceIn(minX, maxX)
+
+        val localSafeTop = (rootSafeTopPx - hostBoundsInRoot.top).coerceAtLeast(0)
+        val localSafeBottom = rootSafeBottomPx.coerceAtLeast(0)
+
+        val minY = localSafeTop + screenMarginPx
+        val maxY = (hostSize.height - localSafeBottom - tooltipSize.height - screenMarginPx).coerceAtLeast(minY)
+
+        val aboveY = localTop - tooltipSize.height - verticalGapPx
+        val belowY = localBottom + verticalGapPx
+
+        val finalY = if (aboveY >= minY) {
+            aboveY.coerceIn(minY, maxY)
+        } else {
+            belowY.coerceIn(minY, maxY)
+        }
+
+        return IntOffset(finalX, finalY)
     }
 }
 
@@ -99,7 +170,9 @@ class ThingsTooltipHostState(
     private data class ActiveEntry(
         val ownerId: Any,
         var text: String,
-        var anchorBounds: IntRect
+        var anchorBounds: IntRect,
+        var isTouchPreview: Boolean,
+        var isReleasedTouch: Boolean
     )
 
     private val activeStack = mutableListOf<ActiveEntry>()
@@ -110,17 +183,25 @@ class ThingsTooltipHostState(
         private set
     var activeAnchorBounds by mutableStateOf(IntRect.Zero)
         private set
+    var activeIsTouchPreview by mutableStateOf(false)
+        private set
+    var releasedTouchTick by mutableIntStateOf(0)
+        private set
 
     private var lastHiddenAtMs: Long = 0L
 
     val isShowing: Boolean
         get() = activeOwnerId != null && activeText.isNotBlank()
 
+    fun hasReleasedTouchPreview(): Boolean =
+        activeStack.any { it.isReleasedTouch }
+
     fun resolveHoverDelayMs(
         coldDelayMs: Long = TooltipTimingPolicy.DEFAULT_INITIAL_DELAY_MS
     ): Long {
+        val activelyHoveredShowing = isShowing && !hasReleasedTouchPreview()
         return TooltipTimingPolicy.effectiveHoverDelayMs(
-            isCurrentlyShowingAny = isShowing,
+            isCurrentlyShowingAny = activelyHoveredShowing,
             lastHiddenAtMs = lastHiddenAtMs,
             nowMs = clockMs(),
             coldDelayMs = coldDelayMs
@@ -131,6 +212,7 @@ class ThingsTooltipHostState(
         if (activeStack.isEmpty()) {
             activeOwnerId = null
             activeText = ""
+            activeIsTouchPreview = false
             return
         }
         // Pick the innermost (smallest-area) active anchor; break ties in favor of the latest entry
@@ -147,16 +229,31 @@ class ThingsTooltipHostState(
         activeOwnerId = best.ownerId
         activeText = best.text
         activeAnchorBounds = best.anchorBounds
+        activeIsTouchPreview = best.isTouchPreview
     }
 
-    fun show(ownerId: Any, text: String, anchorBounds: IntRect) {
+    fun show(
+        ownerId: Any,
+        text: String,
+        anchorBounds: IntRect,
+        isTouchPreview: Boolean = false
+    ) {
         val trimmed = text.trim()
         if (trimmed.isEmpty() || anchorBounds.width <= 0 || anchorBounds.height <= 0) {
             hide(ownerId, allowWarmHandoff = false)
             return
         }
-        activeStack.removeAll { it.ownerId === ownerId }
-        activeStack.add(ActiveEntry(ownerId = ownerId, text = trimmed, anchorBounds = anchorBounds))
+        // Clear any lingering post-release touch preview from a previous control
+        activeStack.removeAll { it.isReleasedTouch || it.ownerId === ownerId }
+        activeStack.add(
+            ActiveEntry(
+                ownerId = ownerId,
+                text = trimmed,
+                anchorBounds = anchorBounds,
+                isTouchPreview = isTouchPreview,
+                isReleasedTouch = false
+            )
+        )
         syncActiveFromStack()
     }
 
@@ -174,17 +271,35 @@ class ThingsTooltipHostState(
         syncActiveFromStack()
     }
 
-    fun hide(ownerId: Any, allowWarmHandoff: Boolean = true) {
+    /**
+     * Transitions an active touch-long-press tooltip into post-release lingering mode so the user
+     * can read the label for [TooltipTimingPolicy.DEFAULT_TOUCH_RELEASE_HIDE_MS] once their finger lifts.
+     */
+    fun releaseTouchPreview(ownerId: Any) {
+        val existing = activeStack.firstOrNull { it.ownerId === ownerId && it.isTouchPreview } ?: return
+        existing.isReleasedTouch = true
+        releasedTouchTick += 1
+        syncActiveFromStack()
+    }
+
+    fun dismissReleasedTouchPreviews(exceptOwnerId: Any? = null) {
+        val removed = activeStack.removeAll { it.isReleasedTouch && it.ownerId !== exceptOwnerId }
+        if (removed) {
+            syncActiveFromStack()
+        }
+    }
+
+    fun hide(ownerId: Any, allowWarmHandoff: Boolean = true, preserveIfReleasedTouch: Boolean = false) {
+        if (preserveIfReleasedTouch) {
+            val existing = activeStack.firstOrNull { it.ownerId === ownerId }
+            if (existing?.isReleasedTouch == true) return
+        }
         val wasShowing = isShowing
         val removed = activeStack.removeAll { it.ownerId === ownerId }
         if (!removed) return
         syncActiveFromStack()
         if (wasShowing && !isShowing) {
-            if (allowWarmHandoff) {
-                lastHiddenAtMs = clockMs()
-            } else {
-                lastHiddenAtMs = 0L
-            }
+            lastHiddenAtMs = if (allowWarmHandoff) clockMs() else 0L
         }
     }
 
@@ -197,6 +312,7 @@ class ThingsTooltipHostState(
         activeStack.clear()
         activeOwnerId = null
         activeText = ""
+        activeIsTouchPreview = false
     }
 }
 
@@ -217,12 +333,30 @@ fun ThingsTooltipHostBox(
     var hostSize by remember { mutableStateOf(IntSize.Zero) }
     var rootOffsetInWindow by remember { mutableStateOf(IntRect.Zero) }
 
+    // Auto-expire post-release touch tooltips after 1.8s so they stay readable once finger lifts
+    LaunchedEffect(hostState.releasedTouchTick) {
+        if (hostState.hasReleasedTouchPreview()) {
+            delay(TooltipTimingPolicy.DEFAULT_TOUCH_RELEASE_HIDE_MS)
+            hostState.dismissReleasedTouchPreviews()
+        }
+    }
+
     CompositionLocalProvider(LocalThingsTooltipHostState provides hostState) {
         Box(
             modifier = modifier
                 .onSizeChanged { hostSize = it }
                 .onGloballyPositioned { coords ->
                     rootOffsetInWindow = coords.boundsInRoot().roundToIntRect()
+                }
+                .pointerInput(hostState) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val ev = awaitPointerEvent(PointerEventPass.Initial)
+                            if (ev.type == PointerEventType.Press || ev.type == PointerEventType.Scroll) {
+                                hostState.dismissReleasedTouchPreviews()
+                            }
+                        }
+                    }
                 }
         ) {
             content()
@@ -244,76 +378,90 @@ private fun BoxScope.ThingsTooltipOverlayLayer(
     val density = LocalDensity.current
     val text = hostState.activeText
     val anchorBounds = hostState.activeAnchorBounds
+    val isTouchPreview = hostState.activeIsTouchPreview
     val isShowing = hostState.activeOwnerId != null && text.isNotBlank()
 
     if (!isShowing || hostSize.width <= 0 || hostSize.height <= 0) {
         return
     }
 
-    val verticalGapPx = with(density) { 8.dp.roundToPx() }
+    val safeInsets = WindowInsets.safeDrawing
+    val rootSafeTopPx = safeInsets.getTop(density)
+    val rootSafeBottomPx = safeInsets.getBottom(density)
+    val verticalGapPx = with(density) { (if (isTouchPreview) 14.dp else 8.dp).roundToPx() }
     val screenMarginPx = with(density) { 8.dp.roundToPx() }
 
-    Box(modifier = Modifier.matchParentSize()) {
-        Box(
-            modifier = Modifier
-                .layout { measurable, constraints ->
-                    val maxTooltipW = (hostSize.width - screenMarginPx * 2).coerceAtLeast(60)
-                    val placeable = measurable.measure(
-                        constraints.copy(
-                            minWidth = 0,
-                            maxWidth = maxTooltipW.coerceAtMost(constraints.maxWidth),
-                            minHeight = 0
-                        )
+    Layout(
+        modifier = Modifier
+            .matchParentSize()
+            .zIndex(10_000f)
+            .semantics {
+                paneTitle = text
+                liveRegion = LiveRegionMode.Polite
+            },
+        content = {
+            Box(
+                modifier = Modifier
+                    .shadow(
+                        elevation = 6.dp,
+                        shape = RoundedCornerShape(8.dp),
+                        clip = false
                     )
-                    val localLeft = anchorBounds.left - hostBoundsInRoot.left
-                    val localTop = anchorBounds.top - hostBoundsInRoot.top
-                    val localBottom = anchorBounds.bottom - hostBoundsInRoot.top
-
-                    val centeredX = localLeft + (anchorBounds.width - placeable.width) / 2
-                    val maxX = (hostSize.width - placeable.width - screenMarginPx).coerceAtLeast(screenMarginPx)
-                    val finalX = centeredX.coerceIn(screenMarginPx, maxX)
-
-                    val aboveY = localTop - placeable.height - verticalGapPx
-                    val belowY = localBottom + verticalGapPx
-                    val maxY = (hostSize.height - placeable.height - screenMarginPx).coerceAtLeast(0)
-                    val finalY = if (aboveY >= screenMarginPx) {
-                        aboveY
-                    } else {
-                        belowY.coerceIn(0, maxY)
-                    }
-
-                    layout(placeable.width, placeable.height) {
-                        placeable.place(finalX, finalY)
-                    }
-                }
-                .clip(RoundedCornerShape(7.dp))
-                .background(Color(0xF21B1F2A))
-                .border(
-                    width = 0.75.dp,
-                    color = Color.White.copy(alpha = 0.16f),
-                    shape = RoundedCornerShape(7.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xF51B1F2A))
+                    .border(
+                        width = 0.75.dp,
+                        color = Color.White.copy(alpha = 0.20f),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    .padding(horizontal = 10.dp, vertical = 5.5.dp)
+            ) {
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    color = Color.White,
+                    maxLines = 2
                 )
-                .padding(horizontal = 9.5.dp, vertical = 5.dp)
-        ) {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.Medium
-                ),
-                color = Color.White,
-                maxLines = 2
+            }
+        }
+    ) { measurables, constraints ->
+        val maxTooltipW = (hostSize.width - screenMarginPx * 2).coerceAtLeast(60)
+        val placeable = measurables.first().measure(
+            constraints.copy(
+                minWidth = 0,
+                maxWidth = maxTooltipW.coerceAtMost(constraints.maxWidth),
+                minHeight = 0
             )
+        )
+        val placement = TooltipTimingPolicy.computeTooltipPlacement(
+            anchorBounds = anchorBounds,
+            hostBoundsInRoot = hostBoundsInRoot,
+            hostSize = hostSize,
+            tooltipSize = IntSize(placeable.width, placeable.height),
+            rootSafeTopPx = rootSafeTopPx,
+            rootSafeBottomPx = rootSafeBottomPx,
+            verticalGapPx = verticalGapPx,
+            screenMarginPx = screenMarginPx
+        )
+        layout(constraints.maxWidth, constraints.maxHeight) {
+            placeable.place(placement.x, placement.y)
         }
     }
 }
 
 /**
  * Responsive Things-style tooltip supporting:
- * 1. Mouse / trackpad / stylus hover (`160ms` cold delay, `0ms` warm handoff across adjacent buttons,
- *    and `0ms` live text/position updates when state or language changes while hovered).
- * 2. Optional passive stationary touch long-press preview (`380ms` within `touchSlop` on `PointerEventPass.Initial`
- *    without consuming pointer changes, so taps and scrolling remain 100% immediate).
+ * 1. Universal hover across USB/Bluetooth mice, ChromeOS ARCVM trackpads (`PointerType.Touch` / `Unknown`),
+ *    Samsung DeX, tablet trackpads, and styluses (`160ms` cold delay, `0ms` warm handoff across adjacent
+ *    buttons, and `0ms` live text/position updates when state or language changes while hovered).
+ * 2. Native-feeling stationary touch long-press preview (`380ms` within `touchSlop` with haptic feedback):
+ *    - Short taps (`< 380ms`), scrolling, and drags consume zero events and remain 100% immediate.
+ *    - Stationary long-presses show the tooltip, consume only the finger release so the underlying button's
+ *      `onClick` does not accidentally fire, and keep the tooltip visible for `1.8s` after finger lift so
+ *      the user can clearly read it unobstructed by their thumb.
  */
 @Composable
 fun ThingsHoverTooltip(
@@ -325,13 +473,21 @@ fun ThingsHoverTooltip(
     content: @Composable () -> Unit
 ) {
     val hostState = LocalThingsTooltipHostState.current
+    val haptics = LocalHapticFeedback.current
     val ownerId = remember { Any() }
     val boundsRef = remember { BoundsRef() }
     val latestText by rememberUpdatedState(text)
 
-    var isMouseHovered by remember { mutableStateOf(false) }
+    val hoverInteractionSource = remember { MutableInteractionSource() }
+    val isInteractionHovered by hoverInteractionSource.collectIsHoveredAsState()
+    var isPointerHovered by remember { mutableStateOf(false) }
+    var isAnyMousePressed by remember { mutableStateOf(false) }
+
     var isTouchDown by remember { mutableStateOf(false) }
     var touchSessionId by remember { mutableIntStateOf(0) }
+    var touchTriggeredSession by remember { mutableIntStateOf(-1) }
+
+    val effectiveHovered = (isInteractionHovered || isPointerHovered) && !isTouchDown && !isAnyMousePressed
 
     DisposableEffect(ownerId, hostState) {
         onDispose {
@@ -349,11 +505,15 @@ fun ThingsHoverTooltip(
         }
     }
 
-    // Mouse / stylus hover lifecycle (with 0ms warm handoff across adjacent controls)
-    LaunchedEffect(isMouseHovered, enabled, hostState) {
-        if (hostState == null || !enabled || !isMouseHovered) {
+    // Mouse / trackpad / stylus hover lifecycle (with 0ms warm handoff across adjacent controls)
+    LaunchedEffect(effectiveHovered, enabled, hostState) {
+        if (hostState == null || !enabled || !effectiveHovered) {
             if (!isTouchDown) {
-                hostState?.hide(ownerId, allowWarmHandoff = true)
+                hostState?.hide(
+                    ownerId,
+                    allowWarmHandoff = true,
+                    preserveIfReleasedTouch = true
+                )
             }
         } else {
             val waitMs = hostState.resolveHoverDelayMs(delayMillis)
@@ -362,9 +522,7 @@ fun ThingsHoverTooltip(
             }
             val resolved = latestText
             if (resolved.isNotBlank()) {
-                hostState.show(ownerId, resolved, boundsRef.rect)
-                delay(TooltipTimingPolicy.DEFAULT_AUTO_HIDE_MS)
-                hostState.hide(ownerId, allowWarmHandoff = false)
+                hostState.show(ownerId, resolved, boundsRef.rect, isTouchPreview = false)
             }
         }
     }
@@ -372,16 +530,25 @@ fun ThingsHoverTooltip(
     // Stationary finger long-press tooltip preview on touchscreens
     LaunchedEffect(touchSessionId, isTouchDown, enabled, enableTouchLongPress, hostState) {
         if (hostState == null || !enabled || !enableTouchLongPress || !isTouchDown) {
-            if (!isMouseHovered && !isTouchDown) {
-                hostState?.hide(ownerId, allowWarmHandoff = true)
+            if (!effectiveHovered && !isTouchDown) {
+                hostState?.hide(
+                    ownerId,
+                    allowWarmHandoff = true,
+                    preserveIfReleasedTouch = true
+                )
             }
         } else {
+            val activeSession = touchSessionId
             delay(TooltipTimingPolicy.DEFAULT_TOUCH_LONG_PRESS_MS)
             val resolved = latestText
-            if (isTouchDown && resolved.isNotBlank()) {
-                hostState.show(ownerId, resolved, boundsRef.rect)
-                delay(TooltipTimingPolicy.DEFAULT_AUTO_HIDE_MS)
-                hostState.hide(ownerId, allowWarmHandoff = false)
+            if (isTouchDown && touchSessionId == activeSession && resolved.isNotBlank()) {
+                touchTriggeredSession = activeSession
+                runCatching { haptics.performHapticFeedback(HapticFeedbackType.LongPress) }
+                hostState.show(ownerId, resolved, boundsRef.rect, isTouchPreview = true)
+                delay(TooltipTimingPolicy.DEFAULT_TOUCH_MAX_VISIBLE_MS)
+                if (isTouchDown && touchSessionId == activeSession) {
+                    hostState.hide(ownerId, allowWarmHandoff = false)
+                }
             }
         }
     }
@@ -393,62 +560,115 @@ fun ThingsHoverTooltip(
                 boundsRef.rect = updated
                 hostState?.updateIfActive(ownerId, latestText, updated)
             }
+            .hoverable(interactionSource = hoverInteractionSource, enabled = enabled)
             .pointerInput(enabled, enableTouchLongPress, hostState != null) {
                 if (!enabled || hostState == null) return@pointerInput
                 val touchSlopPx = viewConfiguration.touchSlop
                 var touchOrigin = Offset.Zero
+                var touchExceededSlop = false
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
-                        val primary = event.changes.firstOrNull()
+                        val changes = event.changes
+                        val primary = changes.firstOrNull()
                         val pointerType = primary?.type
-                        val isHoverPointer = pointerType == PointerType.Mouse || pointerType == PointerType.Stylus
+                        val anyPressed = changes.any { it.pressed }
+                        val anyPreviousPressed = changes.any { it.previousPressed }
 
-                        if (isHoverPointer) {
-                            when (event.type) {
-                                PointerEventType.Enter, PointerEventType.Move -> {
-                                    if (event.changes.none { it.pressed }) {
-                                        if (!isMouseHovered) {
-                                            isMouseHovered = true
-                                        }
-                                    } else {
-                                        if (isMouseHovered) {
-                                            isMouseHovered = false
-                                        }
-                                        hostState.hide(ownerId, allowWarmHandoff = false)
-                                    }
-                                }
-                                PointerEventType.Exit, PointerEventType.Press, PointerEventType.Scroll -> {
-                                    if (isMouseHovered) {
-                                        isMouseHovered = false
-                                    }
-                                    hostState.hide(
-                                        ownerId,
-                                        allowWarmHandoff = event.type == PointerEventType.Exit
-                                    )
-                                }
-                                else -> Unit
+                        if (TooltipTimingPolicy.isUnpressedHoverEvent(
+                                eventType = event.type,
+                                hasChanges = changes.isNotEmpty(),
+                                anyPressed = anyPressed,
+                                anyPreviousPressed = anyPreviousPressed
+                            )
+                        ) {
+                            isAnyMousePressed = false
+                            if (!isPointerHovered) {
+                                isPointerHovered = true
                             }
-                        } else if (enableTouchLongPress && pointerType == PointerType.Touch) {
-                            val pressedChanges = event.changes.filter { it.pressed }
+                            continue
+                        }
+
+                        if (event.type == PointerEventType.Exit) {
+                            if (isPointerHovered) {
+                                isPointerHovered = false
+                            }
+                            isAnyMousePressed = false
+                            if (!isTouchDown) {
+                                hostState.hide(
+                                    ownerId,
+                                    allowWarmHandoff = true,
+                                    preserveIfReleasedTouch = true
+                                )
+                            }
+                            continue
+                        }
+
+                        if (event.type == PointerEventType.Scroll) {
+                            isPointerHovered = false
+                            isTouchDown = false
+                            touchTriggeredSession = -1
+                            hostState.hide(ownerId, allowWarmHandoff = false)
+                            continue
+                        }
+
+                        val isDirectTouchGesture =
+                            pointerType != PointerType.Mouse && (anyPressed || anyPreviousPressed)
+
+                        if (isDirectTouchGesture) {
+                            if (!enableTouchLongPress) {
+                                continue
+                            }
+                            val pressedChanges = changes.filter { it.pressed }
                             when {
-                                pressedChanges.size == 1 && !primary.previousPressed -> {
+                                pressedChanges.size == 1 && primary != null && !primary.previousPressed -> {
+                                    hostState.dismissReleasedTouchPreviews(exceptOwnerId = ownerId)
                                     touchOrigin = primary.position
+                                    touchExceededSlop = false
+                                    touchTriggeredSession = -1
                                     touchSessionId += 1
                                     isTouchDown = true
                                 }
-                                pressedChanges.size == 1 && isTouchDown -> {
+                                pressedChanges.size == 1 && primary != null && isTouchDown -> {
                                     if ((primary.position - touchOrigin).getDistance() > touchSlopPx) {
+                                        touchExceededSlop = true
                                         isTouchDown = false
+                                        touchTriggeredSession = -1
                                         hostState.hide(ownerId, allowWarmHandoff = false)
                                     }
                                 }
-                                pressedChanges.size != 1 -> {
-                                    if (isTouchDown) {
-                                        isTouchDown = false
+                                pressedChanges.isEmpty() -> {
+                                    val shouldConsumeReleaseForTooltip =
+                                        isTouchDown &&
+                                            !touchExceededSlop &&
+                                            touchTriggeredSession == touchSessionId
+                                    isTouchDown = false
+                                    touchTriggeredSession = -1
+                                    if (shouldConsumeReleaseForTooltip) {
+                                        // Prevent IconButton / clickable from firing onClick after long-press tooltip
+                                        changes.forEach { change ->
+                                            if (!change.pressed && change.previousPressed) {
+                                                change.consume()
+                                            }
+                                        }
+                                        hostState.releaseTouchPreview(ownerId)
+                                    } else {
+                                        hostState.hide(ownerId, allowWarmHandoff = false)
                                     }
-                                    hostState.hide(ownerId, allowWarmHandoff = true)
                                 }
+                                pressedChanges.size > 1 -> {
+                                    touchExceededSlop = true
+                                    isTouchDown = false
+                                    touchTriggeredSession = -1
+                                    hostState.hide(ownerId, allowWarmHandoff = false)
+                                }
+                            }
+                        } else {
+                            // Mouse button click press/release
+                            isAnyMousePressed = anyPressed
+                            if (anyPressed) {
+                                isPointerHovered = false
+                                hostState.hide(ownerId, allowWarmHandoff = false)
                             }
                         }
                     }

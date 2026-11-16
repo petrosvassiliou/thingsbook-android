@@ -625,11 +625,21 @@ fun ExpandableTaskCard(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = if (isExpanded) Alignment.CenterVertically else Alignment.Top
                 ) {
-                    ThingsCheckbox(
-                        status = effectiveVisualStatus,
-                        onStatusChange = handleStatusRequest,
-                        isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY
-                    )
+                    val checkboxTooltip = if (effectiveVisualStatus == TaskStatus.OPEN) {
+                        stringResource(R.string.action_complete)
+                    } else {
+                        stringResource(R.string.action_reopen_todo)
+                    }
+                    ThingsHoverTooltip(
+                        text = checkboxTooltip,
+                        enableTouchLongPress = false
+                    ) {
+                        ThingsCheckbox(
+                            status = effectiveVisualStatus,
+                            onStatusChange = handleStatusRequest,
+                            isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY
+                        )
+                    }
 
                     Spacer(modifier = Modifier.width(10.dp))
 
@@ -982,44 +992,90 @@ private fun CollapsedTaskInlineBadges(
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         if (task.scheduleState == ScheduleState.THIS_EVENING) {
-            ThingsWhenBadge(
-                scheduleState = task.scheduleState,
-                whenDateEpochMillis = task.whenDate,
-                locale = locale
-            )
+            ThingsHoverTooltip(
+                text = stringResource(R.string.view_this_evening),
+                enableTouchLongPress = false
+            ) {
+                ThingsWhenBadge(
+                    scheduleState = task.scheduleState,
+                    whenDateEpochMillis = task.whenDate,
+                    locale = locale
+                )
+            }
         }
         if (task.scheduledStartMinutes != null) {
-            ThingsTagPill(
-                title = TimeblockScheduleUtils.formatTimeblockBadge(
-                    task.scheduledStartMinutes,
-                    task.durationMinutes
-                ),
-                onClick = onOpenTimeblockDialog
+            val tbBadge = TimeblockScheduleUtils.formatTimeblockBadge(
+                task.scheduledStartMinutes,
+                task.durationMinutes
             )
+            ThingsHoverTooltip(
+                text = "${stringResource(R.string.v2_timeblock_title)}: $tbBadge",
+                enableTouchLongPress = false
+            ) {
+                ThingsTagPill(
+                    title = tbBadge,
+                    onClick = onOpenTimeblockDialog
+                )
+            }
         } else if (task.durationMinutes != null) {
-            ThingsTagPill(
-                title = "⏱ ${task.durationMinutes}m",
-                onClick = onOpenTimeblockDialog
-            )
+            ThingsHoverTooltip(
+                text = "${stringResource(R.string.v2_timeblock_title)}: ${task.durationMinutes}m",
+                enableTouchLongPress = false
+            ) {
+                ThingsTagPill(
+                    title = "⏱ ${task.durationMinutes}m",
+                    onClick = onOpenTimeblockDialog
+                )
+            }
         }
         task.recurrenceRule?.let { rr ->
-            ThingsRepeatBadge(rule = rr)
+            ThingsHoverTooltip(
+                text = stringResource(R.string.context_configure_repeat),
+                enableTouchLongPress = false
+            ) {
+                ThingsRepeatBadge(rule = rr)
+            }
         }
         task.reminderTime?.let { rt ->
-            ThingsReminderBadge(reminderEpochMillis = rt)
+            ThingsHoverTooltip(
+                text = stringResource(R.string.context_when_date_reminder),
+                enableTouchLongPress = false
+            ) {
+                ThingsReminderBadge(reminderEpochMillis = rt)
+            }
         }
         if (task.checklistItems.isNotEmpty()) {
             val doneCount = task.checklistItems.count { it.isCompleted }
-            ThingsTagPill(title = "☑ $doneCount/${task.checklistItems.size}")
+            ThingsHoverTooltip(
+                text = "${stringResource(R.string.placeholder_checklist)}: $doneCount/${task.checklistItems.size}",
+                enableTouchLongPress = false
+            ) {
+                ThingsTagPill(title = "☑ $doneCount/${task.checklistItems.size}")
+            }
         }
         if (task.attachments.isNotEmpty()) {
-            ThingsTagPill(title = "📎 ${task.attachments.size}")
+            ThingsHoverTooltip(
+                text = "${stringResource(R.string.attachments_section_title)}: ${task.attachments.size}",
+                enableTouchLongPress = false
+            ) {
+                ThingsTagPill(title = "📎 ${task.attachments.size}")
+            }
         }
         task.tags.forEach { tag ->
-            ThingsTagPill(title = tag.title)
+            ThingsHoverTooltip(
+                text = "#${tag.title}",
+                enableTouchLongPress = false
+            ) {
+                ThingsTagPill(title = tag.title)
+            }
         }
         task.deadline?.let { dl ->
-            ThingsDeadlineBadge(deadlineEpochMillis = dl, locale = locale)
+            ThingsHoverTooltip(
+                text = stringResource(R.string.action_deadline),
+                enableTouchLongPress = false
+            ) {
+                ThingsDeadlineBadge(deadlineEpochMillis = dl, locale = locale)
+            }
         }
     }
 }

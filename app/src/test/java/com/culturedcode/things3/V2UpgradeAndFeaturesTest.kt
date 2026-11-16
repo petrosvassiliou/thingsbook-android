@@ -41,7 +41,10 @@ import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
 import com.culturedcode.things3.domain.model.TemplateHeadingBlueprint
 import com.culturedcode.things3.domain.model.TemplateTaskBlueprint
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
 import com.culturedcode.things3.domain.model.TimeblockScheduleUtils
 import com.culturedcode.things3.domain.model.TodayTimelineEntry
 import com.culturedcode.things3.ui.components.ThingsTooltipHostState
@@ -753,9 +756,9 @@ class V2UpgradeAndFeaturesTest {
     }
 
     @Test
-    fun `v2_0_0_beta_13 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
-        assertEquals(57, BuildConfig.VERSION_CODE)
-        assertEquals("2.0.0-beta.13", BuildConfig.VERSION_NAME)
+    fun `v2_0_0_beta_14 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
+        assertEquals(58, BuildConfig.VERSION_CODE)
+        assertEquals("2.0.0-beta.14", BuildConfig.VERSION_NAME)
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -1255,7 +1258,118 @@ class V2UpgradeAndFeaturesTest {
         )
         assertEquals(setOf("dup-stale-today", "dup-tomorrow-second"), losers.toSet())
     }
+
+    @Test
+    fun `v2_0_0_beta_14 Android tooltip unpressed hover detection safe inset placement and touch preview linger`() {
+        // 1. Unpressed Enter/Move events trigger hover regardless of PointerType (ARCVM / Android trackpads),
+        //    while pressed, just-released, Press, or Exit events never falsely re-trigger hover.
+        assertTrue(
+            TooltipTimingPolicy.isUnpressedHoverEvent(
+                eventType = PointerEventType.Enter,
+                hasChanges = true,
+                anyPressed = false,
+                anyPreviousPressed = false
+            )
+        )
+        assertTrue(
+            TooltipTimingPolicy.isUnpressedHoverEvent(
+                eventType = PointerEventType.Move,
+                hasChanges = true,
+                anyPressed = false,
+                anyPreviousPressed = false
+            )
+        )
+        assertFalse(
+            TooltipTimingPolicy.isUnpressedHoverEvent(
+                eventType = PointerEventType.Move,
+                hasChanges = true,
+                anyPressed = true,
+                anyPreviousPressed = false
+            )
+        )
+        assertFalse(
+            TooltipTimingPolicy.isUnpressedHoverEvent(
+                eventType = PointerEventType.Move,
+                hasChanges = true,
+                anyPressed = false,
+                anyPreviousPressed = true
+            )
+        )
+        assertFalse(
+            TooltipTimingPolicy.isUnpressedHoverEvent(
+                eventType = PointerEventType.Exit,
+                hasChanges = true,
+                anyPressed = false,
+                anyPreviousPressed = false
+            )
+        )
+        assertFalse(
+            TooltipTimingPolicy.isUnpressedHoverEvent(
+                eventType = PointerEventType.Press,
+                hasChanges = true,
+                anyPressed = false,
+                anyPreviousPressed = false
+            )
+        )
+
+        // 2. Edge-to-edge Android status bar inset clearance:
+        //    A TopThingsbookBar icon right below a 108px status bar flips cleanly BELOW the button
+        //    instead of rendering behind the status bar / camera cutout.
+        val hostBounds = IntRect(0, 0, 1080, 2400)
+        val hostSize = IntSize(1080, 2400)
+        val tooltipSize = IntSize(220, 76)
+        val topBarIconBounds = IntRect(960, 120, 1056, 216) // 96x96 icon right below 108px status bar
+        val topPlacement = TooltipTimingPolicy.computeTooltipPlacement(
+            anchorBounds = topBarIconBounds,
+            hostBoundsInRoot = hostBounds,
+            hostSize = hostSize,
+            tooltipSize = tooltipSize,
+            rootSafeTopPx = 108,
+            rootSafeBottomPx = 64,
+            verticalGapPx = 18,
+            screenMarginPx = 24
+        )
+        assertEquals(IntOffset(836, 234), topPlacement) // Clamped right edge (1080-220-24=836) & flipped below (216+18=234)
+
+        //    A bottom/body button with ample space above renders cleanly ABOVE the button.
+        val fabAnchorBounds = IntRect(490, 2050, 590, 2150)
+        val bottomPlacement = TooltipTimingPolicy.computeTooltipPlacement(
+            anchorBounds = fabAnchorBounds,
+            hostBoundsInRoot = hostBounds,
+            hostSize = hostSize,
+            tooltipSize = tooltipSize,
+            rootSafeTopPx = 108,
+            rootSafeBottomPx = 64,
+            verticalGapPx = 18,
+            screenMarginPx = 24
+        )
+        assertEquals(IntOffset(430, 1956), bottomPlacement) // Centered X (490 + (100-220)/2 = 430) & above (2050-76-18 = 1956)
+
+        // 3. Touchscreen long-press preview lingers after finger release (1.8s) until dismissed or next tap.
+        var fakeNowMs = 5_000L
+        val host = ThingsTooltipHostState(clockMs = { fakeNowMs })
+        val syncBtn = Any()
+        host.show(syncBtn, "Sync now", topBarIconBounds, isTouchPreview = true)
+        assertTrue(host.isShowing)
+        assertTrue(host.activeIsTouchPreview)
+        assertFalse(host.hasReleasedTouchPreview())
+
+        val prevTick = host.releasedTouchTick
+        host.releaseTouchPreview(syncBtn)
+        assertEquals(prevTick + 1, host.releasedTouchTick)
+        assertTrue(host.isShowing)
+        assertTrue(host.hasReleasedTouchPreview())
+
+        // Hover-exit cleanup with preserveIfReleasedTouch = true must NOT wipe out the post-release touch tooltip
+        host.hide(syncBtn, preserveIfReleasedTouch = true)
+        assertTrue(host.isShowing)
+        assertEquals("Sync now", host.activeText)
+
+        // Subsequent tap / scroll or 1800ms timeout clears released touch previews cleanly
+        assertEquals(1800L, TooltipTimingPolicy.DEFAULT_TOUCH_RELEASE_HIDE_MS)
+        host.dismissReleasedTouchPreviews()
+        assertFalse(host.isShowing)
+        assertFalse(host.hasReleasedTouchPreview())
+    }
 }
-
-
 

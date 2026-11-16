@@ -201,6 +201,7 @@ fun SampleTasksAccountMergeDialog(
         onDismissRequest = onCancel,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+        ThingsTooltipHostBox {
         Surface(
             modifier = Modifier
                 .widthIn(max = 460.dp)
@@ -248,16 +249,18 @@ fun SampleTasksAccountMergeDialog(
                         )
                     }
 
-                    IconButton(
-                        onClick = onCancel,
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = stringResource(R.string.action_cancel),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(18.dp)
-                        )
+                    ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
+                        IconButton(
+                            onClick = onCancel,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.action_cancel),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
 
@@ -330,6 +333,7 @@ fun SampleTasksAccountMergeDialog(
                 }
             }
         }
+        }
     }
 }
 
@@ -359,6 +363,7 @@ fun QuickCreateAreaDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+        ThingsTooltipHostBox {
         Surface(
             modifier = Modifier
                 .widthIn(max = 380.dp)
@@ -403,13 +408,15 @@ fun QuickCreateAreaDialog(
                         }
                     }
 
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                        Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = stringResource(R.string.action_cancel),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(18.dp)
-                        )
+                    ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.action_cancel),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
 
@@ -471,6 +478,7 @@ fun QuickCreateAreaDialog(
                     }
                 }
             }
+        }
         }
     }
 }

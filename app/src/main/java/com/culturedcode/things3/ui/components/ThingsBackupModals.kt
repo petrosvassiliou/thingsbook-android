@@ -278,6 +278,7 @@ fun ThingsBackupCreateDialog(
         onDismissRequest = { if (!isBusy) onDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+        ThingsTooltipHostBox {
         Surface(
             modifier = Modifier
                 .widthIn(max = 460.dp)
@@ -644,6 +645,7 @@ fun ThingsBackupCreateDialog(
                 }
             }
         }
+        }
     }
 }
 
@@ -693,6 +695,7 @@ fun ThingsBackupRestoreDialog(
         onDismissRequest = { if (!isBusy) onCancel() },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+        ThingsTooltipHostBox {
         Surface(
             modifier = Modifier
                 .widthIn(max = 460.dp)
@@ -960,6 +963,7 @@ fun ThingsBackupRestoreDialog(
                     }
                 }
             }
+        }
         }
     }
 }

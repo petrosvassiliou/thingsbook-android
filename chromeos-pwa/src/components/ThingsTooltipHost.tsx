@@ -122,6 +122,8 @@ export const ThingsTooltipHost: React.FC = () => {
     let activeElement: HTMLElement | null = null;
     let activeAnchorId: string | null = null;
     let activeTouchPointerId: number | null = null;
+    let touchTooltipShownForPointer = false;
+    let suppressTouchClickUntilMs = 0;
     let touchStartX = 0;
     let touchStartY = 0;
     let mutationObserver: MutationObserver | null = null;
@@ -345,6 +347,7 @@ export const ThingsTooltipHost: React.FC = () => {
           return;
         }
         activeTouchPointerId = e.pointerId;
+        touchTooltipShownForPointer = false;
         touchStartX = e.clientX;
         touchStartY = e.clientY;
         const pressedEl = resolved.element;
@@ -358,6 +361,7 @@ export const ThingsTooltipHost: React.FC = () => {
           const liveRect = pressedEl.getBoundingClientRect();
           if (liveRect.width <= 0 || liveRect.height <= 0) return;
 
+          touchTooltipShownForPointer = true;
           activeElement = pressedEl;
           activeAnchorId = pressedId;
           observeActiveElement(pressedEl, pressedId);
@@ -390,8 +394,14 @@ export const ThingsTooltipHost: React.FC = () => {
       if (touchPressTimerId !== null) {
         window.clearTimeout(touchPressTimerId);
         touchPressTimerId = null;
+        touchTooltipShownForPointer = false;
         return;
       }
+
+      if (touchTooltipShownForPointer && e.type === 'pointerup') {
+        suppressTouchClickUntilMs = performance.now() + 500;
+      }
+      touchTooltipShownForPointer = false;
 
       // Tooltip was already shown via stationary long-press; fade away shortly after release
       if (touchAutoHideTimerId !== null) {
@@ -400,6 +410,14 @@ export const ThingsTooltipHost: React.FC = () => {
       touchAutoHideTimerId = window.setTimeout(() => {
         dismissImmediately(false);
       }, DEFAULT_TOUCH_RELEASE_HIDE_MS);
+    };
+
+    const handleClickCapture = (e: MouseEvent) => {
+      if (suppressTouchClickUntilMs > performance.now()) {
+        suppressTouchClickUntilMs = 0;
+        e.preventDefault();
+        e.stopPropagation();
+      }
     };
 
     const handleDismissInteraction = () => {
@@ -424,6 +442,7 @@ export const ThingsTooltipHost: React.FC = () => {
       capture: true,
       passive: true
     });
+    document.addEventListener('click', handleClickCapture, true);
     document.addEventListener('wheel', handleDismissInteraction, {
       capture: true,
       passive: true
@@ -446,6 +465,7 @@ export const ThingsTooltipHost: React.FC = () => {
       document.removeEventListener('pointerdown', handlePointerDown, true);
       document.removeEventListener('pointerup', handlePointerUpOrCancel, true);
       document.removeEventListener('pointercancel', handlePointerUpOrCancel, true);
+      document.removeEventListener('click', handleClickCapture, true);
       document.removeEventListener('wheel', handleDismissInteraction, true);
       document.removeEventListener('scroll', handleDismissInteraction, true);
       document.removeEventListener('keydown', handleDismissInteraction, true);

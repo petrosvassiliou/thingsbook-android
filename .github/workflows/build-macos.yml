@@ -161,7 +161,7 @@ jobs:
 
   build-macos:
     name: Parity Gate, Swift Tests & Universal DMG (macOS 15)
-    runs-on: macos-15
+    runs-on: macos-15-intel
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

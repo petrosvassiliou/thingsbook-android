@@ -756,9 +756,9 @@ class V2UpgradeAndFeaturesTest {
     }
 
     @Test
-    fun `v2_0_0_beta_14 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
-        assertEquals(58, BuildConfig.VERSION_CODE)
-        assertEquals("2.0.0-beta.14", BuildConfig.VERSION_NAME)
+    fun `v2_0_0_beta_15 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
+        assertEquals(59, BuildConfig.VERSION_CODE)
+        assertEquals("2.0.0-beta.15", BuildConfig.VERSION_NAME)
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -1370,6 +1370,17 @@ class V2UpgradeAndFeaturesTest {
         host.dismissReleasedTouchPreviews()
         assertFalse(host.isShowing)
         assertFalse(host.hasReleasedTouchPreview())
+
+        // 4. v2.0.0-beta.15 discreet Light & Dark tooltip surfaces (warm-pearl in Light, elevated slate in Dark — never black)
+        val lightStyle = TooltipTimingPolicy.resolveBubbleStyle(isDark = false)
+        assertTrue(lightStyle.backgroundColor.red > 0.94f && lightStyle.backgroundColor.green > 0.94f && lightStyle.backgroundColor.blue > 0.96f)
+        assertTrue(lightStyle.textColor.red < 0.35f && lightStyle.textColor.blue < 0.40f)
+        assertTrue(lightStyle.shadowSpotAlpha <= 0.12f)
+
+        val darkStyle = TooltipTimingPolicy.resolveBubbleStyle(isDark = true)
+        assertTrue(darkStyle.backgroundColor.red > 0.16f && darkStyle.backgroundColor.blue > 0.21f) // elevated slate (#2E323D), not black
+        assertTrue(darkStyle.textColor.red > 0.80f && darkStyle.textColor.red < 0.92f) // muted silver (#D4D9E2), not glaring white
     }
 }
+
 

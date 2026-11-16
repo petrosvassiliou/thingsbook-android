@@ -154,6 +154,35 @@ object TooltipTimingPolicy {
 
         return IntOffset(finalX, finalY)
     }
+    data class TooltipBubbleStyle(
+        val backgroundColor: Color,
+        val borderColor: Color,
+        val textColor: Color,
+        val shadowAmbientAlpha: Float,
+        val shadowSpotAlpha: Float
+    )
+
+    fun resolveBubbleStyle(isDark: Boolean): TooltipBubbleStyle {
+        return if (isDark) {
+            // Soft elevated slate surface matching DarkThingsPalette — never harsh pitch black
+            TooltipBubbleStyle(
+                backgroundColor = Color(0xF22E323D),
+                borderColor = Color(0x1CFFFFFF),
+                textColor = Color(0xFFD4D9E2),
+                shadowAmbientAlpha = 0.20f,
+                shadowSpotAlpha = 0.26f
+            )
+        } else {
+            // Discreet warm-pearl surface with hairline border & muted slate text
+            TooltipBubbleStyle(
+                backgroundColor = Color(0xF2F7F8FB),
+                borderColor = Color(0x1F1C1E24),
+                textColor = Color(0xFF424854),
+                shadowAmbientAlpha = 0.07f,
+                shadowSpotAlpha = 0.11f
+            )
+        }
+    }
 }
 
 /**
@@ -376,6 +405,8 @@ private fun BoxScope.ThingsTooltipOverlayLayer(
     hostBoundsInRoot: IntRect
 ) {
     val density = LocalDensity.current
+    val colors = ThingsTheme.colors
+    val bubbleStyle = TooltipTimingPolicy.resolveBubbleStyle(isDark = colors.isDark)
     val text = hostState.activeText
     val anchorBounds = hostState.activeAnchorBounds
     val isTouchPreview = hostState.activeIsTouchPreview
@@ -388,8 +419,9 @@ private fun BoxScope.ThingsTooltipOverlayLayer(
     val safeInsets = WindowInsets.safeDrawing
     val rootSafeTopPx = safeInsets.getTop(density)
     val rootSafeBottomPx = safeInsets.getBottom(density)
-    val verticalGapPx = with(density) { (if (isTouchPreview) 14.dp else 8.dp).roundToPx() }
+    val verticalGapPx = with(density) { (if (isTouchPreview) 13.dp else 7.dp).roundToPx() }
     val screenMarginPx = with(density) { 8.dp.roundToPx() }
+    val tooltipShape = RoundedCornerShape(6.dp)
 
     Layout(
         modifier = Modifier
@@ -403,26 +435,30 @@ private fun BoxScope.ThingsTooltipOverlayLayer(
             Box(
                 modifier = Modifier
                     .shadow(
-                        elevation = 6.dp,
-                        shape = RoundedCornerShape(8.dp),
-                        clip = false
+                        elevation = 2.dp,
+                        shape = tooltipShape,
+                        clip = false,
+                        ambientColor = Color.Black.copy(alpha = bubbleStyle.shadowAmbientAlpha),
+                        spotColor = Color.Black.copy(alpha = bubbleStyle.shadowSpotAlpha)
                     )
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xF51B1F2A))
+                    .clip(tooltipShape)
+                    .background(bubbleStyle.backgroundColor)
                     .border(
                         width = 0.75.dp,
-                        color = Color.White.copy(alpha = 0.20f),
-                        shape = RoundedCornerShape(8.dp)
+                        color = bubbleStyle.borderColor,
+                        shape = tooltipShape
                     )
-                    .padding(horizontal = 10.dp, vertical = 5.5.dp)
+                    .padding(horizontal = 8.5.dp, vertical = 4.dp)
             ) {
                 Text(
                     text = text,
                     style = MaterialTheme.typography.labelSmall.copy(
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
+                        fontSize = 11.sp,
+                        lineHeight = 14.sp,
+                        fontWeight = FontWeight.Normal,
+                        letterSpacing = 0.1.sp
                     ),
-                    color = Color.White,
+                    color = bubbleStyle.textColor,
                     maxLines = 2
                 )
             }

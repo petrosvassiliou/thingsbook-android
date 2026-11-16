@@ -15,11 +15,11 @@ import {
   selectLatestEligibleRelease
 } from '../src/data/pwaUpdater.ts';
 
-test('v2.0.0-beta.14 build metadata constants are bumped to 2.0.0-beta.14 (Build 58)', () => {
-  assert.equal(APP_VERSION, '2.0.0-beta.14');
-  assert.equal(APP_BUILD_CODE, 58);
-  assert.equal(versionFromUtils, '2.0.0-beta.14');
-  assert.equal(buildFromUtils, 58);
+test('v2.0.0-beta.15 build metadata constants are bumped to 2.0.0-beta.15 (Build 59)', () => {
+  assert.equal(APP_VERSION, '2.0.0-beta.15');
+  assert.equal(APP_BUILD_CODE, 59);
+  assert.equal(versionFromUtils, '2.0.0-beta.15');
+  assert.equal(buildFromUtils, 59);
   assert.equal(isPrereleaseVersion(APP_VERSION), true);
   assert.equal(isPrereleaseVersion('1.8.1'), false);
   assert.equal(isPrereleaseVersion('2.0.0'), false);

@@ -616,7 +616,7 @@ fileprivate final class ThingsTooltipBubbleNSView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = 6.5
+        layer?.cornerRadius = 6.0
         layer?.cornerCurve = .continuous
         layer?.masksToBounds = true
     }
@@ -626,11 +626,20 @@ fileprivate final class ThingsTooltipBubbleNSView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 6.5, yRadius: 6.5)
-        NSColor(srgbRed: 0.105, green: 0.122, blue: 0.168, alpha: 0.96).setFill()
-        path.fill()
-        NSColor.white.withAlphaComponent(0.16).setStroke()
-        path.lineWidth = 1.0
+        let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.375, dy: 0.375), xRadius: 6.0, yRadius: 6.0)
+        if isDark {
+            // Soft elevated slate matching Dark mode surface — never pitch black
+            NSColor(srgbRed: 0.180, green: 0.196, blue: 0.239, alpha: 0.95).setFill()
+            path.fill()
+            NSColor.white.withAlphaComponent(0.11).setStroke()
+        } else {
+            // Discreet warm-pearl surface with subtle hairline border
+            NSColor(srgbRed: 0.969, green: 0.973, blue: 0.984, alpha: 0.95).setFill()
+            path.fill()
+            NSColor(srgbRed: 0.110, green: 0.118, blue: 0.141, alpha: 0.12).setStroke()
+        }
+        path.lineWidth = 0.75
         path.stroke()
     }
 }
@@ -844,7 +853,8 @@ public final class ThingsMacTooltipController {
             presentPanel(
                 text: text,
                 anchorRect: anchorView.screenRect(),
-                parentWindow: parentWin
+                parentWindow: parentWin,
+                anchorAppearance: anchorView.effectiveAppearance
             )
             ensureWatchdogRunning()
         }
@@ -853,7 +863,7 @@ public final class ThingsMacTooltipController {
     private func ensurePanelCreated() {
         guard panel == nil else { return }
         let p = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 140, height: 26),
+            contentRect: NSRect(x: 0, y: 0, width: 140, height: 24),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -867,10 +877,10 @@ public final class ThingsMacTooltipController {
         p.hidesOnDeactivate = true
         p.collectionBehavior = [.transient, .ignoresCycle, .fullScreenAuxiliary]
 
-        let bubble = ThingsTooltipBubbleNSView(frame: NSRect(x: 0, y: 0, width: 140, height: 26))
+        let bubble = ThingsTooltipBubbleNSView(frame: NSRect(x: 0, y: 0, width: 140, height: 24))
         let tf = NSTextField(wrappingLabelWithString: "")
-        tf.font = .systemFont(ofSize: 11.5, weight: .medium)
-        tf.textColor = .white
+        tf.font = .systemFont(ofSize: 11, weight: .regular)
+        tf.textColor = .secondaryLabelColor
         tf.backgroundColor = .clear
         tf.drawsBackground = false
         tf.isBordered = false
@@ -889,7 +899,8 @@ public final class ThingsMacTooltipController {
     private func presentPanel(
         text: String,
         anchorRect: NSRect,
-        parentWindow: NSWindow
+        parentWindow: NSWindow,
+        anchorAppearance: NSAppearance
     ) {
         guard anchorRect.width > 0.5, anchorRect.height > 0.5 else {
             panel?.orderOut(nil)
@@ -898,18 +909,24 @@ public final class ThingsMacTooltipController {
         ensurePanelCreated()
         guard let panel, let bubbleView, let labelField else { return }
 
-        let font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
-        let maxTextWidth: CGFloat = 300
+        panel.appearance = anchorAppearance
+        let isDark = anchorAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        labelField.textColor = isDark
+            ? NSColor(srgbRed: 0.831, green: 0.851, blue: 0.886, alpha: 1.0)
+            : NSColor(srgbRed: 0.259, green: 0.282, blue: 0.329, alpha: 1.0)
+
+        let font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        let maxTextWidth: CGFloat = 290
         let measured = (text as NSString).boundingRect(
             with: NSSize(width: maxTextWidth, height: 120),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: [.font: font]
         )
 
-        let padH: CGFloat = 9.5
-        let padV: CGFloat = 5.0
+        let padH: CGFloat = 8.5
+        let padV: CGFloat = 4.0
         let textW = ceil(min(maxTextWidth, max(16, measured.width + 2)))
-        let textH = ceil(max(15, measured.height + 1))
+        let textH = ceil(max(14, measured.height + 1))
         let bubbleW = textW + padH * 2
         let bubbleH = textH + padV * 2
 

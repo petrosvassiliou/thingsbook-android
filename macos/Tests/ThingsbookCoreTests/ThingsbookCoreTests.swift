@@ -1980,8 +1980,8 @@ final class ThingsbookCoreTests: XCTestCase {
             "macos_tooltip_zoom_out",
             "macos_tooltip_zoom_reset",
             "action_attach_file",
-            "v2_focus_start_25",
-            "context_duplicate_todo",
+            "action_focus_timer",
+            "action_duplicate_todo",
             "action_delete",
             "action_done"
         ]

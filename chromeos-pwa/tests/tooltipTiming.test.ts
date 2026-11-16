@@ -4,7 +4,8 @@ import {
   DEFAULT_INITIAL_DELAY_MS,
   DEFAULT_WARM_HANDOFF_WINDOW_MS,
   TooltipTimingMachine,
-  computeTooltipPosition
+  computeTooltipPosition,
+  isTopBarIconTooltipAllowed
 } from '../src/domain/tooltipTiming.ts';
 
 test('TooltipTimingMachine enforces 160ms cold delay and 0ms warm handoff across adjacent controls', () => {
@@ -127,4 +128,66 @@ test('computeTooltipPosition centers above anchor, flips below near top edge, an
     800
   );
   assert.equal(clampedRight.left, 1072);
+});
+
+test('isTopBarIconTooltipAllowed allows strictly top-bar icon buttons and blocks labeled pills and all non-topbar elements', () => {
+  // Pure icon button inside .workspace-topbar -> allowed
+  assert.equal(
+    isTopBarIconTooltipAllowed({
+      isInsideTopBar: true,
+      tagName: 'BUTTON',
+      isIconButtonClass: true,
+      isResponsiveTopBarControl: false,
+      hasVisibleTextLabel: false
+    }),
+    true
+  );
+
+  // Responsive topbar pill when label is visible (desktop / Chromebook) -> blocked
+  assert.equal(
+    isTopBarIconTooltipAllowed({
+      isInsideTopBar: true,
+      tagName: 'BUTTON',
+      isIconButtonClass: false,
+      isResponsiveTopBarControl: true,
+      hasVisibleTextLabel: true
+    }),
+    false
+  );
+
+  // Responsive topbar pill when collapsed to icon-only on narrow screen -> allowed
+  assert.equal(
+    isTopBarIconTooltipAllowed({
+      isInsideTopBar: true,
+      tagName: 'BUTTON',
+      isIconButtonClass: false,
+      isResponsiveTopBarControl: true,
+      hasVisibleTextLabel: false
+    }),
+    true
+  );
+
+  // Non-button inside topbar (e.g. stalled count badge span) -> blocked
+  assert.equal(
+    isTopBarIconTooltipAllowed({
+      isInsideTopBar: true,
+      tagName: 'SPAN',
+      isIconButtonClass: false,
+      isResponsiveTopBarControl: false,
+      hasVisibleTextLabel: false
+    }),
+    false
+  );
+
+  // Icon button outside .workspace-topbar (sidebar, task card, modal, Magic Plus FAB) -> blocked
+  assert.equal(
+    isTopBarIconTooltipAllowed({
+      isInsideTopBar: false,
+      tagName: 'BUTTON',
+      isIconButtonClass: true,
+      isResponsiveTopBarControl: false,
+      hasVisibleTextLabel: false
+    }),
+    false
+  );
 });

@@ -47,8 +47,11 @@ import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import com.culturedcode.things3.domain.model.TimeblockScheduleUtils
 import com.culturedcode.things3.domain.model.TodayTimelineEntry
+import com.culturedcode.things3.ui.components.MagicPlusDropMode
 import com.culturedcode.things3.ui.components.ThingsTooltipHostState
 import com.culturedcode.things3.ui.components.TooltipTimingPolicy
+import com.culturedcode.things3.ui.components.computeMagicPlusDropSlot
+import com.culturedcode.things3.ui.components.resolveMagicPlusDropMode
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -756,9 +759,9 @@ class V2UpgradeAndFeaturesTest {
     }
 
     @Test
-    fun `v2_0_0_beta_15 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
-        assertEquals(59, BuildConfig.VERSION_CODE)
-        assertEquals("2.0.0-beta.15", BuildConfig.VERSION_NAME)
+    fun `v2_0_0_beta_16 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
+        assertEquals(60, BuildConfig.VERSION_CODE)
+        assertEquals("2.0.0-beta.16", BuildConfig.VERSION_NAME)
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -1371,7 +1374,7 @@ class V2UpgradeAndFeaturesTest {
         assertFalse(host.isShowing)
         assertFalse(host.hasReleasedTouchPreview())
 
-        // 4. v2.0.0-beta.15 discreet Light & Dark tooltip surfaces (warm-pearl in Light, elevated slate in Dark — never black)
+        // 4. v2.0.0-beta.15+ discreet Light & Dark tooltip surfaces (warm-pearl in Light, elevated slate in Dark — never black)
         val lightStyle = TooltipTimingPolicy.resolveBubbleStyle(isDark = false)
         assertTrue(lightStyle.backgroundColor.red > 0.94f && lightStyle.backgroundColor.green > 0.94f && lightStyle.backgroundColor.blue > 0.96f)
         assertTrue(lightStyle.textColor.red < 0.35f && lightStyle.textColor.blue < 0.40f)
@@ -1380,6 +1383,59 @@ class V2UpgradeAndFeaturesTest {
         val darkStyle = TooltipTimingPolicy.resolveBubbleStyle(isDark = true)
         assertTrue(darkStyle.backgroundColor.red > 0.16f && darkStyle.backgroundColor.blue > 0.21f) // elevated slate (#2E323D), not black
         assertTrue(darkStyle.textColor.red > 0.80f && darkStyle.textColor.red < 0.92f) // muted silver (#D4D9E2), not glaring white
+
+        // 5. v2.0.0-beta.16: Tooltips strictly restricted to top-bar icon scope — zero tooltip attachment anywhere else
+        assertTrue(
+            TooltipTimingPolicy.shouldAttachTooltip(
+                isTopBarIconScope = true,
+                enabled = true,
+                hasHost = true,
+                text = "Settings"
+            )
+        )
+        assertFalse(
+            TooltipTimingPolicy.shouldAttachTooltip(
+                isTopBarIconScope = false,
+                enabled = true,
+                hasHost = true,
+                text = "Non-topbar control"
+            )
+        )
+        assertFalse(
+            TooltipTimingPolicy.shouldAttachTooltip(
+                isTopBarIconScope = true,
+                enabled = false,
+                hasHost = true,
+                text = "Wide-screen labeled Quick Find"
+            )
+        )
+        assertFalse(
+            TooltipTimingPolicy.shouldAttachTooltip(
+                isTopBarIconScope = true,
+                enabled = true,
+                hasHost = true,
+                text = "   "
+            )
+        )
+
+        // 6. v2.0.0-beta.16: MagicPlusFab drag-to-insert To-Do slot & Project Heading drop mode
+        assertEquals(4, computeMagicPlusDropSlot(itemCount = 4, dragOffsetY = 0f, rowHeightPx = 116f))
+        assertEquals(2, computeMagicPlusDropSlot(itemCount = 4, dragOffsetY = -232f, rowHeightPx = 116f))
+        assertEquals(0, computeMagicPlusDropSlot(itemCount = 4, dragOffsetY = -900f, rowHeightPx = 116f))
+        assertEquals(4, computeMagicPlusDropSlot(itemCount = 4, dragOffsetY = 120f, rowHeightPx = 116f))
+
+        assertEquals(
+            MagicPlusDropMode.INSERT_TODO,
+            resolveMagicPlusDropMode(allowHeadingDrop = true, dragOffsetX = -80f, leftEdgeThresholdPx = -360f)
+        )
+        assertEquals(
+            MagicPlusDropMode.INSERT_HEADING,
+            resolveMagicPlusDropMode(allowHeadingDrop = true, dragOffsetX = -380f, leftEdgeThresholdPx = -360f)
+        )
+        assertEquals(
+            MagicPlusDropMode.INSERT_TODO,
+            resolveMagicPlusDropMode(allowHeadingDrop = false, dragOffsetX = -500f, leftEdgeThresholdPx = -360f)
+        )
     }
 }
 

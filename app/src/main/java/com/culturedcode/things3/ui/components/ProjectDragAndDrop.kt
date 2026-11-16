@@ -477,46 +477,44 @@ fun ProjectTaskDragHandle(
     val hoverSource = remember { MutableInteractionSource() }
     val isHovered by hoverSource.collectIsHoveredAsState()
 
-    ThingsHoverTooltip(text = stringResource(R.string.task_drag_handle)) {
-        Box(
-            modifier = modifier
-                .size(width = 26.dp, height = 30.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(if (isHovered) colors.thingsBlueSoft else androidx.compose.ui.graphics.Color.Transparent)
-                .hoverable(hoverSource)
-                .pointerHoverIcon(PointerIcon.Hand)
-                .onGloballyPositioned { coordsHolder[0] = it }
-                .pointerInput(controller) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        down.consume()
-                        val slopChange = awaitTouchSlopOrCancellation(down.id) { change, _ ->
-                            change.consume()
-                        } ?: return@awaitEachGesture
-                        val coords = coordsHolder[0]
-                        val windowPos = if (coords != null && coords.isAttached) {
-                            coords.localToWindow(slopChange.position)
-                        } else {
-                            return@awaitEachGesture
-                        }
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        controller.start(
-                            kind = ProjectDragKind.MOVE_TASK,
-                            pointerWindow = windowPos,
-                            taskId = currentTask.id,
-                            taskTitle = currentTask.title
-                        )
-                        // From here on the list surface (projectDropSurface) tracks the pointer in the Initial pass.
+    Box(
+        modifier = modifier
+            .size(width = 26.dp, height = 30.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (isHovered) colors.thingsBlueSoft else androidx.compose.ui.graphics.Color.Transparent)
+            .hoverable(hoverSource)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .onGloballyPositioned { coordsHolder[0] = it }
+            .pointerInput(controller) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    val slopChange = awaitTouchSlopOrCancellation(down.id) { change, _ ->
+                        change.consume()
+                    } ?: return@awaitEachGesture
+                    val coords = coordsHolder[0]
+                    val windowPos = if (coords != null && coords.isAttached) {
+                        coords.localToWindow(slopChange.position)
+                    } else {
+                        return@awaitEachGesture
                     }
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.DragIndicator,
-                contentDescription = stringResource(R.string.task_drag_handle),
-                tint = if (isHovered) colors.thingsBlue else colors.secondaryText.copy(alpha = 0.55f),
-                modifier = Modifier.size(18.dp)
-            )
-        }
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    controller.start(
+                        kind = ProjectDragKind.MOVE_TASK,
+                        pointerWindow = windowPos,
+                        taskId = currentTask.id,
+                        taskTitle = currentTask.title
+                    )
+                    // From here on the list surface (projectDropSurface) tracks the pointer in the Initial pass.
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.DragIndicator,
+            contentDescription = stringResource(R.string.task_drag_handle),
+            tint = if (isHovered) colors.thingsBlue else colors.secondaryText.copy(alpha = 0.55f),
+            modifier = Modifier.size(18.dp)
+        )
     }
 }

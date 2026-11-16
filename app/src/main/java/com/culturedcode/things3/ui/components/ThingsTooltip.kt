@@ -183,6 +183,12 @@ object TooltipTimingPolicy {
             )
         }
     }
+    fun shouldAttachTooltip(
+        isTopBarIconScope: Boolean,
+        enabled: Boolean,
+        hasHost: Boolean,
+        text: String
+    ): Boolean = isTopBarIconScope && enabled && hasHost && text.isNotBlank()
 }
 
 /**
@@ -347,20 +353,43 @@ class ThingsTooltipHostState(
 
 val LocalThingsTooltipHostState = staticCompositionLocalOf<ThingsTooltipHostState?> { null }
 
+/**
+ * Gates floating tooltips strictly to the icon buttons inside `TopThingsbookBar`.
+ * Defaults to `false` everywhere else so non-top-bar UI renders with zero tooltip wrappers or listeners.
+ */
+val LocalThingsTopBarTooltipScope = staticCompositionLocalOf { false }
+
+@Composable
+fun ThingsTopBarTooltipScope(content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalThingsTopBarTooltipScope provides true, content = content)
+}
+
 private class BoundsRef(var rect: IntRect = IntRect.Zero)
 
 /**
- * Root or Dialog container that hosts the hit-test-transparent GPU tooltip layer above its content.
- * Safe to wrap both full-screen Activity roots and wrap-content `Dialog` surfaces (`matchParentSize`).
+ * Root container that hosts the hit-test-transparent GPU tooltip layer above its content.
+ * Nested invocations inside dialogs/modals pass straight through with zero wrapper overhead.
  */
 @Composable
 fun ThingsTooltipHostBox(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
+    if (LocalThingsTooltipHostState.current != null) {
+        if (modifier === Modifier) {
+            content()
+        } else {
+            Box(modifier = modifier) {
+                content()
+            }
+        }
+        return
+    }
+
     val hostState = remember { ThingsTooltipHostState() }
     var hostSize by remember { mutableStateOf(IntSize.Zero) }
     var rootOffsetInWindow by remember { mutableStateOf(IntRect.Zero) }
+    val hasReleasedTouch = hostState.releasedTouchTick > 0 && hostState.hasReleasedTouchPreview()
 
     // Auto-expire post-release touch tooltips after 1.8s so they stay readable once finger lifts
     LaunchedEffect(hostState.releasedTouchTick) {
@@ -377,16 +406,22 @@ fun ThingsTooltipHostBox(
                 .onGloballyPositioned { coords ->
                     rootOffsetInWindow = coords.boundsInRoot().roundToIntRect()
                 }
-                .pointerInput(hostState) {
-                    awaitPointerEventScope {
-                        while (true) {
-                            val ev = awaitPointerEvent(PointerEventPass.Initial)
-                            if (ev.type == PointerEventType.Press || ev.type == PointerEventType.Scroll) {
-                                hostState.dismissReleasedTouchPreviews()
+                .then(
+                    if (hasReleasedTouch) {
+                        Modifier.pointerInput(hostState) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                    if (ev.type == PointerEventType.Press || ev.type == PointerEventType.Scroll) {
+                                        hostState.dismissReleasedTouchPreviews()
+                                    }
+                                }
                             }
                         }
+                    } else {
+                        Modifier
                     }
-                }
+                )
         ) {
             content()
             ThingsTooltipOverlayLayer(
@@ -489,15 +524,10 @@ private fun BoxScope.ThingsTooltipOverlayLayer(
 }
 
 /**
- * Responsive Things-style tooltip supporting:
- * 1. Universal hover across USB/Bluetooth mice, ChromeOS ARCVM trackpads (`PointerType.Touch` / `Unknown`),
- *    Samsung DeX, tablet trackpads, and styluses (`160ms` cold delay, `0ms` warm handoff across adjacent
- *    buttons, and `0ms` live text/position updates when state or language changes while hovered).
- * 2. Native-feeling stationary touch long-press preview (`380ms` within `touchSlop` with haptic feedback):
- *    - Short taps (`< 380ms`), scrolling, and drags consume zero events and remain 100% immediate.
- *    - Stationary long-presses show the tooltip, consume only the finger release so the underlying button's
- *      `onClick` does not accidentally fire, and keep the tooltip visible for `1.8s` after finger lift so
- *      the user can clearly read it unobstructed by their thumb.
+ * Discreet Things-style tooltip strictly active inside [ThingsTopBarTooltipScope] (top-bar icons only):
+ * 1. Outside [ThingsTopBarTooltipScope], renders [content] directly with zero layout or pointer overhead.
+ * 2. Inside [ThingsTopBarTooltipScope], supports mouse/trackpad/stylus hover (`160ms` cold delay, `0ms` warm
+ *    handoff) and stationary touch long-press preview (`380ms` with `1.8s` post-release readability).
  */
 @Composable
 fun ThingsHoverTooltip(
@@ -509,6 +539,23 @@ fun ThingsHoverTooltip(
     content: @Composable () -> Unit
 ) {
     val hostState = LocalThingsTooltipHostState.current
+    val isTopBarScope = LocalThingsTopBarTooltipScope.current
+    if (hostState == null || !TooltipTimingPolicy.shouldAttachTooltip(
+            isTopBarIconScope = isTopBarScope,
+            enabled = enabled,
+            hasHost = true,
+            text = text
+        )
+    ) {
+        if (modifier === Modifier) {
+            content()
+        } else {
+            Box(modifier = modifier) {
+                content()
+            }
+        }
+        return
+    }
     val haptics = LocalHapticFeedback.current
     val ownerId = remember { Any() }
     val boundsRef = remember { BoundsRef() }

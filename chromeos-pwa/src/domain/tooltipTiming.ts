@@ -214,3 +214,28 @@ export function computeTooltipPosition(
     placement: 'below'
   };
 }
+
+export interface TopBarIconEligibilityInput {
+  isInsideTopBar: boolean;
+  tagName: string;
+  isIconButtonClass: boolean;
+  isResponsiveTopBarControl: boolean;
+  hasVisibleTextLabel: boolean;
+}
+
+/**
+ * Restricts floating tooltips strictly to icon buttons inside `.workspace-topbar`.
+ * Labeled pills in the top bar (when their text label is visible) and all controls
+ * outside `.workspace-topbar` never show tooltips.
+ */
+export function isTopBarIconTooltipAllowed(
+  input: TopBarIconEligibilityInput
+): boolean {
+  if (!input.isInsideTopBar) return false;
+  if (input.tagName.toUpperCase() !== 'BUTTON') return false;
+  if (input.isIconButtonClass) return true;
+  if (input.isResponsiveTopBarControl && !input.hasVisibleTextLabel) {
+    return true;
+  }
+  return false;
+}

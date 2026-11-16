@@ -511,22 +511,33 @@ public extension View {
         modifier(GlassSurfaceModifier(cornerRadius: cornerRadius, isSelected: isSelected))
     }
 
-    /// Attaches an instant, zero-lag floating tooltip anchored to this specific control without
-    /// triggering AppKit's shared `NSToolTipManager` / `NSToolbarItem.toolTip` delay or stale text bug.
+    /// Preserves VoiceOver accessibility hint without rendering a visual tooltip outside the top bar.
     func thingsTooltip(_ text: String) -> some View {
-        modifier(ThingsMacTooltipModifier(text: text))
+        modifier(ThingsMacTooltipModifier(text: text, isTopBarIcon: false))
+    }
+
+    /// Attaches a discreet floating tooltip strictly to top-bar icon buttons (`MacToolbarIconButton`).
+    func thingsTopBarIconTooltip(_ text: String) -> some View {
+        modifier(ThingsMacTooltipModifier(text: text, isTopBarIcon: true))
     }
 }
 
-// MARK: - Instant Per-Control AppKit Floating Tooltip Engine
+// MARK: - Discreet Top-Bar-Icon-Only AppKit Floating Tooltip Engine
 
 private struct ThingsMacTooltipModifier: ViewModifier {
     let text: String
+    let isTopBarIcon: Bool
 
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content
-            .background(ThingsTooltipTrackingRepresentable(text: text))
-            .accessibilityHint(text)
+        if isTopBarIcon && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            content
+                .background(ThingsTooltipTrackingRepresentable(text: text))
+                .accessibilityHint(text)
+        } else {
+            content
+                .accessibilityHint(text)
+        }
     }
 }
 

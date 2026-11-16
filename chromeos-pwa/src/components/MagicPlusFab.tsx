@@ -160,7 +160,6 @@ export const MagicPlusFab: React.FC<MagicPlusFabProps> = ({
         className={`magic-fab-circle ${open ? 'open' : ''}`}
         onClick={onToggleOpen}
         aria-label={t.entityNewTodo}
-        title={`${t.entityNewTodo} (Ctrl+N)`}
       >
         <Plus size={26} strokeWidth={2.4} />
       </button>

@@ -7,6 +7,7 @@ import {
   DEFAULT_TOUCH_SLOP_PX,
   TooltipTimingMachine,
   computeTooltipPosition,
+  isTopBarIconTooltipAllowed,
   type AnchorRectLike
 } from '../domain/tooltipTiming';
 
@@ -39,13 +40,61 @@ function isDisabledControl(el: HTMLElement): boolean {
   return el.getAttribute('aria-disabled') === 'true';
 }
 
+function hasVisibleResponsiveTextLabel(el: HTMLElement): boolean {
+  const labelNodes = el.querySelectorAll<HTMLElement>(
+    '.brand-name, .topbar-label-hide-sm, .topbar-label-hide-xs'
+  );
+  if (labelNodes.length === 0) {
+    return (el.textContent ?? '').trim().length > 0;
+  }
+  for (const node of labelNodes) {
+    if ((node.textContent ?? '').trim().length === 0) continue;
+    const style = window.getComputedStyle(node);
+    if (style.display !== 'none' && style.visibility !== 'hidden') {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isTopBarIconButton(el: HTMLElement): boolean {
+  const isInsideTopBar = el.closest('.workspace-topbar') !== null;
+  if (!isInsideTopBar) return false;
+  const isIconButtonClass = el.classList.contains('icon-btn');
+  const isResponsiveTopBarControl =
+    el.classList.contains('brand-title-group') ||
+    el.classList.contains('topbar-pill');
+  const hasVisibleTextLabel = isResponsiveTopBarControl
+    ? hasVisibleResponsiveTextLabel(el)
+    : false;
+  return isTopBarIconTooltipAllowed({
+    isInsideTopBar,
+    tagName: el.tagName,
+    isIconButtonClass,
+    isResponsiveTopBarControl,
+    hasVisibleTextLabel
+  });
+}
+
+/**
+ * Strips native HTML `title` attributes across the entire app so ChromeOS / browser
+ * native black OS tooltips never appear anywhere, while preserving ARIA accessibility
+ * and storing tooltip copy strictly for `.workspace-topbar` buttons.
+ */
 function syncElementTooltipAttribute(el: HTMLElement): string {
+  const inTopBarButton =
+    el.tagName === 'BUTTON' && el.closest('.workspace-topbar') !== null;
+
   if (el.hasAttribute('title')) {
     const rawTitle = el.getAttribute('title') ?? '';
     el.removeAttribute('title');
     const trimmedTitle = rawTitle.trim();
     if (trimmedTitle) {
-      el.setAttribute('data-tooltip', trimmedTitle);
+      if (inTopBarButton) {
+        el.setAttribute('data-topbar-tip', trimmedTitle);
+      } else {
+        el.removeAttribute('data-topbar-tip');
+      }
       const hasExplicitAria =
         (el.hasAttribute('aria-label') && !el.hasAttribute('data-tooltip-auto-aria')) ||
         el.hasAttribute('aria-labelledby');
@@ -55,20 +104,42 @@ function syncElementTooltipAttribute(el: HTMLElement): string {
         el.setAttribute('data-tooltip-auto-aria', '1');
       }
     } else {
-      el.removeAttribute('data-tooltip');
+      el.removeAttribute('data-topbar-tip');
       if (el.hasAttribute('data-tooltip-auto-aria')) {
         el.removeAttribute('aria-label');
         el.removeAttribute('data-tooltip-auto-aria');
       }
     }
   }
-  return (el.getAttribute('data-tooltip') ?? '').trim();
+
+  if (el.hasAttribute('data-tooltip')) {
+    const legacy = (el.getAttribute('data-tooltip') ?? '').trim();
+    el.removeAttribute('data-tooltip');
+    if (inTopBarButton && legacy && !el.hasAttribute('data-topbar-tip')) {
+      el.setAttribute('data-topbar-tip', legacy);
+    }
+  }
+
+  if (!isTopBarIconButton(el)) {
+    return '';
+  }
+  return (el.getAttribute('data-topbar-tip') ?? '').trim();
+}
+
+function sanitizeSubtreeTitles(root: ParentNode): void {
+  if (root instanceof HTMLElement && (root.hasAttribute('title') || root.hasAttribute('data-tooltip'))) {
+    syncElementTooltipAttribute(root);
+  }
+  const titled = root.querySelectorAll<HTMLElement>('[title], [data-tooltip]');
+  for (const node of titled) {
+    syncElementTooltipAttribute(node);
+  }
 }
 
 function upgradeNativeTitlesInLineage(target: EventTarget | null): void {
   let cur: Element | null = target instanceof Element ? target : null;
   while (cur) {
-    if (isTooltipEligibleElement(cur) && cur.hasAttribute('title')) {
+    if (isTooltipEligibleElement(cur) && (cur.hasAttribute('title') || cur.hasAttribute('data-tooltip'))) {
       syncElementTooltipAttribute(cur);
     }
     cur = cur.parentElement;
@@ -82,20 +153,22 @@ function resolveTooltipAnchor(
   let cur: Element | null = target instanceof Element ? target : null;
   while (cur) {
     if (isTooltipEligibleElement(cur) && cur.isConnected && !isDisabledControl(cur)) {
-      const text = syncElementTooltipAttribute(cur);
-      if (text) {
-        const domRect = cur.getBoundingClientRect();
-        if (domRect.width > 0 && domRect.height > 0) {
-          return {
-            element: cur,
-            text,
-            rect: {
-              left: domRect.left,
-              top: domRect.top,
-              width: domRect.width,
-              height: domRect.height
-            }
-          };
+      if (isTopBarIconButton(cur)) {
+        const text = syncElementTooltipAttribute(cur);
+        if (text) {
+          const domRect = cur.getBoundingClientRect();
+          if (domRect.width > 0 && domRect.height > 0) {
+            return {
+              element: cur,
+              text,
+              rect: {
+                left: domRect.left,
+                top: domRect.top,
+                width: domRect.width,
+                height: domRect.height
+              }
+            };
+          }
         }
       }
     }
@@ -127,6 +200,30 @@ export const ThingsTooltipHost: React.FC = () => {
     let touchStartX = 0;
     let touchStartY = 0;
     let mutationObserver: MutationObserver | null = null;
+
+    // Globally strip native HTML `title` attributes so browser OS black tooltips never appear anywhere
+    sanitizeSubtreeTitles(document.body);
+    const globalTitleSuppressor = new MutationObserver((records) => {
+      for (const rec of records) {
+        if (rec.type === 'attributes' && rec.target instanceof HTMLElement) {
+          if (rec.target.hasAttribute('title') || rec.target.hasAttribute('data-tooltip')) {
+            syncElementTooltipAttribute(rec.target);
+          }
+        } else if (rec.type === 'childList') {
+          for (const added of rec.addedNodes) {
+            if (added instanceof HTMLElement) {
+              sanitizeSubtreeTitles(added);
+            }
+          }
+        }
+      }
+    });
+    globalTitleSuppressor.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['title', 'data-tooltip']
+    });
 
     const clearPendingHoverTimer = () => {
       if (pendingTimerId !== null) {
@@ -168,7 +265,7 @@ export const ThingsTooltipHost: React.FC = () => {
     const observeActiveElement = (el: HTMLElement, anchorId: string) => {
       disconnectObserver();
       mutationObserver = new MutationObserver(() => {
-        if (!el.isConnected || isDisabledControl(el)) {
+        if (!el.isConnected || isDisabledControl(el) || !isTopBarIconButton(el)) {
           if (activeAnchorId === anchorId) {
             dismissImmediately(true);
           }
@@ -207,7 +304,7 @@ export const ThingsTooltipHost: React.FC = () => {
       });
       mutationObserver.observe(el, {
         attributes: true,
-        attributeFilter: ['title', 'data-tooltip', 'disabled', 'aria-disabled']
+        attributeFilter: ['title', 'data-tooltip', 'data-topbar-tip', 'disabled', 'aria-disabled']
       });
     };
 
@@ -459,6 +556,7 @@ export const ThingsTooltipHost: React.FC = () => {
       clearPendingHoverTimer();
       clearTouchTimers();
       disconnectObserver();
+      globalTitleSuppressor.disconnect();
       document.removeEventListener('pointerover', handlePointerOver, true);
       document.removeEventListener('pointermove', handlePointerMove, true);
       document.removeEventListener('pointerout', handlePointerOut, true);

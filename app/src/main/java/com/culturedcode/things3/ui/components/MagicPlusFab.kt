@@ -16,7 +16,10 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -62,23 +65,27 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
-import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.culturedcode.things3.R
 import com.culturedcode.things3.ui.theme.ThingsTheme
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.roundToInt
 
 private val SmoothPopoverOutEasing = CubicBezierEasing(0.22f, 1.0f, 0.36f, 1.0f)
@@ -95,6 +102,33 @@ enum class MagicPlusContextMode {
     AREA_DETAIL,
     PROJECT_DETAIL,
     LOGBOOK
+}
+
+fun computeMagicPlusDropSlot(
+    itemCount: Int,
+    dragOffsetY: Float,
+    rowHeightPx: Float
+): Int {
+    val safeCount = itemCount.coerceAtLeast(0)
+    val rawRows = if (dragOffsetY.isFinite() && rowHeightPx > 0f) {
+        ((-dragOffsetY) / rowHeightPx).roundToInt()
+    } else {
+        0
+    }
+    val rowsUp = rawRows.coerceAtLeast(0)
+    return (safeCount - rowsUp).coerceIn(0, safeCount)
+}
+
+fun resolveMagicPlusDropMode(
+    allowHeadingDrop: Boolean,
+    dragOffsetX: Float,
+    leftEdgeThresholdPx: Float
+): MagicPlusDropMode {
+    return if (allowHeadingDrop && dragOffsetX.isFinite() && dragOffsetX <= leftEdgeThresholdPx) {
+        MagicPlusDropMode.INSERT_HEADING
+    } else {
+        MagicPlusDropMode.INSERT_TODO
+    }
 }
 
 /**
@@ -226,20 +260,28 @@ fun MagicPlusFab(
     val density = LocalDensity.current
 
     val allowHeadingDrop = contextMode == MagicPlusContextMode.PROJECT_DETAIL
+    val newTodoLabel = stringResource(R.string.entity_new_todo)
 
     var dragOffset by remember { mutableStateOf(Offset.Zero) }
     var isDragging by remember { mutableStateOf(false) }
+    var isFabPressed by remember { mutableStateOf(false) }
     var lastHapticSlot by remember { mutableIntStateOf(-1) }
     var lastDropMode by remember { mutableStateOf(MagicPlusDropMode.NONE) }
     val fabCoordsHolder = remember { arrayOfNulls<LayoutCoordinates>(1) }
     var dragStartCenter by remember { mutableStateOf(Offset.Zero) }
+
+    val currentItemCount by rememberUpdatedState(itemCount)
+    val currentAllowHeadingDrop by rememberUpdatedState(allowHeadingDrop)
+    val currentIsMenuExpanded by rememberUpdatedState(isMenuExpanded)
+    val currentOnMenuExpandedChange by rememberUpdatedState(onMenuExpandedChange)
+    val currentOnDragStateChanged by rememberUpdatedState(onDragStateChanged)
+    val currentOnDropCreateTodoAt by rememberUpdatedState(onDropCreateTodoAt)
+    val currentOnDropCreateHeadingAt by rememberUpdatedState(onDropCreateHeadingAt)
     val currentPositionalHandler by rememberUpdatedState(positionalDropHandler)
 
     val fabInteractionSource = remember { MutableInteractionSource() }
-    val isFabPressed by fabInteractionSource.collectIsPressedAsState()
     val isInteractionHovered by fabInteractionSource.collectIsHoveredAsState()
-    var isPointerHovered by remember { mutableStateOf(false) }
-    val isFabHovered = (isInteractionHovered || isPointerHovered) && !isDragging && !isFabPressed
+    val isFabHovered = isInteractionHovered && !isDragging && !isFabPressed
 
     val showMenu = isMenuExpanded && !isDragging
     val menuTransition = updateTransition(targetState = showMenu, label = "magicPlusMenuTransition")
@@ -303,8 +345,8 @@ fun MagicPlusFab(
         label = "magicPlusIconRotation"
     )
 
-    val rowHeightPx = with(density) { 58.dp.toPx() }.coerceAtLeast(1f)
-    val leftEdgeThresholdPx = with(density) { (-210).dp.toPx() }
+    val rowHeightPx by rememberUpdatedState(with(density) { 58.dp.toPx() }.coerceAtLeast(1f))
+    val leftEdgeThresholdPx by rememberUpdatedState(with(density) { (-180).dp.toPx() })
     val menuFloatOffsetPx = with(density) { 10.dp.toPx() }
 
     Box(
@@ -357,94 +399,136 @@ fun MagicPlusFab(
             }
         }
 
-        // Draggable + Clickable Magic Plus Circle Button with smooth mouse/stylus hover animation & zero ripple flash
-        ThingsHoverTooltip(
-            text = stringResource(R.string.magic_plus_fab_tooltip),
-            enabled = !isDragging && !isMenuExpanded
-        ) {
-            Box(
-                modifier = Modifier
-                    .offset {
-                        IntOffset(
-                            x = dragOffset.x.takeIf { it.isFinite() }?.roundToInt() ?: 0,
-                            y = dragOffset.y.takeIf { it.isFinite() }?.roundToInt() ?: 0
+        // Draggable + Clickable Magic Plus Circle Button with unified zero-conflict gesture pipeline
+        Box(
+            modifier = Modifier
+                .offset {
+                    IntOffset(
+                        x = dragOffset.x.takeIf { it.isFinite() }?.roundToInt() ?: 0,
+                        y = dragOffset.y.takeIf { it.isFinite() }?.roundToInt() ?: 0
+                    )
+                }
+                .onGloballyPositioned { fabCoordsHolder[0] = it }
+                .graphicsLayer {
+                    val safeScale = if (fabScale.isFinite()) fabScale else 1f
+                    val safeLift = if (fabHoverLiftPx.isFinite()) fabHoverLiftPx else 0f
+                    scaleX = safeScale
+                    scaleY = safeScale
+                    translationY = safeLift
+                }
+                .shadow(
+                    elevation = when {
+                        isDragging -> 14.dp
+                        isFabHovered -> 12.dp
+                        else -> 8.dp
+                    },
+                    shape = CircleShape,
+                    ambientColor = colors.thingsBlue.copy(alpha = if (isFabHovered) 0.46f else 0.38f),
+                    spotColor = colors.thingsBlue.copy(alpha = if (isFabHovered) 0.58f else 0.48f)
+                )
+                .size(58.dp)
+                .clip(CircleShape)
+                .background(fabBgColor)
+                .border(
+                    width = 1.dp,
+                    color = Color.White.copy(alpha = if (fabRingAlpha.isFinite()) fabRingAlpha.coerceIn(0f, 1f) else 0f),
+                    shape = CircleShape
+                )
+                .pointerHoverIcon(PointerIcon.Hand)
+                .hoverable(interactionSource = fabInteractionSource)
+                .semantics {
+                    role = Role.Button
+                    contentDescription = newTodoLabel
+                    onClick {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        currentOnMenuExpandedChange(!currentIsMenuExpanded)
+                        true
+                    }
+                }
+                .pointerInput(Unit) {
+                    fun applyDragDelta(delta: Offset) {
+                        if (delta.x.isFinite() && delta.y.isFinite()) {
+                            dragOffset += delta
+                        }
+
+                        val computedSlot = computeMagicPlusDropSlot(
+                            itemCount = currentItemCount,
+                            dragOffsetY = dragOffset.y,
+                            rowHeightPx = rowHeightPx
                         )
-                    }
-                    .onGloballyPositioned { fabCoordsHolder[0] = it }
-                    .graphicsLayer {
-                        val safeScale = if (fabScale.isFinite()) fabScale else 1f
-                        val safeLift = if (fabHoverLiftPx.isFinite()) fabHoverLiftPx else 0f
-                        scaleX = safeScale
-                        scaleY = safeScale
-                        translationY = safeLift
-                    }
-                    .shadow(
-                        elevation = when {
-                            isDragging -> 14.dp
-                            isFabHovered -> 12.dp
-                            else -> 8.dp
-                        },
-                        shape = CircleShape,
-                        ambientColor = colors.thingsBlue.copy(alpha = if (isFabHovered) 0.46f else 0.38f),
-                        spotColor = colors.thingsBlue.copy(alpha = if (isFabHovered) 0.58f else 0.48f)
-                    )
-                    .size(58.dp)
-                    .clip(CircleShape)
-                    .background(fabBgColor)
-                    .border(
-                        width = 1.dp,
-                        color = Color.White.copy(alpha = if (fabRingAlpha.isFinite()) fabRingAlpha.coerceIn(0f, 1f) else 0f),
-                        shape = CircleShape
-                    )
-                    .pointerHoverIcon(PointerIcon.Hand)
-                    .hoverable(interactionSource = fabInteractionSource)
-                    .pointerInput(Unit) {
-                        awaitPointerEventScope {
-                            while (true) {
-                                val event = awaitPointerEvent(PointerEventPass.Initial)
-                                val pointerType = event.changes.firstOrNull()?.type
-                                val isHoverCapable = pointerType == PointerType.Mouse || pointerType == PointerType.Stylus
-                                when (event.type) {
-                                    PointerEventType.Enter, PointerEventType.Move -> {
-                                        if (isHoverCapable && event.changes.none { it.pressed }) {
-                                            isPointerHovered = true
-                                        }
-                                    }
-                                    PointerEventType.Exit, PointerEventType.Press -> {
-                                        if (isPointerHovered) {
-                                            isPointerHovered = false
-                                        }
-                                    }
-                                    else -> Unit
-                                }
+                        val mode = resolveMagicPlusDropMode(
+                            allowHeadingDrop = currentAllowHeadingDrop,
+                            dragOffsetX = dragOffset.x,
+                            leftEdgeThresholdPx = leftEdgeThresholdPx
+                        )
+
+                        val positional = currentPositionalHandler
+                        if (positional != null) {
+                            positional.onDragMove(dragStartCenter + dragOffset, mode)
+                            lastHapticSlot = computedSlot
+                            if (mode != lastDropMode) {
+                                lastDropMode = mode
+                                currentOnDragStateChanged(
+                                    MagicPlusDragState(
+                                        isDragging = true,
+                                        dropIndex = computedSlot,
+                                        dropMode = mode
+                                    )
+                                )
                             }
+                        } else if (computedSlot != lastHapticSlot || mode != lastDropMode) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            lastHapticSlot = computedSlot
+                            lastDropMode = mode
+                            currentOnDragStateChanged(
+                                MagicPlusDragState(
+                                    isDragging = true,
+                                    dropIndex = computedSlot,
+                                    dropMode = mode
+                                )
+                            )
                         }
                     }
-                    .clickable(
-                        interactionSource = fabInteractionSource,
-                        indication = null,
-                        enabled = !isDragging
-                    ) {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onMenuExpandedChange(!isMenuExpanded)
-                    }
-                    .pointerInput(itemCount, allowHeadingDrop) {
-                        detectDragGestures(
-                            onDragStart = {
-                                isPointerHovered = false
-                                onMenuExpandedChange(false)
+
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        down.consume()
+                        isFabPressed = true
+                        var dragSessionStarted = false
+
+                        try {
+                            var overSlop = Offset.Zero
+                            val dragStart = awaitTouchSlopOrCancellation(down.id) { change, over ->
+                                change.consume()
+                                overSlop = over
+                            }
+
+                            if (dragStart == null) {
+                                isFabPressed = false
+                                val upChange = currentEvent.changes.firstOrNull { it.id == down.id }
+                                if (upChange != null && !upChange.pressed && upChange.previousPressed && !upChange.isConsumed) {
+                                    upChange.consume()
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    currentOnMenuExpandedChange(!currentIsMenuExpanded)
+                                }
+                            } else {
+                                isFabPressed = false
+                                dragSessionStarted = true
+                                currentOnMenuExpandedChange(false)
                                 isDragging = true
                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                val initialIndex = itemCount.coerceAtLeast(0)
+
+                                val initialIndex = currentItemCount.coerceAtLeast(0)
                                 lastHapticSlot = initialIndex
                                 lastDropMode = MagicPlusDropMode.INSERT_TODO
-                                onDragStateChanged(
+                                currentOnDragStateChanged(
                                     MagicPlusDragState(
                                         isDragging = true,
                                         dropIndex = initialIndex,
                                         dropMode = MagicPlusDropMode.INSERT_TODO
                                     )
                                 )
+
                                 val coords = fabCoordsHolder[0]
                                 dragStartCenter = if (coords != null && coords.isAttached) {
                                     coords.localToWindow(
@@ -457,85 +541,63 @@ fun MagicPlusFab(
                                     dragStartCenter + dragOffset,
                                     MagicPlusDropMode.INSERT_TODO
                                 )
-                            },
-                            onDragEnd = {
-                                val finalSlot = lastHapticSlot.coerceIn(0, itemCount.coerceAtLeast(0))
-                                val finalMode = lastDropMode
-                                isDragging = false
-                                dragOffset = Offset.Zero
-                                onDragStateChanged(MagicPlusDragState(isDragging = false))
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
 
-                                val positional = currentPositionalHandler
-                                if (positional != null) {
-                                    positional.onDragEnd(finalMode)
-                                } else if (finalMode == MagicPlusDropMode.INSERT_HEADING && allowHeadingDrop) {
-                                    onDropCreateHeadingAt(finalSlot)
-                                } else {
-                                    onDropCreateTodoAt(finalSlot)
+                                applyDragDelta(overSlop)
+
+                                val completedCleanly = drag(dragStart.id) { change ->
+                                    val delta = change.positionChange()
+                                    change.consume()
+                                    applyDragDelta(delta)
                                 }
-                            },
-                            onDragCancel = {
+
+                                dragSessionStarted = false
+                                if (completedCleanly) {
+                                    val finalSlot = lastHapticSlot.coerceIn(0, currentItemCount.coerceAtLeast(0))
+                                    val finalMode = lastDropMode
+                                    isDragging = false
+                                    dragOffset = Offset.Zero
+                                    currentOnDragStateChanged(MagicPlusDragState(isDragging = false))
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+
+                                    val positional = currentPositionalHandler
+                                    if (positional != null) {
+                                        positional.onDragEnd(finalMode)
+                                    } else if (finalMode == MagicPlusDropMode.INSERT_HEADING && currentAllowHeadingDrop) {
+                                        currentOnDropCreateHeadingAt(finalSlot)
+                                    } else {
+                                        currentOnDropCreateTodoAt(finalSlot)
+                                    }
+                                } else {
+                                    currentPositionalHandler?.onDragCancel()
+                                    isDragging = false
+                                    dragOffset = Offset.Zero
+                                    currentOnDragStateChanged(MagicPlusDragState(isDragging = false))
+                                }
+                            }
+                        } catch (c: CancellationException) {
+                            isFabPressed = false
+                            if (dragSessionStarted || isDragging) {
                                 currentPositionalHandler?.onDragCancel()
                                 isDragging = false
                                 dragOffset = Offset.Zero
-                                onDragStateChanged(MagicPlusDragState(isDragging = false))
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                if (dragAmount.x.isFinite() && dragAmount.y.isFinite()) {
-                                    dragOffset += dragAmount
-                                }
-
-                                val rawRows = if (dragOffset.y.isFinite() && rowHeightPx > 0f) {
-                                    ((-dragOffset.y) / rowHeightPx).roundToInt()
-                                } else 0
-                                val rowsUp = rawRows.coerceAtLeast(0)
-                                val computedSlot = (itemCount - rowsUp).coerceIn(0, itemCount.coerceAtLeast(0))
-
-                                val mode = if (allowHeadingDrop && dragOffset.x <= leftEdgeThresholdPx) {
-                                    MagicPlusDropMode.INSERT_HEADING
-                                } else {
-                                    MagicPlusDropMode.INSERT_TODO
-                                }
-
-                                val positional = currentPositionalHandler
-                                if (positional != null) {
-                                    positional.onDragMove(dragStartCenter + dragOffset, mode)
-                                    if (mode != lastDropMode) {
-                                        lastDropMode = mode
-                                        onDragStateChanged(
-                                            MagicPlusDragState(isDragging = true, dropIndex = computedSlot, dropMode = mode)
-                                        )
-                                    }
-                                } else if (computedSlot != lastHapticSlot || mode != lastDropMode) {
-                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    lastHapticSlot = computedSlot
-                                    lastDropMode = mode
-                                    onDragStateChanged(
-                                        MagicPlusDragState(
-                                            isDragging = true,
-                                            dropIndex = computedSlot,
-                                            dropMode = mode
-                                        )
-                                    )
-                                }
+                                currentOnDragStateChanged(MagicPlusDragState(isDragging = false))
                             }
-                        )
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Add,
-                    contentDescription = stringResource(R.string.entity_new_todo),
-                    tint = Color.White,
-                    modifier = Modifier
-                        .size(30.dp)
-                        .graphicsLayer {
-                            rotationZ = if (iconRotation.isFinite()) iconRotation else 0f
+                            throw c
                         }
-                )
-            }
+                    }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Add,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier
+                    .size(30.dp)
+                    .graphicsLayer {
+                        rotationZ = if (iconRotation.isFinite()) iconRotation else 0f
+                    }
+            )
         }
     }
 }
@@ -656,79 +718,71 @@ private fun MagicPlusOptionRow(
         label = "magicPlusOptionHoverBg"
     )
 
-    val optionTooltip = if (!shortcutBadge.isNullOrBlank()) {
-        "$title ($shortcutBadge) — $subtitle"
-    } else {
-        "$title — $subtitle"
-    }
-
-    ThingsHoverTooltip(text = optionTooltip) {
-        Row(
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(rowBg)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .hoverable(interactionSource = interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
+            .padding(horizontal = 10.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(11.dp)
+    ) {
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(rowBg)
-                .pointerHoverIcon(PointerIcon.Hand)
-                .hoverable(interactionSource = interactionSource)
-                .clickable(
-                    interactionSource = interactionSource,
-                    indication = null,
-                    onClick = onClick
-                )
-                .padding(horizontal = 10.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(11.dp)
+                .size(34.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(iconBg),
+            contentAlignment = Alignment.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(iconBg),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = title,
-                    tint = iconTint,
-                    modifier = Modifier.size(19.dp)
-                )
-            }
+            Icon(
+                imageVector = icon,
+                contentDescription = title,
+                tint = iconTint,
+                modifier = Modifier.size(19.dp)
+            )
+        }
 
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = colors.primaryText
-                    )
-                    if (!shortcutBadge.isNullOrBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(5.dp))
-                                .background(colors.tagPillBg)
-                                .padding(horizontal = 5.dp, vertical = 1.5.dp)
-                        ) {
-                            Text(
-                                text = shortcutBadge,
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontSize = 9.5.sp,
-                                    fontWeight = FontWeight.Medium
-                                ),
-                                color = colors.secondaryText
-                            )
-                        }
+        Column(modifier = Modifier.weight(1f)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = colors.primaryText
+                )
+                if (!shortcutBadge.isNullOrBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(colors.tagPillBg)
+                            .padding(horizontal = 5.dp, vertical = 1.5.dp)
+                    ) {
+                        Text(
+                            text = shortcutBadge,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Medium
+                            ),
+                            color = colors.secondaryText
+                        )
                     }
                 }
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                    color = colors.secondaryText,
-                    maxLines = 1
-                )
             }
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                color = colors.secondaryText,
+                maxLines = 1
+            )
         }
     }
 }

@@ -1093,7 +1093,7 @@ private struct MacToolbarIconButton<Label: View>: View {
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
-        .thingsTooltip(helpText)
+        .thingsTopBarIconTooltip(helpText)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isHovered = hovering

@@ -400,49 +400,53 @@ fun TaskAttachmentsStrip(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (onAttachFileClick != null) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(colors.tagPillBg)
-                            .clickable(onClick = onAttachFileClick)
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.AttachFile,
-                            contentDescription = stringResource(R.string.action_attach_file),
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = stringResource(R.string.action_attach_file),
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                            color = colors.thingsBlue
-                        )
+                    ThingsHoverTooltip(text = stringResource(R.string.action_attach_file)) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(colors.tagPillBg)
+                                .clickable(onClick = onAttachFileClick)
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.AttachFile,
+                                contentDescription = stringResource(R.string.action_attach_file),
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.action_attach_file),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                                color = colors.thingsBlue
+                            )
+                        }
                     }
                 }
                 if (onTakePhotoClick != null) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(colors.tagPillBg)
-                            .clickable(onClick = onTakePhotoClick)
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.CameraAlt,
-                            contentDescription = stringResource(R.string.action_take_photo),
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = stringResource(R.string.action_take_photo),
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                            color = colors.thingsBlue
-                        )
+                    ThingsHoverTooltip(text = stringResource(R.string.action_take_photo)) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(colors.tagPillBg)
+                                .clickable(onClick = onTakePhotoClick)
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.CameraAlt,
+                                contentDescription = stringResource(R.string.action_take_photo),
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.action_take_photo),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                                color = colors.thingsBlue
+                            )
+                        }
                     }
                 }
             }
@@ -507,67 +511,71 @@ private fun AttachmentThumbnailCard(
         }
     }
 
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(colors.tagPillBg.copy(alpha = 0.7f))
-            .border(0.5.dp, colors.secondaryText.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
-            .padding(6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Box(
+    ThingsHoverTooltip(text = attachment.fileName) {
+        Row(
             modifier = Modifier
-                .size(42.dp)
-                .clip(RoundedCornerShape(7.dp))
-                .background(colors.thingsBlue.copy(alpha = 0.12f)),
-            contentAlignment = Alignment.Center
+                .clip(RoundedCornerShape(10.dp))
+                .background(colors.tagPillBg.copy(alpha = 0.7f))
+                .border(0.5.dp, colors.secondaryText.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
+                .clickable(onClick = onClick)
+                .padding(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            val bmp = thumbnailBitmap
-            if (bmp != null) {
-                Image(
-                    bitmap = bmp,
-                    contentDescription = attachment.fileName,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(colors.thingsBlue.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                val bmp = thumbnailBitmap
+                if (bmp != null) {
+                    Image(
+                        bitmap = bmp,
+                        contentDescription = attachment.fileName,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        imageVector = if (attachment.isImage) Icons.Outlined.Image else Icons.Outlined.Description,
+                        contentDescription = attachment.fileName,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            Column(modifier = Modifier.width(116.dp)) {
+                Text(
+                    text = attachment.fileName,
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                    color = colors.primaryText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
-            } else {
-                Icon(
-                    imageVector = if (attachment.isImage) Icons.Outlined.Image else Icons.Outlined.Description,
-                    contentDescription = attachment.fileName,
-                    tint = colors.thingsBlue,
-                    modifier = Modifier.size(20.dp)
+                Text(
+                    text = "${if (attachment.isPdf) "PDF • " else ""}${formatAttachmentSize(attachment.sizeBytes)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.secondaryText,
+                    maxLines = 1
                 )
             }
-        }
 
-        Column(modifier = Modifier.width(116.dp)) {
-            Text(
-                text = attachment.fileName,
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
-                color = colors.primaryText,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = "${if (attachment.isPdf) "PDF • " else ""}${formatAttachmentSize(attachment.sizeBytes)}",
-                style = MaterialTheme.typography.labelSmall,
-                color = colors.secondaryText,
-                maxLines = 1
-            )
-        }
-
-        IconButton(
-            onClick = onDelete,
-            modifier = Modifier.size(24.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.Close,
-                contentDescription = stringResource(R.string.attachment_remove),
-                tint = colors.secondaryText,
-                modifier = Modifier.size(14.dp)
-            )
+            ThingsHoverTooltip(text = stringResource(R.string.attachment_remove)) {
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Close,
+                        contentDescription = stringResource(R.string.attachment_remove),
+                        tint = colors.secondaryText,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
         }
     }
 }
@@ -678,148 +686,156 @@ private fun AttachmentFullScreenPreviewDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            shape = RoundedCornerShape(18.dp),
-            color = colors.cardSurface,
-            tonalElevation = 8.dp
-        ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Top Bar
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = attachment.fileName,
-                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = colors.primaryText,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = formatAttachmentSize(attachment.sizeBytes),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colors.secondaryText
-                        )
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        IconButton(onClick = { openAttachmentExternally(context, attachment) }) {
-                            Icon(
-                                imageVector = Icons.Outlined.OpenInNew,
-                                contentDescription = stringResource(R.string.attachment_open_external),
-                                tint = colors.thingsBlue
-                            )
-                        }
-                        IconButton(onClick = onDelete) {
-                            Icon(
-                                imageVector = Icons.Outlined.DeleteOutline,
-                                contentDescription = stringResource(R.string.attachment_remove),
-                                tint = colors.deadlineUrgentRed
-                            )
-                        }
-                        IconButton(onClick = onDismiss) {
-                            Icon(
-                                imageVector = Icons.Outlined.Close,
-                                contentDescription = stringResource(R.string.action_cancel),
-                                tint = colors.secondaryText
-                            )
-                        }
-                    }
-                }
-
-                // Preview Body
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .background(Color.Black.copy(alpha = 0.05f))
-                        .pointerInput(attachment.id, currentPdfPage) {
-                            detectTransformGestures { _, pan, zoom, _ ->
-                                val newScale = (scale * zoom).coerceIn(1f, 4f)
-                                scale = newScale
-                                if (newScale > 1f) {
-                                    offsetX += pan.x
-                                    offsetY += pan.y
-                                } else {
-                                    offsetX = 0f
-                                    offsetY = 0f
-                                }
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    val img = fullImageBitmap ?: pdfPageBitmap
-                    if (img != null) {
-                        Image(
-                            bitmap = img,
-                            contentDescription = attachment.fileName,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(12.dp)
-                                .graphicsLayer(
-                                    scaleX = scale,
-                                    scaleY = scale,
-                                    translationX = offsetX,
-                                    translationY = offsetY
-                                )
-                        )
-                    } else {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Description,
-                                contentDescription = null,
-                                tint = colors.thingsBlue,
-                                modifier = Modifier.size(48.dp)
-                            )
-                            Text(
-                                text = attachment.fileName,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = colors.primaryText
-                            )
-                            TextButton(onClick = { openAttachmentExternally(context, attachment) }) {
-                                Text(text = stringResource(R.string.attachment_open_external))
-                            }
-                        }
-                    }
-                }
-
-                // PDF Pagination Footer
-                if (attachment.isPdf && pdfPageCount > 1) {
+        ThingsTooltipHostBox(modifier = Modifier.fillMaxSize()) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                shape = RoundedCornerShape(18.dp),
+                color = colors.cardSurface,
+                tonalElevation = 8.dp
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Top Bar
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        TextButton(
-                            onClick = { if (currentPdfPage > 0) currentPdfPage-- },
-                            enabled = currentPdfPage > 0
-                        ) {
-                            Text("←")
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = attachment.fileName,
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.primaryText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = formatAttachmentSize(attachment.sizeBytes),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.secondaryText
+                            )
                         }
-                        Text(
-                            text = "${currentPdfPage + 1} / $pdfPageCount",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = colors.secondaryText
-                        )
-                        TextButton(
-                            onClick = { if (currentPdfPage < pdfPageCount - 1) currentPdfPage++ },
-                            enabled = currentPdfPage < pdfPageCount - 1
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            ThingsHoverTooltip(text = stringResource(R.string.attachment_open_external)) {
+                                IconButton(onClick = { openAttachmentExternally(context, attachment) }) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.OpenInNew,
+                                        contentDescription = stringResource(R.string.attachment_open_external),
+                                        tint = colors.thingsBlue
+                                    )
+                                }
+                            }
+                            ThingsHoverTooltip(text = stringResource(R.string.attachment_remove)) {
+                                IconButton(onClick = onDelete) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.DeleteOutline,
+                                        contentDescription = stringResource(R.string.attachment_remove),
+                                        tint = colors.deadlineUrgentRed
+                                    )
+                                }
+                            }
+                            ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
+                                IconButton(onClick = onDismiss) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Close,
+                                        contentDescription = stringResource(R.string.action_cancel),
+                                        tint = colors.secondaryText
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Preview Body
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .background(Color.Black.copy(alpha = 0.05f))
+                            .pointerInput(attachment.id, currentPdfPage) {
+                                detectTransformGestures { _, pan, zoom, _ ->
+                                    val newScale = (scale * zoom).coerceIn(1f, 4f)
+                                    scale = newScale
+                                    if (newScale > 1f) {
+                                        offsetX += pan.x
+                                        offsetY += pan.y
+                                    } else {
+                                        offsetX = 0f
+                                        offsetY = 0f
+                                    }
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val img = fullImageBitmap ?: pdfPageBitmap
+                        if (img != null) {
+                            Image(
+                                bitmap = img,
+                                contentDescription = attachment.fileName,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(12.dp)
+                                    .graphicsLayer(
+                                        scaleX = scale,
+                                        scaleY = scale,
+                                        translationX = offsetX,
+                                        translationY = offsetY
+                                    )
+                            )
+                        } else {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Description,
+                                    contentDescription = null,
+                                    tint = colors.thingsBlue,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Text(
+                                    text = attachment.fileName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = colors.primaryText
+                                )
+                                TextButton(onClick = { openAttachmentExternally(context, attachment) }) {
+                                    Text(text = stringResource(R.string.attachment_open_external))
+                                }
+                            }
+                        }
+                    }
+
+                    // PDF Pagination Footer
+                    if (attachment.isPdf && pdfPageCount > 1) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("→")
+                            TextButton(
+                                onClick = { if (currentPdfPage > 0) currentPdfPage-- },
+                                enabled = currentPdfPage > 0
+                            ) {
+                                Text("←")
+                            }
+                            Text(
+                                text = "${currentPdfPage + 1} / $pdfPageCount",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = colors.secondaryText
+                            )
+                            TextButton(
+                                onClick = { if (currentPdfPage < pdfPageCount - 1) currentPdfPage++ },
+                                enabled = currentPdfPage < pdfPageCount - 1
+                            ) {
+                                Text("→")
+                            }
                         }
                     }
                 }

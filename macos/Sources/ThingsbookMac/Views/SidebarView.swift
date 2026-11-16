@@ -146,7 +146,7 @@ public struct SidebarView: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .help(store.tr("entity_new_project"))
+                .thingsTooltip(store.tr("entity_new_project"))
 
                 Spacer()
 
@@ -162,7 +162,7 @@ public struct SidebarView: View {
                     .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
-                .help(store.trf("areas_active_count", store.areas.count, ThingsSQLiteDatabase.maxAreas))
+                .thingsTooltip(store.trf("areas_active_count", store.areas.count, ThingsSQLiteDatabase.maxAreas))
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -201,7 +201,19 @@ public struct SidebarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(store.tr("v2_weekly_review_title") + " (⇧⌘R)")
+        .thingsTooltip(store.tr("v2_weekly_review_title") + " (⇧⌘R)")
+    }
+
+    private func smartViewShortcut(for view: SmartView) -> String {
+        switch view {
+        case .inbox: return "⌘1"
+        case .today: return "⌘2"
+        case .upcoming: return "⌘3"
+        case .anytime: return "⌘4"
+        case .someday: return "⌘5"
+        case .logbook: return "⌘6"
+        case .trash: return "⌘7"
+        }
     }
 
     private func smartViewRow(_ view: SmartView, count: Int) -> some View {
@@ -240,6 +252,7 @@ public struct SidebarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .thingsTooltip("\(store.tr(view.titleKey)) (\(smartViewShortcut(for: view)))")
     }
 
     private func areaSection(_ area: Area) -> some View {
@@ -268,6 +281,7 @@ public struct SidebarView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .thingsTooltip("\(store.tr("entity_area")): \(area.title)")
 
                 Button {
                     store.newProjectDefaultAreaId = area.id
@@ -279,7 +293,7 @@ public struct SidebarView: View {
                         .frame(width: 18, height: 18)
                 }
                 .buttonStyle(.plain)
-                .help(store.tr("entity_new_project"))
+                .thingsTooltip(store.trf("sidebar_new_project_in_area", area.title))
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 5.5)
@@ -350,7 +364,7 @@ public struct SidebarView: View {
                     Circle()
                         .fill(ThingsMacPalette.somedayAmber)
                         .frame(width: 6, height: 6)
-                        .help(statusHelpText)
+                        .thingsTooltip(statusHelpText)
                 }
 
                 if proj.deadline != nil {
@@ -375,7 +389,7 @@ public struct SidebarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(statusHelpText.map { "\(proj.title) — \($0)" } ?? proj.title)
+        .thingsTooltip(statusHelpText.map { "\(proj.title) — \($0)" } ?? proj.title)
         .contextMenu {
             Button(store.tr("project_edit_title")) {
                 store.editingProject = proj

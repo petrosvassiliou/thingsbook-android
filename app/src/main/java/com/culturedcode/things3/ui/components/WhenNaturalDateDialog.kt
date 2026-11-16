@@ -149,6 +149,7 @@ fun WhenNaturalDateDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+        ThingsTooltipHostBox {
         Surface(
             modifier = Modifier
                 .widthIn(max = 308.dp)
@@ -187,16 +188,18 @@ fun WhenNaturalDateDialog(
                         )
                     }
 
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.size(22.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = stringResource(R.string.action_cancel),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(15.dp)
-                        )
+                    ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(22.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.action_cancel),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
                     }
                 }
 
@@ -522,6 +525,7 @@ fun WhenNaturalDateDialog(
                 }
             }
         }
+        }
     }
 }
 
@@ -616,6 +620,7 @@ fun DeadlineDatePickerDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+        ThingsTooltipHostBox {
         Surface(
             modifier = Modifier
                 .widthIn(max = 308.dp)
@@ -652,13 +657,15 @@ fun DeadlineDatePickerDialog(
                             color = colors.primaryText
                         )
                     }
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(22.dp)) {
-                        Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = stringResource(R.string.action_cancel),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(15.dp)
-                        )
+                    ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(22.dp)) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.action_cancel),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
                     }
                 }
 
@@ -701,6 +708,7 @@ fun DeadlineDatePickerDialog(
                     }
                 }
             }
+        }
         }
     }
 }

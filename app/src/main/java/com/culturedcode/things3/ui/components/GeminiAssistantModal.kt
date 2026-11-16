@@ -78,6 +78,7 @@ fun GeminiAssistantModal(
     var showApiKeyField by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
+        ThingsTooltipHostBox {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -116,27 +117,31 @@ fun GeminiAssistantModal(
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            onClick = { showApiKeyField = !showApiKeyField },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Key,
-                                contentDescription = stringResource(R.string.gemini_api_key_label),
-                                tint = if (apiKeyInput.isNotBlank()) colors.thingsBlue else colors.secondaryText,
-                                modifier = Modifier.size(18.dp)
-                            )
+                        ThingsHoverTooltip(text = stringResource(R.string.gemini_api_key_label)) {
+                            IconButton(
+                                onClick = { showApiKeyField = !showApiKeyField },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Key,
+                                    contentDescription = stringResource(R.string.gemini_api_key_label),
+                                    tint = if (apiKeyInput.isNotBlank()) colors.thingsBlue else colors.secondaryText,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
-                        IconButton(
-                            onClick = onDismiss,
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Close,
-                                contentDescription = stringResource(R.string.action_cancel),
-                                tint = colors.secondaryText,
-                                modifier = Modifier.size(18.dp)
-                            )
+                        ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
+                            IconButton(
+                                onClick = onDismiss,
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Close,
+                                    contentDescription = stringResource(R.string.action_cancel),
+                                    tint = colors.secondaryText,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -160,13 +165,15 @@ fun GeminiAssistantModal(
                             modifier = Modifier.weight(1f)
                         )
                         if (onClearError != null) {
-                            IconButton(onClick = onClearError, modifier = Modifier.size(22.dp)) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Close,
-                                    contentDescription = stringResource(R.string.action_cancel),
-                                    tint = colors.deadlineUrgentRed,
-                                    modifier = Modifier.size(14.dp)
-                                )
+                            ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
+                                IconButton(onClick = onClearError, modifier = Modifier.size(22.dp)) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Close,
+                                        contentDescription = stringResource(R.string.action_cancel),
+                                        tint = colors.deadlineUrgentRed,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -337,6 +344,7 @@ fun GeminiAssistantModal(
                     }
                 }
             }
+        }
         }
     }
 }

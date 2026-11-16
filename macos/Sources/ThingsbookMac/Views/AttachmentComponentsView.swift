@@ -313,7 +313,7 @@ public struct AttachmentsStripView: View {
                     .foregroundStyle(ThingsMacPalette.accentBlue)
                 }
                 .buttonStyle(.plain)
-                .help(store.tr("action_attach_file"))
+                .thingsTooltip(store.tr("action_attach_file"))
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -372,7 +372,7 @@ private struct AttachmentChipCard: View {
                     .foregroundStyle(.secondary.opacity(isHovering ? 0.95 : 0.55))
             }
             .buttonStyle(.plain)
-            .help(store.tr("attachment_remove"))
+            .thingsTooltip(store.tr("attachment_remove"))
         }
         .padding(.leading, 6)
         .padding(.trailing, 9)
@@ -459,7 +459,7 @@ public struct AttachmentPreviewSheet: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .help(store.tr("macos_tooltip_zoom_out"))
+                        .thingsTooltip(store.tr("macos_tooltip_zoom_out"))
 
                         Button {
                             imageZoom = 1.0
@@ -469,7 +469,7 @@ public struct AttachmentPreviewSheet: View {
                                 .frame(width: 44)
                         }
                         .buttonStyle(.plain)
-                        .help(store.tr("macos_tooltip_zoom_reset"))
+                        .thingsTooltip(store.tr("macos_tooltip_zoom_reset"))
 
                         Button {
                             imageZoom = min(4.0, imageZoom + 0.25)
@@ -478,7 +478,7 @@ public struct AttachmentPreviewSheet: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .help(store.tr("macos_tooltip_zoom_in"))
+                        .thingsTooltip(store.tr("macos_tooltip_zoom_in"))
                     }
                 }
 
@@ -492,7 +492,7 @@ public struct AttachmentPreviewSheet: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .fixedSize(horizontal: true, vertical: false)
-                    .help(store.tr("macos_attachment_quicklook"))
+                    .thingsTooltip(store.tr("macos_attachment_quicklook"))
 
                     Button {
                         NSWorkspace.shared.open(url)
@@ -503,7 +503,7 @@ public struct AttachmentPreviewSheet: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .fixedSize(horizontal: true, vertical: false)
-                    .help(store.tr("attachment_open_external"))
+                    .thingsTooltip(store.tr("attachment_open_external"))
                 }
 
                 Button(role: .destructive) {
@@ -515,7 +515,7 @@ public struct AttachmentPreviewSheet: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .help(store.tr("attachment_remove"))
+                .thingsTooltip(store.tr("attachment_remove"))
 
                 Button(store.tr("action_done")) {
                     dismiss()
@@ -523,7 +523,7 @@ public struct AttachmentPreviewSheet: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .fixedSize(horizontal: true, vertical: false)
-                .help(store.tr("action_done"))
+                .thingsTooltip(store.tr("action_done"))
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 12)

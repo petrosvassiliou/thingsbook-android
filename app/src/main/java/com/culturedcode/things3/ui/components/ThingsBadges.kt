@@ -110,19 +110,24 @@ fun ThingsTagPill(
     onClick: (() -> Unit)? = null
 ) {
     val colors = ThingsTheme.colors
-    Box(
+    ThingsHoverTooltip(
+        text = "${stringResource(R.string.action_tags)}: $title",
         modifier = modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(colors.tagPillBg)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 7.dp, vertical = 2.dp),
-        contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.labelSmall,
-            color = colors.tagPillText
-        )
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(colors.tagPillBg)
+                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+                .padding(horizontal = 7.dp, vertical = 2.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.tagPillText
+            )
+        }
     }
 }
 
@@ -153,26 +158,31 @@ fun ThingsDeadlineBadge(
         else -> stringResource(R.string.deadline_days_overdue, -daysDiff)
     }
 
-    Row(
+    ThingsHoverTooltip(
+        text = "${stringResource(R.string.action_deadline)}: $label",
         modifier = modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(bgColor)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 7.dp, vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Icon(
-            imageVector = Icons.Outlined.Flag,
-            contentDescription = stringResource(R.string.action_deadline),
-            tint = textColor,
-            modifier = Modifier.size(13.dp)
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-            color = textColor
-        )
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(bgColor)
+                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+                .padding(horizontal = 7.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Flag,
+                contentDescription = stringResource(R.string.action_deadline),
+                tint = textColor,
+                modifier = Modifier.size(13.dp)
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                color = textColor
+            )
+        }
     }
 }
 
@@ -227,26 +237,31 @@ fun ThingsWhenBadge(
         )
     }
 
-    Row(
+    ThingsHoverTooltip(
+        text = "${stringResource(R.string.action_when)}: $label",
         modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(colors.tagPillBg)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 9.dp, vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp)
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = tint,
-            modifier = Modifier.size(15.dp)
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.primaryText
-        )
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(colors.tagPillBg)
+                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+                .padding(horizontal = 9.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = tint,
+                modifier = Modifier.size(15.dp)
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.primaryText
+            )
+        }
     }
 }
 
@@ -266,20 +281,25 @@ fun ThingsReminderBadge(
             .format(timeFormatter)
     }.getOrDefault("--:--")
 
-    Row(
+    ThingsHoverTooltip(
+        text = "${stringResource(R.string.action_reminder)}: $formattedTime",
         modifier = modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(colors.thingsBlueSoft)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 7.dp, vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Text(
-            text = "🔔 $formattedTime",
-            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-            color = colors.thingsBlue
-        )
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(colors.thingsBlueSoft)
+                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+                .padding(horizontal = 7.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = "🔔 $formattedTime",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                color = colors.thingsBlue
+            )
+        }
     }
 }
 

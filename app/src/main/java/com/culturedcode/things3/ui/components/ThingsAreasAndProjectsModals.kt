@@ -117,6 +117,7 @@ fun ThingsAreaManagerModal(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+        ThingsTooltipHostBox {
         Surface(
             modifier = Modifier
                 .widthIn(max = 360.dp)
@@ -164,16 +165,18 @@ fun ThingsAreaManagerModal(
                             )
                         }
                     }
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = stringResource(R.string.action_cancel),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(18.dp)
-                        )
+                    ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.action_cancel),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
 
@@ -494,6 +497,7 @@ fun ThingsAreaManagerModal(
                 }
             }
         }
+        }
     }
 }
 
@@ -566,6 +570,7 @@ fun CreateOrEditProjectDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+        ThingsTooltipHostBox {
         Surface(
             modifier = Modifier
                 .widthIn(max = 340.dp)
@@ -601,13 +606,15 @@ fun CreateOrEditProjectDialog(
                             color = colors.primaryText
                         )
                     }
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(26.dp)) {
-                        Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = stringResource(R.string.action_cancel),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(16.dp)
-                        )
+                    ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(26.dp)) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.action_cancel),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
 
@@ -879,6 +886,7 @@ fun CreateOrEditProjectDialog(
                 }
             }
         }
+        }
     }
 
 
@@ -914,6 +922,7 @@ fun MoveTaskToProjectOrAreaDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+        ThingsTooltipHostBox {
         Surface(
             modifier = Modifier
                 .widthIn(max = 320.dp)
@@ -952,13 +961,15 @@ fun MoveTaskToProjectOrAreaDialog(
                             color = colors.primaryText
                         )
                     }
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
-                        Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = stringResource(R.string.action_cancel),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(15.dp)
-                        )
+                    ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.action_cancel),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
                     }
                 }
 
@@ -1085,6 +1096,7 @@ fun MoveTaskToProjectOrAreaDialog(
                     }
                 }
             }
+        }
         }
     }
 }

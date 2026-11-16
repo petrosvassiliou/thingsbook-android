@@ -58,11 +58,11 @@ public enum MacInAppUpdateError: LocalizedError, Equatable, Sendable {
 }
 
 public enum AppUpdateService {
-    public static let currentVersion = "2.0.0-beta.10"
-    public static let displayVersion = "2.0.0-beta.10"
-    public static let currentBuildNumber = 54
+    public static let currentVersion = "2.0.0-beta.11"
+    public static let displayVersion = "2.0.0-beta.11"
+    public static let currentBuildNumber = 55
     public static let expectedBundleIdentifier = "com.thingsbook.macos"
-    private static let releasesEndpoint = "https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases?per_page=15"
+    private static let releasesEndpoint = "https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases?per_page=30"
 
     public static var currentVersionIsPrerelease: Bool {
         defaultIncludeBeta(for: currentVersion)

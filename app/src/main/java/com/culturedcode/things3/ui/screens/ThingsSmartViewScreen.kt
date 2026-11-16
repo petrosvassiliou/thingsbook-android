@@ -5509,33 +5509,83 @@ private fun ThingsChromebookSidebar(
                 )
             }
             if (onCloseDrawer != null) {
-                IconButton(
-                    onClick = onCloseDrawer,
-                    modifier = Modifier.size(28.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Close,
-                        contentDescription = stringResource(R.string.action_cancel),
-                        tint = colors.secondaryText,
-                        modifier = Modifier.size(18.dp)
-                    )
+                ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
+                    IconButton(
+                        onClick = onCloseDrawer,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Close,
+                            contentDescription = stringResource(R.string.action_cancel),
+                            tint = colors.secondaryText,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(2.dp))
 
-        SmartViewType.entries.forEach { viewType ->
+        SmartViewType.entries.forEachIndexed { idx, viewType ->
             val selected = navTarget == ActiveNavigationTarget.SmartView(viewType)
             val count = smartViewCounts[viewType] ?: 0
+            val viewLabel = stringResource(viewType.titleRes)
+            val shortcutHint = if (idx < 7) " (Ctrl+${idx + 1})" else ""
+            ThingsHoverTooltip(
+                text = "$viewLabel$shortcutHint",
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(if (selected) colors.thingsBlue.copy(alpha = 0.14f) else Color.Transparent)
+                        .clickable {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onSelectSmartView(viewType)
+                        }
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        SmartViewIcon(viewType = viewType, modifier = Modifier.size(18.dp))
+                        Text(
+                            text = viewLabel,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (selected) colors.thingsBlue else colors.primaryText
+                            )
+                        )
+                    }
+                    if (count > 0 && viewType != SmartViewType.LOGBOOK) {
+                        Text(
+                            text = count.toString(),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (selected) colors.thingsBlue else colors.secondaryText
+                        )
+                    }
+                }
+            }
+        }
+
+        // v2 GTD Weekly Review & Project Templates / Markdown Importer quick rows
+        ThingsHoverTooltip(
+            text = stringResource(R.string.v2_weekly_review_title),
+            modifier = Modifier.fillMaxWidth()
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(9.dp))
-                    .background(if (selected) colors.thingsBlue.copy(alpha = 0.14f) else Color.Transparent)
+                    .background(Color.Transparent)
                     .clickable {
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onSelectSmartView(viewType)
+                        onOpenWeeklyReview()
                     }
                     .padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -5545,51 +5595,57 @@ private fun ThingsChromebookSidebar(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    SmartViewIcon(viewType = viewType, modifier = Modifier.size(18.dp))
+                    Icon(
+                        imageVector = Icons.Outlined.Checklist,
+                        contentDescription = stringResource(R.string.v2_weekly_review_title),
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
                     Text(
-                        text = stringResource(viewType.titleRes),
+                        text = stringResource(R.string.v2_weekly_review_title),
                         style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (selected) colors.thingsBlue else colors.primaryText
-                        )
+                            fontWeight = FontWeight.Normal,
+                            color = colors.primaryText
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
-                if (count > 0 && viewType != SmartViewType.LOGBOOK) {
+                if (stalledCount > 0) {
                     Text(
-                        text = count.toString(),
+                        text = stalledCount.toString(),
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (selected) colors.thingsBlue else colors.secondaryText
+                        color = colors.secondaryText
                     )
                 }
             }
         }
 
-        // v2 GTD Weekly Review & Project Templates / Markdown Importer quick rows
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(9.dp))
-                .background(Color.Transparent)
-                .clickable {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onOpenWeeklyReview()
-                }
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+        ThingsHoverTooltip(
+            text = stringResource(R.string.v2_templates_title),
+            modifier = Modifier.fillMaxWidth()
         ) {
             Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(Color.Transparent)
+                    .clickable {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onOpenTemplatesAndImport()
+                    }
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Outlined.Checklist,
-                    contentDescription = stringResource(R.string.v2_weekly_review_title),
-                    tint = colors.thingsBlue,
+                    imageVector = Icons.Outlined.ContentCopy,
+                    contentDescription = stringResource(R.string.v2_templates_title),
+                    tint = colors.anytimeTeal,
                     modifier = Modifier.size(18.dp)
                 )
                 Text(
-                    text = stringResource(R.string.v2_weekly_review_title),
+                    text = stringResource(R.string.v2_templates_title),
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = FontWeight.Normal,
                         color = colors.primaryText
@@ -5598,43 +5654,6 @@ private fun ThingsChromebookSidebar(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            if (stalledCount > 0) {
-                Text(
-                    text = stalledCount.toString(),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.secondaryText
-                )
-            }
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(9.dp))
-                .background(Color.Transparent)
-                .clickable {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onOpenTemplatesAndImport()
-                }
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.ContentCopy,
-                contentDescription = stringResource(R.string.v2_templates_title),
-                tint = colors.anytimeTeal,
-                modifier = Modifier.size(18.dp)
-            )
-            Text(
-                text = stringResource(R.string.v2_templates_title),
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.Normal,
-                    color = colors.primaryText
-                ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
         }
 
         Spacer(modifier = Modifier.height(6.dp))

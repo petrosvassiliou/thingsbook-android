@@ -168,6 +168,7 @@ fun ThingsQuickShareModal(
     }
 
     Dialog(onDismissRequest = onDismiss) {
+        ThingsTooltipHostBox {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -196,19 +197,23 @@ fun ThingsQuickShareModal(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        IconButton(onClick = triggerVoiceCapture, modifier = Modifier.size(30.dp)) {
-                            Icon(
-                                imageVector = Icons.Outlined.Mic,
-                                contentDescription = stringResource(R.string.voice_capture_btn),
-                                tint = colors.thingsBlue
-                            )
+                        ThingsHoverTooltip(text = stringResource(R.string.voice_capture_btn)) {
+                            IconButton(onClick = triggerVoiceCapture, modifier = Modifier.size(30.dp)) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Mic,
+                                    contentDescription = stringResource(R.string.voice_capture_btn),
+                                    tint = colors.thingsBlue
+                                )
+                            }
                         }
-                        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                            Icon(
-                                imageVector = Icons.Outlined.Close,
-                                contentDescription = stringResource(R.string.action_cancel),
-                                tint = colors.secondaryText
-                            )
+                        ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
+                            IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Close,
+                                    contentDescription = stringResource(R.string.action_cancel),
+                                    tint = colors.secondaryText
+                                )
+                            }
                         }
                     }
                 }
@@ -219,12 +224,14 @@ fun ThingsQuickShareModal(
                     label = { Text(stringResource(R.string.placeholder_todo_title)) },
                     singleLine = true,
                     trailingIcon = {
-                        IconButton(onClick = triggerVoiceCapture) {
-                            Icon(
-                                imageVector = Icons.Outlined.Mic,
-                                contentDescription = stringResource(R.string.voice_capture_btn),
-                                tint = colors.thingsBlue
-                            )
+                        ThingsHoverTooltip(text = stringResource(R.string.voice_capture_btn)) {
+                            IconButton(onClick = triggerVoiceCapture) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Mic,
+                                    contentDescription = stringResource(R.string.voice_capture_btn),
+                                    tint = colors.thingsBlue
+                                )
+                            }
                         }
                     },
                     modifier = Modifier.fillMaxWidth()
@@ -444,6 +451,7 @@ fun ThingsQuickShareModal(
                 }
             }
         }
+        }
     }
 }
 
@@ -524,49 +532,58 @@ fun ThingsFocusTimerBanner(
                     modifier = Modifier.padding(end = 4.dp)
                 )
 
-                IconButton(onClick = onTogglePause, modifier = Modifier.size(30.dp)) {
-                    Icon(
-                        imageVector = if (timerState.isPaused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause,
-                        contentDescription = if (timerState.isPaused) {
-                            stringResource(R.string.focus_timer_resume)
-                        } else {
-                            stringResource(R.string.focus_timer_pause)
-                        },
-                        tint = colors.primaryText,
-                        modifier = Modifier.size(18.dp)
-                    )
+                val pauseResumeTooltip = if (timerState.isPaused) {
+                    stringResource(R.string.focus_timer_resume)
+                } else {
+                    stringResource(R.string.focus_timer_pause)
+                }
+                ThingsHoverTooltip(text = pauseResumeTooltip) {
+                    IconButton(onClick = onTogglePause, modifier = Modifier.size(30.dp)) {
+                        Icon(
+                            imageVector = if (timerState.isPaused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause,
+                            contentDescription = pauseResumeTooltip,
+                            tint = colors.primaryText,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
 
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(colors.tagPillBg)
-                        .clickable(onClick = onAddFiveMinutes)
-                        .padding(horizontal = 6.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = stringResource(R.string.focus_timer_plus_5m),
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                        color = colors.primaryText
-                    )
+                ThingsHoverTooltip(text = stringResource(R.string.focus_timer_plus_5m)) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(colors.tagPillBg)
+                            .clickable(onClick = onAddFiveMinutes)
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.focus_timer_plus_5m),
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.primaryText
+                        )
+                    }
                 }
 
-                IconButton(onClick = onCompleteTask, modifier = Modifier.size(30.dp)) {
-                    Icon(
-                        imageVector = Icons.Outlined.Check,
-                        contentDescription = stringResource(R.string.action_complete),
-                        tint = colors.logbookGreen,
-                        modifier = Modifier.size(18.dp)
-                    )
+                ThingsHoverTooltip(text = stringResource(R.string.action_complete)) {
+                    IconButton(onClick = onCompleteTask, modifier = Modifier.size(30.dp)) {
+                        Icon(
+                            imageVector = Icons.Outlined.Check,
+                            contentDescription = stringResource(R.string.action_complete),
+                            tint = colors.logbookGreen,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
 
-                IconButton(onClick = onStopTimer, modifier = Modifier.size(30.dp)) {
-                    Icon(
-                        imageVector = Icons.Outlined.Close,
-                        contentDescription = stringResource(R.string.focus_timer_stop),
-                        tint = colors.secondaryText,
-                        modifier = Modifier.size(17.dp)
-                    )
+                ThingsHoverTooltip(text = stringResource(R.string.focus_timer_stop)) {
+                    IconButton(onClick = onStopTimer, modifier = Modifier.size(30.dp)) {
+                        Icon(
+                            imageVector = Icons.Outlined.Close,
+                            contentDescription = stringResource(R.string.focus_timer_stop),
+                            tint = colors.secondaryText,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
                 }
             }
         }
@@ -839,48 +856,50 @@ fun ThingsBiometricLockOverlay(
             decorFitsSystemWindows = false
         )
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(colors.canvasBackground)
-                .clickable(enabled = true, onClick = {}),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.padding(32.dp)
+        ThingsTooltipHostBox(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(colors.canvasBackground)
+                    .clickable(enabled = true, onClick = {}),
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(CircleShape)
-                        .background(colors.thingsBlue.copy(alpha = 0.14f)),
-                    contentAlignment = Alignment.Center
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.padding(32.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Lock,
-                        contentDescription = promptTitle,
-                        tint = colors.thingsBlue,
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
-                Text(
-                    text = promptTitle,
-                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                    color = colors.primaryText
-                )
-                Text(
-                    text = promptSubtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.secondaryText
-                )
-                OutlinedButton(onClick = triggerUnlock) {
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(CircleShape)
+                            .background(colors.thingsBlue.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Lock,
+                            contentDescription = promptTitle,
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
                     Text(
-                        text = stringResource(R.string.app_lock_unlock_btn),
-                        color = colors.thingsBlue,
-                        fontWeight = FontWeight.SemiBold
+                        text = promptTitle,
+                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                        color = colors.primaryText
                     )
+                    Text(
+                        text = promptSubtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.secondaryText
+                    )
+                    OutlinedButton(onClick = triggerUnlock) {
+                        Text(
+                            text = stringResource(R.string.app_lock_unlock_btn),
+                            color = colors.thingsBlue,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
         }

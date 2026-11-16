@@ -209,13 +209,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
             className="icon-btn sidebar-close-mobile"
             onClick={onCloseMobile}
             aria-label={t.actionDone}
+            title={t.sidebarHide}
           >
             <X size={17} />
           </button>
         </div>
 
         <div className="sidebar-scroll">
-          {smartItems.slice(0, 5).map((item) => {
+          {smartItems.slice(0, 5).map((item, idx) => {
             const isActive = activeNav.kind === 'smart' && activeNav.view === item.view;
             const dKey = `smart-${item.view}`;
             return (
@@ -225,6 +226,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className={`nav-item ${isActive ? 'active' : ''} ${
                   dragTargetKey === dKey ? 'drag-over' : ''
                 }`}
+                title={`${item.label} (Ctrl+${idx + 1})`}
                 onClick={() => onSelectNav({ kind: 'smart', view: item.view })}
                 {...makeDropHandlers(dKey, { kind: 'smart', view: item.view })}
               >
@@ -245,6 +247,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 type="button"
                 className={`nav-item ${isActive ? 'active' : ''}`}
+                title={`${logItem.label} (Ctrl+6)`}
                 onClick={() => onSelectNav({ kind: 'smart', view: 'LOGBOOK' })}
               >
                 <span className="nav-item-icon">{logItem.icon}</span>
@@ -262,6 +265,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className={`nav-item ${isActive ? 'active' : ''} ${
                   dragTargetKey === dKey ? 'drag-over' : ''
                 }`}
+                title={`${trashItem.label} (Ctrl+7)`}
                 onClick={() => onSelectNav({ kind: 'smart', view: 'TRASH' })}
                 {...makeDropHandlers(dKey, { kind: 'smart', view: 'TRASH' })}
               >
@@ -329,6 +333,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     className={`nav-item area-row ${isAreaActive ? 'active' : ''} ${
                       dragTargetKey === areaKey ? 'drag-over' : ''
                     }`}
+                    title={`${t.entityArea}: ${area.title}`}
                     onClick={() => onSelectNav({ kind: 'area', areaId: area.id })}
                     {...makeDropHandlers(areaKey, { kind: 'area', areaId: area.id })}
                   >
@@ -359,6 +364,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       className={`nav-item indented ${isProjActive ? 'active' : ''} ${
                         dragTargetKey === projKey ? 'drag-over' : ''
                       }`}
+                      title={`${proj.title} (${prog.done}/${prog.total})`}
                       onClick={() => onSelectNav({ kind: 'project', projectId: proj.id })}
                       {...makeDropHandlers(projKey, { kind: 'project', projectId: proj.id })}
                     >
@@ -392,6 +398,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     className={`nav-item ${isProjActive ? 'active' : ''} ${
                       dragTargetKey === projKey ? 'drag-over' : ''
                     }`}
+                    title={`${proj.title} (${prog.done}/${prog.total})`}
                     onClick={() => onSelectNav({ kind: 'project', projectId: proj.id })}
                     {...makeDropHandlers(projKey, { kind: 'project', projectId: proj.id })}
                   >
@@ -434,7 +441,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <Plus size={14} />
             <span>{t.entityNewProject}</span>
           </button>
-          <button type="button" className="sidebar-footer-btn" onClick={onOpenManageAreas}>
+          <button
+            type="button"
+            className="sidebar-footer-btn"
+            title={t.areasManageTitle}
+            onClick={onOpenManageAreas}
+          >
             <Package size={13.5} />
             <span>
               {t.entityAreas} ({activeAreas.length}/{MAX_AREAS})
@@ -550,13 +562,14 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
   return (
     <>
       <div className="smart-nav-strip" role="navigation" aria-label="Smart View Strip">
-        {smartViews.map((sv) => {
+        {smartViews.map((sv, idx) => {
           const isActive = activeNav.kind === 'smart' && activeNav.view === sv.view;
           return (
             <button
               key={sv.view}
               type="button"
               className={`strip-pill ${isActive ? 'active' : ''}`}
+              title={`${sv.label} (Ctrl+${idx + 1})`}
               onClick={() => onSelectNav({ kind: 'smart', view: sv.view })}
             >
               {sv.icon}
@@ -569,11 +582,21 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
         })}
 
         <span className="strip-divider" />
-        <button type="button" className="strip-pill" onClick={onOpenWeeklyReview}>
+        <button
+          type="button"
+          className="strip-pill"
+          title={`${t.weeklyReviewTitle} (Ctrl+Shift+R)`}
+          onClick={onOpenWeeklyReview}
+        >
           <ListChecks size={13.5} style={{ color: 'var(--things-blue)' }} />
           <span>{t.weeklyReviewBtn}</span>
         </button>
-        <button type="button" className="strip-pill" onClick={onOpenTemplates}>
+        <button
+          type="button"
+          className="strip-pill"
+          title={t.templatesModalTitle}
+          onClick={onOpenTemplates}
+        >
           <ClipboardList size={13.5} style={{ color: 'var(--gemini-violet)' }} />
           <span>{t.templatesBtn}</span>
         </button>
@@ -586,6 +609,7 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
               key={area.id}
               type="button"
               className={`strip-pill ${isActive ? 'active' : ''}`}
+              title={`${t.entityArea}: ${area.title}`}
               onClick={() => onSelectNav({ kind: 'area', areaId: area.id })}
             >
               <Package size={13} style={{ color: 'var(--anytime-teal)' }} />
@@ -603,6 +627,7 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
               key={proj.id}
               type="button"
               className={`strip-pill ${isActive ? 'active' : ''}`}
+              title={`${proj.title} (${prog.done}/${prog.total})`}
               onClick={() => onSelectNav({ kind: 'project', projectId: proj.id })}
             >
               <ProjectProgressRing completed={prog.done} total={prog.total} size={14} />
@@ -615,11 +640,21 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
         })}
 
         <span className="strip-divider" />
-        <button type="button" className="strip-pill" onClick={onCreateProject}>
+        <button
+          type="button"
+          className="strip-pill"
+          title={`${t.entityNewProject} (Ctrl+Shift+N)`}
+          onClick={onCreateProject}
+        >
           <Plus size={13} />
           <span>{t.entityProject}</span>
         </button>
-        <button type="button" className="strip-pill" onClick={onOpenManageAreas}>
+        <button
+          type="button"
+          className="strip-pill"
+          title={t.areasManageTitle}
+          onClick={onOpenManageAreas}
+        >
           <Package size={13} />
           <span>
             {t.entityAreas} ({activeAreas.length}/{MAX_AREAS})

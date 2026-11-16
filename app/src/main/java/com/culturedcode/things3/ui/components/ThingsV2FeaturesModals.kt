@@ -254,6 +254,7 @@ fun ThingsWeeklyReviewModal(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+        ThingsTooltipHostBox {
         Surface(
             modifier = Modifier
                 .widthIn(max = 580.dp)
@@ -323,13 +324,15 @@ fun ThingsWeeklyReviewModal(
                         }
                     }
 
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(30.dp)) {
-                        Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = stringResource(R.string.action_cancel),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(18.dp)
-                        )
+                    ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(30.dp)) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.action_cancel),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
 
@@ -892,6 +895,7 @@ fun ThingsWeeklyReviewModal(
                 }
             }
         }
+        }
     }
 }
 
@@ -995,6 +999,7 @@ fun ThingsTemplatesAndImportModal(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+        ThingsTooltipHostBox {
         Surface(
             modifier = Modifier
                 .widthIn(max = 560.dp)
@@ -1035,13 +1040,15 @@ fun ThingsTemplatesAndImportModal(
                             color = colors.primaryText
                         )
                     }
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(30.dp)) {
-                        Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = stringResource(R.string.action_cancel),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(18.dp)
-                        )
+                    ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(30.dp)) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.action_cancel),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
 
@@ -1329,6 +1336,7 @@ private fun TemplateGalleryCard(
                 }
             }
         }
+        }
     }
 }
 
@@ -1359,6 +1367,7 @@ fun ThingsTimeblockPickerDialog(
     }
 
     Dialog(onDismissRequest = onDismiss) {
+        ThingsTooltipHostBox {
         Surface(
             shape = RoundedCornerShape(18.dp),
             color = colors.cardSurface,
@@ -1553,6 +1562,7 @@ fun ThingsTimeblockPickerDialog(
                 }
             }
         }
+        }
     }
 }
 
@@ -1573,48 +1583,52 @@ fun ThingsTodayModeSegmentedToggle(
         horizontalArrangement = Arrangement.spacedBy(2.dp)
     ) {
         val listSelected = !isTimelineMode
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(if (listSelected) colors.cardSurface else Color.Transparent)
-                .clickable {
-                    if (isTimelineMode) {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onModeChange(false)
+        ThingsHoverTooltip(text = stringResource(R.string.v2_list_view)) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (listSelected) colors.cardSurface else Color.Transparent)
+                    .clickable {
+                        if (isTimelineMode) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onModeChange(false)
+                        }
                     }
-                }
-                .padding(horizontal = 10.dp, vertical = 5.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "📋 ${stringResource(R.string.v2_list_view)}",
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = if (listSelected) FontWeight.Bold else FontWeight.Medium
-                ),
-                color = if (listSelected) colors.thingsBlue else colors.secondaryText
-            )
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "📋 ${stringResource(R.string.v2_list_view)}",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = if (listSelected) FontWeight.Bold else FontWeight.Medium
+                    ),
+                    color = if (listSelected) colors.thingsBlue else colors.secondaryText
+                )
+            }
         }
 
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(if (isTimelineMode) colors.cardSurface else Color.Transparent)
-                .clickable {
-                    if (!isTimelineMode) {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onModeChange(true)
+        ThingsHoverTooltip(text = stringResource(R.string.v2_timeline_view)) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (isTimelineMode) colors.cardSurface else Color.Transparent)
+                    .clickable {
+                        if (!isTimelineMode) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onModeChange(true)
+                        }
                     }
-                }
-                .padding(horizontal = 10.dp, vertical = 5.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "🗓️ ${stringResource(R.string.v2_timeline_view)}",
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = if (isTimelineMode) FontWeight.Bold else FontWeight.Medium
-                ),
-                color = if (isTimelineMode) colors.thingsBlue else colors.secondaryText
-            )
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "🗓️ ${stringResource(R.string.v2_timeline_view)}",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = if (isTimelineMode) FontWeight.Bold else FontWeight.Medium
+                    ),
+                    color = if (isTimelineMode) colors.thingsBlue else colors.secondaryText
+                )
+            }
         }
     }
 }
@@ -1845,22 +1859,24 @@ fun ThingsTodayTimelineSection(
                                     }
 
                                     // 1-Tap Start Focus Timer (defaults to task.durationMinutes ?: 25)
-                                    IconButton(
-                                        onClick = {
-                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            onStartFocusTimer(task)
-                                        },
-                                        modifier = Modifier
-                                            .size(30.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(colors.thingsBlueSoft)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.PlayArrow,
-                                            contentDescription = stringResource(R.string.action_focus_timer),
-                                            tint = colors.thingsBlue,
-                                            modifier = Modifier.size(16.dp)
-                                        )
+                                    ThingsHoverTooltip(text = stringResource(R.string.action_focus_timer)) {
+                                        IconButton(
+                                            onClick = {
+                                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                onStartFocusTimer(task)
+                                            },
+                                            modifier = Modifier
+                                                .size(30.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(colors.thingsBlueSoft)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.PlayArrow,
+                                                contentDescription = stringResource(R.string.action_focus_timer),
+                                                tint = colors.thingsBlue,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
                                     }
                                 }
 
@@ -1941,16 +1957,18 @@ fun ThingsTodayTimelineSection(
                                     .weight(1f)
                                     .clickable { onOpenTask(task.id) }
                             )
-                            IconButton(
-                                onClick = { onStartFocusTimer(task) },
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Timer,
-                                    contentDescription = stringResource(R.string.action_focus_timer),
-                                    tint = colors.secondaryText,
-                                    modifier = Modifier.size(16.dp)
-                                )
+                            ThingsHoverTooltip(text = stringResource(R.string.action_focus_timer)) {
+                                IconButton(
+                                    onClick = { onStartFocusTimer(task) },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Timer,
+                                        contentDescription = stringResource(R.string.action_focus_timer),
+                                        tint = colors.secondaryText,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
                         }
 

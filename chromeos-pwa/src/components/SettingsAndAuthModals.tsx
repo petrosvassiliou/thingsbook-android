@@ -136,7 +136,7 @@ const BackupCreateModal: React.FC<BackupCreateModalProps> = ({
             <ShieldCheck size={18} style={{ color: 'var(--things-blue)' }} />
             <span>{t.backupCreateBtn}</span>
           </h3>
-          <button type="button" className="icon-btn" onClick={onClose}>
+          <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
             <X size={18} />
           </button>
         </div>
@@ -336,7 +336,7 @@ const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
             <Upload size={18} style={{ color: 'var(--things-blue)' }} />
             <span>{t.backupRestoreBtn}</span>
           </h3>
-          <button type="button" className="icon-btn" onClick={onClose}>
+          <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
             <X size={18} />
           </button>
         </div>
@@ -631,7 +631,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {t.settingsSubtitle}
               </div>
             </div>
-            <button type="button" className="icon-btn" onClick={onClose}>
+            <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
               <X size={18} />
             </button>
           </div>
@@ -1734,7 +1734,7 @@ export const AuthSyncModal: React.FC<AuthSyncModalProps> = ({
             <Cloud size={18} style={{ color: 'var(--things-blue)' }} />
             <span>{t.syncTitle}</span>
           </h3>
-          <button type="button" className="icon-btn" onClick={onClose}>
+          <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
             <X size={18} />
           </button>
         </div>

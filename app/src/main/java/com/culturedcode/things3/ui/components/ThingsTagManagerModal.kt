@@ -88,6 +88,7 @@ fun ThingsTagManagerModal(
     var editingTagShortcutField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
 
     Dialog(onDismissRequest = onDismiss) {
+        ThingsTooltipHostBox {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -124,13 +125,15 @@ fun ThingsTagManagerModal(
                         )
                     }
 
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                        Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = stringResource(R.string.action_cancel),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(18.dp)
-                        )
+                    ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.action_cancel),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
 
@@ -429,19 +432,21 @@ fun ThingsTagManagerModal(
                                                 )
                                             }
 
-                                            IconButton(
-                                                onClick = {
-                                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                    onDeleteTag(tag.id)
-                                                },
-                                                modifier = Modifier.size(30.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Outlined.DeleteOutline,
-                                                    contentDescription = stringResource(R.string.action_delete),
-                                                    tint = colors.deadlineUrgentRed,
-                                                    modifier = Modifier.size(17.dp)
-                                                )
+                                            ThingsHoverTooltip(text = stringResource(R.string.action_delete)) {
+                                                IconButton(
+                                                    onClick = {
+                                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                        onDeleteTag(tag.id)
+                                                    },
+                                                    modifier = Modifier.size(30.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Outlined.DeleteOutline,
+                                                        contentDescription = stringResource(R.string.action_delete),
+                                                        tint = colors.deadlineUrgentRed,
+                                                        modifier = Modifier.size(17.dp)
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -451,6 +456,7 @@ fun ThingsTagManagerModal(
                     }
                 }
             }
+        }
         }
     }
 }
@@ -474,6 +480,7 @@ fun TaskTagPickerDialog(
     var quickNewTagField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
 
     Dialog(onDismissRequest = onDismiss) {
+        ThingsTooltipHostBox {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -508,13 +515,15 @@ fun TaskTagPickerDialog(
                             color = colors.primaryText
                         )
                     }
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                        Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = stringResource(R.string.action_cancel),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(18.dp)
-                        )
+                    ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.action_cancel),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
 
@@ -669,6 +678,7 @@ fun TaskTagPickerDialog(
                     }
                 }
             }
+        }
         }
     }
 }

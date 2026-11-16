@@ -129,7 +129,7 @@ public struct ThingsCheckboxButton: View {
                 isHovering = hovering
             }
         }
-        .help(helpText)
+        .thingsTooltip(helpText)
     }
 }
 
@@ -236,9 +236,9 @@ public struct TagPillBadge: View {
         if let onTap {
             Button(action: onTap) { content }
                 .buttonStyle(.plain)
-                .help(helpText ?? "#\(title)")
+                .thingsTooltip(helpText ?? "#\(title)")
         } else if let helpText {
-            content.help(helpText)
+            content.thingsTooltip(helpText)
         } else {
             content
         }
@@ -426,7 +426,7 @@ public struct ThingsActionChipButton: View {
                 isHovering = hovering
             }
         }
-        .help(helpText)
+        .thingsTooltip(helpText)
         .accessibilityLabel(title)
         .accessibilityHint(helpText)
     }
@@ -475,7 +475,7 @@ public struct ThingsUtilityIconButton: View {
                 isHovering = hovering
             }
         }
-        .help(helpText)
+        .thingsTooltip(helpText)
         .accessibilityLabel(helpText)
     }
 }
@@ -510,4 +510,459 @@ public extension View {
     func thingsCardSurface(cornerRadius: CGFloat = 12, isSelected: Bool = false) -> some View {
         modifier(GlassSurfaceModifier(cornerRadius: cornerRadius, isSelected: isSelected))
     }
+
+    /// Attaches an instant, zero-lag floating tooltip anchored to this specific control without
+    /// triggering AppKit's shared `NSToolTipManager` / `NSToolbarItem.toolTip` delay or stale text bug.
+    func thingsTooltip(_ text: String) -> some View {
+        modifier(ThingsMacTooltipModifier(text: text))
+    }
 }
+
+// MARK: - Instant Per-Control AppKit Floating Tooltip Engine
+
+private struct ThingsMacTooltipModifier: ViewModifier {
+    let text: String
+
+    func body(content: Content) -> some View {
+        content
+            .background(ThingsTooltipTrackingRepresentable(text: text))
+            .accessibilityHelp(text)
+    }
+}
+
+private struct ThingsTooltipTrackingRepresentable: NSViewRepresentable {
+    let text: String
+
+    func makeNSView(context: Context) -> ThingsTooltipTrackingNSView {
+        let view = ThingsTooltipTrackingNSView()
+        view.tooltipText = text
+        return view
+    }
+
+    func updateNSView(_ nsView: ThingsTooltipTrackingNSView, context: Context) {
+        if nsView.tooltipText != text {
+            nsView.tooltipText = text
+            ThingsMacTooltipController.shared.anchorUpdatedText(nsView)
+        }
+    }
+
+    static func dismantleNSView(_ nsView: ThingsTooltipTrackingNSView, coordinator: ()) {
+        ThingsMacTooltipController.shared.anchorExited(nsView)
+    }
+}
+
+@MainActor
+fileprivate final class ThingsTooltipTrackingNSView: NSView {
+    let anchorId: String = UUID().uuidString
+    var tooltipText: String = ""
+    private var trackingAreaRef: NSTrackingArea?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    override func updateTrackingAreas() {
+        if let existing = trackingAreaRef {
+            removeTrackingArea(existing)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .mouseMoved, .inVisibleRect, .activeAlways],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingAreaRef = area
+        super.updateTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        ThingsMacTooltipController.shared.anchorEntered(self)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        ThingsMacTooltipController.shared.anchorMoved(self)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        ThingsMacTooltipController.shared.anchorExited(self)
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil {
+            ThingsMacTooltipController.shared.anchorExited(self)
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    func screenRect() -> NSRect {
+        guard let window else { return .zero }
+        let rectInWindow = convert(bounds, to: nil)
+        return window.convertToScreen(rectInWindow)
+    }
+}
+
+fileprivate final class WeakTooltipAnchorEntry {
+    let id: String
+    weak var view: ThingsTooltipTrackingNSView?
+
+    init(id: String, view: ThingsTooltipTrackingNSView) {
+        self.id = id
+        self.view = view
+    }
+}
+
+fileprivate final class ThingsTooltipBubbleNSView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 6.5
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = true
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 6.5, yRadius: 6.5)
+        NSColor(srgbRed: 0.105, green: 0.122, blue: 0.168, alpha: 0.96).setFill()
+        path.fill()
+        NSColor.white.withAlphaComponent(0.16).setStroke()
+        path.lineWidth = 1.0
+        path.stroke()
+    }
+}
+
+@MainActor
+public final class ThingsMacTooltipController {
+    public static let shared = ThingsMacTooltipController()
+
+    private var timing = TooltipTimingCoordinator(initialDelayMs: 160, warmHandoffWindowMs: 450)
+    private var hoveredAnchors: [WeakTooltipAnchorEntry] = []
+    private var pendingWorkItem: DispatchWorkItem?
+    private var watchdogTimer: Timer?
+    private var localEventMonitor: Any?
+
+    private var panel: NSPanel?
+    private var bubbleView: ThingsTooltipBubbleNSView?
+    private var labelField: NSTextField?
+
+    private init() {
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.dismissImmediately(allowWarmHandoff: false)
+            }
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.dismissImmediately(allowWarmHandoff: false)
+            }
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.dismissImmediately(allowWarmHandoff: false)
+            }
+        }
+
+        localEventMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel, .keyDown]
+        ) { [weak self] event in
+            MainActor.assumeIsolated {
+                self?.dismissImmediately(allowWarmHandoff: false)
+            }
+            return event
+        }
+    }
+
+    fileprivate func anchorEntered(_ view: ThingsTooltipTrackingNSView) {
+        pruneDetachedAnchors()
+        if !hoveredAnchors.contains(where: { $0.id == view.anchorId }) {
+            hoveredAnchors.append(WeakTooltipAnchorEntry(id: view.anchorId, view: view))
+        }
+        reconcileActiveAnchor()
+    }
+
+    fileprivate func anchorMoved(_ view: ThingsTooltipTrackingNSView) {
+        if !hoveredAnchors.contains(where: { $0.id == view.anchorId }) {
+            hoveredAnchors.append(WeakTooltipAnchorEntry(id: view.anchorId, view: view))
+            reconcileActiveAnchor()
+        }
+    }
+
+    fileprivate func anchorUpdatedText(_ view: ThingsTooltipTrackingNSView) {
+        guard timing.hoveredAnchorId == view.anchorId else { return }
+        let action = timing.updateText(
+            anchorId: view.anchorId,
+            text: view.tooltipText,
+            nowMs: Self.nowMs()
+        )
+        apply(action, anchorView: view)
+    }
+
+    fileprivate func anchorExited(_ view: ThingsTooltipTrackingNSView) {
+        hoveredAnchors.removeAll { $0.id == view.anchorId || $0.view == nil }
+        reconcileActiveAnchor()
+    }
+
+    public func dismissImmediately(allowWarmHandoff: Bool = false) {
+        hoveredAnchors.removeAll()
+        let action = timing.dismissAll(nowMs: Self.nowMs(), allowWarmHandoff: allowWarmHandoff)
+        apply(action, anchorView: nil)
+    }
+
+    private func pruneDetachedAnchors() {
+        let mouseLoc = NSEvent.mouseLocation
+        hoveredAnchors.removeAll { entry in
+            guard let v = entry.view,
+                  let win = v.window,
+                  win.isVisible,
+                  !v.isHiddenOrHasHiddenAncestor,
+                  !v.tooltipText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return true
+            }
+            let rect = v.screenRect()
+            guard rect.width > 0.5, rect.height > 0.5 else { return true }
+            return !rect.insetBy(dx: -3, dy: -3).contains(mouseLoc)
+        }
+    }
+
+    private func selectBestHoveredAnchor() -> ThingsTooltipTrackingNSView? {
+        pruneDetachedAnchors()
+        guard NSApp.isActive, !hoveredAnchors.isEmpty else { return nil }
+
+        let keyWindow = NSApp.keyWindow
+        let candidates = hoveredAnchors.compactMap { $0.view }
+
+        let windowFiltered: [ThingsTooltipTrackingNSView]
+        if let keyWindow, candidates.contains(where: { $0.window === keyWindow }) {
+            windowFiltered = candidates.filter { $0.window === keyWindow }
+        } else {
+            windowFiltered = candidates
+        }
+
+        // Prefer the smallest (most specific / innermost) control when tracking rects nest
+        return windowFiltered.min { lhs, rhs in
+            let lr = lhs.screenRect()
+            let rr = rhs.screenRect()
+            return (lr.width * lr.height) < (rr.width * rr.height)
+        }
+    }
+
+    private func reconcileActiveAnchor() {
+        let now = Self.nowMs()
+        if let winner = selectBestHoveredAnchor() {
+            let action: TooltipTimingCoordinator.Action
+            if timing.hoveredAnchorId != winner.anchorId {
+                action = timing.pointerEntered(
+                    anchorId: winner.anchorId,
+                    text: winner.tooltipText,
+                    nowMs: now
+                )
+            } else {
+                action = timing.updateText(
+                    anchorId: winner.anchorId,
+                    text: winner.tooltipText,
+                    nowMs: now
+                )
+            }
+            apply(action, anchorView: winner)
+        } else if let staleId = timing.hoveredAnchorId ?? timing.visibleAnchorId {
+            let action = timing.pointerExited(anchorId: staleId, nowMs: now)
+            apply(action, anchorView: nil)
+        } else {
+            pendingWorkItem?.cancel()
+            pendingWorkItem = nil
+            panel?.orderOut(nil)
+            stopWatchdogIfIdle()
+        }
+    }
+
+    private func apply(
+        _ action: TooltipTimingCoordinator.Action,
+        anchorView: ThingsTooltipTrackingNSView?
+    ) {
+        switch action {
+        case .none:
+            break
+
+        case .hideImmediately:
+            pendingWorkItem?.cancel()
+            pendingWorkItem = nil
+            panel?.orderOut(nil)
+            stopWatchdogIfIdle()
+
+        case .scheduleShow(let anchorId, _, let delayMs):
+            pendingWorkItem?.cancel()
+            panel?.orderOut(nil)
+            let work = DispatchWorkItem { [weak self, weak anchorView] in
+                guard let self else { return }
+                guard let anchorView,
+                      anchorView.window != nil,
+                      anchorView.window?.isVisible == true,
+                      NSApp.isActive,
+                      anchorView.screenRect().insetBy(dx: -3, dy: -3).contains(NSEvent.mouseLocation) else {
+                    self.reconcileActiveAnchor()
+                    return
+                }
+                let commitAction = self.timing.commitScheduledShow(
+                    anchorId: anchorId,
+                    nowMs: Self.nowMs()
+                )
+                self.apply(commitAction, anchorView: anchorView)
+            }
+            pendingWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(Int(delayMs)), execute: work)
+            ensureWatchdogRunning()
+
+        case .showImmediately(_, let text):
+            pendingWorkItem?.cancel()
+            pendingWorkItem = nil
+            guard let anchorView,
+                  let parentWin = anchorView.window,
+                  parentWin.isVisible,
+                  NSApp.isActive else {
+                panel?.orderOut(nil)
+                stopWatchdogIfIdle()
+                return
+            }
+            presentPanel(
+                text: text,
+                anchorRect: anchorView.screenRect(),
+                parentWindow: parentWin
+            )
+            ensureWatchdogRunning()
+        }
+    }
+
+    private func ensurePanelCreated() {
+        guard panel == nil else { return }
+        let p = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 140, height: 26),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        p.isFloatingPanel = true
+        p.level = .popUpMenu
+        p.backgroundColor = .clear
+        p.isOpaque = false
+        p.hasShadow = true
+        p.ignoresMouseEvents = true
+        p.hidesOnDeactivate = true
+        p.collectionBehavior = [.transient, .ignoresCycle, .fullScreenAuxiliary]
+
+        let bubble = ThingsTooltipBubbleNSView(frame: NSRect(x: 0, y: 0, width: 140, height: 26))
+        let tf = NSTextField(wrappingLabelWithString: "")
+        tf.font = .systemFont(ofSize: 11.5, weight: .medium)
+        tf.textColor = .white
+        tf.backgroundColor = .clear
+        tf.drawsBackground = false
+        tf.isBordered = false
+        tf.isEditable = false
+        tf.isSelectable = false
+        tf.maximumNumberOfLines = 3
+        tf.lineBreakMode = .byWordWrapping
+        bubble.addSubview(tf)
+
+        p.contentView = bubble
+        panel = p
+        bubbleView = bubble
+        labelField = tf
+    }
+
+    private func presentPanel(
+        text: String,
+        anchorRect: NSRect,
+        parentWindow: NSWindow
+    ) {
+        guard anchorRect.width > 0.5, anchorRect.height > 0.5 else {
+            panel?.orderOut(nil)
+            return
+        }
+        ensurePanelCreated()
+        guard let panel, let bubbleView, let labelField else { return }
+
+        let font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+        let maxTextWidth: CGFloat = 300
+        let measured = (text as NSString).boundingRect(
+            with: NSSize(width: maxTextWidth, height: 120),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font]
+        )
+
+        let padH: CGFloat = 9.5
+        let padV: CGFloat = 5.0
+        let textW = ceil(min(maxTextWidth, max(16, measured.width + 2)))
+        let textH = ceil(max(15, measured.height + 1))
+        let bubbleW = textW + padH * 2
+        let bubbleH = textH + padV * 2
+
+        let anchorCenter = NSPoint(x: anchorRect.midX, y: anchorRect.midY)
+        let targetScreen = NSScreen.screens.first(where: { $0.frame.contains(anchorCenter) })
+            ?? parentWindow.screen
+            ?? NSScreen.main
+        let visibleFrame = targetScreen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+
+        var originY = round(anchorRect.minY - bubbleH - 6)
+        if originY < visibleFrame.minY + 8 {
+            originY = round(anchorRect.maxY + 6)
+        }
+
+        let minX = visibleFrame.minX + 8
+        let maxX = max(minX, visibleFrame.maxX - bubbleW - 8)
+        let originX = min(max(round(anchorRect.midX - bubbleW / 2.0), minX), maxX)
+
+        labelField.stringValue = text
+        labelField.frame = NSRect(x: padH, y: padV, width: textW, height: textH)
+        bubbleView.frame = NSRect(x: 0, y: 0, width: bubbleW, height: bubbleH)
+        bubbleView.needsDisplay = true
+
+        panel.setFrame(NSRect(x: originX, y: originY, width: bubbleW, height: bubbleH), display: true)
+        panel.orderFrontRegardless()
+    }
+
+    private func ensureWatchdogRunning() {
+        guard watchdogTimer == nil else { return }
+        watchdogTimer = Timer.scheduledTimer(withTimeInterval: 0.10, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.watchdogTick()
+            }
+        }
+    }
+
+    private func stopWatchdogIfIdle() {
+        if pendingWorkItem == nil && !timing.isShowing && hoveredAnchors.isEmpty {
+            watchdogTimer?.invalidate()
+            watchdogTimer = nil
+        }
+    }
+
+    private func watchdogTick() {
+        if !NSApp.isActive {
+            dismissImmediately(allowWarmHandoff: false)
+            return
+        }
+        reconcileActiveAnchor()
+    }
+
+    private static func nowMs() -> Int64 {
+        Int64(ProcessInfo.processInfo.systemUptime * 1000.0)
+    }
+}
+

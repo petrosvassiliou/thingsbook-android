@@ -65,28 +65,47 @@ object AppModule {
         }
     }
 
+    internal fun SupportSQLiteDatabase.hasColumn(tableName: String, columnName: String): Boolean {
+        query("PRAGMA table_info(`$tableName`)").use { cursor ->
+            val nameIdx = cursor.getColumnIndex("name")
+            if (nameIdx < 0) return false
+            while (cursor.moveToNext()) {
+                if (cursor.getString(nameIdx).equals(columnName, ignoreCase = true)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
     internal val MIGRATION_3_4 = object : Migration(3, 4) {
         override fun migrate(db: SupportSQLiteDatabase) {
-            db.execSQL("ALTER TABLE tasks ADD COLUMN scheduledStartMinutes INTEGER DEFAULT NULL")
-            db.execSQL("ALTER TABLE tasks ADD COLUMN durationMinutes INTEGER DEFAULT NULL")
-            db.execSQL("ALTER TABLE projects ADD COLUMN lastReviewedAt INTEGER DEFAULT NULL")
+            if (!db.hasColumn("tasks", "scheduledStartMinutes")) {
+                db.execSQL("ALTER TABLE `tasks` ADD COLUMN `scheduledStartMinutes` INTEGER")
+            }
+            if (!db.hasColumn("tasks", "durationMinutes")) {
+                db.execSQL("ALTER TABLE `tasks` ADD COLUMN `durationMinutes` INTEGER")
+            }
+            if (!db.hasColumn("projects", "lastReviewedAt")) {
+                db.execSQL("ALTER TABLE `projects` ADD COLUMN `lastReviewedAt` INTEGER")
+            }
             db.execSQL(
-                "CREATE TABLE IF NOT EXISTS project_templates (" +
-                    "id TEXT NOT NULL, " +
-                    "title TEXT NOT NULL, " +
-                    "notes TEXT NOT NULL, " +
-                    "defaultAreaId TEXT, " +
-                    "tagIdsJson TEXT NOT NULL, " +
-                    "blueprintJson TEXT NOT NULL, " +
-                    "sortOrder REAL NOT NULL, " +
-                    "createdAt INTEGER NOT NULL, " +
-                    "updatedAt INTEGER NOT NULL, " +
-                    "isDeleted INTEGER NOT NULL, " +
-                    "isDirty INTEGER NOT NULL, " +
-                    "PRIMARY KEY(id))"
+                "CREATE TABLE IF NOT EXISTS `project_templates` (" +
+                    "`id` TEXT NOT NULL, " +
+                    "`title` TEXT NOT NULL, " +
+                    "`notes` TEXT NOT NULL, " +
+                    "`defaultAreaId` TEXT, " +
+                    "`tagIdsJson` TEXT NOT NULL, " +
+                    "`blueprintJson` TEXT NOT NULL, " +
+                    "`sortOrder` REAL NOT NULL, " +
+                    "`createdAt` INTEGER NOT NULL, " +
+                    "`updatedAt` INTEGER NOT NULL, " +
+                    "`isDeleted` INTEGER NOT NULL, " +
+                    "`isDirty` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`id`))"
             )
-            db.execSQL("CREATE INDEX IF NOT EXISTS index_project_templates_updatedAt ON project_templates(updatedAt)")
-            db.execSQL("CREATE INDEX IF NOT EXISTS index_project_templates_isDirty ON project_templates(isDirty)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_project_templates_updatedAt` ON `project_templates`(`updatedAt`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_project_templates_isDirty` ON `project_templates`(`isDirty`)")
         }
     }
 

@@ -104,7 +104,7 @@ export const GeminiModal: React.FC<GeminiModalProps> = ({
             <Sparkles size={19} style={{ color: 'var(--gemini-violet)' }} />
             <span>{t.geminiHubTitle}</span>
           </h3>
-          <button type="button" className="icon-btn" onClick={onClose}>
+          <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
             <X size={18} />
           </button>
         </div>

@@ -87,6 +87,7 @@ fun ThingsAuthAndSyncModal(
     var password by remember { mutableStateOf("") }
 
     Dialog(onDismissRequest = onDismiss) {
+        ThingsTooltipHostBox {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -128,16 +129,18 @@ fun ThingsAuthAndSyncModal(
                         )
                     }
 
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.size(30.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = stringResource(R.string.action_cancel),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(18.dp)
-                        )
+                    ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.action_cancel),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
 
@@ -406,6 +409,7 @@ fun ThingsAuthAndSyncModal(
                     }
                 }
             }
+        }
         }
     }
 }

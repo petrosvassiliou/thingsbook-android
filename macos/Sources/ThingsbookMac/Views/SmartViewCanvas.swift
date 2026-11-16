@@ -76,7 +76,7 @@ public struct SmartViewCanvas: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .fixedSize()
-                .help("\(store.tr("v2_list_view")) / \(store.tr("v2_timeline_view"))")
+                .thingsTooltip("\(store.tr("v2_list_view")) / \(store.tr("v2_timeline_view"))")
 
                 if store.todayViewMode == .list {
                     let grouped = store.preferences.groupTodayByProjectOrArea
@@ -103,7 +103,7 @@ public struct SmartViewCanvas: View {
                     }
                     .buttonStyle(.plain)
                     .fixedSize(horizontal: true, vertical: false)
-                    .help(store.tr("settings_group_today_title"))
+                    .thingsTooltip(store.tr("settings_group_today_title"))
                 }
             }
 
@@ -126,7 +126,7 @@ public struct SmartViewCanvas: View {
                 }
                 .buttonStyle(.plain)
                 .fixedSize(horizontal: true, vertical: false)
-                .help(store.tr("gemini_logbook_review_action"))
+                .thingsTooltip(store.tr("gemini_logbook_review_action"))
             }
 
             if view == .trash && (!store.trashedTasks.isEmpty || !store.trashedProjects.isEmpty) {
@@ -140,7 +140,7 @@ public struct SmartViewCanvas: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .fixedSize(horizontal: true, vertical: false)
-                .help(store.tr("trash_empty_btn"))
+                .thingsTooltip(store.tr("trash_empty_btn"))
             }
         }
 
@@ -234,7 +234,7 @@ public struct SmartViewCanvas: View {
                                     .frame(width: 22, height: 22)
                             }
                             .buttonStyle(.plain)
-                            .help(store.tr("entity_new_todo"))
+                            .thingsTooltip(store.tr("entity_new_todo"))
                         }
                         .padding(.top, 14)
 
@@ -353,7 +353,7 @@ public struct SmartViewCanvas: View {
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
-                    .help(badgeLabel)
+                    .thingsTooltip(badgeLabel)
                 }
 
                 Spacer()
@@ -366,7 +366,7 @@ public struct SmartViewCanvas: View {
                             .font(.system(size: 12.5, weight: .medium))
                     }
                     .buttonStyle(.borderless)
-                    .help(store.tr("project_move_up"))
+                    .thingsTooltip(store.tr("project_move_up"))
 
                     Button {
                         store.moveProjectOrder(project, direction: 1)
@@ -375,7 +375,7 @@ public struct SmartViewCanvas: View {
                             .font(.system(size: 12.5, weight: .medium))
                     }
                     .buttonStyle(.borderless)
-                    .help(store.tr("project_move_down"))
+                    .thingsTooltip(store.tr("project_move_down"))
 
                     Button {
                         store.editingProject = project
@@ -384,7 +384,7 @@ public struct SmartViewCanvas: View {
                             .font(.system(size: 13))
                     }
                     .buttonStyle(.borderless)
-                    .help(store.tr("project_edit_title"))
+                    .thingsTooltip(store.tr("project_edit_title"))
 
                     Button {
                         let next: ProjectStatus = project.status == .completed ? .active : .completed
@@ -395,7 +395,7 @@ public struct SmartViewCanvas: View {
                             .foregroundStyle(ThingsMacPalette.logbookGreen)
                     }
                     .buttonStyle(.borderless)
-                    .help(store.tr("macos_complete_project"))
+                    .thingsTooltip(store.tr("macos_complete_project"))
 
                     Button(role: .destructive) {
                         store.deleteProjectWithUndo(project)
@@ -405,7 +405,7 @@ public struct SmartViewCanvas: View {
                             .foregroundStyle(ThingsMacPalette.deadlineCrimson)
                     }
                     .buttonStyle(.borderless)
-                    .help(store.tr("macos_delete_project"))
+                    .thingsTooltip(store.tr("macos_delete_project"))
 
                     Menu {
                         Button(store.tr("project_edit_title")) {
@@ -437,7 +437,7 @@ public struct SmartViewCanvas: View {
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
-                    .help(store.tr("macos_tooltip_project_options"))
+                    .thingsTooltip(store.tr("macos_tooltip_project_options"))
                 }
             }
 
@@ -480,7 +480,7 @@ public struct SmartViewCanvas: View {
                     }
                     .buttonStyle(.plain)
                     .fixedSize(horizontal: true, vertical: false)
-                    .help(store.tr("project_set_target_date"))
+                    .thingsTooltip(store.tr("project_set_target_date"))
                 }
 
                 if let aid = project.areaId, let area = store.area(byId: aid) {
@@ -505,7 +505,7 @@ public struct SmartViewCanvas: View {
                     }
                     .buttonStyle(.plain)
                     .fixedSize(horizontal: true, vertical: false)
-                    .help("\(store.tr("entity_area")): \(area.title)")
+                    .thingsTooltip("\(store.tr("entity_area")): \(area.title)")
                 }
 
                 ThingsActionChipButton(
@@ -667,7 +667,7 @@ public struct SmartViewCanvas: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help(store.tr("heading_add_task"))
+                .thingsTooltip(store.tr("heading_add_task"))
 
                 Button {
                     renameHeadingText = heading.title
@@ -678,7 +678,7 @@ public struct SmartViewCanvas: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help(store.tr("macos_rename_heading"))
+                .thingsTooltip(store.tr("macos_rename_heading"))
 
                 Button {
                     try? store.database.deleteHeading(heading.id)
@@ -688,7 +688,7 @@ public struct SmartViewCanvas: View {
                         .foregroundStyle(ThingsMacPalette.deadlineCrimson.opacity(0.85))
                 }
                 .buttonStyle(.plain)
-                .help(store.tr("action_delete"))
+                .thingsTooltip(store.tr("action_delete"))
 
                 Button {
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
@@ -704,7 +704,7 @@ public struct SmartViewCanvas: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help(store.tr("action_collapse_heading"))
+                .thingsTooltip(store.tr("action_collapse_heading"))
             }
             .padding(.top, 14)
 
@@ -759,7 +759,7 @@ public struct SmartViewCanvas: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .help(store.tr("areas_rename_label"))
+                .thingsTooltip(store.tr("areas_rename_label"))
 
                 Button {
                     store.newProjectDefaultAreaId = area.id
@@ -772,7 +772,7 @@ public struct SmartViewCanvas: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .fixedSize(horizontal: true, vertical: false)
-                .help(store.trf("sidebar_new_project_in_area", area.title))
+                .thingsTooltip(store.trf("sidebar_new_project_in_area", area.title))
             }
 
             let areaProjects = store.projectsForArea(area.id)
@@ -917,7 +917,7 @@ public struct SmartViewCanvas: View {
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
                                 .fixedSize(horizontal: true, vertical: false)
-                                .help(store.tr("trash_restore_btn"))
+                                .thingsTooltip(store.tr("trash_restore_btn"))
 
                                 Button(role: .destructive) {
                                     store.permanentlyDeleteProject(proj)
@@ -928,7 +928,7 @@ public struct SmartViewCanvas: View {
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
                                 .fixedSize(horizontal: true, vertical: false)
-                                .help(store.tr("trash_delete_forever_btn"))
+                                .thingsTooltip(store.tr("trash_delete_forever_btn"))
                             }
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
@@ -967,7 +967,7 @@ public struct SmartViewCanvas: View {
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
                                 .fixedSize(horizontal: true, vertical: false)
-                                .help(store.tr("trash_restore_btn"))
+                                .thingsTooltip(store.tr("trash_restore_btn"))
 
                                 Button(role: .destructive) {
                                     store.permanentlyDeleteTask(task.id)
@@ -978,7 +978,7 @@ public struct SmartViewCanvas: View {
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
                                 .fixedSize(horizontal: true, vertical: false)
-                                .help(store.tr("trash_delete_forever_btn"))
+                                .thingsTooltip(store.tr("trash_delete_forever_btn"))
                             }
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
@@ -1167,7 +1167,7 @@ public struct SmartViewCanvas: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .help(store.tr("setup_banner_hide_tooltip"))
+            .thingsTooltip(store.tr("setup_banner_hide_tooltip"))
         }
         .padding(14)
         .thingsCardSurface(cornerRadius: 12)
@@ -1621,7 +1621,7 @@ private struct TodayDailyTimelineView: View {
                 .controlSize(.small)
                 .buttonStyle(.bordered)
                 .fixedSize(horizontal: true, vertical: false)
-                .help(store.tr("macos_tooltip_shift_15m"))
+                .thingsTooltip(store.tr("macos_tooltip_shift_15m"))
 
                 Button {
                     store.startFocusTimer(for: task)
@@ -1637,7 +1637,7 @@ private struct TodayDailyTimelineView: View {
                 .controlSize(.small)
                 .buttonStyle(.borderedProminent)
                 .fixedSize(horizontal: true, vertical: false)
-                .help(store.tr("action_focus_timer"))
+                .thingsTooltip(store.tr("action_focus_timer"))
 
                 Button {
                     store.setTaskTimeblock(task.id, startMinutes: nil, durationMinutes: nil)
@@ -1647,7 +1647,7 @@ private struct TodayDailyTimelineView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help(store.tr("v2_timeblock_clear"))
+                .thingsTooltip(store.tr("v2_timeblock_clear"))
             }
         }
         .padding(.horizontal, 14)
@@ -1693,7 +1693,7 @@ private struct TodayDailyTimelineView: View {
                 .controlSize(.small)
                 .buttonStyle(.bordered)
                 .fixedSize(horizontal: true, vertical: false)
-                .help("\(store.tr("macos_tooltip_timeblock")) — \(slotLabel)")
+                .thingsTooltip("\(store.tr("macos_tooltip_timeblock")) — \(slotLabel)")
             }
 
             ThingsActionChipButton(

@@ -62,7 +62,7 @@ public struct QuickFindOverlay: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .help(store.tr("quick_find_clear"))
+                    .thingsTooltip(store.tr("quick_find_clear"))
                 }
 
                 Button("ESC") {
@@ -72,7 +72,7 @@ public struct QuickFindOverlay: View {
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
                 .fixedSize(horizontal: true, vertical: false)
-                .help("\(store.tr("action_done")) (Esc)")
+                .thingsTooltip("\(store.tr("action_done")) (Esc)")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 13)
@@ -113,7 +113,7 @@ public struct QuickFindOverlay: View {
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
-                    .help("\(store.tr("action_when")): \(store.tr(filter.dateFilter.titleKey))")
+                    .thingsTooltip("\(store.tr("action_when")): \(store.tr(filter.dateFilter.titleKey))")
 
                     filterTogglePill(
                         icon: "flag",
@@ -167,7 +167,7 @@ public struct QuickFindOverlay: View {
                         }
                         .menuStyle(.borderlessButton)
                         .fixedSize()
-                        .help("\(store.tr("action_tags")): \(selectedTagTitle)")
+                        .thingsTooltip("\(store.tr("action_tags")): \(selectedTagTitle)")
                     }
 
                     Menu {
@@ -192,7 +192,7 @@ public struct QuickFindOverlay: View {
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
-                    .help(store.tr(filter.scope.titleKey))
+                    .thingsTooltip(store.tr(filter.scope.titleKey))
 
                     if filter.hasActiveFilters {
                         Button {
@@ -216,7 +216,7 @@ public struct QuickFindOverlay: View {
                         }
                         .buttonStyle(.plain)
                         .fixedSize(horizontal: true, vertical: false)
-                        .help(store.tr("search_filter_reset"))
+                        .thingsTooltip(store.tr("search_filter_reset"))
                     }
                 }
                 .padding(.horizontal, 14)
@@ -423,7 +423,7 @@ public struct QuickFindOverlay: View {
         }
         .buttonStyle(.plain)
         .fixedSize(horizontal: true, vertical: false)
-        .help(helpText)
+        .thingsTooltip(helpText)
     }
 
     private func filterMenuLabel(icon: String, title: String, isActive: Bool) -> some View {

@@ -1,0 +1,495 @@
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  DEFAULT_TOUCH_LONG_PRESS_MS,
+  DEFAULT_TOUCH_MAX_VISIBLE_MS,
+  DEFAULT_TOUCH_RELEASE_HIDE_MS,
+  DEFAULT_TOUCH_SLOP_PX,
+  TooltipTimingMachine,
+  computeTooltipPosition,
+  type AnchorRectLike
+} from '../domain/tooltipTiming';
+
+interface VisibleTooltipState {
+  anchorId: string;
+  text: string;
+  anchorRect: AnchorRectLike;
+}
+
+let nextAnchorSeq = 1;
+const anchorIdsByElement = new WeakMap<HTMLElement, string>();
+
+function getOrAssignAnchorId(el: HTMLElement): string {
+  let id = anchorIdsByElement.get(el);
+  if (!id) {
+    id = `tb-tip-${nextAnchorSeq++}`;
+    anchorIdsByElement.set(el, id);
+  }
+  return id;
+}
+
+function isTooltipEligibleElement(el: Element): el is HTMLElement {
+  return el instanceof HTMLElement && el.tagName !== 'IFRAME';
+}
+
+function isDisabledControl(el: HTMLElement): boolean {
+  if ((el as HTMLButtonElement).disabled === true) {
+    return true;
+  }
+  return el.getAttribute('aria-disabled') === 'true';
+}
+
+function syncElementTooltipAttribute(el: HTMLElement): string {
+  if (el.hasAttribute('title')) {
+    const rawTitle = el.getAttribute('title') ?? '';
+    el.removeAttribute('title');
+    const trimmedTitle = rawTitle.trim();
+    if (trimmedTitle) {
+      el.setAttribute('data-tooltip', trimmedTitle);
+      const hasExplicitAria =
+        (el.hasAttribute('aria-label') && !el.hasAttribute('data-tooltip-auto-aria')) ||
+        el.hasAttribute('aria-labelledby');
+      const hasVisibleText = (el.textContent ?? '').trim().length > 0;
+      if (!hasExplicitAria && !hasVisibleText) {
+        el.setAttribute('aria-label', trimmedTitle);
+        el.setAttribute('data-tooltip-auto-aria', '1');
+      }
+    } else {
+      el.removeAttribute('data-tooltip');
+      if (el.hasAttribute('data-tooltip-auto-aria')) {
+        el.removeAttribute('aria-label');
+        el.removeAttribute('data-tooltip-auto-aria');
+      }
+    }
+  }
+  return (el.getAttribute('data-tooltip') ?? '').trim();
+}
+
+function upgradeNativeTitlesInLineage(target: EventTarget | null): void {
+  let cur: Element | null = target instanceof Element ? target : null;
+  while (cur) {
+    if (isTooltipEligibleElement(cur) && cur.hasAttribute('title')) {
+      syncElementTooltipAttribute(cur);
+    }
+    cur = cur.parentElement;
+  }
+}
+
+function resolveTooltipAnchor(
+  target: EventTarget | null
+): { element: HTMLElement; text: string; rect: AnchorRectLike } | null {
+  upgradeNativeTitlesInLineage(target);
+  let cur: Element | null = target instanceof Element ? target : null;
+  while (cur) {
+    if (isTooltipEligibleElement(cur) && cur.isConnected && !isDisabledControl(cur)) {
+      const text = syncElementTooltipAttribute(cur);
+      if (text) {
+        const domRect = cur.getBoundingClientRect();
+        if (domRect.width > 0 && domRect.height > 0) {
+          return {
+            element: cur,
+            text,
+            rect: {
+              left: domRect.left,
+              top: domRect.top,
+              width: domRect.width,
+              height: domRect.height
+            }
+          };
+        }
+      }
+    }
+    cur = cur.parentElement;
+  }
+  return null;
+}
+
+export const ThingsTooltipHost: React.FC = () => {
+  const [visibleTooltip, setVisibleTooltip] = useState<VisibleTooltipState | null>(null);
+  const [coords, setCoords] = useState<{ left: number; top: number } | null>(null);
+
+  const tooltipRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (typeof document === 'undefined' || typeof window === 'undefined') {
+      return;
+    }
+
+    const machine = new TooltipTimingMachine();
+    let pendingTimerId: number | null = null;
+    let touchPressTimerId: number | null = null;
+    let touchAutoHideTimerId: number | null = null;
+    let activeElement: HTMLElement | null = null;
+    let activeAnchorId: string | null = null;
+    let activeTouchPointerId: number | null = null;
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let mutationObserver: MutationObserver | null = null;
+
+    const clearPendingHoverTimer = () => {
+      if (pendingTimerId !== null) {
+        window.clearTimeout(pendingTimerId);
+        pendingTimerId = null;
+      }
+    };
+
+    const clearTouchTimers = () => {
+      if (touchPressTimerId !== null) {
+        window.clearTimeout(touchPressTimerId);
+        touchPressTimerId = null;
+      }
+      if (touchAutoHideTimerId !== null) {
+        window.clearTimeout(touchAutoHideTimerId);
+        touchAutoHideTimerId = null;
+      }
+    };
+
+    const disconnectObserver = () => {
+      if (mutationObserver) {
+        mutationObserver.disconnect();
+        mutationObserver = null;
+      }
+    };
+
+    const dismissImmediately = (preserveWarmWindow = false) => {
+      clearPendingHoverTimer();
+      clearTouchTimers();
+      disconnectObserver();
+      activeTouchPointerId = null;
+      activeElement = null;
+      activeAnchorId = null;
+      machine.dismissAll(performance.now(), preserveWarmWindow);
+      setVisibleTooltip(null);
+      setCoords(null);
+    };
+
+    const observeActiveElement = (el: HTMLElement, anchorId: string) => {
+      disconnectObserver();
+      mutationObserver = new MutationObserver(() => {
+        if (!el.isConnected || isDisabledControl(el)) {
+          if (activeAnchorId === anchorId) {
+            dismissImmediately(true);
+          }
+          return;
+        }
+        const nextText = syncElementTooltipAttribute(el);
+        const res = machine.updateActiveText(anchorId, nextText, performance.now());
+        if (!res.activeText) {
+          if (activeAnchorId === anchorId) {
+            clearPendingHoverTimer();
+            disconnectObserver();
+            activeElement = null;
+            activeAnchorId = null;
+            setVisibleTooltip(null);
+            setCoords(null);
+          }
+          return;
+        }
+        if (res.isVisible) {
+          const domRect = el.getBoundingClientRect();
+          if (domRect.width > 0 && domRect.height > 0) {
+            setVisibleTooltip({
+              anchorId,
+              text: res.activeText,
+              anchorRect: {
+                left: domRect.left,
+                top: domRect.top,
+                width: domRect.width,
+                height: domRect.height
+              }
+            });
+          } else {
+            dismissImmediately(true);
+          }
+        }
+      });
+      mutationObserver.observe(el, {
+        attributes: true,
+        attributeFilter: ['title', 'data-tooltip', 'disabled', 'aria-disabled']
+      });
+    };
+
+    const activateHoverTarget = (target: EventTarget | null) => {
+      const resolved = resolveTooltipAnchor(target);
+      const now = performance.now();
+
+      if (!resolved) {
+        if (activeAnchorId !== null) {
+          clearPendingHoverTimer();
+          disconnectObserver();
+          machine.pointerLeave(activeAnchorId, now);
+          activeElement = null;
+          activeAnchorId = null;
+          setVisibleTooltip(null);
+          setCoords(null);
+        }
+        return;
+      }
+
+      const nextId = getOrAssignAnchorId(resolved.element);
+      if (activeAnchorId === nextId && activeElement === resolved.element) {
+        // Still on the same element; check if text mutated without attribute event
+        const synced = machine.updateActiveText(nextId, resolved.text, now);
+        if (synced.changed && synced.isVisible) {
+          setVisibleTooltip({
+            anchorId: nextId,
+            text: synced.activeText,
+            anchorRect: resolved.rect
+          });
+        }
+        return;
+      }
+
+      clearPendingHoverTimer();
+      activeElement = resolved.element;
+      activeAnchorId = nextId;
+      observeActiveElement(resolved.element, nextId);
+
+      const transition = machine.pointerEnter(nextId, resolved.text, now);
+      if (transition.shouldShowImmediately) {
+        setVisibleTooltip({
+          anchorId: nextId,
+          text: transition.activeText,
+          anchorRect: resolved.rect
+        });
+      } else if (transition.delayMs > 0) {
+        setVisibleTooltip(null);
+        setCoords(null);
+        const scheduledEl = resolved.element;
+        pendingTimerId = window.setTimeout(() => {
+          pendingTimerId = null;
+          if (!scheduledEl.isConnected || isDisabledControl(scheduledEl)) {
+            machine.pointerLeave(nextId, performance.now());
+            return;
+          }
+          const latestText = syncElementTooltipAttribute(scheduledEl);
+          machine.updateActiveText(nextId, latestText, performance.now());
+          if (!machine.commitPendingShow(nextId)) {
+            return;
+          }
+          const liveRect = scheduledEl.getBoundingClientRect();
+          if (liveRect.width <= 0 || liveRect.height <= 0) {
+            machine.pointerLeave(nextId, performance.now());
+            return;
+          }
+          setVisibleTooltip({
+            anchorId: nextId,
+            text: machine.activeText,
+            anchorRect: {
+              left: liveRect.left,
+              top: liveRect.top,
+              width: liveRect.width,
+              height: liveRect.height
+            }
+          });
+        }, transition.delayMs);
+      }
+    };
+
+    const handlePointerOver = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') {
+        upgradeNativeTitlesInLineage(e.target);
+        return;
+      }
+      activateHoverTarget(e.target);
+    };
+
+    const handlePointerMove = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') {
+        if (activeTouchPointerId === e.pointerId && touchPressTimerId !== null) {
+          const dx = e.clientX - touchStartX;
+          const dy = e.clientY - touchStartY;
+          if (Math.hypot(dx, dy) > DEFAULT_TOUCH_SLOP_PX) {
+            clearTouchTimers();
+            activeTouchPointerId = null;
+          }
+        }
+        return;
+      }
+
+      if (activeElement && !activeElement.isConnected) {
+        const hit = document.elementFromPoint(e.clientX, e.clientY);
+        activateHoverTarget(hit);
+        return;
+      }
+      activateHoverTarget(e.target);
+    };
+
+    const handlePointerOut = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') return;
+      if (!activeElement || !activeAnchorId) return;
+
+      const related = e.relatedTarget;
+      if (related instanceof Node && activeElement.contains(related)) {
+        // Moved into a child inside activeElement; check if child has its own inner tooltip
+        const inner = resolveTooltipAnchor(related);
+        if (inner && inner.element !== activeElement) {
+          activateHoverTarget(inner.element);
+        }
+        return;
+      }
+
+      // Leaving activeElement — check if relatedTarget is an outer tooltipped ancestor or neighbor
+      activateHoverTarget(related);
+    };
+
+    const handlePointerDown = (e: PointerEvent) => {
+      upgradeNativeTitlesInLineage(e.target);
+
+      if (e.pointerType === 'touch') {
+        dismissImmediately(false);
+        const resolved = resolveTooltipAnchor(e.target);
+        if (!resolved) return;
+        // Skip checkboxes that handle long-press / context status menu directly
+        if (resolved.element.classList.contains('things-checkbox')) {
+          return;
+        }
+        activeTouchPointerId = e.pointerId;
+        touchStartX = e.clientX;
+        touchStartY = e.clientY;
+        const pressedEl = resolved.element;
+        const pressedId = getOrAssignAnchorId(pressedEl);
+
+        touchPressTimerId = window.setTimeout(() => {
+          touchPressTimerId = null;
+          if (!pressedEl.isConnected || isDisabledControl(pressedEl)) return;
+          const text = syncElementTooltipAttribute(pressedEl);
+          if (!text) return;
+          const liveRect = pressedEl.getBoundingClientRect();
+          if (liveRect.width <= 0 || liveRect.height <= 0) return;
+
+          activeElement = pressedEl;
+          activeAnchorId = pressedId;
+          observeActiveElement(pressedEl, pressedId);
+          setVisibleTooltip({
+            anchorId: pressedId,
+            text,
+            anchorRect: {
+              left: liveRect.left,
+              top: liveRect.top,
+              width: liveRect.width,
+              height: liveRect.height
+            }
+          });
+
+          touchAutoHideTimerId = window.setTimeout(() => {
+            dismissImmediately(false);
+          }, DEFAULT_TOUCH_MAX_VISIBLE_MS);
+        }, DEFAULT_TOUCH_LONG_PRESS_MS);
+        return;
+      }
+
+      dismissImmediately(false);
+    };
+
+    const handlePointerUpOrCancel = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      if (activeTouchPointerId !== e.pointerId) return;
+      activeTouchPointerId = null;
+
+      if (touchPressTimerId !== null) {
+        window.clearTimeout(touchPressTimerId);
+        touchPressTimerId = null;
+        return;
+      }
+
+      // Tooltip was already shown via stationary long-press; fade away shortly after release
+      if (touchAutoHideTimerId !== null) {
+        window.clearTimeout(touchAutoHideTimerId);
+      }
+      touchAutoHideTimerId = window.setTimeout(() => {
+        dismissImmediately(false);
+      }, DEFAULT_TOUCH_RELEASE_HIDE_MS);
+    };
+
+    const handleDismissInteraction = () => {
+      dismissImmediately(false);
+    };
+
+    document.addEventListener('pointerover', handlePointerOver, true);
+    document.addEventListener('pointermove', handlePointerMove, {
+      capture: true,
+      passive: true
+    });
+    document.addEventListener('pointerout', handlePointerOut, true);
+    document.addEventListener('pointerdown', handlePointerDown, {
+      capture: true,
+      passive: true
+    });
+    document.addEventListener('pointerup', handlePointerUpOrCancel, {
+      capture: true,
+      passive: true
+    });
+    document.addEventListener('pointercancel', handlePointerUpOrCancel, {
+      capture: true,
+      passive: true
+    });
+    document.addEventListener('wheel', handleDismissInteraction, {
+      capture: true,
+      passive: true
+    });
+    document.addEventListener('scroll', handleDismissInteraction, {
+      capture: true,
+      passive: true
+    });
+    document.addEventListener('keydown', handleDismissInteraction, true);
+    window.addEventListener('blur', handleDismissInteraction);
+    window.addEventListener('resize', handleDismissInteraction);
+
+    return () => {
+      clearPendingHoverTimer();
+      clearTouchTimers();
+      disconnectObserver();
+      document.removeEventListener('pointerover', handlePointerOver, true);
+      document.removeEventListener('pointermove', handlePointerMove, true);
+      document.removeEventListener('pointerout', handlePointerOut, true);
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      document.removeEventListener('pointerup', handlePointerUpOrCancel, true);
+      document.removeEventListener('pointercancel', handlePointerUpOrCancel, true);
+      document.removeEventListener('wheel', handleDismissInteraction, true);
+      document.removeEventListener('scroll', handleDismissInteraction, true);
+      document.removeEventListener('keydown', handleDismissInteraction, true);
+      window.removeEventListener('blur', handleDismissInteraction);
+      window.removeEventListener('resize', handleDismissInteraction);
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!visibleTooltip || !tooltipRef.current || typeof window === 'undefined') {
+      setCoords(null);
+      return;
+    }
+    const bubbleRect = tooltipRef.current.getBoundingClientRect();
+    const pos = computeTooltipPosition(
+      visibleTooltip.anchorRect,
+      bubbleRect.width,
+      bubbleRect.height,
+      window.innerWidth,
+      window.innerHeight,
+      8,
+      8
+    );
+    setCoords({ left: pos.left, top: pos.top });
+  }, [visibleTooltip]);
+
+  if (!visibleTooltip || typeof document === 'undefined') {
+    return null;
+  }
+
+  return createPortal(
+    <div
+      ref={tooltipRef}
+      role="tooltip"
+      data-testid="things-floating-tooltip"
+      className="tb-floating-tooltip"
+      style={{
+        left: coords ? `${coords.left}px` : '-9999px',
+        top: coords ? `${coords.top}px` : '-9999px',
+        opacity: coords ? 1 : 0
+      }}
+    >
+      {visibleTooltip.text}
+    </div>,
+    document.body
+  );
+};

@@ -628,7 +628,7 @@ public struct TagPickerPopoverView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help(store.tr("tags_manage_title"))
+                .thingsTooltip(store.tr("tags_manage_title"))
             }
 
             HStack(spacing: 6) {
@@ -641,7 +641,7 @@ public struct TagPickerPopoverView: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 38)
                     .font(.system(size: 12))
-                    .help(store.tr("tags_shortcut_placeholder"))
+                    .thingsTooltip(store.tr("tags_shortcut_placeholder"))
 
                 Button {
                     createNewTag()
@@ -694,7 +694,7 @@ public struct TagPickerPopoverView: View {
                                         .foregroundStyle(.tertiary)
                                 }
                                 .buttonStyle(.plain)
-                                .help(store.tr("action_delete"))
+                                .thingsTooltip(store.tr("action_delete"))
                             }
                             .padding(.vertical, 3)
                         }
@@ -975,7 +975,7 @@ public struct ManageAreasSheetView: View {
                                 }
                                 .buttonStyle(.borderless)
                                 .disabled(index == 0)
-                                .help(store.tr("area_move_up"))
+                                .thingsTooltip(store.tr("area_move_up"))
 
                                 Button {
                                     store.moveAreaOrder(area, direction: 1)
@@ -985,7 +985,7 @@ public struct ManageAreasSheetView: View {
                                 }
                                 .buttonStyle(.borderless)
                                 .disabled(index == store.areas.count - 1)
-                                .help(store.tr("area_move_down"))
+                                .thingsTooltip(store.tr("area_move_down"))
 
                                 Button {
                                     renamingAreaId = area.id
@@ -995,7 +995,7 @@ public struct ManageAreasSheetView: View {
                                         .font(.system(size: 12))
                                 }
                                 .buttonStyle(.borderless)
-                                .help(store.tr("areas_rename_label"))
+                                .thingsTooltip(store.tr("areas_rename_label"))
 
                                 Button(role: .destructive) {
                                     if store.selectedDestination == .area(area.id) {
@@ -1008,7 +1008,7 @@ public struct ManageAreasSheetView: View {
                                         .foregroundStyle(ThingsMacPalette.upcomingRed)
                                 }
                                 .buttonStyle(.borderless)
-                                .help(store.tr("action_delete"))
+                                .thingsTooltip(store.tr("action_delete"))
                             }
                         }
                         .padding(.horizontal, 12)
@@ -1187,7 +1187,7 @@ public struct ManageTagsSheetView: View {
                                             .font(.system(size: 12))
                                     }
                                     .buttonStyle(.borderless)
-                                    .help(store.tr("tags_edit_title"))
+                                    .thingsTooltip(store.tr("tags_edit_title"))
 
                                     Button(role: .destructive) {
                                         if store.selectedFilterTagId == tag.id {
@@ -1200,7 +1200,7 @@ public struct ManageTagsSheetView: View {
                                             .foregroundStyle(ThingsMacPalette.upcomingRed)
                                     }
                                     .buttonStyle(.borderless)
-                                    .help(store.tr("action_delete"))
+                                    .thingsTooltip(store.tr("action_delete"))
                                 }
                             }
                             .padding(.horizontal, 12)

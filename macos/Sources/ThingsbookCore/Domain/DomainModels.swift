@@ -1977,4 +1977,168 @@ public struct QuickFindFilter: Equatable, Hashable, Sendable {
     }
 }
 
+// MARK: - Instant Cross-Control Tooltip Timing Coordinator
+
+/// Pure state machine governing responsive hover tooltip timing:
+/// - Cold hover waits `initialDelayMs` (160ms) so casual pointer sweeps do not flicker.
+/// - Moving between controls while a tooltip is visible or within `warmHandoffWindowMs` (450ms)
+///   transitions in `0ms` so tooltips never lag behind the cursor or display stale text.
+/// - Dynamic text changes on the currently hovered control update in `0ms`.
+/// - Pointer exit from an older control never clobbers a newer control that already took ownership.
+public struct TooltipTimingCoordinator: Sendable, Equatable {
+    public enum Action: Sendable, Equatable {
+        case none
+        case scheduleShow(anchorId: String, text: String, delayMs: Int64)
+        case showImmediately(anchorId: String, text: String)
+        case hideImmediately
+    }
+
+    public let initialDelayMs: Int64
+    public let warmHandoffWindowMs: Int64
+
+    public private(set) var hoveredAnchorId: String?
+    public private(set) var visibleAnchorId: String?
+    public private(set) var visibleText: String
+    public private(set) var pendingText: String
+    public private(set) var lastHiddenAtMs: Int64?
+
+    public init(
+        initialDelayMs: Int64 = 160,
+        warmHandoffWindowMs: Int64 = 450
+    ) {
+        self.initialDelayMs = max(0, initialDelayMs)
+        self.warmHandoffWindowMs = max(0, warmHandoffWindowMs)
+        self.hoveredAnchorId = nil
+        self.visibleAnchorId = nil
+        self.visibleText = ""
+        self.pendingText = ""
+        self.lastHiddenAtMs = nil
+    }
+
+    public var isShowing: Bool {
+        visibleAnchorId != nil && !visibleText.isEmpty
+    }
+
+    public mutating func pointerEntered(
+        anchorId: String,
+        text: String,
+        nowMs: Int64
+    ) -> Action {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !anchorId.isEmpty else {
+            let wasActive = hoveredAnchorId != nil || visibleAnchorId != nil
+            if visibleAnchorId != nil {
+                lastHiddenAtMs = nowMs
+            }
+            hoveredAnchorId = nil
+            visibleAnchorId = nil
+            visibleText = ""
+            pendingText = ""
+            return wasActive ? .hideImmediately : .none
+        }
+
+        let isWarm = isWarmAt(nowMs: nowMs)
+        hoveredAnchorId = anchorId
+        pendingText = trimmed
+
+        if isWarm {
+            visibleAnchorId = anchorId
+            visibleText = trimmed
+            lastHiddenAtMs = nil
+            return .showImmediately(anchorId: anchorId, text: trimmed)
+        } else {
+            return .scheduleShow(anchorId: anchorId, text: trimmed, delayMs: initialDelayMs)
+        }
+    }
+
+    public mutating func commitScheduledShow(
+        anchorId: String,
+        nowMs: Int64
+    ) -> Action {
+        guard hoveredAnchorId == anchorId, !pendingText.isEmpty else {
+            return .none
+        }
+        visibleAnchorId = anchorId
+        visibleText = pendingText
+        lastHiddenAtMs = nil
+        return .showImmediately(anchorId: anchorId, text: pendingText)
+    }
+
+    public mutating func updateText(
+        anchorId: String,
+        text: String,
+        nowMs: Int64
+    ) -> Action {
+        guard hoveredAnchorId == anchorId else {
+            return .none
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            if visibleAnchorId != nil {
+                lastHiddenAtMs = nowMs
+            }
+            hoveredAnchorId = nil
+            visibleAnchorId = nil
+            visibleText = ""
+            pendingText = ""
+            return .hideImmediately
+        }
+
+        pendingText = trimmed
+        if visibleAnchorId == anchorId {
+            if visibleText == trimmed {
+                return .none
+            }
+            visibleText = trimmed
+            return .showImmediately(anchorId: anchorId, text: trimmed)
+        }
+        return .none
+    }
+
+    public mutating func pointerExited(
+        anchorId: String,
+        nowMs: Int64
+    ) -> Action {
+        guard hoveredAnchorId == anchorId || visibleAnchorId == anchorId else {
+            return .none
+        }
+        if visibleAnchorId != nil {
+            lastHiddenAtMs = nowMs
+        }
+        hoveredAnchorId = nil
+        visibleAnchorId = nil
+        visibleText = ""
+        pendingText = ""
+        return .hideImmediately
+    }
+
+    public mutating func dismissAll(
+        nowMs: Int64,
+        allowWarmHandoff: Bool = false
+    ) -> Action {
+        let hadState = hoveredAnchorId != nil || visibleAnchorId != nil
+        if allowWarmHandoff && visibleAnchorId != nil {
+            lastHiddenAtMs = nowMs
+        } else if !allowWarmHandoff {
+            lastHiddenAtMs = nil
+        }
+        hoveredAnchorId = nil
+        visibleAnchorId = nil
+        visibleText = ""
+        pendingText = ""
+        return hadState ? .hideImmediately : .none
+    }
+
+    private func isWarmAt(nowMs: Int64) -> Bool {
+        if visibleAnchorId != nil {
+            return true
+        }
+        if let lastHidden = lastHiddenAtMs, nowMs >= lastHidden {
+            return (nowMs - lastHidden) <= warmHandoffWindowMs
+        }
+        return false
+    }
+}
+
+
 

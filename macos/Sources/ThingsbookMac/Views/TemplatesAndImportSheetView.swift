@@ -119,7 +119,7 @@ public struct TemplatesAndImportSheetView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .help(store.tr("action_cancel"))
+            .thingsTooltip(store.tr("action_cancel"))
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 13)
@@ -195,7 +195,7 @@ public struct TemplatesAndImportSheetView: View {
                             .foregroundStyle(ThingsMacPalette.upcomingRed)
                     }
                     .buttonStyle(.borderless)
-                    .help(store.tr("action_delete"))
+                    .thingsTooltip(store.tr("action_delete"))
                 }
             }
 

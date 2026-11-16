@@ -1,15 +1,12 @@
 package com.culturedcode.things3.ui.components
 
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,8 +18,10 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -38,7 +37,6 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerType
@@ -59,6 +57,35 @@ import com.culturedcode.things3.ui.theme.ThingsTheme
 import kotlinx.coroutines.delay
 
 /**
+ * Pure deterministic timing policy shared across Android hover & touch-preview tooltips:
+ * - Cold pointer entry waits [DEFAULT_INITIAL_DELAY_MS] (160ms) so casual cursor sweeps never flicker.
+ * - Moving between adjacent controls while a tooltip is visible or within [DEFAULT_WARM_HANDOFF_WINDOW_MS] (450ms)
+ *   switches in `0ms` so tooltips never lag behind the cursor or show stale labels.
+ * - Stationary touch long-press previews appear after [DEFAULT_TOUCH_LONG_PRESS_MS] (380ms) without consuming
+ *   any pointer events, keeping taps, drags, and list scrolling 100% instant.
+ */
+object TooltipTimingPolicy {
+    const val DEFAULT_INITIAL_DELAY_MS = 160L
+    const val DEFAULT_WARM_HANDOFF_WINDOW_MS = 450L
+    const val DEFAULT_TOUCH_LONG_PRESS_MS = 380L
+    const val DEFAULT_AUTO_HIDE_MS = 4000L
+
+    fun effectiveHoverDelayMs(
+        isCurrentlyShowingAny: Boolean,
+        lastHiddenAtMs: Long,
+        nowMs: Long,
+        coldDelayMs: Long = DEFAULT_INITIAL_DELAY_MS,
+        warmWindowMs: Long = DEFAULT_WARM_HANDOFF_WINDOW_MS
+    ): Long {
+        if (isCurrentlyShowingAny) return 0L
+        if (lastHiddenAtMs > 0L && nowMs >= lastHiddenAtMs && (nowMs - lastHiddenAtMs) <= warmWindowMs) {
+            return 0L
+        }
+        return coldDelayMs.coerceAtLeast(0L)
+    }
+}
+
+/**
  * Pure in-tree GPU Tooltip Coordinator:
  * Avoids Android `WindowManager` `Popup` windows completely, eliminating:
  * 1. The ChromeOS / Android hover-stealing strobe loop (`Enter -> Popup -> Exit -> Destroy -> Enter`)
@@ -66,7 +93,17 @@ import kotlinx.coroutines.delay
  * Because the rendered tooltip layer has zero pointer modifiers, hit-testing passes 100% through it.
  */
 @Stable
-class ThingsTooltipHostState {
+class ThingsTooltipHostState(
+    private val clockMs: () -> Long = { System.nanoTime() / 1_000_000L }
+) {
+    private data class ActiveEntry(
+        val ownerId: Any,
+        var text: String,
+        var anchorBounds: IntRect
+    )
+
+    private val activeStack = mutableListOf<ActiveEntry>()
+
     var activeOwnerId by mutableStateOf<Any?>(null)
         private set
     var activeText by mutableStateOf("")
@@ -74,17 +111,92 @@ class ThingsTooltipHostState {
     var activeAnchorBounds by mutableStateOf(IntRect.Zero)
         private set
 
-    fun show(ownerId: Any, text: String, anchorBounds: IntRect) {
-        if (text.isBlank() || anchorBounds.width <= 0 || anchorBounds.height <= 0) return
-        activeOwnerId = ownerId
-        activeText = text
-        activeAnchorBounds = anchorBounds
+    private var lastHiddenAtMs: Long = 0L
+
+    val isShowing: Boolean
+        get() = activeOwnerId != null && activeText.isNotBlank()
+
+    fun resolveHoverDelayMs(
+        coldDelayMs: Long = TooltipTimingPolicy.DEFAULT_INITIAL_DELAY_MS
+    ): Long {
+        return TooltipTimingPolicy.effectiveHoverDelayMs(
+            isCurrentlyShowingAny = isShowing,
+            lastHiddenAtMs = lastHiddenAtMs,
+            nowMs = clockMs(),
+            coldDelayMs = coldDelayMs
+        )
     }
 
-    fun hide(ownerId: Any) {
-        if (activeOwnerId === ownerId) {
+    private fun syncActiveFromStack() {
+        if (activeStack.isEmpty()) {
             activeOwnerId = null
+            activeText = ""
+            return
         }
+        // Pick the innermost (smallest-area) active anchor; break ties in favor of the latest entry
+        var best = activeStack.last()
+        var bestArea = best.anchorBounds.width.toLong() * best.anchorBounds.height.toLong()
+        for (i in activeStack.lastIndex - 1 downTo 0) {
+            val candidate = activeStack[i]
+            val area = candidate.anchorBounds.width.toLong() * candidate.anchorBounds.height.toLong()
+            if (area < bestArea) {
+                best = candidate
+                bestArea = area
+            }
+        }
+        activeOwnerId = best.ownerId
+        activeText = best.text
+        activeAnchorBounds = best.anchorBounds
+    }
+
+    fun show(ownerId: Any, text: String, anchorBounds: IntRect) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty() || anchorBounds.width <= 0 || anchorBounds.height <= 0) {
+            hide(ownerId, allowWarmHandoff = false)
+            return
+        }
+        activeStack.removeAll { it.ownerId === ownerId }
+        activeStack.add(ActiveEntry(ownerId = ownerId, text = trimmed, anchorBounds = anchorBounds))
+        syncActiveFromStack()
+    }
+
+    fun updateIfActive(ownerId: Any, text: String, anchorBounds: IntRect) {
+        val existing = activeStack.firstOrNull { it.ownerId === ownerId } ?: return
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) {
+            hide(ownerId, allowWarmHandoff = true)
+            return
+        }
+        existing.text = trimmed
+        if (anchorBounds.width > 0 && anchorBounds.height > 0) {
+            existing.anchorBounds = anchorBounds
+        }
+        syncActiveFromStack()
+    }
+
+    fun hide(ownerId: Any, allowWarmHandoff: Boolean = true) {
+        val wasShowing = isShowing
+        val removed = activeStack.removeAll { it.ownerId === ownerId }
+        if (!removed) return
+        syncActiveFromStack()
+        if (wasShowing && !isShowing) {
+            if (allowWarmHandoff) {
+                lastHiddenAtMs = clockMs()
+            } else {
+                lastHiddenAtMs = 0L
+            }
+        }
+    }
+
+    fun dismissAll(allowWarmHandoff: Boolean = false) {
+        if (allowWarmHandoff && isShowing) {
+            lastHiddenAtMs = clockMs()
+        } else if (!allowWarmHandoff) {
+            lastHiddenAtMs = 0L
+        }
+        activeStack.clear()
+        activeOwnerId = null
+        activeText = ""
     }
 }
 
@@ -93,7 +205,8 @@ val LocalThingsTooltipHostState = staticCompositionLocalOf<ThingsTooltipHostStat
 private class BoundsRef(var rect: IntRect = IntRect.Zero)
 
 /**
- * Root container that hosts the hit-test-transparent GPU tooltip layer above its content.
+ * Root or Dialog container that hosts the hit-test-transparent GPU tooltip layer above its content.
+ * Safe to wrap both full-screen Activity roots and wrap-content `Dialog` surfaces (`matchParentSize`).
  */
 @Composable
 fun ThingsTooltipHostBox(
@@ -123,40 +236,24 @@ fun ThingsTooltipHostBox(
 }
 
 @Composable
-private fun ThingsTooltipOverlayLayer(
+private fun BoxScope.ThingsTooltipOverlayLayer(
     hostState: ThingsTooltipHostState,
     hostSize: IntSize,
     hostBoundsInRoot: IntRect
 ) {
     val density = LocalDensity.current
-    val isShowing = hostState.activeOwnerId != null && hostState.activeText.isNotBlank()
+    val text = hostState.activeText
+    val anchorBounds = hostState.activeAnchorBounds
+    val isShowing = hostState.activeOwnerId != null && text.isNotBlank()
 
-    var displayedText by remember { mutableStateOf("") }
-    var displayedBounds by remember { mutableStateOf(IntRect.Zero) }
-
-    if (isShowing) {
-        displayedText = hostState.activeText
-        displayedBounds = hostState.activeAnchorBounds
-    }
-
-    val alpha by animateFloatAsState(
-        targetValue = if (isShowing) 1f else 0f,
-        animationSpec = tween(
-            durationMillis = if (isShowing) 150 else 110,
-            easing = FastOutSlowInEasing
-        ),
-        label = "thingsTooltipAlpha"
-    )
-
-    if (alpha <= 0.005f || displayedText.isBlank() || hostSize.width <= 0 || hostSize.height <= 0) {
+    if (!isShowing || hostSize.width <= 0 || hostSize.height <= 0) {
         return
     }
 
     val verticalGapPx = with(density) { 8.dp.roundToPx() }
     val screenMarginPx = with(density) { 8.dp.roundToPx() }
-    val slideOffsetPx = with(density) { 3.dp.toPx() }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.matchParentSize()) {
         Box(
             modifier = Modifier
                 .layout { measurable, constraints ->
@@ -168,11 +265,11 @@ private fun ThingsTooltipOverlayLayer(
                             minHeight = 0
                         )
                     )
-                    val localLeft = displayedBounds.left - hostBoundsInRoot.left
-                    val localTop = displayedBounds.top - hostBoundsInRoot.top
-                    val localBottom = displayedBounds.bottom - hostBoundsInRoot.top
+                    val localLeft = anchorBounds.left - hostBoundsInRoot.left
+                    val localTop = anchorBounds.top - hostBoundsInRoot.top
+                    val localBottom = anchorBounds.bottom - hostBoundsInRoot.top
 
-                    val centeredX = localLeft + (displayedBounds.width - placeable.width) / 2
+                    val centeredX = localLeft + (anchorBounds.width - placeable.width) / 2
                     val maxX = (hostSize.width - placeable.width - screenMarginPx).coerceAtLeast(screenMarginPx)
                     val finalX = centeredX.coerceIn(screenMarginPx, maxX)
 
@@ -189,22 +286,17 @@ private fun ThingsTooltipOverlayLayer(
                         placeable.place(finalX, finalY)
                     }
                 }
-                .graphicsLayer {
-                    val safeAlpha = if (alpha.isFinite()) alpha.coerceIn(0f, 1f) else 0f
-                    this.alpha = safeAlpha
-                    this.translationY = (1f - safeAlpha) * slideOffsetPx
-                }
                 .clip(RoundedCornerShape(7.dp))
-                .background(Color(0xEB1D2128))
+                .background(Color(0xF21B1F2A))
                 .border(
                     width = 0.75.dp,
-                    color = Color.White.copy(alpha = 0.14f),
+                    color = Color.White.copy(alpha = 0.16f),
                     shape = RoundedCornerShape(7.dp)
                 )
-                .padding(horizontal = 9.dp, vertical = 5.dp)
+                .padding(horizontal = 9.5.dp, vertical = 5.dp)
         ) {
             Text(
-                text = displayedText,
+                text = text,
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontSize = 11.5.sp,
                     fontWeight = FontWeight.Medium
@@ -217,68 +309,147 @@ private fun ThingsTooltipOverlayLayer(
 }
 
 /**
- * Non-intrusive Things-for-Mac style mouse/stylus hover tooltip.
- *
- * - Uses pure in-tree GPU rendering via [LocalThingsTooltipHostState] — never spawns Android `PopupWindow`s,
- *   completely preventing hover-exit oscillation/flashing on Chromebooks, tablets, and desktop mice.
- * - Ignores touch finger taps (`PointerType.Touch`), activating strictly on mouse/stylus hover.
+ * Responsive Things-style tooltip supporting:
+ * 1. Mouse / trackpad / stylus hover (`160ms` cold delay, `0ms` warm handoff across adjacent buttons,
+ *    and `0ms` live text/position updates when state or language changes while hovered).
+ * 2. Optional passive stationary touch long-press preview (`380ms` within `touchSlop` on `PointerEventPass.Initial`
+ *    without consuming pointer changes, so taps and scrolling remain 100% immediate).
  */
 @Composable
 fun ThingsHoverTooltip(
     text: String,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    delayMillis: Long = 420L,
+    delayMillis: Long = TooltipTimingPolicy.DEFAULT_INITIAL_DELAY_MS,
+    enableTouchLongPress: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val hostState = LocalThingsTooltipHostState.current
     val ownerId = remember { Any() }
     val boundsRef = remember { BoundsRef() }
+    val latestText by rememberUpdatedState(text)
+
     var isMouseHovered by remember { mutableStateOf(false) }
+    var isTouchDown by remember { mutableStateOf(false) }
+    var touchSessionId by remember { mutableIntStateOf(0) }
 
     DisposableEffect(ownerId, hostState) {
         onDispose {
-            hostState?.hide(ownerId)
+            hostState?.hide(ownerId, allowWarmHandoff = false)
         }
     }
 
-    LaunchedEffect(isMouseHovered, enabled, text, hostState) {
-        if (hostState == null || !enabled || !isMouseHovered || text.isBlank()) {
-            hostState?.hide(ownerId)
+    // Live 0ms text & bounds sync while this control already owns the visible tooltip
+    LaunchedEffect(text, enabled, hostState) {
+        if (hostState == null) return@LaunchedEffect
+        if (!enabled || text.isBlank()) {
+            hostState.hide(ownerId, allowWarmHandoff = true)
         } else {
-            delay(delayMillis)
-            hostState.show(ownerId, text, boundsRef.rect)
-            // Calm auto-hide after 3.5s so a parked mouse cursor never blocks the view indefinitely
-            delay(3500L)
-            hostState.hide(ownerId)
+            hostState.updateIfActive(ownerId, text, boundsRef.rect)
+        }
+    }
+
+    // Mouse / stylus hover lifecycle (with 0ms warm handoff across adjacent controls)
+    LaunchedEffect(isMouseHovered, enabled, hostState) {
+        if (hostState == null || !enabled || !isMouseHovered) {
+            if (!isTouchDown) {
+                hostState?.hide(ownerId, allowWarmHandoff = true)
+            }
+        } else {
+            val waitMs = hostState.resolveHoverDelayMs(delayMillis)
+            if (waitMs > 0L) {
+                delay(waitMs)
+            }
+            val resolved = latestText
+            if (resolved.isNotBlank()) {
+                hostState.show(ownerId, resolved, boundsRef.rect)
+                delay(TooltipTimingPolicy.DEFAULT_AUTO_HIDE_MS)
+                hostState.hide(ownerId, allowWarmHandoff = false)
+            }
+        }
+    }
+
+    // Stationary finger long-press tooltip preview on touchscreens
+    LaunchedEffect(touchSessionId, isTouchDown, enabled, enableTouchLongPress, hostState) {
+        if (hostState == null || !enabled || !enableTouchLongPress || !isTouchDown) {
+            if (!isMouseHovered && !isTouchDown) {
+                hostState?.hide(ownerId, allowWarmHandoff = true)
+            }
+        } else {
+            delay(TooltipTimingPolicy.DEFAULT_TOUCH_LONG_PRESS_MS)
+            val resolved = latestText
+            if (isTouchDown && resolved.isNotBlank()) {
+                hostState.show(ownerId, resolved, boundsRef.rect)
+                delay(TooltipTimingPolicy.DEFAULT_AUTO_HIDE_MS)
+                hostState.hide(ownerId, allowWarmHandoff = false)
+            }
         }
     }
 
     Box(
         modifier = modifier
             .onGloballyPositioned { coords ->
-                boundsRef.rect = coords.boundsInRoot().roundToIntRect()
+                val updated = coords.boundsInRoot().roundToIntRect()
+                boundsRef.rect = updated
+                hostState?.updateIfActive(ownerId, latestText, updated)
             }
-            .pointerInput(enabled, hostState != null) {
+            .pointerInput(enabled, enableTouchLongPress, hostState != null) {
                 if (!enabled || hostState == null) return@pointerInput
+                val touchSlopPx = viewConfiguration.touchSlop
+                var touchOrigin = Offset.Zero
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
-                        val pointerType = event.changes.firstOrNull()?.type
+                        val primary = event.changes.firstOrNull()
+                        val pointerType = primary?.type
                         val isHoverPointer = pointerType == PointerType.Mouse || pointerType == PointerType.Stylus
-                        when (event.type) {
-                            PointerEventType.Enter -> {
-                                if (isHoverPointer && event.changes.none { it.pressed }) {
-                                    isMouseHovered = true
+
+                        if (isHoverPointer) {
+                            when (event.type) {
+                                PointerEventType.Enter, PointerEventType.Move -> {
+                                    if (event.changes.none { it.pressed }) {
+                                        if (!isMouseHovered) {
+                                            isMouseHovered = true
+                                        }
+                                    } else {
+                                        if (isMouseHovered) {
+                                            isMouseHovered = false
+                                        }
+                                        hostState.hide(ownerId, allowWarmHandoff = false)
+                                    }
+                                }
+                                PointerEventType.Exit, PointerEventType.Press, PointerEventType.Scroll -> {
+                                    if (isMouseHovered) {
+                                        isMouseHovered = false
+                                    }
+                                    hostState.hide(
+                                        ownerId,
+                                        allowWarmHandoff = event.type == PointerEventType.Exit
+                                    )
+                                }
+                                else -> Unit
+                            }
+                        } else if (enableTouchLongPress && pointerType == PointerType.Touch) {
+                            val pressedChanges = event.changes.filter { it.pressed }
+                            when {
+                                pressedChanges.size == 1 && !primary.previousPressed -> {
+                                    touchOrigin = primary.position
+                                    touchSessionId += 1
+                                    isTouchDown = true
+                                }
+                                pressedChanges.size == 1 && isTouchDown -> {
+                                    if ((primary.position - touchOrigin).getDistance() > touchSlopPx) {
+                                        isTouchDown = false
+                                        hostState.hide(ownerId, allowWarmHandoff = false)
+                                    }
+                                }
+                                pressedChanges.size != 1 -> {
+                                    if (isTouchDown) {
+                                        isTouchDown = false
+                                    }
+                                    hostState.hide(ownerId, allowWarmHandoff = true)
                                 }
                             }
-                            PointerEventType.Exit, PointerEventType.Press -> {
-                                if (isMouseHovered) {
-                                    isMouseHovered = false
-                                }
-                                hostState.hide(ownerId)
-                            }
-                            else -> Unit
                         }
                     }
                 }

@@ -37,8 +37,11 @@ import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
 import com.culturedcode.things3.domain.model.TemplateHeadingBlueprint
 import com.culturedcode.things3.domain.model.TemplateTaskBlueprint
+import androidx.compose.ui.unit.IntRect
 import com.culturedcode.things3.domain.model.TimeblockScheduleUtils
 import com.culturedcode.things3.domain.model.TodayTimelineEntry
+import com.culturedcode.things3.ui.components.ThingsTooltipHostState
+import com.culturedcode.things3.ui.components.TooltipTimingPolicy
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -746,9 +749,9 @@ class V2UpgradeAndFeaturesTest {
     }
 
     @Test
-    fun `v2_0_0_beta_10 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
-        assertEquals(54, BuildConfig.VERSION_CODE)
-        assertEquals("2.0.0-beta.10", BuildConfig.VERSION_NAME)
+    fun `v2_0_0_beta_11 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
+        assertEquals(55, BuildConfig.VERSION_CODE)
+        assertEquals("2.0.0-beta.11", BuildConfig.VERSION_NAME)
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -1071,5 +1074,59 @@ class V2UpgradeAndFeaturesTest {
             }
         }
     }
+
+    @Test
+    fun `v2_0_0_beta_11 instant tooltip timing policy and host state warm handoff and nested anchors`() {
+        var fakeNowMs = 1_000L
+        val host = ThingsTooltipHostState(clockMs = { fakeNowMs })
+        val outerCard = Any()
+        val innerDeleteBtn = Any()
+        val adjacentToolbarBtn = Any()
+
+        // 1. Cold hover delay is 160ms
+        assertEquals(TooltipTimingPolicy.DEFAULT_INITIAL_DELAY_MS, host.resolveHoverDelayMs())
+        assertEquals(160L, host.resolveHoverDelayMs())
+
+        // 2. Showing outer attachment card activates tooltip & sets warm delay to 0ms
+        host.show(outerCard, "floorplan.pdf", IntRect(0, 0, 200, 56))
+        assertTrue(host.isShowing)
+        assertEquals("floorplan.pdf", host.activeText)
+        assertEquals(0L, host.resolveHoverDelayMs())
+
+        // 3. Hovering nested inner delete button (smaller area) overrides outer card in 0ms
+        host.show(innerDeleteBtn, "Delete", IntRect(170, 8, 194, 32))
+        assertEquals("Delete", host.activeText)
+
+        // 4. Live state / language change while hovered updates active text in 0ms
+        host.updateIfActive(innerDeleteBtn, "Löschen", IntRect(170, 8, 194, 32))
+        assertEquals("Löschen", host.activeText)
+
+        // 5. Leaving inner delete button restores outer attachment card tooltip immediately
+        host.hide(innerDeleteBtn)
+        assertTrue(host.isShowing)
+        assertEquals("floorplan.pdf", host.activeText)
+
+        // 6. Leaving outer card starts 450ms warm handoff window -> next control enters in 0ms
+        fakeNowMs = 2_000L
+        host.hide(outerCard)
+        assertFalse(host.isShowing)
+
+        fakeNowMs = 2_320L // 320ms <= 450ms warm window
+        assertEquals(0L, host.resolveHoverDelayMs())
+
+        // 7. After 450ms cooldown expires, cold 160ms delay is restored
+        fakeNowMs = 2_600L // 600ms > 450ms warm window
+        assertEquals(160L, host.resolveHoverDelayMs())
+
+        // 8. Explicit click / scroll dismissAll(allowWarmHandoff = false) clears warm handoff immediately
+        host.show(adjacentToolbarBtn, "Quick Find (Ctrl+F)", IntRect(10, 10, 130, 44))
+        assertTrue(host.isShowing)
+        fakeNowMs = 3_000L
+        host.dismissAll(allowWarmHandoff = false)
+        assertFalse(host.isShowing)
+        fakeNowMs = 3_050L
+        assertEquals(160L, host.resolveHoverDelayMs())
+    }
 }
+
 

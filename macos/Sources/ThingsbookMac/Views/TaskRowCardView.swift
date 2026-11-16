@@ -163,7 +163,7 @@ public struct TaskRowCardView: View {
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2.5)
                     .background(Capsule().fill(Color.primary.opacity(0.055)))
-                    .help("\(store.tr("attachments_section_title")): \(task.attachments.count)")
+                    .thingsTooltip("\(store.tr("attachments_section_title")): \(task.attachments.count)")
                 }
 
                 if let tbPill = task.formattedTimeblockPill {
@@ -182,7 +182,7 @@ public struct TaskRowCardView: View {
                         .background(Capsule().fill(ThingsMacPalette.anytimeTeal.opacity(0.12)))
                     }
                     .buttonStyle(.plain)
-                    .help("\(store.tr("macos_tooltip_timeblock")) — \(tbPill)")
+                    .thingsTooltip("\(store.tr("macos_tooltip_timeblock")) — \(tbPill)")
                     .popover(isPresented: $isCollapsedTimeblockPopoverOpen) {
                         TimeblockPopoverView(
                             store: store,
@@ -205,7 +205,7 @@ public struct TaskRowCardView: View {
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2.5)
                     .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.11)))
-                    .help(store.trf("when_task_reminder_set", shortTimeString(rem)))
+                    .thingsTooltip(store.trf("when_task_reminder_set", shortTimeString(rem)))
                 }
 
                 if !task.checklistItems.isEmpty {
@@ -220,7 +220,7 @@ public struct TaskRowCardView: View {
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2.5)
                     .background(Capsule().fill(Color.primary.opacity(0.055)))
-                    .help("\(store.tr("placeholder_checklist")): \(done)/\(task.checklistItems.count)")
+                    .thingsTooltip("\(store.tr("placeholder_checklist")): \(done)/\(task.checklistItems.count)")
                 }
 
                 if let rule = task.recurrenceRule {
@@ -234,7 +234,7 @@ public struct TaskRowCardView: View {
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2.5)
                     .background(Capsule().fill(Color.primary.opacity(0.055)))
-                    .help("\(store.tr("action_repeat")): \(rule.formatShortLabel(locale: store.preferences.language.locale))")
+                    .thingsTooltip("\(store.tr("action_repeat")): \(rule.formatShortLabel(locale: store.preferences.language.locale))")
                 }
 
                 ForEach(task.tags.prefix(3)) { tag in
@@ -335,7 +335,7 @@ public struct TaskRowCardView: View {
                         .foregroundStyle(rowVoiceController.isRecording ? ThingsMacPalette.deadlineCrimson : .secondary)
                 }
                 .buttonStyle(.plain)
-                .help(rowVoiceController.isRecording ? store.tr("macos_voice_stop") : store.tr("voice_capture_btn"))
+                .thingsTooltip(rowVoiceController.isRecording ? store.tr("macos_voice_stop") : store.tr("voice_capture_btn"))
             }
 
             // Markdown Notes Box + Detected Smart Link Chips
@@ -412,7 +412,7 @@ public struct TaskRowCardView: View {
                                 )
                             }
                             .buttonStyle(.plain)
-                            .help(link.targetUri)
+                            .thingsTooltip(link.targetUri)
                         }
 
                         Spacer()
@@ -426,7 +426,7 @@ public struct TaskRowCardView: View {
                             .buttonStyle(.plain)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: true, vertical: false)
-                            .help(toggleLabel)
+                            .thingsTooltip(toggleLabel)
                         }
                     }
                 }
@@ -519,7 +519,7 @@ public struct TaskRowCardView: View {
                     .buttonStyle(.plain)
                     .fixedSize(horizontal: true, vertical: false)
                     .disabled(isGeneratingChecklist)
-                    .help(store.tr("gemini_magic_breakdown_desc"))
+                    .thingsTooltip(store.tr("gemini_magic_breakdown_desc"))
                 }
             }
             .padding(.leading, 30)
@@ -542,7 +542,7 @@ public struct TaskRowCardView: View {
                         .padding(.horizontal, 9)
                         .padding(.vertical, 3.5)
                         .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.10)))
-                        .help(whenButtonTooltip)
+                        .thingsTooltip(whenButtonTooltip)
                     }
 
                     if let tbPill = task.formattedTimeblockPill {
@@ -558,7 +558,7 @@ public struct TaskRowCardView: View {
                         .padding(.horizontal, 9)
                         .padding(.vertical, 3.5)
                         .background(Capsule().fill(ThingsMacPalette.anytimeTeal.opacity(0.12)))
-                        .help(timeblockButtonTooltip)
+                        .thingsTooltip(timeblockButtonTooltip)
                     }
 
                     if let rem = task.reminderTime {
@@ -574,7 +574,7 @@ public struct TaskRowCardView: View {
                         .padding(.horizontal, 9)
                         .padding(.vertical, 3.5)
                         .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.10)))
-                        .help(store.trf("when_task_reminder_set", shortTimeString(rem)))
+                        .thingsTooltip(store.trf("when_task_reminder_set", shortTimeString(rem)))
                     }
 
                     if let dl = task.deadline {
@@ -594,7 +594,7 @@ public struct TaskRowCardView: View {
                         .padding(.horizontal, 9)
                         .padding(.vertical, 3.5)
                         .background(Capsule().fill(Color.primary.opacity(0.06)))
-                        .help(moveButtonTooltip)
+                        .thingsTooltip(moveButtonTooltip)
                     }
 
                     if let rule = task.recurrenceRule {
@@ -602,7 +602,7 @@ public struct TaskRowCardView: View {
                             .font(.system(size: 11.5, weight: .medium))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: true, vertical: false)
-                            .help(repeatButtonTooltip)
+                            .thingsTooltip(repeatButtonTooltip)
                     }
 
                     ForEach(task.tags) { tag in
@@ -827,7 +827,7 @@ public struct TaskRowCardView: View {
                             isHoveringDone = hovering
                         }
                     }
-                    .help("\(store.tr("action_done")) (Esc)")
+                    .thingsTooltip("\(store.tr("action_done")) (Esc)")
                     .keyboardShortcut(.escape, modifiers: [])
                 }
             }
@@ -1064,7 +1064,7 @@ public struct TaskRowCardView: View {
         .background(
             Capsule().fill(isUrgent ? ThingsMacPalette.deadlineCrimson.opacity(0.12) : Color.primary.opacity(0.055))
         )
-        .help("\(store.tr("action_deadline")): \(label)")
+        .thingsTooltip("\(store.tr("action_deadline")): \(label)")
     }
 
     private func shortTimeString(_ millis: Int64) -> String {
@@ -1110,7 +1110,7 @@ private struct ChecklistItemRowView: View {
                     .foregroundStyle(item.isCompleted ? ThingsMacPalette.accentBlue : .secondary)
             }
             .buttonStyle(.plain)
-            .help(item.isCompleted ? store.tr("action_reopen_todo") : store.tr("action_complete"))
+            .thingsTooltip(item.isCompleted ? store.tr("action_reopen_todo") : store.tr("action_complete"))
 
             TextField("", text: $text)
                 .textFieldStyle(.plain)
@@ -1135,7 +1135,7 @@ private struct ChecklistItemRowView: View {
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
-                .help(store.tr("subtask_move_up"))
+                .thingsTooltip(store.tr("subtask_move_up"))
 
                 Button {
                     saveTask?.cancel()
@@ -1147,7 +1147,7 @@ private struct ChecklistItemRowView: View {
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
-                .help(store.tr("subtask_move_down"))
+                .thingsTooltip(store.tr("subtask_move_down"))
 
                 Button {
                     saveTask?.cancel()
@@ -1158,7 +1158,7 @@ private struct ChecklistItemRowView: View {
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
-                .help(store.tr("subtask_delete"))
+                .thingsTooltip(store.tr("subtask_delete"))
             }
         }
         .padding(.vertical, 2)

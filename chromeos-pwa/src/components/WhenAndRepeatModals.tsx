@@ -242,7 +242,7 @@ export const WhenModal: React.FC<WhenModalProps> = ({
             <Calendar size={18} style={{ color: 'var(--things-blue)' }} />
             <span>{t.ctxWhenReminder}</span>
           </h3>
-          <button type="button" className="icon-btn" onClick={onClose}>
+          <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
             <X size={18} />
           </button>
         </div>
@@ -502,7 +502,7 @@ export const DeadlineModal: React.FC<DeadlineModalProps> = ({
             <Flag size={18} style={{ color: 'var(--deadline-red)' }} />
             <span>{titleLabel || t.actionDeadline}</span>
           </h3>
-          <button type="button" className="icon-btn" onClick={onClose}>
+          <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
             <X size={18} />
           </button>
         </div>
@@ -642,7 +642,7 @@ export const RepeatModal: React.FC<RepeatModalProps> = ({ task, lang, t, onApply
             <Repeat size={18} style={{ color: 'var(--things-blue)' }} />
             <span>{t.repeatDialogTitle}</span>
           </h3>
-          <button type="button" className="icon-btn" onClick={onClose}>
+          <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
             <X size={18} />
           </button>
         </div>

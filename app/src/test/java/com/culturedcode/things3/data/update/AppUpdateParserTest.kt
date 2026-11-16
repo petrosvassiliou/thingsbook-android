@@ -134,12 +134,32 @@ class AppUpdateParserTest {
                 "draft": false,
                 "prerelease": false,
                 "body": "Stable 1.8.1 notes"
+              },
+              {
+                "tag_name": "v2.0.0-beta.11",
+                "name": "Thingsbook v2.0.0-beta.11",
+                "draft": false,
+                "prerelease": true,
+                "body": "Beta 11 notes",
+                "assets": [
+                  {
+                    "name": "Thingsbook-v2.0.0-beta.11-GTD-Full.apk",
+                    "browser_download_url": "https://github.com/petrosvassiliou/thingsbook-android/releases/download/v2.0.0-beta.11/Thingsbook-v2.0.0-beta.11-GTD-Full.apk"
+                  }
+                ]
+              },
+              {
+                "tag_name": "v2.0.0-beta.10",
+                "name": "Thingsbook v2.0.0-beta.10",
+                "draft": false,
+                "prerelease": true,
+                "body": "Beta 10 notes"
               }
             ]
         """.trimIndent()
 
         val pickedBeta = AppUpdateParser.parseGitHubReleaseJson(releasesArrayJson, includeBeta = true)
-        assertEquals("2.0.0-beta.2", pickedBeta.versionName)
+        assertEquals("2.0.0-beta.11", pickedBeta.versionName)
 
         val pickedStable = AppUpdateParser.parseGitHubReleaseJson(releasesArrayJson, includeBeta = false)
         assertEquals("1.8.1", pickedStable.versionName)

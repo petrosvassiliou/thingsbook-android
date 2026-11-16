@@ -292,7 +292,10 @@ fun ThingsCheckbox(
     }
 
     if (showHoverTooltip && !showCancelMenu) {
-        ThingsHoverTooltip(text = resolvedTooltip) {
+        ThingsHoverTooltip(
+            text = resolvedTooltip,
+            enableTouchLongPress = false
+        ) {
             checkboxCore()
         }
     } else {

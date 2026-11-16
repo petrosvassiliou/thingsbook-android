@@ -656,71 +656,79 @@ private fun MagicPlusOptionRow(
         label = "magicPlusOptionHoverBg"
     )
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(rowBg)
-            .pointerHoverIcon(PointerIcon.Hand)
-            .hoverable(interactionSource = interactionSource)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick
-            )
-            .padding(horizontal = 10.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(11.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(34.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(iconBg),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = title,
-                tint = iconTint,
-                modifier = Modifier.size(19.dp)
-            )
-        }
+    val optionTooltip = if (!shortcutBadge.isNullOrBlank()) {
+        "$title ($shortcutBadge) — $subtitle"
+    } else {
+        "$title — $subtitle"
+    }
 
-        Column(modifier = Modifier.weight(1f)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                    color = colors.primaryText
+    ThingsHoverTooltip(text = optionTooltip) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(rowBg)
+                .pointerHoverIcon(PointerIcon.Hand)
+                .hoverable(interactionSource = interactionSource)
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onClick
                 )
-                if (!shortcutBadge.isNullOrBlank()) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(5.dp))
-                            .background(colors.tagPillBg)
-                            .padding(horizontal = 5.dp, vertical = 1.5.dp)
-                    ) {
-                        Text(
-                            text = shortcutBadge,
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Medium
-                            ),
-                            color = colors.secondaryText
-                        )
+                .padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(11.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(iconBg),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = iconTint,
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.primaryText
+                    )
+                    if (!shortcutBadge.isNullOrBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(colors.tagPillBg)
+                                .padding(horizontal = 5.dp, vertical = 1.5.dp)
+                        ) {
+                            Text(
+                                text = shortcutBadge,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Medium
+                                ),
+                                color = colors.secondaryText
+                            )
+                        }
                     }
                 }
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                    color = colors.secondaryText,
+                    maxLines = 1
+                )
             }
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                color = colors.secondaryText,
-                maxLines = 1
-            )
         }
     }
 }

@@ -259,7 +259,13 @@ export const QuickShareModal: React.FC<{
             >
               {isListening ? <MicOff size={17} /> : <Mic size={17} />}
             </button>
-            <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
+            <button
+              type="button"
+              className="icon-btn"
+              title={t.actionCancel}
+              onClick={onClose}
+              aria-label={t.actionCancel}
+            >
               <X size={18} />
             </button>
           </div>
@@ -673,7 +679,7 @@ export const EmptyTrashConfirmDialog: React.FC<{
       <div className="modal-panel" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3 className="modal-title">{t.trashEmptyBtn}</h3>
-          <button type="button" className="icon-btn" onClick={onCancel}>
+          <button type="button" className="icon-btn" title={t.actionCancel} onClick={onCancel}>
             <X size={18} />
           </button>
         </div>
@@ -727,7 +733,7 @@ export const AppLockPinSetupModal: React.FC<{
             <Lock size={17} style={{ color: 'var(--things-blue)' }} />
             <span>{t.appLockSetupPinTitle}</span>
           </h3>
-          <button type="button" className="icon-btn" onClick={onCancel}>
+          <button type="button" className="icon-btn" title={t.actionCancel} onClick={onCancel}>
             <X size={18} />
           </button>
         </div>

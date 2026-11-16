@@ -106,7 +106,7 @@ public struct WeeklyReviewSheetView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .help(store.tr("action_cancel"))
+            .thingsTooltip(store.tr("action_cancel"))
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
@@ -214,7 +214,7 @@ public struct WeeklyReviewSheetView: View {
                                 .foregroundStyle(ThingsMacPalette.upcomingRed)
                         }
                         .buttonStyle(.borderless)
-                        .help(store.tr("action_delete"))
+                        .thingsTooltip(store.tr("action_delete"))
                     }
                 }
                 .padding(12)
@@ -275,7 +275,7 @@ public struct WeeklyReviewSheetView: View {
                                 .font(.system(size: 13))
                         }
                         .buttonStyle(.borderless)
-                        .help(store.tr("action_complete"))
+                        .thingsTooltip(store.tr("action_complete"))
                     }
                 }
                 .padding(12)
@@ -422,7 +422,7 @@ public struct WeeklyReviewSheetView: View {
                             .foregroundStyle(ThingsMacPalette.upcomingRed)
                     }
                     .buttonStyle(.borderless)
-                    .help(store.tr("action_delete"))
+                    .thingsTooltip(store.tr("action_delete"))
                 }
                 .padding(12)
                 .thingsCardSurface(cornerRadius: 10)

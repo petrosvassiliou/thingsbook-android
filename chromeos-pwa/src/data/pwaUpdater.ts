@@ -72,7 +72,7 @@ export async function checkForSwAndReleaseUpdates(
 
   try {
     const endpoint = includeBeta
-      ? 'https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases?per_page=10'
+      ? 'https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases?per_page=30'
       : 'https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases/latest';
     const res = await fetch(endpoint, {
       headers: { Accept: 'application/vnd.github+json' }

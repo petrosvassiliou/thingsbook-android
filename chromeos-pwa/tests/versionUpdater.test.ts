@@ -15,11 +15,11 @@ import {
   selectLatestEligibleRelease
 } from '../src/data/pwaUpdater.ts';
 
-test('v2.0.0-beta.10 build metadata constants are bumped to 2.0.0-beta.10 (Build 54)', () => {
-  assert.equal(APP_VERSION, '2.0.0-beta.10');
-  assert.equal(APP_BUILD_CODE, 54);
-  assert.equal(versionFromUtils, '2.0.0-beta.10');
-  assert.equal(buildFromUtils, 54);
+test('v2.0.0-beta.11 build metadata constants are bumped to 2.0.0-beta.11 (Build 55)', () => {
+  assert.equal(APP_VERSION, '2.0.0-beta.11');
+  assert.equal(APP_BUILD_CODE, 55);
+  assert.equal(versionFromUtils, '2.0.0-beta.11');
+  assert.equal(buildFromUtils, 55);
   assert.equal(isPrereleaseVersion(APP_VERSION), true);
   assert.equal(isPrereleaseVersion('1.8.1'), false);
   assert.equal(isPrereleaseVersion('2.0.0'), false);
@@ -28,7 +28,7 @@ test('v2.0.0-beta.10 build metadata constants are bumped to 2.0.0-beta.10 (Build
   assert.equal(selectLatestEligibleRelease, selectFromUtils);
 });
 
-test('compareSemver orders numeric pre-release identifiers (beta.1 < beta.2 < beta.3 < beta.10 < 2.0.0) and +build metadata accurately', () => {
+test('compareSemver orders numeric pre-release identifiers (beta.1 < beta.2 < beta.3 < beta.10 < beta.11 < 2.0.0) and +build metadata accurately', () => {
   const ordered = [
     '1.7.9',
     '1.8.0-alpha.1',
@@ -47,6 +47,7 @@ test('compareSemver orders numeric pre-release identifiers (beta.1 < beta.2 < be
     '2.0.0-beta.2',
     '2.0.0-beta.3',
     '2.0.0-beta.10',
+    '2.0.0-beta.11',
     '2.0.0-beta.99',
     '2.0.0-rc.1',
     '2.0.0-rc.2',

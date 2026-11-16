@@ -221,7 +221,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
               {t.weeklyReviewSubtitle}
             </div>
           </div>
-          <button type="button" className="icon-btn" onClick={onClose}>
+          <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
             <X size={18} />
           </button>
         </div>

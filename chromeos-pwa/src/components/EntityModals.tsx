@@ -73,7 +73,7 @@ export const AreaManagerModal: React.FC<AreaManagerModalProps> = ({
               {t.areasManageTitle} ({activeAreas.length} / {MAX_AREAS})
             </span>
           </h3>
-          <button type="button" className="icon-btn" onClick={onClose}>
+          <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
             <X size={18} />
           </button>
         </div>
@@ -263,7 +263,7 @@ export const QuickCreateAreaModal: React.FC<QuickCreateAreaModalProps> = ({
           <h3 className="modal-title">
             {t.entityNewArea} ({areasCount}/{MAX_AREAS})
           </h3>
-          <button type="button" className="icon-btn" onClick={onClose}>
+          <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
             <X size={18} />
           </button>
         </div>
@@ -373,7 +373,7 @@ export const CreateOrEditProjectModal: React.FC<CreateOrEditProjectModalProps> =
                 <span>📋 {t.templatesBtn}</span>
               </button>
             )}
-            <button type="button" className="icon-btn" onClick={onClose}>
+            <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
               <X size={18} />
             </button>
           </div>
@@ -541,7 +541,7 @@ export const MoveTaskModal: React.FC<MoveTaskModalProps> = ({
             <FolderInput size={18} style={{ color: 'var(--things-blue)' }} />
             <span>{t.ctxMoveContainer}</span>
           </h3>
-          <button type="button" className="icon-btn" onClick={onClose}>
+          <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
             <X size={18} />
           </button>
         </div>
@@ -624,7 +624,7 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
             <Tag size={18} style={{ color: 'var(--things-blue)' }} />
             <span>{t.tagsManageTitle}</span>
           </h3>
-          <button type="button" className="icon-btn" onClick={onClose}>
+          <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
             <X size={18} />
           </button>
         </div>
@@ -815,7 +815,7 @@ export const TaskTagPickerModal: React.FC<TaskTagPickerModalProps> = ({
             <Tag size={18} style={{ color: 'var(--things-blue)' }} />
             <span>{t.ctxAssignTags}</span>
           </h3>
-          <button type="button" className="icon-btn" onClick={onClose}>
+          <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
             <X size={18} />
           </button>
         </div>
@@ -930,7 +930,7 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
             <Bell size={18} style={{ color: 'var(--things-blue)' }} />
             <span>{t.notificationsTitle}</span>
           </h3>
-          <button type="button" className="icon-btn" onClick={onClose}>
+          <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
             <X size={18} />
           </button>
         </div>

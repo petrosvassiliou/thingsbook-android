@@ -181,6 +181,7 @@ fun ThingsSettingsModal(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+        ThingsTooltipHostBox {
         Surface(
             modifier = Modifier
                 .widthIn(max = 500.dp)
@@ -1026,6 +1027,7 @@ fun ThingsSettingsModal(
                     }
                 }
             }
+        }
         }
     }
 }

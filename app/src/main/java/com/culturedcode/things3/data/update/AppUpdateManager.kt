@@ -80,10 +80,11 @@ object AppUpdateParser {
     const val GITHUB_OWNER = "petrosvassiliou"
     const val GITHUB_REPO = "thingsbook-android"
     const val LATEST_RELEASE_API_URL = "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/latest"
-    const val RELEASES_LIST_API_URL = "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases?per_page=10"
+    const val RELEASES_LIST_API_URL = "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases?per_page=30"
     const val RELEASES_PAGE_URL = "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases/latest"
     const val BETA_RELEASES_PAGE_URL = "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases"
     const val RAW_GRADLE_URL = "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/main/app/build.gradle.kts"
+    const val RAW_BETA_GRADLE_URL = "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/beta-2.0/app/build.gradle.kts"
     const val RAW_README_URL = "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/main/README.md"
 
     private val json = Json {
@@ -229,8 +230,11 @@ object AppUpdateParser {
                 if (!includeBeta && isPre) return@filter false
                 true
             }
-            eligible.firstOrNull { hasApkAssetOrBodyLink(it) || it.body.isNotBlank() }
-                ?: eligible.firstOrNull()
+            val sortedEligible = eligible.sortedWith { a, b ->
+                compareVersions(normalizeVersion(b.tag_name), normalizeVersion(a.tag_name))
+            }
+            sortedEligible.firstOrNull { hasApkAssetOrBodyLink(it) || it.body.isNotBlank() }
+                ?: sortedEligible.firstOrNull()
                 ?: throw IllegalArgumentException("No matching release found in releases list")
         } else {
             json.decodeFromString<GitHubReleaseDto>(rawJson)
@@ -371,20 +375,53 @@ class AppUpdateManager @Inject constructor(
         }
 
         primaryAttempt.getOrElse { primaryError ->
-            // Fallback to raw main branch files (immune to unauthenticated GitHub REST API rate limits)
-            val gradleContent = runCatchingCancellable {
-                httpGetTextFollowingRedirects(url = AppUpdateParser.RAW_GRADLE_URL)
-            }.getOrElse { throw primaryError }
-
+            // Fallback to raw branch files (immune to unauthenticated GitHub REST API rate limits)
             val readmeContent = runCatchingCancellable {
                 httpGetTextFollowingRedirects(url = AppUpdateParser.RAW_README_URL)
             }.getOrNull()
 
-            AppUpdateParser.parseFallbackGradleAndReadme(
-                gradleKts = gradleContent,
-                readmeMarkdown = readmeContent,
-                includeBeta = effectiveIncludeBeta
-            )
+            if (effectiveIncludeBeta) {
+                val betaRelease = runCatchingCancellable {
+                    val betaGradle = httpGetTextFollowingRedirects(url = AppUpdateParser.RAW_BETA_GRADLE_URL)
+                    AppUpdateParser.parseFallbackGradleAndReadme(
+                        gradleKts = betaGradle,
+                        readmeMarkdown = null,
+                        includeBeta = true
+                    )
+                }.getOrNull()
+
+                val mainRelease = runCatchingCancellable {
+                    val mainGradle = httpGetTextFollowingRedirects(url = AppUpdateParser.RAW_GRADLE_URL)
+                    AppUpdateParser.parseFallbackGradleAndReadme(
+                        gradleKts = mainGradle,
+                        readmeMarkdown = readmeContent,
+                        includeBeta = true
+                    )
+                }.getOrNull()
+
+                when {
+                    betaRelease != null && mainRelease != null -> {
+                        if (AppUpdateParser.compareVersions(betaRelease.versionName, mainRelease.versionName) >= 0) {
+                            betaRelease
+                        } else {
+                            mainRelease
+                        }
+                    }
+                    betaRelease != null -> betaRelease
+                    mainRelease != null -> mainRelease
+                    else -> throw primaryError
+                }
+            } else {
+                val gradleContent = runCatchingCancellable {
+                    httpGetTextFollowingRedirects(url = AppUpdateParser.RAW_GRADLE_URL)
+                }.getOrElse { throw primaryError }
+
+                AppUpdateParser.parseFallbackGradleAndReadme(
+                    gradleKts = gradleContent,
+                    readmeMarkdown = readmeContent,
+                    includeBeta = false
+                )
+            }
         }
     }
 

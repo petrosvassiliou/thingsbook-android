@@ -89,7 +89,7 @@ public struct QuickEntrySheetView: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .help(voiceController.isRecording ? store.tr("macos_voice_stop") : store.tr("voice_capture_prompt"))
+                .thingsTooltip(voiceController.isRecording ? store.tr("macos_voice_stop") : store.tr("voice_capture_prompt"))
             }
 
             if voiceController.isRecording {
@@ -147,7 +147,7 @@ public struct QuickEntrySheetView: View {
                     .buttonStyle(.plain)
                     .fixedSize(horizontal: true, vertical: false)
                     .disabled(isSmartParsing)
-                    .help(store.tr("gemini_brain_dump_action"))
+                    .thingsTooltip(store.tr("gemini_brain_dump_action"))
 
                     Spacer()
                 }

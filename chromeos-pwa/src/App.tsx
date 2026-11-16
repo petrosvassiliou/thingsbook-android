@@ -129,6 +129,7 @@ import { ProjectProgressRing } from './components/ProjectProgressRing';
 import { AuthSyncModal, SettingsModal } from './components/SettingsAndAuthModals';
 import { Sidebar, SmartViewNavigationStrip } from './components/Sidebar';
 import { TaskItem } from './components/TaskItem';
+import { ThingsTooltipHost } from './components/ThingsTooltipHost';
 import {
   TemplatesAndImportModal,
   type TemplatesModalTab
@@ -1964,6 +1965,7 @@ export const App: React.FC = () => {
               <button
                 type="button"
                 className="brand-title-group"
+                title={t.viewToday}
                 onClick={() => handleSelectNav({ kind: 'smart', view: 'TODAY' })}
               >
                 <span className="brand-app-icon">
@@ -2032,7 +2034,7 @@ export const App: React.FC = () => {
               type="button"
               className="topbar-pill gemini-pill"
               onClick={() => setGeminiModalOpen(true)}
-              title="Ctrl+G"
+              title={`${t.geminiHubTitle} (Ctrl+G)`}
             >
               <Sparkles size={14} />
               <span className="topbar-label-hide-sm">Gemini</span>
@@ -2286,6 +2288,7 @@ export const App: React.FC = () => {
                     <button
                       type="button"
                       className="icon-btn"
+                      title={t.actionCancel}
                       onClick={() => updatePrefs({ setupBannerDismissed: true })}
                     >
                       <X size={15} />
@@ -2368,6 +2371,7 @@ export const App: React.FC = () => {
                           type="button"
                           className={`v2-segmented-btn ${todayViewMode === 'list' ? 'active' : ''}`}
                           data-testid="today-mode-list-btn"
+                          title={t.todayModeList}
                           onClick={() => setTodayViewMode('list')}
                         >
                           <List size={13.5} />
@@ -2377,6 +2381,7 @@ export const App: React.FC = () => {
                           type="button"
                           className={`v2-segmented-btn ${todayViewMode === 'timeline' ? 'active' : ''}`}
                           data-testid="today-mode-timeline-btn"
+                          title={t.todayModeTimeline}
                           onClick={() => setTodayViewMode('timeline')}
                         >
                           <CalendarDays size={13.5} />
@@ -2391,6 +2396,7 @@ export const App: React.FC = () => {
                           type="button"
                           className="chip-btn urgent"
                           data-testid="empty-trash-btn"
+                          title={t.trashEmptyBtn}
                           onClick={() => setEmptyTrashConfirmOpen(true)}
                         >
                           <Trash2 size={13} />
@@ -2406,6 +2412,7 @@ export const App: React.FC = () => {
                     <button
                       type="button"
                       className={`tag-pill ${selectedFilterTagId === null ? 'active' : ''}`}
+                      title={t.tagsFilterAll}
                       onClick={() => setSelectedFilterTagId(null)}
                     >
                       {t.tagsFilterAll}
@@ -2415,6 +2422,7 @@ export const App: React.FC = () => {
                         key={tg.id}
                         type="button"
                         className={`tag-pill ${selectedFilterTagId === tg.id ? 'active' : ''}`}
+                        title={`${t.entityTag}: ${tg.title}`}
                         onClick={() =>
                           setSelectedFilterTagId((cur) => (cur === tg.id ? null : tg.id))
                         }
@@ -2959,6 +2967,7 @@ export const App: React.FC = () => {
                                 type="button"
                                 className="icon-btn"
                                 disabled={pIdx === 0}
+                                title={t.actionMove}
                                 onClick={() =>
                                   localDb.moveProjectOrder(proj.id, 'up', area.id)
                                 }
@@ -2969,6 +2978,7 @@ export const App: React.FC = () => {
                                 type="button"
                                 className="icon-btn"
                                 disabled={pIdx === areaProjects.length - 1}
+                                title={t.actionMove}
                                 onClick={() =>
                                   localDb.moveProjectOrder(proj.id, 'down', area.id)
                                 }
@@ -2978,6 +2988,7 @@ export const App: React.FC = () => {
                               <button
                                 type="button"
                                 className="icon-btn"
+                                title={t.actionEdit}
                                 onClick={() =>
                                   setProjectModalState({ open: true, project: proj })
                                 }
@@ -3083,6 +3094,7 @@ export const App: React.FC = () => {
                           type="button"
                           className="icon-btn"
                           disabled={projIdx <= 0}
+                          title={t.actionMove}
                           onClick={() =>
                             localDb.moveProjectOrder(project.id, 'up', project.areaId)
                           }
@@ -3095,6 +3107,7 @@ export const App: React.FC = () => {
                           disabled={
                             projIdx < 0 || projIdx >= siblingProjects.length - 1
                           }
+                          title={t.actionMove}
                           onClick={() =>
                             localDb.moveProjectOrder(project.id, 'down', project.areaId)
                           }
@@ -3179,6 +3192,7 @@ export const App: React.FC = () => {
                               ? 'active'
                               : ''
                         }`}
+                        title={t.targetDate}
                         onClick={() =>
                           setDeadlineModalTarget({ kind: 'project', projectId: project.id })
                         }
@@ -3202,6 +3216,7 @@ export const App: React.FC = () => {
                         <button
                           type="button"
                           className={`chip-btn ${projArea ? 'active' : ''}`}
+                          title={t.assignArea}
                           onClick={() => setProjectAreaDropdownOpen((v) => !v)}
                         >
                           <Package size={12.5} />
@@ -3258,6 +3273,7 @@ export const App: React.FC = () => {
                       <button
                         type="button"
                         className="chip-btn"
+                        title={`${t.entityNewTodo} (Ctrl+N)`}
                         onClick={() => void createNewTodoInCurrentContext(null)}
                       >
                         <Plus size={12.5} />
@@ -3267,6 +3283,7 @@ export const App: React.FC = () => {
                       <button
                         type="button"
                         className="chip-btn"
+                        title={t.entityNewHeading}
                         onClick={() => void createNewHeadingInActiveProject()}
                       >
                         <HeadingIcon size={12.5} />
@@ -3277,6 +3294,7 @@ export const App: React.FC = () => {
                         type="button"
                         className="chip-btn"
                         data-testid="project-save-template-btn"
+                        title={t.projectSaveAsTemplateBtn}
                         onClick={async () => {
                           const tpl = await localDb.saveProjectAsTemplate(project.id);
                           if (tpl) {
@@ -3296,6 +3314,7 @@ export const App: React.FC = () => {
                       <button
                         type="button"
                         className={`tag-pill ${selectedFilterTagId === null ? 'active' : ''}`}
+                        title={t.tagsFilterAll}
                         onClick={() => setSelectedFilterTagId(null)}
                       >
                         {t.tagsFilterAll}
@@ -3305,6 +3324,7 @@ export const App: React.FC = () => {
                           key={tg.id}
                           type="button"
                           className={`tag-pill ${selectedFilterTagId === tg.id ? 'active' : ''}`}
+                          title={`${t.entityTag}: ${tg.title}`}
                           onClick={() =>
                             setSelectedFilterTagId((cur) => (cur === tg.id ? null : tg.id))
                           }
@@ -3499,6 +3519,7 @@ export const App: React.FC = () => {
                               type="button"
                               className="icon-btn"
                               style={{ height: 26, minWidth: 26, padding: 0 }}
+                              title={isCollapsed ? t.sidebarShow : t.sidebarHide}
                               onClick={toggleCollapse}
                             >
                               {isCollapsed ? (
@@ -3551,6 +3572,7 @@ export const App: React.FC = () => {
               <button
                 type="button"
                 className="chip-btn"
+                title={t.viewToday}
                 onClick={async () => {
                   await localDb.batchUpdateTasks(selectedTaskIds, {
                     scheduleState: 'TODAY',
@@ -3566,6 +3588,7 @@ export const App: React.FC = () => {
               <button
                 type="button"
                 className="chip-btn"
+                title={t.dateTomorrow}
                 onClick={async () => {
                   await localDb.batchUpdateTasks(selectedTaskIds, {
                     scheduleState: 'UPCOMING',
@@ -3581,6 +3604,7 @@ export const App: React.FC = () => {
               <button
                 type="button"
                 className="chip-btn"
+                title={t.actionMove}
                 onClick={() => setMoveModalTaskIds(selectedTaskIds)}
               >
                 <FolderInput size={12} />
@@ -3590,6 +3614,7 @@ export const App: React.FC = () => {
               <button
                 type="button"
                 className="chip-btn"
+                title={t.actionComplete}
                 onClick={async () => {
                   await localDb.batchUpdateTasks(selectedTaskIds, { status: 'COMPLETED' });
                   setSelectedTaskIds([]);
@@ -3602,6 +3627,7 @@ export const App: React.FC = () => {
               <button
                 type="button"
                 className="chip-btn urgent"
+                title={t.actionDelete}
                 onClick={async () => {
                   await localDb.softDeleteTasks(selectedTaskIds);
                   setSelectedTaskIds([]);
@@ -4048,6 +4074,7 @@ export const App: React.FC = () => {
               <button
                 type="button"
                 className="icon-btn"
+                title={t.actionCancel}
                 onClick={() => setPendingDeleteProject(null)}
               >
                 <X size={18} />
@@ -4166,6 +4193,8 @@ export const App: React.FC = () => {
           onUnlocked={() => setIsAppLocked(false)}
         />
       )}
+
+      <ThingsTooltipHost />
     </div>
   );
 };

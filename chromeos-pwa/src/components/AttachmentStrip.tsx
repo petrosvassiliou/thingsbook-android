@@ -166,7 +166,7 @@ export const AttachmentPreviewModal: React.FC<{
             >
               <Trash2 size={16} />
             </button>
-            <button type="button" className="icon-btn" onClick={onClose}>
+            <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
               <X size={18} />
             </button>
           </div>

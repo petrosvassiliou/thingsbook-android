@@ -63,6 +63,7 @@ interface ChecklistSubtaskRowProps {
   idx: number;
   totalCount: number;
   taskId: string;
+  t: TranslationStrings;
   registerRef: (el: HTMLInputElement | null) => void;
   onFocusAddBottom: () => void;
   onFocusNewSubtask: (newId: string) => void;
@@ -75,6 +76,7 @@ const ChecklistSubtaskRow: React.FC<ChecklistSubtaskRowProps> = ({
   idx,
   totalCount,
   taskId,
+  t,
   registerRef,
   onFocusAddBottom,
   onFocusNewSubtask,
@@ -97,6 +99,7 @@ const ChecklistSubtaskRow: React.FC<ChecklistSubtaskRowProps> = ({
       <button
         type="button"
         className={`checklist-circle ${item.isCompleted ? 'done' : ''}`}
+        title={item.isCompleted ? t.actionReopenTodo : t.actionComplete}
         onClick={() =>
           void localDb.updateChecklistItem(item.id, { isCompleted: !item.isCompleted })
         }
@@ -161,6 +164,7 @@ const ChecklistSubtaskRow: React.FC<ChecklistSubtaskRowProps> = ({
           className="icon-btn"
           style={{ height: 22, minWidth: 22, padding: 0 }}
           disabled={idx === 0}
+          title={t.actionMove}
           onClick={() => onSwapWith('up')}
         >
           <ArrowUp size={12.5} />
@@ -170,6 +174,7 @@ const ChecklistSubtaskRow: React.FC<ChecklistSubtaskRowProps> = ({
           className="icon-btn"
           style={{ height: 22, minWidth: 22, padding: 0 }}
           disabled={idx === totalCount - 1}
+          title={t.actionMove}
           onClick={() => onSwapWith('down')}
         >
           <ArrowDown size={12.5} />
@@ -178,6 +183,7 @@ const ChecklistSubtaskRow: React.FC<ChecklistSubtaskRowProps> = ({
           type="button"
           className="icon-btn"
           style={{ height: 22, minWidth: 22, padding: 0 }}
+          title={t.actionDelete}
           onClick={() => void localDb.deleteChecklistItem(item.id)}
         >
           <X size={13} />
@@ -763,6 +769,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               idx={idx}
               totalCount={activeChecklists.length}
               taskId={task.id}
+              t={t}
               registerRef={(el) => {
                 subtaskRefs.current[item.id] = el;
               }}
@@ -816,6 +823,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               <button
                 type="button"
                 className="chip-btn active"
+                title={t.actionChecklist}
                 onClick={async () => {
                   const txt = newSubtask.trim();
                   setNewSubtask('');
@@ -840,6 +848,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 ? 'active'
                 : ''
             }`}
+            title={t.ctxWhenReminder}
             onClick={() => {
               flushDraftsIfNeeded();
               onOpenWhenModal(task.id);
@@ -866,6 +875,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             className={`chip-btn ${
               task.scheduledStartMinutes != null || timeblockOpen ? 'active' : ''
             }`}
+            title={t.actionTimeblock}
             onClick={() => {
               flushDraftsIfNeeded();
               setTimeblockOpen((v) => !v);
@@ -882,6 +892,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             <button
               type="button"
               className="chip-btn active"
+              title={`${t.actionReminder}: ${formatReminderClock(task.reminderTime)}`}
               onClick={() => {
                 flushDraftsIfNeeded();
                 onOpenWhenModal(task.id);
@@ -896,6 +907,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           <button
             type="button"
             className={`chip-btn ${task.recurrenceRule != null ? 'active' : ''}`}
+            title={t.actionRepeat}
             onClick={() => {
               flushDraftsIfNeeded();
               onOpenRepeatModal(task.id);
@@ -915,6 +927,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             className={`chip-btn ${
               dlMeta ? (dlMeta.urgent ? 'urgent' : 'active') : ''
             }`}
+            title={dlMeta ? `${t.actionDeadline}: ${dlMeta.label}` : t.actionDeadline}
             onClick={() => {
               flushDraftsIfNeeded();
               onOpenDeadlineModal(task.id);
@@ -933,6 +946,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           <button
             type="button"
             className={`chip-btn ${containerLabel ? 'active' : ''}`}
+            title={t.ctxMoveContainer}
             onClick={() => {
               flushDraftsIfNeeded();
               onOpenMoveModal(task.id);
@@ -948,6 +962,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               key={tg.id}
               type="button"
               className="chip-btn active"
+              title={`${t.entityTag}: ${tg.title}`}
               onClick={() => {
                 flushDraftsIfNeeded();
                 onOpenTagsModal(task.id);
@@ -961,6 +976,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           <button
             type="button"
             className="chip-btn"
+            title={t.ctxAssignTags}
             onClick={() => {
               flushDraftsIfNeeded();
               onOpenTagsModal(task.id);
@@ -1002,6 +1018,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                     key={mins}
                     type="button"
                     className={`chip-btn ${task.scheduledStartMinutes === mins ? 'active' : ''}`}
+                    title={`${t.timeblockStartTime}: ${formatMinutesAsClock(mins)}`}
                     onClick={() =>
                       void localDb.upsertTask({
                         id: task.id,
@@ -1025,6 +1042,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                     key={dur}
                     type="button"
                     className={`chip-btn ${currentDuration === dur ? 'active' : ''}`}
+                    title={`${t.timeblockDuration}: ${dur}m`}
                     onClick={() =>
                       void localDb.upsertTask({
                         id: task.id,
@@ -1043,6 +1061,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                   type="button"
                   className="chip-btn urgent"
                   style={{ marginLeft: 'auto' }}
+                  title={t.timeblockClear}
                   onClick={() =>
                     void localDb.upsertTask({
                       id: task.id,
@@ -1065,6 +1084,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             type="button"
             className="chip-btn gemini"
             disabled={loadingAi}
+            title={t.geminiMagicBreakdown}
             onClick={() => void runMagicBreakdown()}
           >
             <Sparkles size={13.5} />
@@ -1189,6 +1209,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               type="button"
               className="btn-primary"
               style={{ padding: '5px 11px', fontSize: 12.2 }}
+              title={t.actionDone}
               onClick={handleDoneCollapse}
             >
               <Check size={14} />
@@ -1312,23 +1333,23 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             <div className="task-row-badges-second">
               {/* 1. Schedule State Badge (This Evening everywhere; Today / Upcoming / Someday in Project & Area views) */}
               {task.scheduleState === 'THIS_EVENING' ? (
-                <span className="meta-badge evening">
+                <span className="meta-badge evening" title={t.viewThisEvening}>
                   <Moon size={10.5} />
                   <span>{t.viewThisEvening}</span>
                 </span>
               ) : showCollapsedSchedulePill ? (
                 task.scheduleState === 'TODAY' ? (
-                  <span className="meta-badge today">
+                  <span className="meta-badge today" title={t.viewToday}>
                     <Star size={10.5} fill="var(--today-star)" style={{ color: 'var(--today-star)' }} />
                     <span>{t.viewToday}</span>
                   </span>
                 ) : task.scheduleState === 'SOMEDAY' ? (
-                  <span className="meta-badge">
+                  <span className="meta-badge" title={t.viewSomeday}>
                     <Archive size={10.5} />
                     <span>{t.viewSomeday}</span>
                   </span>
                 ) : task.whenDate != null ? (
-                  <span className="meta-badge">
+                  <span className="meta-badge" title={`${t.actionWhen}: ${formatShortDate(task.whenDate)}`}>
                     <Calendar size={10.5} />
                     <span>{formatShortDate(task.whenDate)}</span>
                   </span>
@@ -1337,14 +1358,21 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 
               {/* 1b. v2.0 Timeblock Range Pill */}
               {timeblockRangeLabel && (
-                <span className="meta-badge v2-timeblock-pill" data-testid="task-row-timeblock-pill">
+                <span
+                  className="meta-badge v2-timeblock-pill"
+                  data-testid="task-row-timeblock-pill"
+                  title={`${t.actionTimeblock}: ${timeblockRangeLabel}`}
+                >
                   <span>🕐 {timeblockRangeLabel}</span>
                 </span>
               )}
 
               {/* 2. Repeat */}
               {task.recurrenceRule != null && (
-                <span className="meta-badge">
+                <span
+                  className="meta-badge"
+                  title={`${t.actionRepeat}: ${formatRecurrenceShort(task.recurrenceRule, lang)}`}
+                >
                   <Repeat size={10.5} />
                   <span>{formatRecurrenceShort(task.recurrenceRule, lang)}</span>
                 </span>
@@ -1352,7 +1380,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 
               {/* 3. Reminder */}
               {task.reminderTime != null && (
-                <span className="meta-badge">
+                <span
+                  className="meta-badge"
+                  title={`${t.actionReminder}: ${formatReminderClock(task.reminderTime)}`}
+                >
                   <Bell size={10.5} />
                   <span>{formatReminderClock(task.reminderTime)}</span>
                 </span>
@@ -1360,7 +1391,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 
               {/* 4. Checklist */}
               {activeChecklists.length > 0 && (
-                <span className="meta-badge">
+                <span
+                  className="meta-badge"
+                  title={`${t.actionChecklist}: ${doneChecklistsCount}/${activeChecklists.length}`}
+                >
                   <CheckSquare size={10.5} />
                   <span>
                     {doneChecklistsCount}/{activeChecklists.length}
@@ -1370,7 +1404,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 
               {/* 4b. Attachments Count Badge (v1.8.0) */}
               {taskAttachments.length > 0 && (
-                <span className="meta-badge" title={t.attachmentsTitle}>
+                <span className="meta-badge" title={`${t.attachmentsTitle}: ${taskAttachments.length}`}>
                   <Paperclip size={10.5} />
                   <span>{taskAttachments.length}</span>
                 </span>
@@ -1378,7 +1412,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 
               {/* 5. Tag Pills */}
               {taskTags.map((tg) => (
-                <span key={tg.id} className="meta-badge">
+                <span key={tg.id} className="meta-badge" title={`${t.entityTag}: ${tg.title}`}>
                   <Tag size={9.5} />
                   <span>{tg.title}</span>
                 </span>
@@ -1388,7 +1422,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               {task.deadline != null && (() => {
                 const dl = renderDeadlineMeta(task.deadline);
                 return (
-                  <span className={`meta-badge ${dl.urgent ? 'urgent' : ''}`}>
+                  <span
+                    className={`meta-badge ${dl.urgent ? 'urgent' : ''}`}
+                    title={`${t.actionDeadline}: ${dl.label}`}
+                  >
                     <Flag size={10.5} />
                     <span>{dl.label}</span>
                   </span>
@@ -1398,7 +1435,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           )}
         </div>
 
-        <span className="drag-grip" title="Drag">
+        <span className="drag-grip" title={t.actionMove}>
           <GripVertical size={15} />
         </span>
       </div>

@@ -50,6 +50,7 @@ public struct GeminiAssistantSheet: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .thingsTooltip(store.tr("gemini_api_key_label"))
 
                 Button {
                     dismiss()
@@ -59,6 +60,7 @@ public struct GeminiAssistantSheet: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .thingsTooltip("\(store.tr("action_done")) (Esc)")
             }
 
             if showApiKeyField {

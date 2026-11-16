@@ -55,7 +55,7 @@ public struct SettingsWindowView: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .help(store.tr("settings_close_tooltip"))
+                    .thingsTooltip(store.tr("settings_close_tooltip"))
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
@@ -151,6 +151,7 @@ public struct SettingsWindowView: View {
                                 )
                             }
                             .buttonStyle(.plain)
+                            .thingsTooltip(languageLabel(for: lang))
                         }
                     }
                 }

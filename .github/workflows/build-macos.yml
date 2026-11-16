@@ -49,15 +49,73 @@ jobs:
         env:
           KEYSTORE_B64: ${{ secrets.THINGSBOOK_DEBUG_KEYSTORE_B64 }}
         run: |
-          if [ -n "$KEYSTORE_B64" ]; then
-            mkdir -p "$HOME/.gemini"
-            echo "$KEYSTORE_B64" | base64 -d > "$HOME/.gemini/thingsbook-debug.keystore"
-            chmod 600 "$HOME/.gemini/thingsbook-debug.keystore"
-            echo "Restored persistent Thingsbook signing keystore."
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::THINGSBOOK_DEBUG_KEYSTORE_B64 secret is missing; refusing to sign with an ephemeral keystore because that would break in-place upgrades over 1.8 releases."
+            exit 1
           fi
+          mkdir -p "$HOME/.gemini"
+          echo "$KEYSTORE_B64" | base64 -d > "$HOME/.gemini/thingsbook-debug.keystore"
+          chmod 600 "$HOME/.gemini/thingsbook-debug.keystore"
+          test -s "$HOME/.gemini/thingsbook-debug.keystore"
+          echo "Restored persistent Thingsbook signing keystore."
 
       - name: Run Android Unit Tests & Assemble Release APK
         run: gradle testDebugUnitTest assembleRelease --no-daemon
+
+      - name: Verify APK Signing Certificate & 1.8 Upgrade Compatibility
+        run: |
+          python3 - <<'PY'
+          import hashlib, struct, sys
+
+          APK_PATH = "app/build/outputs/apk/release/app-release.apk"
+          EXPECTED_CERT_SHA256 = "61:75:91:8B:C7:1A:3D:2F:72:E3:AB:14:54:9C:9C:06:66:F3:F3:D1:5E:BB:E1:D8:15:64:78:54:EF:F5:AB:24"
+
+          with open(APK_PATH, "rb") as f:
+              data = f.read()
+
+          eocd = data.rfind(b"PK\x05\x06")
+          assert eocd != -1, "ZIP EOCD not found in APK"
+          cd_offset = struct.unpack_from("<I", data, eocd + 16)[0]
+          assert data[cd_offset - 16 : cd_offset] == b"APK Sig Block 42", "APK Signature Block v2 missing"
+          block_size = struct.unpack_from("<Q", data, cd_offset - 24)[0]
+          block_start = cd_offset - 8 - block_size
+          pairs_end = cd_offset - 24
+          pos = block_start + 8
+          v2_block = None
+          while pos < pairs_end:
+              pair_len = struct.unpack_from("<Q", data, pos)[0]
+              pair_id = struct.unpack_from("<I", data, pos + 8)[0]
+              if pair_id == 0x7109871A:
+                  v2_block = data[pos + 12 : pos + 8 + pair_len]
+                  break
+              pos += 8 + pair_len
+          assert v2_block is not None, "APK Signature Scheme v2 ID (0x7109871a) missing"
+
+          signers_len = struct.unpack_from("<I", v2_block, 0)[0]
+          assert signers_len > 0, "Empty v2 signers list"
+          signer_len = struct.unpack_from("<I", v2_block, 4)[0]
+          signed_data_len = struct.unpack_from("<I", v2_block, 8)[0]
+          signed_data = v2_block[12 : 12 + signed_data_len]
+          digests_len = struct.unpack_from("<I", signed_data, 0)[0]
+          certs_offset = 4 + digests_len
+          certs_len = struct.unpack_from("<I", signed_data, certs_offset)[0]
+          assert certs_len > 0, "No X.509 certificate in v2 signature"
+          cert_len = struct.unpack_from("<I", signed_data, certs_offset + 4)[0]
+          cert_der = signed_data[certs_offset + 8 : certs_offset + 8 + cert_len]
+          actual_fp = ":".join(f"{b:02X}" for b in hashlib.sha256(cert_der).digest())
+          print(f"Verified APK v2 certificate SHA-256: {actual_fp}")
+          if actual_fp != EXPECTED_CERT_SHA256:
+              sys.exit(f"Signing certificate mismatch! Expected {EXPECTED_CERT_SHA256} (1.8 release key), got {actual_fp}")
+
+          import re
+          gradle_text = open("app/build.gradle.kts", "r", encoding="utf-8").read()
+          vc_match = re.search(r"versionCode\s*=\s*(\d+)", gradle_text)
+          assert vc_match is not None, "versionCode missing in app/build.gradle.kts"
+          vc = int(vc_match.group(1))
+          print(f"Verified APK versionCode: {vc} (> 44 required for 1.8.1 upgrade)")
+          if vc <= 44:
+              sys.exit(f"versionCode {vc} must be > 44 (v1.8.1) for in-place Android upgrades")
+          PY
 
       - name: Stage Signed Android APK
         run: |

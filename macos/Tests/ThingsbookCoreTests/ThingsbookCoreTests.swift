@@ -190,7 +190,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.10"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.11"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -405,12 +405,12 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(searchHits.tasks.map(\.id), ["remote-sync-task-1"], "FTS5 must index remotely synced tasks")
     }
 
-    // MARK: - 7. v2.0.0-beta.10 AppUpdateService Beta Channel, Stable Isolation & Version Bump
+    // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.10")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.10")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 54)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.11")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.11")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 55)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
 
         // Core [major, minor, patch] + build metadata comparisons on stable channel (includeBeta inferred false for 1.8.1)
@@ -2003,6 +2003,98 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(ThingsStrings.shared.text("action_tags", lang: .de), "Tags")
         XCTAssertEqual(ThingsStrings.shared.text("action_deadline", lang: .de), "Frist")
         XCTAssertEqual(ThingsStrings.shared.text("v2_timeblock_title", lang: .de), "Zeitblock")
+    }
+
+    // MARK: - 18. v2.0.0-beta.11 Instant TooltipTimingCoordinator Warm Handoff & Live State Updates
+
+    func testTooltipTimingCoordinatorWarmHandoffAndLiveUpdatesV200Beta11() {
+        var coordinator = TooltipTimingCoordinator(
+            initialDelayMs: 160,
+            warmHandoffWindowMs: 450
+        )
+
+        // 1. Cold hover entry schedules 160ms initial delay
+        let coldAction = coordinator.pointerEntered(
+            anchorId: "quick-find",
+            text: "Schnellsuche (⌘F)",
+            nowMs: 1_000
+        )
+        XCTAssertEqual(
+            coldAction,
+            .scheduleShow(anchorId: "quick-find", text: "Schnellsuche (⌘F)", delayMs: 160)
+        )
+        XCTAssertNil(coordinator.visibleAnchorId)
+
+        // Stale timer for another anchor must not fire
+        XCTAssertEqual(coordinator.commitScheduledShow(anchorId: "other", nowMs: 1_160), .none)
+        XCTAssertEqual(
+            coordinator.commitScheduledShow(anchorId: "quick-find", nowMs: 1_160),
+            .showImmediately(anchorId: "quick-find", text: "Schnellsuche (⌘F)")
+        )
+        XCTAssertEqual(coordinator.visibleAnchorId, "quick-find")
+        XCTAssertEqual(coordinator.visibleText, "Schnellsuche (⌘F)")
+
+        // 2. Sweeping directly onto an adjacent toolbar icon transitions in 0ms with zero stale tooltip lag
+        let directHandoff = coordinator.pointerEntered(
+            anchorId: "weekly-review",
+            text: "Wochenrückblick (⇧⌘R)",
+            nowMs: 1_280
+        )
+        XCTAssertEqual(
+            directHandoff,
+            .showImmediately(anchorId: "weekly-review", text: "Wochenrückblick (⇧⌘R)")
+        )
+
+        // Out-of-order pointerExited from the previous control must never clobber the active tooltip
+        XCTAssertEqual(coordinator.pointerExited(anchorId: "quick-find", nowMs: 1_285), .none)
+        XCTAssertEqual(coordinator.visibleAnchorId, "weekly-review")
+
+        // 3. Dynamic state or language change while hovered updates visible tooltip text in 0ms
+        XCTAssertEqual(
+            coordinator.updateText(
+                anchorId: "weekly-review",
+                text: "Weekly Review (⇧⌘R)",
+                nowMs: 1_320
+            ),
+            .showImmediately(anchorId: "weekly-review", text: "Weekly Review (⇧⌘R)")
+        )
+
+        // 4. Leaving starts 450ms warm window; entering next icon within 450ms shows in 0ms
+        XCTAssertEqual(coordinator.pointerExited(anchorId: "weekly-review", nowMs: 1_400), .hideImmediately)
+        XCTAssertEqual(
+            coordinator.pointerEntered(
+                anchorId: "templates",
+                text: "Vorlagen",
+                nowMs: 1_720
+            ),
+            .showImmediately(anchorId: "templates", text: "Vorlagen")
+        )
+
+        // 5. Waiting beyond 450ms resets to 160ms cold delay
+        XCTAssertEqual(coordinator.pointerExited(anchorId: "templates", nowMs: 2_000), .hideImmediately)
+        XCTAssertEqual(
+            coordinator.pointerEntered(
+                anchorId: "gemini",
+                text: "Gemini KI (⌘G)",
+                nowMs: 2_600
+            ),
+            .scheduleShow(anchorId: "gemini", text: "Gemini KI (⌘G)", delayMs: 160)
+        )
+
+        // 6. Click / scroll dismissAll(allowWarmHandoff: false) clears active & warm state immediately
+        _ = coordinator.commitScheduledShow(anchorId: "gemini", nowMs: 2_760)
+        XCTAssertEqual(
+            coordinator.dismissAll(nowMs: 2_800, allowWarmHandoff: false),
+            .hideImmediately
+        )
+        XCTAssertEqual(
+            coordinator.pointerEntered(
+                anchorId: "gemini",
+                text: "Gemini KI (⌘G)",
+                nowMs: 2_850
+            ),
+            .scheduleShow(anchorId: "gemini", text: "Gemini KI (⌘G)", delayMs: 160)
+        )
     }
 }
 

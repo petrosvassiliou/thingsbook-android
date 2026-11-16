@@ -7,7 +7,7 @@ set -euo pipefail
 
 APP_NAME="Thingsbook"
 INSTALL_DIR="/Applications"
-RELEASES_API="https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases?per_page=15"
+RELEASES_API="https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases?per_page=30"
 
 resolve_beta_or_stable_dmg_url() {
   local json_payload="${1:-}"
@@ -168,6 +168,7 @@ fi
 TMP_DIR="$(mktemp -d)"
 DMG_PATH="$TMP_DIR/Thingsbook-macOS-Universal.dmg"
 MOUNT_POINT="$TMP_DIR/mount"
+BACKUP_APP="$TMP_DIR/rollback-$APP_NAME.app"
 
 cleanup() {
   if [ -d "$MOUNT_POINT" ]; then
@@ -192,7 +193,7 @@ fi
 if pgrep -x "Thingsbook" >/dev/null 2>&1 || pgrep -x "ThingsbookMac" >/dev/null 2>&1; then
   echo "🔄 Closing running $APP_NAME instance (preserving all local tasks & sync state)..."
   osascript -e 'tell application "Thingsbook" to quit' 2>/dev/null || killall Thingsbook 2>/dev/null || killall ThingsbookMac 2>/dev/null || true
-  for _ in 1 2 3 4 5; do
+  for _ in 1 2 3 4 5 6 7 8; do
     if ! pgrep -x "Thingsbook" >/dev/null 2>&1 && ! pgrep -x "ThingsbookMac" >/dev/null 2>&1; then
       break
     fi
@@ -201,10 +202,32 @@ if pgrep -x "Thingsbook" >/dev/null 2>&1 || pgrep -x "ThingsbookMac" >/dev/null 
   killall Thingsbook 2>/dev/null || killall ThingsbookMac 2>/dev/null || true
 fi
 
+TARGET_APP="$INSTALL_DIR/$APP_NAME.app"
 echo "📦 Upgrading / installing $APP_NAME.app in $INSTALL_DIR..."
-rm -rf "$INSTALL_DIR/$APP_NAME.app"
-ditto "$MOUNT_POINT/$APP_NAME.app" "$INSTALL_DIR/$APP_NAME.app"
-xattr -cr "$INSTALL_DIR/$APP_NAME.app" 2>/dev/null || true
+if [ -w "$INSTALL_DIR" ] && { [ ! -e "$TARGET_APP" ] || [ -w "$TARGET_APP" ]; }; then
+  if [ -d "$TARGET_APP" ]; then
+    mv "$TARGET_APP" "$BACKUP_APP" 2>/dev/null || rm -rf "$TARGET_APP"
+  fi
+  if ditto "$MOUNT_POINT/$APP_NAME.app" "$TARGET_APP"; then
+    xattr -cr "$TARGET_APP" 2>/dev/null || true
+  else
+    [ -d "$BACKUP_APP" ] && [ ! -d "$TARGET_APP" ] && mv "$BACKUP_APP" "$TARGET_APP" 2>/dev/null || true
+    echo "❌ Error: Failed to copy $APP_NAME.app into $INSTALL_DIR." >&2
+    exit 1
+  fi
+else
+  echo "🔐 Administrator privileges required to replace $TARGET_APP..."
+  if [ -d "$TARGET_APP" ]; then
+    sudo mv "$TARGET_APP" "$BACKUP_APP" 2>/dev/null || sudo rm -rf "$TARGET_APP"
+  fi
+  if sudo ditto "$MOUNT_POINT/$APP_NAME.app" "$TARGET_APP"; then
+    sudo xattr -cr "$TARGET_APP" 2>/dev/null || true
+  else
+    [ -d "$BACKUP_APP" ] && [ ! -d "$TARGET_APP" ] && sudo mv "$BACKUP_APP" "$TARGET_APP" 2>/dev/null || true
+    echo "❌ Error: Failed to copy $APP_NAME.app into $INSTALL_DIR." >&2
+    exit 1
+  fi
+fi
 
-echo "✅ Installed $INSTALL_DIR/$APP_NAME.app — launching now!"
-open "$INSTALL_DIR/$APP_NAME.app"
+echo "✅ Installed $TARGET_APP — launching now!"
+open "$TARGET_APP"

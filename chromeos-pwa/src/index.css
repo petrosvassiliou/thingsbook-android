@@ -3235,3 +3235,37 @@ button.v2-stalled-pill:hover {
   }
 }
 
+/* ==================== Instant Cross-Platform Floating Tooltip ==================== */
+
+.tb-floating-tooltip {
+  position: fixed;
+  z-index: 99999;
+  pointer-events: none;
+  user-select: none;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 5px 10px;
+  border-radius: 7px;
+  background: rgba(24, 26, 32, 0.94);
+  color: #F7F8FA;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 6px 18px rgba(10, 14, 22, 0.28), 0 1px 3px rgba(10, 14, 22, 0.18);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  white-space: normal;
+  word-break: break-word;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: opacity 0.08s ease;
+}
+
+[data-theme="dark"] .tb-floating-tooltip {
+  background: rgba(14, 16, 20, 0.96);
+  color: #F5F6F8;
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+

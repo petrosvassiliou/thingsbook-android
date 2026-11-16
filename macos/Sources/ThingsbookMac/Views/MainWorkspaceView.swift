@@ -210,7 +210,7 @@ public struct MainWorkspaceView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .fixedSize(horizontal: true, vertical: false)
-                .help(pauseLabel)
+                .thingsTooltip(pauseLabel)
 
                 Button(store.tr("focus_timer_plus_5m")) {
                     store.addFiveMinutesToFocusTimer()
@@ -219,7 +219,7 @@ public struct MainWorkspaceView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .fixedSize(horizontal: true, vertical: false)
-                .help(store.tr("focus_timer_plus_5m"))
+                .thingsTooltip(store.tr("focus_timer_plus_5m"))
 
                 Button {
                     if let task = store.allOpenTasks.first(where: { $0.id == focus.taskId }) {
@@ -235,7 +235,7 @@ public struct MainWorkspaceView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .fixedSize(horizontal: true, vertical: false)
-                .help(store.tr("action_complete"))
+                .thingsTooltip(store.tr("action_complete"))
 
                 Button {
                     store.stopFocusTimer()
@@ -245,7 +245,7 @@ public struct MainWorkspaceView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help(store.tr("focus_timer_stop"))
+                .thingsTooltip(store.tr("focus_timer_stop"))
             }
 
             GeometryReader { geo in
@@ -324,7 +324,7 @@ public struct MainWorkspaceView: View {
                 NSCursor.arrow.set()
             }
         }
-        .help(store.tr("magic_plus_fab_tooltip"))
+        .thingsTooltip(store.tr("magic_plus_fab_tooltip"))
         .popover(isPresented: $isMagicPlusMenuOpen, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 4) {
                 magicPlusItem(
@@ -462,7 +462,7 @@ public struct MainWorkspaceView: View {
             .foregroundStyle(ThingsMacPalette.todayYellow)
             .fixedSize(horizontal: true, vertical: false)
             .buttonStyle(.plain)
-            .help("\(store.tr("action_when")): \(store.tr("view_today"))")
+            .thingsTooltip("\(store.tr("action_when")): \(store.tr("view_today"))")
 
             Button(store.tr("action_delete")) {
                 store.deleteSelectedTasks()
@@ -471,7 +471,7 @@ public struct MainWorkspaceView: View {
             .foregroundStyle(ThingsMacPalette.upcomingRed)
             .fixedSize(horizontal: true, vertical: false)
             .buttonStyle(.plain)
-            .help(store.tr("action_delete"))
+            .thingsTooltip(store.tr("action_delete"))
 
             Button {
                 store.selectedTaskIds.removeAll()
@@ -480,7 +480,7 @@ public struct MainWorkspaceView: View {
                     .foregroundStyle(.white.opacity(0.75))
             }
             .buttonStyle(.plain)
-            .help(store.tr("multiselect_clear"))
+            .thingsTooltip(store.tr("multiselect_clear"))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -508,7 +508,7 @@ public struct MainWorkspaceView: View {
             .foregroundStyle(ThingsMacPalette.todayYellow)
             .fixedSize(horizontal: true, vertical: false)
             .buttonStyle(.plain)
-            .help("\(store.tr("action_undo")) (⌘Z)")
+            .thingsTooltip("\(store.tr("action_undo")) (⌘Z)")
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
@@ -766,7 +766,7 @@ public struct MainWorkspaceView: View {
         .buttonStyle(.plain)
         .fixedSize(horizontal: true, vertical: false)
         .disabled(store.isLocked)
-        .help(store.tr("quick_find_title") + " (⌘F)")
+        .thingsTooltip(store.tr("quick_find_title") + " (⌘F)")
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isQuickFindHovered = hovering
@@ -1020,7 +1020,7 @@ private struct MacToolbarGeminiButton: View {
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
-        .help(helpText)
+        .thingsTooltip(helpText)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isHovered = hovering
@@ -1093,7 +1093,7 @@ private struct MacToolbarIconButton<Label: View>: View {
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
-        .help(helpText)
+        .thingsTooltip(helpText)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isHovered = hovering
@@ -1158,6 +1158,11 @@ private struct MacWindowTitlebarConfigurator: NSViewRepresentable {
             if window.titlebarSeparatorStyle != .none {
                 window.titlebarSeparatorStyle = .none
             }
+            if let items = window.toolbar?.items {
+                for item in items where item.toolTip != nil {
+                    item.toolTip = nil
+                }
+            }
         }
     }
 }
@@ -1171,6 +1176,13 @@ private struct MagicPlusPopoverRow: View {
     let action: () -> Void
 
     @State private var isHovered = false
+
+    private var rowTooltip: String {
+        if let shortcut, !shortcut.isEmpty {
+            return "\(title) (\(shortcut)) — \(subtitle)"
+        }
+        return "\(title) — \(subtitle)"
+    }
 
     var body: some View {
         Button(action: action) {
@@ -1218,6 +1230,7 @@ private struct MagicPlusPopoverRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .thingsTooltip(rowTooltip)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isHovered = hovering

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SQLite3
 
@@ -866,78 +867,130 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
     @discardableResult
     public func performMidnightRollover(referenceDate: Date = Date(), calendar: Calendar = .current) throws -> Int {
-        let changedCount: Int = try queue.sync {
+        var promotedCount = 0
+        var dedupedCount = 0
+        try queue.sync {
             let endOfToday = DateEpochConverter.endOfDayMillis(for: referenceDate, calendar: calendar)
             let sodToday = DateEpochConverter.startOfDayMillis(for: referenceDate, calendar: calendar)
             let now = nowMillis()
 
-            return try inTransactionLocked {
+            try inTransactionLocked {
                 var total = 0
                 let stmt1 = try prepareLocked("""
                     UPDATE tasks
-                    SET schedule_state = 'TODAY', updated_at = ?, is_dirty = 1
+                    SET schedule_state = 'TODAY'
                     WHERE status = 'OPEN' AND is_deleted = 0
                       AND schedule_state = 'UPCOMING'
                       AND when_date IS NOT NULL AND when_date <= ?;
                 """)
                 defer { sqlite3_finalize(stmt1) }
-                bindInt64(stmt1, 1, now)
-                bindInt64(stmt1, 2, endOfToday)
+                bindInt64(stmt1, 1, endOfToday)
                 if sqlite3_step(stmt1) == SQLITE_DONE {
                     total += Int(sqlite3_changes(db))
                 }
 
                 let stmt2 = try prepareLocked("""
                     UPDATE tasks
-                    SET schedule_state = 'TODAY', when_date = ?, updated_at = ?, is_dirty = 1
+                    SET schedule_state = 'TODAY', when_date = ?
                     WHERE status = 'OPEN' AND is_deleted = 0
                       AND schedule_state = 'THIS_EVENING'
                       AND ((when_date IS NOT NULL AND when_date < ?) OR (when_date IS NULL AND updated_at < ?));
                 """)
                 defer { sqlite3_finalize(stmt2) }
                 bindInt64(stmt2, 1, sodToday)
-                bindInt64(stmt2, 2, now)
+                bindInt64(stmt2, 2, sodToday)
                 bindInt64(stmt2, 3, sodToday)
-                bindInt64(stmt2, 4, sodToday)
                 if sqlite3_step(stmt2) == SQLITE_DONE {
                     total += Int(sqlite3_changes(db))
                 }
 
                 let stmt3 = try prepareLocked("""
                     UPDATE projects
-                    SET schedule_state = 'TODAY', updated_at = ?, is_dirty = 1
+                    SET schedule_state = 'TODAY'
                     WHERE status = 'ACTIVE' AND is_deleted = 0
                       AND schedule_state = 'UPCOMING'
                       AND when_date IS NOT NULL AND when_date <= ?;
                 """)
                 defer { sqlite3_finalize(stmt3) }
-                bindInt64(stmt3, 1, now)
-                bindInt64(stmt3, 2, endOfToday)
+                bindInt64(stmt3, 1, endOfToday)
                 if sqlite3_step(stmt3) == SQLITE_DONE {
                     total += Int(sqlite3_changes(db))
                 }
 
                 let stmt4 = try prepareLocked("""
                     UPDATE projects
-                    SET schedule_state = 'TODAY', when_date = ?, updated_at = ?, is_dirty = 1
+                    SET schedule_state = 'TODAY', when_date = ?
                     WHERE status = 'ACTIVE' AND is_deleted = 0
                       AND schedule_state = 'THIS_EVENING'
                       AND ((when_date IS NOT NULL AND when_date < ?) OR (when_date IS NULL AND updated_at < ?));
                 """)
                 defer { sqlite3_finalize(stmt4) }
                 bindInt64(stmt4, 1, sodToday)
-                bindInt64(stmt4, 2, now)
+                bindInt64(stmt4, 2, sodToday)
                 bindInt64(stmt4, 3, sodToday)
-                bindInt64(stmt4, 4, sodToday)
                 if sqlite3_step(stmt4) == SQLITE_DONE {
                     total += Int(sqlite3_changes(db))
                 }
 
-                return total
+                promotedCount = total
+                dedupedCount = try deduplicateOpenRecurringTasksLocked(nowMillis: now)
             }
         }
-        if changedCount > 0 { notifyMutation() }
-        return changedCount
+        if dedupedCount > 0 {
+            notifyMutation()
+        } else if promotedCount > 0 {
+            if let onRemoteSyncApplied {
+                onRemoteSyncApplied()
+            } else {
+                notifyMutation()
+            }
+        }
+        return promotedCount + dedupedCount
+    }
+
+    @discardableResult
+    public func deduplicateOpenRecurringTasks() throws -> Int {
+        let deduped: Int = try queue.sync {
+            let now = nowMillis()
+            return try inTransactionLocked {
+                try deduplicateOpenRecurringTasksLocked(nowMillis: now)
+            }
+        }
+        if deduped > 0 {
+            notifyMutation()
+        }
+        return deduped
+    }
+
+    private func fetchOpenRecurringTasksWithRawTagIdsLocked() throws -> (tasks: [TaskItem], rawTagIdsByTask: [String: [String]]) {
+        let tags = try fetchActiveTagsLocked()
+        let tagsById = Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0) })
+        let tagIds = try fetchAllTaskTagIdsLocked()
+        let tasks = try fetchTasksWhereLocked(
+            whereClause: "is_deleted = 0 AND status = 'OPEN' AND recurrence_rule IS NOT NULL",
+            bind: { _ in },
+            orderBy: "sort_order ASC",
+            tagsById: tagsById,
+            tagIdsByTask: tagIds,
+            checklistsByTask: [:]
+        )
+        return (tasks, tagIds)
+    }
+
+    private func deduplicateOpenRecurringTasksLocked(nowMillis: Int64) throws -> Int {
+        let (openRecurring, rawTagIdsByTask) = try fetchOpenRecurringTasksWithRawTagIdsLocked()
+        let loserIds = Self.selectRecurringDuplicateLoserIds(
+            openRecurring,
+            overrideTagIdsByTaskId: rawTagIdsByTask
+        )
+        guard !loserIds.isEmpty else { return 0 }
+        let openById = Dictionary(uniqueKeysWithValues: openRecurring.map { ($0.id, $0) })
+        for loserId in loserIds {
+            let prevUpdatedAt = openById[loserId]?.updatedAt ?? 0
+            let tombstoneAt = max(nowMillis, prevUpdatedAt + 1)
+            try purgeTaskToTombstoneLocked(taskId: loserId, now: tombstoneAt)
+        }
+        return loserIds.count
     }
 
     // MARK: - Task Mutations
@@ -1069,29 +1122,56 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         referenceDate: Date = Date(),
         calendar: Calendar = .current
     ) throws -> String? {
+        var didMutate = false
         let spawnedId: String? = try queue.sync {
             guard var existing = try fetchTaskByIdLocked(taskId) else { return nil }
             let previousStatus = existing.status
-            let now = Int64(referenceDate.timeIntervalSince1970 * 1000.0)
+            guard previousStatus != status else { return nil }
+            let rawTagIds = (try? fetchAllTaskTagIdsLocked()[taskId]) ?? existing.tagIds
+            let now = max(Int64(referenceDate.timeIntervalSince1970 * 1000.0), existing.updatedAt + 1)
             existing.status = status
             existing.completedAt = (status == .completed || status == .canceled) ? now : nil
             existing.updatedAt = now
+            didMutate = true
 
             return try inTransactionLocked {
-                try upsertTaskLocked(existing, tagIds: existing.tagIds, isDirty: true)
+                try upsertTaskLocked(existing, tagIds: rawTagIds, isDirty: true)
 
                 if status == .completed, previousStatus == .open, let rule = existing.recurrenceRule {
-                    return try spawnRecurringOccurrenceLocked(from: existing, rule: rule, nowMillis: now, referenceDate: referenceDate, calendar: calendar)
+                    return try spawnRecurringOccurrenceLocked(
+                        from: existing,
+                        rawTagIds: rawTagIds,
+                        rule: rule,
+                        nowMillis: now,
+                        referenceDate: referenceDate,
+                        calendar: calendar
+                    )
+                } else if status == .open, previousStatus != .open, existing.recurrenceRule != nil {
+                    if let seriesKey = Self.buildRecurringSeriesKey(existing, overrideTagIds: rawTagIds) {
+                        let (openRecurring, rawTagsByTask) = try fetchOpenRecurringTasksWithRawTagIdsLocked()
+                        for candidate in openRecurring where candidate.id != existing.id {
+                            if Self.buildRecurringSeriesKey(
+                                candidate,
+                                overrideTagIds: rawTagsByTask[candidate.id]
+                            ) == seriesKey {
+                                try purgeTaskToTombstoneLocked(
+                                    taskId: candidate.id,
+                                    now: max(now, candidate.updatedAt + 1)
+                                )
+                            }
+                        }
+                    }
                 }
                 return nil
             }
         }
-        notifyMutation()
+        if didMutate { notifyMutation() }
         return spawnedId
     }
 
     private func spawnRecurringOccurrenceLocked(
         from completedTask: TaskItem,
+        rawTagIds: [String],
         rule: RecurrenceRule,
         nowMillis: Int64,
         referenceDate: Date,
@@ -1136,18 +1216,40 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             )
         }
 
-        let newTaskId = UUID().uuidString
+        let dayComps = calendar.dateComponents([.year, .month, .day], from: nextDate)
+        let dateKey = String(
+            format: "%04d-%02d-%02d",
+            dayComps.year ?? 1970,
+            dayComps.month ?? 1,
+            dayComps.day ?? 1
+        )
+        let newTaskId = Self.deriveRecurringNextTaskId(
+            completedTaskId: completedTask.id,
+            nextWhenYyyyMmDd: dateKey
+        )
+        let existingById = try fetchTaskByIdLocked(newTaskId)
+        let nextUpdatedAt = existingById.map { max(nowMillis, $0.updatedAt + 1) } ?? nowMillis
         let maxOrder = try maxSortOrderLocked(table: "tasks")
 
-        let clonedChecklists = completedTask.checklistItems.map { chk in
-            ChecklistItem(
-                id: UUID().uuidString,
+        let escapedNewId = newTaskId.replacingOccurrences(of: "'", with: "''")
+        let priorChecklistsById = Dictionary(
+            uniqueKeysWithValues: ((try? fetchChecklistsWhereLocked("task_id = '\(escapedNewId)'")) ?? [])
+                .map { ($0.id, $0) }
+        )
+        let clonedChecklists = completedTask.checklistItems.map { chk -> ChecklistItem in
+            let nextChkId = Self.deriveRecurringChecklistItemId(
+                nextTaskId: newTaskId,
+                sourceChecklistId: chk.id
+            )
+            let existingChk = priorChecklistsById[nextChkId]
+            return ChecklistItem(
+                id: nextChkId,
                 taskId: newTaskId,
                 title: chk.title,
                 isCompleted: false,
                 sortOrder: chk.sortOrder,
-                createdAt: nowMillis,
-                updatedAt: nowMillis
+                createdAt: existingChk?.createdAt ?? nowMillis,
+                updatedAt: existingChk.map { max(nowMillis, $0.updatedAt + 1) } ?? nowMillis
             )
         }
 
@@ -1170,11 +1272,43 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             sortOrder: maxOrder + 1000.0,
             checklistItems: clonedChecklists,
             tags: completedTask.tags,
-            createdAt: nowMillis,
-            updatedAt: nowMillis
+            createdAt: existingById?.createdAt ?? nowMillis,
+            updatedAt: nextUpdatedAt
         )
 
-        try upsertTaskLocked(spawned, tagIds: completedTask.tagIds, isDirty: true)
+        if let seriesKey = Self.buildRecurringSeriesKey(spawned, overrideTagIds: rawTagIds) {
+            let (openRecurring, rawTagsByTask) = try fetchOpenRecurringTasksWithRawTagIdsLocked()
+            let openSiblings = openRecurring.filter {
+                $0.id != completedTask.id &&
+                    Self.buildRecurringSeriesKey($0, overrideTagIds: rawTagsByTask[$0.id]) == seriesKey
+            }
+            if !openSiblings.isEmpty {
+                var primary = openSiblings[0]
+                if openSiblings.count > 1 {
+                    for extra in openSiblings.dropFirst() {
+                        try purgeTaskToTombstoneLocked(
+                            taskId: extra.id,
+                            now: max(nowMillis, extra.updatedAt + 1)
+                        )
+                    }
+                }
+                if (primary.whenDate ?? 0) < nextWhenEpoch {
+                    primary.whenDate = nextWhenEpoch
+                    primary.scheduleState = nextSchedule
+                    primary.deadline = nextDeadline
+                    primary.reminderTime = nextReminder
+                    primary.updatedAt = max(nowMillis, primary.updatedAt + 1)
+                    try upsertTaskLocked(
+                        primary,
+                        tagIds: rawTagsByTask[primary.id] ?? primary.tagIds,
+                        isDirty: true
+                    )
+                }
+                return primary.id
+            }
+        }
+
+        try upsertTaskLocked(spawned, tagIds: rawTagIds, isDirty: true)
         for chk in clonedChecklists {
             try upsertChecklistItemLocked(chk, isDirty: true)
         }
@@ -1312,7 +1446,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             try upsertAttachmentLocked(att, isDirty: true)
         }
 
-        let chkStmt = try prepareLocked("UPDATE checklist_items SET title = '', is_deleted = 1, updated_at = ?, is_dirty = 1 WHERE task_id = ?;")
+        let chkStmt = try prepareLocked("UPDATE checklist_items SET title = '', is_deleted = 1, updated_at = MAX(updated_at + 1, ?), is_dirty = 1 WHERE task_id = ?;")
         defer { sqlite3_finalize(chkStmt) }
         bindInt64(chkStmt, 1, now)
         bindText(chkStmt, 2, taskId)
@@ -1323,7 +1457,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         bindText(ttStmt, 1, taskId)
         _ = sqlite3_step(ttStmt)
 
-        let stmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 1, is_dirty = 1, title = '', notes = '', tag_ids_json = '[]', scheduled_start_minutes = NULL, duration_minutes = NULL, updated_at = ? WHERE id = ?;")
+        let stmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 1, is_dirty = 1, title = '', notes = '', recurrence_rule = NULL, tag_ids_json = '[]', scheduled_start_minutes = NULL, duration_minutes = NULL, updated_at = MAX(updated_at + 1, ?) WHERE id = ?;")
         defer { sqlite3_finalize(stmt) }
         bindInt64(stmt, 1, now)
         bindText(stmt, 2, taskId)
@@ -3344,6 +3478,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     public func applyRemoteDeltas(_ deltas: RemoteDeltaBatch) throws -> Int64 {
         var maxTimestamp: Int64 = 0
         var appliedCount = 0
+        var didDeduplicate = false
         var clampedMax: Int64 = 0
 
         try queue.sync {
@@ -3462,6 +3597,13 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         appliedCount += 1
                     }
                 }
+                if !deltas.tasks.isEmpty {
+                    let deduped = try deduplicateOpenRecurringTasksLocked(nowMillis: self.nowMillis())
+                    if deduped > 0 {
+                        appliedCount += deduped
+                        didDeduplicate = true
+                    }
+                }
             }
             if appliedCount > 0 {
                 rebuildFtsLocked()
@@ -3471,7 +3613,9 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             clampedMax = maxTimestamp > 0 ? min(maxTimestamp, maxAllowed) : 0
         }
 
-        if appliedCount > 0 {
+        if didDeduplicate {
+            notifyMutation()
+        } else if appliedCount > 0 {
             if let onRemoteSyncApplied {
                 onRemoteSyncApplied()
             } else {
@@ -3486,6 +3630,112 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         let r = (remote ?? 0) > 0 ? remote : nil
         if let l, let r { return max(l, r) }
         return l ?? r
+    }
+
+    private static func sha256LowerHex(_ input: String) -> String {
+        let digest = SHA256.hash(data: Data(input.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    public static func formatDeterministicUuidFromSha256Hex(_ sha256HexDigest: String) -> String {
+        let h = Array(sha256HexDigest.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+        guard h.count >= 32 else { return UUID().uuidString.lowercased() }
+        let p1 = String(h[0..<8])
+        let p2 = String(h[8..<12])
+        let p3 = "5" + String(h[13..<16])
+        let p4 = "a" + String(h[17..<20])
+        let p5 = String(h[20..<32])
+        return "\(p1)-\(p2)-\(p3)-\(p4)-\(p5)"
+    }
+
+    public static func deriveRecurringNextTaskId(completedTaskId: String, nextWhenYyyyMmDd: String) -> String {
+        let seed = "thingsbook-rec-next-v1:\(completedTaskId.trimmingCharacters(in: .whitespacesAndNewlines)):\(nextWhenYyyyMmDd.trimmingCharacters(in: .whitespacesAndNewlines))"
+        return formatDeterministicUuidFromSha256Hex(sha256LowerHex(seed))
+    }
+
+    public static func deriveRecurringChecklistItemId(nextTaskId: String, sourceChecklistId: String) -> String {
+        let seed = "thingsbook-rec-chk-v1:\(nextTaskId.trimmingCharacters(in: .whitespacesAndNewlines)):\(sourceChecklistId.trimmingCharacters(in: .whitespacesAndNewlines))"
+        return formatDeterministicUuidFromSha256Hex(sha256LowerHex(seed))
+    }
+
+    public static func canonicalizeRecurrenceRuleKey(_ rule: RecurrenceRule?) -> String? {
+        guard let rule else { return nil }
+        let interval = min(3650, max(1, rule.interval))
+        let validDays = Array(Set(rule.daysOfWeek.filter { (1...7).contains($0) }))
+            .sorted()
+            .map(String.init)
+            .joined(separator: ",")
+        let dom = rule.dayOfMonth.map(String.init) ?? ""
+        let endMs = rule.endDateEpochMillis.map(String.init) ?? ""
+        return "\(rule.mode.rawValue)|\(rule.unit.rawValue)|\(interval)|\(validDays)|\(dom)|\(endMs)"
+    }
+
+    public static func buildRecurringSeriesKey(
+        _ task: TaskItem,
+        overrideTagIds: [String]? = nil
+    ) -> String? {
+        guard !task.isDeleted && task.status == .open else { return nil }
+        let normTitle = task.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normTitle.isEmpty else { return nil }
+        guard let ruleKey = canonicalizeRecurrenceRuleKey(task.recurrenceRule) else { return nil }
+        let normNotes = task.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let proj = (task.projectId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let head = (task.headingId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let area = (task.areaId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let normContainer = !proj.isEmpty ? "P:\(proj)|H:\(head)" : "A:\(area)"
+        let sourceTags = overrideTagIds ?? task.tagIds
+        let normTags = Array(
+            Set(sourceTags.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+        )
+            .sorted()
+            .joined(separator: ",")
+        let startPart = task.scheduledStartMinutes.map(String.init) ?? ""
+        let durPart = task.durationMinutes.map(String.init) ?? ""
+        let normTimeblock = "\(startPart):\(durPart)"
+        return "\(normTitle)\u{001F}\(normNotes)\u{001F}\(normContainer)\u{001F}\(ruleKey)\u{001F}\(normTags)\u{001F}\(normTimeblock)"
+    }
+
+    public static func compareRecurringTaskPriority(_ a: TaskItem, _ b: TaskItem) -> Bool {
+        let aWhen = a.whenDate ?? -1
+        let bWhen = b.whenDate ?? -1
+        if aWhen != bWhen {
+            return aWhen > bWhen
+        }
+        let aCreated = a.createdAt > 0 ? a.createdAt : Int64.max
+        let bCreated = b.createdAt > 0 ? b.createdAt : Int64.max
+        if aCreated != bCreated {
+            return aCreated < bCreated
+        }
+        return a.id < b.id
+    }
+
+    public static func selectRecurringDuplicateLoserIds(
+        _ tasks: [TaskItem],
+        overrideTagIdsByTaskId: [String: [String]] = [:]
+    ) -> [String] {
+        var orderedKeys: [String] = []
+        var groups: [String: [TaskItem]] = [:]
+        for task in tasks {
+            guard let key = buildRecurringSeriesKey(
+                task,
+                overrideTagIds: overrideTagIdsByTaskId[task.id]
+            ) else { continue }
+            if groups[key] == nil {
+                orderedKeys.append(key)
+                groups[key] = [task]
+            } else {
+                groups[key]?.append(task)
+            }
+        }
+        var losers: [String] = []
+        for key in orderedKeys {
+            guard let group = groups[key], group.count >= 2 else { continue }
+            let sorted = group.sorted(by: compareRecurringTaskPriority)
+            for loser in sorted.dropFirst() {
+                losers.append(loser.id)
+            }
+        }
+        return losers
     }
 
     private static func sortParentFirst<T>(

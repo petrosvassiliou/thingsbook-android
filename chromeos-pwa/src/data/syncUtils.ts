@@ -1,4 +1,4 @@
-import type { AttachmentRecord } from '../domain/types.ts';
+import type { AttachmentRecord, RecurrenceRule, TaskRecord } from '../domain/types.ts';
 
 export const MAX_ATTACHMENT_INLINE_BYTES = 700_000;
 export const ATTACHMENT_BATCH_CHUNK_SIZE = 8;
@@ -16,6 +16,162 @@ export function formatUidWakeSeed(userId: string): string {
 
 export function formatUidWakeChannelFromHex(sha256HexDigest: string): string {
   return `tb_uid_${sha256HexDigest.trim().toLowerCase().slice(0, 28)}`;
+}
+
+export function formatDeterministicUuidFromSha256Hex(sha256HexDigest: string): string {
+  const h = sha256HexDigest.trim().toLowerCase();
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
+export function formatLocalYyyyMmDd(epochMillis: number): string {
+  const d = new Date(epochMillis);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export function formatRecurringNextTaskSeed(completedTaskId: string, nextWhenYyyyMmDd: string): string {
+  return `thingsbook-rec-next-v1:${completedTaskId.trim()}:${nextWhenYyyyMmDd.trim()}`;
+}
+
+export function formatRecurringChecklistSeed(nextTaskId: string, sourceChecklistId: string): string {
+  return `thingsbook-rec-chk-v1:${nextTaskId.trim()}:${sourceChecklistId.trim()}`;
+}
+
+export async function sha256HexWebCrypto(input: string): Promise<string> {
+  const bytes = new TextEncoder().encode(input);
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+export async function deriveRecurringNextTaskId(
+  completedTaskId: string,
+  nextWhenYyyyMmDd: string
+): Promise<string> {
+  const hex = await sha256HexWebCrypto(formatRecurringNextTaskSeed(completedTaskId, nextWhenYyyyMmDd));
+  return formatDeterministicUuidFromSha256Hex(hex);
+}
+
+export async function deriveRecurringChecklistItemId(
+  nextTaskId: string,
+  sourceChecklistId: string
+): Promise<string> {
+  const hex = await sha256HexWebCrypto(formatRecurringChecklistSeed(nextTaskId, sourceChecklistId));
+  return formatDeterministicUuidFromSha256Hex(hex);
+}
+
+export type RecurringDedupCandidate = Pick<
+  TaskRecord,
+  | 'id'
+  | 'title'
+  | 'notes'
+  | 'status'
+  | 'isDeleted'
+  | 'whenDate'
+  | 'createdAt'
+  | 'projectId'
+  | 'headingId'
+  | 'areaId'
+  | 'recurrenceRule'
+  | 'tagIds'
+  | 'scheduledStartMinutes'
+  | 'durationMinutes'
+>;
+
+export function canonicalizeRecurrenceRuleKey(rule: RecurrenceRule | null | undefined): string | null {
+  if (!rule) return null;
+  const interval = Math.max(1, Math.min(3650, Math.trunc(rule.interval || 1)));
+  const validDays = Array.from(
+    new Set((rule.daysOfWeek || []).map((d) => Math.trunc(d)).filter((d) => d >= 1 && d <= 7))
+  )
+    .sort((a, b) => a - b)
+    .join(',');
+  const dom = rule.dayOfMonth != null ? String(Math.trunc(rule.dayOfMonth)) : '';
+  const endMs = rule.endDateEpochMillis != null ? String(Math.trunc(rule.endDateEpochMillis)) : '';
+  return `${rule.mode}|${rule.unit}|${interval}|${validDays}|${dom}|${endMs}`;
+}
+
+export function buildRecurringSeriesKey(
+  task: Pick<
+    RecurringDedupCandidate,
+    | 'title'
+    | 'notes'
+    | 'status'
+    | 'isDeleted'
+    | 'projectId'
+    | 'headingId'
+    | 'areaId'
+    | 'recurrenceRule'
+    | 'tagIds'
+    | 'scheduledStartMinutes'
+    | 'durationMinutes'
+  >
+): string | null {
+  if (task.isDeleted || task.status !== 'OPEN') return null;
+  const normTitle = (task.title || '').trim();
+  if (!normTitle) return null;
+  const ruleKey = canonicalizeRecurrenceRuleKey(task.recurrenceRule);
+  if (!ruleKey) return null;
+  const normNotes = (task.notes || '').trim();
+  const proj = (task.projectId || '').trim();
+  const head = (task.headingId || '').trim();
+  const area = (task.areaId || '').trim();
+  const normContainer = proj ? `P:${proj}|H:${head}` : `A:${area}`;
+  const normTags = Array.from(
+    new Set((task.tagIds || []).map((t) => t.trim()).filter(Boolean))
+  )
+    .sort()
+    .join(',');
+  const normTimeblock = `${task.scheduledStartMinutes ?? ''}:${task.durationMinutes ?? ''}`;
+  return `${normTitle}\u001F${normNotes}\u001F${normContainer}\u001F${ruleKey}\u001F${normTags}\u001F${normTimeblock}`;
+}
+
+export function compareRecurringTaskPriority(
+  a: Pick<RecurringDedupCandidate, 'id' | 'whenDate' | 'createdAt'>,
+  b: Pick<RecurringDedupCandidate, 'id' | 'whenDate' | 'createdAt'>
+): number {
+  const aWhen = a.whenDate != null && Number.isFinite(a.whenDate) ? Math.trunc(a.whenDate) : -1;
+  const bWhen = b.whenDate != null && Number.isFinite(b.whenDate) ? Math.trunc(b.whenDate) : -1;
+  if (aWhen !== bWhen) {
+    return aWhen > bWhen ? -1 : 1;
+  }
+  const aCreated =
+    Number.isFinite(a.createdAt) && a.createdAt > 0 ? Math.trunc(a.createdAt) : Number.MAX_SAFE_INTEGER;
+  const bCreated =
+    Number.isFinite(b.createdAt) && b.createdAt > 0 ? Math.trunc(b.createdAt) : Number.MAX_SAFE_INTEGER;
+  if (aCreated !== bCreated) {
+    return aCreated < bCreated ? -1 : 1;
+  }
+  if (a.id === b.id) return 0;
+  return a.id < b.id ? -1 : 1;
+}
+
+export function selectRecurringDuplicateLoserIds(
+  tasks: readonly RecurringDedupCandidate[]
+): string[] {
+  const groups = new Map<string, RecurringDedupCandidate[]>();
+  for (const t of tasks) {
+    const key = buildRecurringSeriesKey(t);
+    if (!key) continue;
+    const arr = groups.get(key);
+    if (arr) {
+      arr.push(t);
+    } else {
+      groups.set(key, [t]);
+    }
+  }
+  const losers: string[] = [];
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const sorted = [...group].sort(compareRecurringTaskPriority);
+    for (let i = 1; i < sorted.length; i++) {
+      losers.push(sorted[i].id);
+    }
+  }
+  return losers;
 }
 
 function finiteNumber(v: unknown, fallback = 0): number {

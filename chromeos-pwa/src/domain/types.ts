@@ -403,77 +403,110 @@ export function calculateNextRecurrenceDate(
   nowMillis: number = Date.now()
 ): number | null {
   const interval = Math.max(1, Math.min(3650, Math.floor(rule.interval || 1)));
+  const nowDate = new Date(nowMillis);
+  const todayMidnight = new Date(
+    nowDate.getFullYear(),
+    nowDate.getMonth(),
+    nowDate.getDate(),
+    0,
+    0,
+    0,
+    0
+  );
   const baseEpoch =
     rule.mode === 'AFTER_COMPLETION' ? nowMillis : (completedTaskWhenDate ?? nowMillis);
   const base = new Date(baseEpoch);
-  const baseMidnight = new Date(base.getFullYear(), base.getMonth(), base.getDate(), 0, 0, 0, 0);
+  const initialBaseMidnight = new Date(
+    base.getFullYear(),
+    base.getMonth(),
+    base.getDate(),
+    0,
+    0,
+    0,
+    0
+  );
 
-  let nextDate: Date;
-  if (rule.unit === 'DAYS') {
-    nextDate = new Date(
-      baseMidnight.getFullYear(),
-      baseMidnight.getMonth(),
-      baseMidnight.getDate() + interval
-    );
-  } else if (rule.unit === 'WEEKS') {
-    const validDays = Array.from(
-      new Set((rule.daysOfWeek || []).filter((d) => d >= 1 && d <= 7))
-    ).sort((a, b) => a - b);
-    if (rule.mode === 'FIXED_SCHEDULE' && validDays.length > 0) {
-      const currentDow = isoDayOfWeek(baseMidnight);
-      const nextSameWeek = validDays.find((d) => d > currentDow);
-      if (nextSameWeek != null) {
-        nextDate = new Date(
-          baseMidnight.getFullYear(),
-          baseMidnight.getMonth(),
-          baseMidnight.getDate() + (nextSameWeek - currentDow)
-        );
-      } else {
+  const validDays = Array.from(
+    new Set((rule.daysOfWeek || []).filter((d) => d >= 1 && d <= 7))
+  ).sort((a, b) => a - b);
+
+  const stepFrom = (anchorMidnight: Date): Date => {
+    if (rule.unit === 'DAYS') {
+      return new Date(
+        anchorMidnight.getFullYear(),
+        anchorMidnight.getMonth(),
+        anchorMidnight.getDate() + interval
+      );
+    }
+    if (rule.unit === 'WEEKS') {
+      if (rule.mode === 'FIXED_SCHEDULE' && validDays.length > 0) {
+        const currentDow = isoDayOfWeek(anchorMidnight);
+        const nextSameWeek = validDays.find((d) => d > currentDow);
+        if (nextSameWeek != null) {
+          return new Date(
+            anchorMidnight.getFullYear(),
+            anchorMidnight.getMonth(),
+            anchorMidnight.getDate() + (nextSameWeek - currentDow)
+          );
+        }
         const firstDow = validDays[0];
         const mondayOfCurrent = new Date(
-          baseMidnight.getFullYear(),
-          baseMidnight.getMonth(),
-          baseMidnight.getDate() - (currentDow - 1)
+          anchorMidnight.getFullYear(),
+          anchorMidnight.getMonth(),
+          anchorMidnight.getDate() - (currentDow - 1)
         );
-        nextDate = new Date(
+        return new Date(
           mondayOfCurrent.getFullYear(),
           mondayOfCurrent.getMonth(),
           mondayOfCurrent.getDate() + interval * 7 + (firstDow - 1)
         );
       }
-    } else {
-      nextDate = new Date(
-        baseMidnight.getFullYear(),
-        baseMidnight.getMonth(),
-        baseMidnight.getDate() + interval * 7
+      return new Date(
+        anchorMidnight.getFullYear(),
+        anchorMidnight.getMonth(),
+        anchorMidnight.getDate() + interval * 7
       );
     }
-  } else if (rule.unit === 'MONTHS') {
-    const targetMonthDate = new Date(
-      baseMidnight.getFullYear(),
-      baseMidnight.getMonth() + interval,
-      1
-    );
-    const lastDayOfTarget = new Date(
-      targetMonthDate.getFullYear(),
-      targetMonthDate.getMonth() + 1,
-      0
-    ).getDate();
-    let dom = baseMidnight.getDate();
-    if (rule.dayOfMonth === -1) {
-      dom = lastDayOfTarget;
-    } else if (rule.dayOfMonth != null && rule.dayOfMonth >= 1 && rule.dayOfMonth <= 31) {
-      dom = Math.min(rule.dayOfMonth, lastDayOfTarget);
-    } else {
-      dom = Math.min(dom, lastDayOfTarget);
+    if (rule.unit === 'MONTHS') {
+      const targetMonthDate = new Date(
+        anchorMidnight.getFullYear(),
+        anchorMidnight.getMonth() + interval,
+        1
+      );
+      const lastDayOfTarget = new Date(
+        targetMonthDate.getFullYear(),
+        targetMonthDate.getMonth() + 1,
+        0
+      ).getDate();
+      let dom = anchorMidnight.getDate();
+      if (rule.dayOfMonth === -1) {
+        dom = lastDayOfTarget;
+      } else if (rule.dayOfMonth != null && rule.dayOfMonth >= 1 && rule.dayOfMonth <= 31) {
+        dom = Math.min(rule.dayOfMonth, lastDayOfTarget);
+      } else {
+        dom = Math.min(dom, lastDayOfTarget);
+      }
+      return new Date(targetMonthDate.getFullYear(), targetMonthDate.getMonth(), dom);
     }
-    nextDate = new Date(targetMonthDate.getFullYear(), targetMonthDate.getMonth(), dom);
-  } else {
-    nextDate = new Date(
-      baseMidnight.getFullYear() + interval,
-      baseMidnight.getMonth(),
-      baseMidnight.getDate()
+    return new Date(
+      anchorMidnight.getFullYear() + interval,
+      anchorMidnight.getMonth(),
+      anchorMidnight.getDate()
     );
+  };
+
+  let nextDate = stepFrom(initialBaseMidnight);
+  if (rule.mode === 'FIXED_SCHEDULE' && nextDate.getTime() <= todayMidnight.getTime()) {
+    let guard = 0;
+    while (nextDate.getTime() <= todayMidnight.getTime() && guard < 500) {
+      const stepped = stepFrom(nextDate);
+      if (stepped.getTime() <= nextDate.getTime()) break;
+      nextDate = stepped;
+      guard++;
+    }
+    if (nextDate.getTime() <= todayMidnight.getTime()) {
+      nextDate = stepFrom(todayMidnight);
+    }
   }
 
   const nextMillis = nextDate.getTime();

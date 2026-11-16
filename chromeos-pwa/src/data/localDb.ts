@@ -40,7 +40,14 @@ import {
   type BackupSummary
 } from './backupCodec.ts';
 import { parseCsvTaskImport, serializeEntitiesToCsv } from './csvCodec.ts';
-import { mergeMonotonicReviewTimestamp } from './syncUtils.ts';
+import {
+  buildRecurringSeriesKey,
+  deriveRecurringChecklistItemId,
+  deriveRecurringNextTaskId,
+  formatLocalYyyyMmDd,
+  mergeMonotonicReviewTimestamp,
+  selectRecurringDuplicateLoserIds
+} from './syncUtils.ts';
 import {
   SAMPLE_CHECKLIST_IDS,
   SAMPLE_HEADING_IDS,
@@ -300,9 +307,10 @@ export class ThingsLocalDb {
           await tx.done;
         }
 
-        // Initial day rollover on startup (matching ThingsbookViewModel.init -> refreshCurrentDayAndRollover)
-        const promotedOnStartup = await this.rolloverDueTasksUnlocked(db);
-        if (promotedOnStartup > 0) {
+        // Initial day rollover on startup (local-only view promotion; preserves updatedAt/isDirty)
+        await this.rolloverDueTasksUnlocked(db);
+        const dedupedOnStartup = await this.deduplicateOpenRecurringTasksUnlocked(db);
+        if (dedupedOnStartup > 0) {
           this.triggerSync();
         }
       }
@@ -312,13 +320,14 @@ export class ThingsLocalDb {
   }
 
   /**
-   * Internal unlocked helper matching Android v1.6.19 TaskDao.rolloverDueUpcomingTasksToToday
+   * Internal unlocked helper matching Android TaskDao.rolloverDueUpcomingTasksToToday
    * and TaskDao.rolloverYesterdayEveningTasksToToday.
+   * Local rollover MUST NOT bump updatedAt or mark tasks isDirty, otherwise a device waking up
+   * before pulling remote completions would stamp a newer updatedAt and resurrect completed tasks.
    */
   private async rolloverDueTasksUnlocked(db: IDBPDatabase): Promise<number> {
     const startOfToday = startOfDayEpoch();
     const endOfToday = endOfDayEpoch();
-    const now = Date.now();
     const allTasks = (await db.getAll('tasks')) as TaskRecord[];
     const updates: TaskRecord[] = [];
 
@@ -328,9 +337,7 @@ export class ThingsLocalDb {
       if (t.scheduleState === 'UPCOMING' && t.whenDate != null && t.whenDate <= endOfToday) {
         updates.push({
           ...t,
-          scheduleState: 'TODAY',
-          updatedAt: now,
-          isDirty: true
+          scheduleState: 'TODAY'
         });
       } else if (
         t.scheduleState === 'THIS_EVENING' &&
@@ -340,9 +347,7 @@ export class ThingsLocalDb {
         updates.push({
           ...t,
           scheduleState: 'TODAY',
-          whenDate: startOfToday,
-          updatedAt: now,
-          isDirty: true
+          whenDate: startOfToday
         });
       }
     }
@@ -358,20 +363,80 @@ export class ThingsLocalDb {
     return updates.length;
   }
 
+  private async silentlyPurgeTasksByIdsUnlocked(
+    db: IDBPDatabase,
+    taskIds: readonly string[],
+    now = Date.now()
+  ): Promise<number> {
+    if (taskIds.length === 0) return 0;
+    const idSet = new Set(taskIds);
+    const allTasks = (await db.getAll('tasks')) as TaskRecord[];
+    const allChecklists = (await db.getAll('checklist_items')) as ChecklistItemRecord[];
+    const tx = db.transaction(['tasks', 'checklist_items'], 'readwrite');
+    const taskStore = tx.objectStore('tasks');
+    const chkStore = tx.objectStore('checklist_items');
+    let purgedCount = 0;
+
+    for (const t of allTasks) {
+      if (!idSet.has(t.id) || t.isDeleted) continue;
+      const tombstoneAt = Math.max(now, t.updatedAt + 1);
+      await taskStore.put({
+        ...t,
+        title: '',
+        notes: '',
+        recurrenceRule: null,
+        tagIds: [],
+        scheduledStartMinutes: null,
+        durationMinutes: null,
+        isDeleted: true,
+        purgedFromTrash: true,
+        isDirty: true,
+        updatedAt: tombstoneAt
+      });
+      purgedCount++;
+    }
+
+    for (const item of allChecklists) {
+      if (!idSet.has(item.taskId) || item.isDeleted) continue;
+      const tombstoneAt = Math.max(now, item.updatedAt + 1);
+      await chkStore.put({
+        ...item,
+        isDeleted: true,
+        isDirty: true,
+        updatedAt: tombstoneAt
+      });
+    }
+
+    await tx.done;
+    return purgedCount;
+  }
+
+  private async deduplicateOpenRecurringTasksUnlocked(
+    db: IDBPDatabase,
+    now = Date.now()
+  ): Promise<number> {
+    const allTasks = (await db.getAll('tasks')) as TaskRecord[];
+    const loserIds = selectRecurringDuplicateLoserIds(allTasks);
+    if (loserIds.length === 0) return 0;
+    return this.silentlyPurgeTasksByIdsUnlocked(db, loserIds, now);
+  }
+
   /**
    * Re-evaluates local day boundaries (00:00 midnight, app resume/focus, or timezone change)
-   * and promotes due UPCOMING tasks and yesterday's THIS_EVENING tasks to TODAY (Android v1.6.19 parity).
+   * and promotes due UPCOMING tasks and yesterday's THIS_EVENING tasks to TODAY.
    */
   async rolloverDueTasksForNewDay(): Promise<boolean> {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
       const promotedCount = await this.rolloverDueTasksUnlocked(db);
-      if (promotedCount > 0) {
+      const dedupedCount = await this.deduplicateOpenRecurringTasksUnlocked(db);
+      if (promotedCount > 0 || dedupedCount > 0) {
         await this.refreshSnapshot();
-        this.triggerSync();
-        return true;
       }
-      return false;
+      if (dedupedCount > 0) {
+        this.triggerSync();
+      }
+      return promotedCount > 0 || dedupedCount > 0;
     });
   }
 
@@ -693,7 +758,8 @@ export class ThingsLocalDb {
     await tx.store.put(record);
     await tx.done;
 
-    // Spawn next recurrence instance if transitioning OPEN -> COMPLETED
+    // Spawn next recurrence instance if transitioning OPEN -> COMPLETED,
+    // or clean up any already-spawned open sibling if reopening COMPLETED/CANCELED -> OPEN.
     let spawnedTaskId: string | null = null;
     if (
       (!existing || existing.status === 'OPEN') &&
@@ -701,6 +767,22 @@ export class ThingsLocalDb {
       record.recurrenceRule != null
     ) {
       spawnedTaskId = await this.spawnNextRecurrence(record, now);
+    } else if (
+      existing &&
+      existing.status !== 'OPEN' &&
+      status === 'OPEN' &&
+      record.recurrenceRule != null
+    ) {
+      const seriesKey = buildRecurringSeriesKey(record);
+      if (seriesKey) {
+        const allTasks = (await db.getAll('tasks')) as TaskRecord[];
+        const siblingIds = allTasks
+          .filter((t) => t.id !== record.id && buildRecurringSeriesKey(t) === seriesKey)
+          .map((t) => t.id);
+        if (siblingIds.length > 0) {
+          await this.silentlyPurgeTasksByIdsUnlocked(db, siblingIds, now);
+        }
+      }
     }
 
     if (
@@ -852,7 +934,12 @@ export class ThingsLocalDb {
       ).getTime();
     }
 
-    const newTaskId = crypto.randomUUID();
+    const newTaskId = await deriveRecurringNextTaskId(
+      completedTask.id,
+      formatLocalYyyyMmDd(nextWhen)
+    );
+    const existingById = (await db.get('tasks', newTaskId)) as TaskRecord | undefined;
+    const nextUpdatedAt = existingById ? Math.max(now, existingById.updatedAt + 1) : now;
     const nextTask: TaskRecord = {
       ...completedTask,
       id: newTaskId,
@@ -863,11 +950,43 @@ export class ThingsLocalDb {
       deadline: nextDeadline,
       reminderTime: nextReminder,
       sortOrder: completedTask.sortOrder + 0.01,
-      createdAt: now,
-      updatedAt: now,
+      createdAt: existingById?.createdAt ?? now,
+      updatedAt: nextUpdatedAt,
       isDeleted: false,
-      isDirty: true
+      isDirty: true,
+      purgedFromTrash: false
     };
+
+    const seriesKey = buildRecurringSeriesKey(nextTask);
+    if (seriesKey) {
+      const allTasks = (await db.getAll('tasks')) as TaskRecord[];
+      const openSiblings = allTasks.filter(
+        (t) => t.id !== completedTask.id && buildRecurringSeriesKey(t) === seriesKey
+      );
+      if (openSiblings.length > 0) {
+        const primary = openSiblings[0];
+        if (openSiblings.length > 1) {
+          await this.silentlyPurgeTasksByIdsUnlocked(
+            db,
+            openSiblings.slice(1).map((t) => t.id),
+            now
+          );
+        }
+        if ((primary.whenDate ?? 0) < nextWhen) {
+          await db.put('tasks', {
+            ...primary,
+            whenDate: nextWhen,
+            scheduleState: nextSchedule,
+            deadline: nextDeadline,
+            reminderTime: nextReminder,
+            updatedAt: Math.max(now, primary.updatedAt + 1),
+            isDirty: true
+          });
+        }
+        return primary.id;
+      }
+    }
+
     await db.put('tasks', nextTask);
 
     const allChecklists = (await db.getAll('checklist_items')) as ChecklistItemRecord[];
@@ -875,13 +994,17 @@ export class ThingsLocalDb {
       (c) => c.taskId === completedTask.id && !c.isDeleted
     );
     for (const item of sourceItems) {
+      const nextChecklistId = await deriveRecurringChecklistItemId(newTaskId, item.id);
+      const existingChk = (await db.get('checklist_items', nextChecklistId)) as
+        | ChecklistItemRecord
+        | undefined;
       await db.put('checklist_items', {
         ...item,
-        id: crypto.randomUUID(),
+        id: nextChecklistId,
         taskId: newTaskId,
         isCompleted: false,
-        createdAt: now,
-        updatedAt: now,
+        createdAt: existingChk?.createdAt ?? now,
+        updatedAt: existingChk ? Math.max(now, existingChk.updatedAt + 1) : now,
         isDeleted: false,
         isDirty: true
       });
@@ -2935,8 +3058,9 @@ export class ThingsLocalDb {
       await tx.done;
 
       if ((batch.tasks?.length ?? 0) > 0) {
-        const promoted = await this.rolloverDueTasksUnlocked(db);
-        if (promoted > 0) {
+        await this.rolloverDueTasksUnlocked(db);
+        const deduped = await this.deduplicateOpenRecurringTasksUnlocked(db);
+        if (deduped > 0) {
           this.triggerSync();
         }
       }

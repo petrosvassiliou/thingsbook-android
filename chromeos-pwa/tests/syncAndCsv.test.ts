@@ -11,11 +11,16 @@ import {
   attachmentToFirestoreMap,
   buildBoundedNtfyRelayPayload,
   buildNtfyRelayOrWakePayload,
+  buildRecurringSeriesKey,
   chunkItems,
   clampRemoteCursorTimestamp,
   computeEffectivePullCursor,
+  deriveRecurringChecklistItemId,
+  deriveRecurringNextTaskId,
+  formatLocalYyyyMmDd,
   formatUidWakeChannelFromHex,
-  formatUidWakeSeed
+  formatUidWakeSeed,
+  selectRecurringDuplicateLoserIds
 } from '../src/data/syncUtils.ts';
 import {
   detectCsvDelimiter,
@@ -26,13 +31,15 @@ import {
   serializeEntitiesToCsv,
   splitEscapedCsvList
 } from '../src/data/csvCodec.ts';
-import type {
-  AreaRecord,
-  AttachmentRecord,
-  ChecklistItemRecord,
-  ProjectRecord,
-  TagRecord,
-  TaskRecord
+import {
+  calculateNextRecurrenceDate,
+  type AreaRecord,
+  type AttachmentRecord,
+  type ChecklistItemRecord,
+  type ProjectRecord,
+  type RecurrenceRule,
+  type TagRecord,
+  type TaskRecord
 } from '../src/domain/types.ts';
 
 test('syncUtils enforces 120s clock-skew overlap and +60s future-timestamp cursor clamping', () => {
@@ -408,3 +415,97 @@ test('csvCodec escapes semicolons in checklist/tags, detects headerless delimite
   assert.deepEqual(esParsed[0].tagNames, ['Urgente']);
   assert.equal(esParsed[0].deadline, new Date(2026, 6, 19, 0, 0, 0, 0).getTime());
 });
+
+test('v2.0.0-beta.13 recurring task deterministic UUID vectors, overdue FIXED_SCHEDULE stepping, and series deduplication match Android & macOS', async () => {
+  // 1. Exact cross-platform SHA-256 deterministic UUID vectors
+  const nextTaskId = await deriveRecurringNextTaskId(' task-daily-001 ', '2026-11-17');
+  assert.equal(nextTaskId, 'e2d2925b-820d-5122-a510-f8164e907815');
+
+  const nextChkId = await deriveRecurringChecklistItemId(nextTaskId, 'chk-step-001');
+  assert.equal(nextChkId, '55d4ccdc-7b54-53cb-a216-e0f79e8fb359');
+
+  const nov17Local = new Date(2026, 10, 17, 0, 0, 0, 0).getTime();
+  assert.equal(formatLocalYyyyMmDd(nov17Local), '2026-11-17');
+
+  // 2. Overdue FIXED_SCHEDULE daily task completed Today advances strictly past Today to Tomorrow
+  const dailyFixed: RecurrenceRule = {
+    mode: 'FIXED_SCHEDULE',
+    interval: 1,
+    unit: 'DAYS',
+    daysOfWeek: [],
+    dayOfMonth: null,
+    endDateEpochMillis: null
+  };
+  const nov15Local = new Date(2026, 10, 15, 0, 0, 0, 0).getTime();
+  const nov16NoonLocal = new Date(2026, 10, 16, 12, 0, 0, 0).getTime();
+  assert.equal(calculateNextRecurrenceDate(dailyFixed, nov15Local, nov16NoonLocal), nov17Local);
+
+  // 3. Canonical series key + deterministic winner selection across cross-platform project/area shapes
+  const baseRecurring: TaskRecord = {
+    id: 'dup-stale-today',
+    title: 'Morning Journal',
+    notes: '5 minutes',
+    status: 'OPEN',
+    scheduleState: 'TODAY',
+    whenDate: new Date(2026, 10, 16, 0, 0, 0, 0).getTime(),
+    deadline: null,
+    reminderTime: null,
+    scheduledStartMinutes: 540,
+    durationMinutes: 15,
+    completedAt: null,
+    projectId: 'proj-1',
+    headingId: 'head-1',
+    areaId: 'area-1', // Android/macOS may populate areaId alongside projectId
+    recurrenceRule: dailyFixed,
+    sortOrder: 1000,
+    tagIds: ['tag-b', 'tag-a'],
+    createdAt: 1_760_000_050_000,
+    updatedAt: 1_760_000_900_000,
+    isDeleted: false,
+    isDirty: false
+  };
+  const latestOccurrence: TaskRecord = {
+    ...baseRecurring,
+    id: 'dup-latest-tomorrow',
+    scheduleState: 'UPCOMING',
+    whenDate: nov17Local,
+    areaId: null, // ChromeOS sets areaId=null when projectId != null
+    tagIds: ['tag-a', 'tag-b'],
+    createdAt: 1_760_000_200_000,
+    updatedAt: 1_760_000_200_000
+  };
+  const sameDateLaterCreated: TaskRecord = {
+    ...latestOccurrence,
+    id: 'dup-tomorrow-second',
+    createdAt: 1_760_000_250_000
+  };
+  const nonRecurringA: TaskRecord = {
+    ...baseRecurring,
+    id: 'plain-1',
+    title: 'Buy Coffee',
+    recurrenceRule: null
+  };
+  const nonRecurringB: TaskRecord = {
+    ...nonRecurringA,
+    id: 'plain-2'
+  };
+  const differentRuleTask: TaskRecord = {
+    ...latestOccurrence,
+    id: 'weekly-journal',
+    recurrenceRule: { ...dailyFixed, unit: 'WEEKS' }
+  };
+
+  assert.equal(buildRecurringSeriesKey(baseRecurring), buildRecurringSeriesKey(latestOccurrence));
+  assert.equal(buildRecurringSeriesKey(nonRecurringA), null);
+
+  const losers = selectRecurringDuplicateLoserIds([
+    baseRecurring,
+    latestOccurrence,
+    sameDateLaterCreated,
+    nonRecurringA,
+    nonRecurringB,
+    differentRuleTask
+  ]);
+  assert.deepEqual(new Set(losers), new Set(['dup-stale-today', 'dup-tomorrow-second']));
+});
+

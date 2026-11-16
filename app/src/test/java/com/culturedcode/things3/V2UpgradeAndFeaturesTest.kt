@@ -13,6 +13,7 @@ import com.culturedcode.things3.data.backup.ThingsbookBackupEnvelope
 import com.culturedcode.things3.data.backup.ThingsbookBackupPayload
 import com.culturedcode.things3.data.local.ThingsDatabase
 import com.culturedcode.things3.data.local.entity.ProjectEntity
+import com.culturedcode.things3.data.local.entity.TaskEntity
 import com.culturedcode.things3.data.remote.dto.CloudDeltaBatchPayload
 import com.culturedcode.things3.data.remote.dto.ProjectFirestoreDto
 import com.culturedcode.things3.data.remote.dto.ProjectTemplateFirestoreDto
@@ -28,6 +29,9 @@ import com.culturedcode.things3.domain.model.ProjectTemplateCodec
 import com.culturedcode.things3.domain.model.QuickFindDateFilter
 import com.culturedcode.things3.domain.model.QuickFindEntityScope
 import com.culturedcode.things3.domain.model.QuickFindFilter
+import com.culturedcode.things3.domain.model.RecurrenceMode
+import com.culturedcode.things3.domain.model.RecurrenceRule
+import com.culturedcode.things3.domain.model.RecurrenceUnit
 import com.culturedcode.things3.domain.model.ScheduleState
 import com.culturedcode.things3.domain.model.StalledProjectDetector
 import com.culturedcode.things3.domain.model.StalledProjectReason
@@ -1160,6 +1164,98 @@ class V2UpgradeAndFeaturesTest {
         )
         assertFalse(legacyDecoded.wakeOnly)
     }
+
+    @Test
+    fun `v2_0_0_beta_13 recurring task deterministic UUID vectors and canonical series deduplication match ChromeOS and macOS`() {
+        // 1. Exact cross-platform SHA-256 deterministic UUID vectors
+        val derivedTaskId = SyncRepository.deriveRecurringNextTaskId(" task-daily-001 ", "2026-11-17")
+        assertEquals("e2d2925b-820d-5122-a510-f8164e907815", derivedTaskId)
+
+        val derivedChkId = SyncRepository.deriveRecurringChecklistItemId(derivedTaskId, "chk-step-001")
+        assertEquals("55d4ccdc-7b54-53cb-a216-e0f79e8fb359", derivedChkId)
+
+        val jsonCodec = Json {
+            ignoreUnknownKeys = true
+            encodeDefaults = true
+        }
+        val dailyRuleJson = jsonCodec.encodeToString(
+            RecurrenceRule(
+                mode = RecurrenceMode.FIXED_SCHEDULE,
+                interval = 1,
+                unit = RecurrenceUnit.DAYS
+            )
+        )
+        val weeklyRuleJson = jsonCodec.encodeToString(
+            RecurrenceRule(
+                mode = RecurrenceMode.FIXED_SCHEDULE,
+                interval = 1,
+                unit = RecurrenceUnit.WEEKS
+            )
+        )
+
+        val staleToday = TaskEntity(
+            id = "dup-stale-today",
+            title = "Morning Journal",
+            notes = "5 minutes",
+            status = TaskStatus.OPEN,
+            scheduleState = ScheduleState.TODAY,
+            whenDate = 1_763_251_200_000L, // 2026-11-16
+            scheduledStartMinutes = 540,
+            durationMinutes = 15,
+            projectId = "proj-1",
+            headingId = "head-1",
+            areaId = "area-1",
+            recurrenceRuleJson = dailyRuleJson,
+            sortOrder = 1000.0,
+            tagIdsJson = """["tag-b","tag-a"]""",
+            createdAt = 1_760_000_050_000L,
+            updatedAt = 1_760_000_900_000L,
+            isDeleted = false,
+            isDirty = false
+        )
+        val latestTomorrow = staleToday.copy(
+            id = "dup-latest-tomorrow",
+            scheduleState = ScheduleState.UPCOMING,
+            whenDate = 1_763_337_600_000L, // 2026-11-17
+            areaId = null, // ChromeOS sets areaId=null when projectId != null
+            tagIdsJson = """["tag-a","tag-b"]""",
+            createdAt = 1_760_000_200_000L,
+            updatedAt = 1_760_000_200_000L
+        )
+        val sameDateLaterCreated = latestTomorrow.copy(
+            id = "dup-tomorrow-second",
+            createdAt = 1_760_000_250_000L
+        )
+        val nonRecurringA = staleToday.copy(
+            id = "plain-1",
+            title = "Buy Coffee",
+            recurrenceRuleJson = null
+        )
+        val nonRecurringB = nonRecurringA.copy(id = "plain-2")
+        val differentRuleTask = latestTomorrow.copy(
+            id = "weekly-journal",
+            recurrenceRuleJson = weeklyRuleJson
+        )
+
+        assertEquals(
+            SyncRepository.buildRecurringSeriesKey(staleToday),
+            SyncRepository.buildRecurringSeriesKey(latestTomorrow)
+        )
+        assertNull(SyncRepository.buildRecurringSeriesKey(nonRecurringA))
+
+        val losers = SyncRepository.selectRecurringDuplicateLoserIds(
+            listOf(
+                staleToday,
+                latestTomorrow,
+                sameDateLaterCreated,
+                nonRecurringA,
+                nonRecurringB,
+                differentRuleTask
+            )
+        )
+        assertEquals(setOf("dup-stale-today", "dup-tomorrow-second"), losers.toSet())
+    }
 }
+
 
 

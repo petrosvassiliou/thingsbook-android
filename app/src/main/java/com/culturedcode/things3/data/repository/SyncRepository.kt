@@ -24,6 +24,7 @@ import com.culturedcode.things3.data.remote.dto.ProjectTemplateFirestoreDto
 import com.culturedcode.things3.data.remote.dto.TagFirestoreDto
 import com.culturedcode.things3.data.remote.dto.TaskFirestoreDto
 import com.culturedcode.things3.data.remote.dto.toFirestoreDto
+import com.culturedcode.things3.domain.model.RecurrenceRule
 import com.culturedcode.things3.domain.model.TaskStatus
 import com.culturedcode.things3.domain.util.runCatchingCancellable
 import com.google.firebase.auth.FirebaseAuth
@@ -715,6 +716,47 @@ class SyncRepository @Inject constructor(
         }
     }
 
+    suspend fun deduplicateOpenRecurringTasks(): Int = dbApplyMutex.withLock {
+        deduplicateOpenRecurringTasksLocked()
+    }
+
+    private suspend fun deduplicateOpenRecurringTasksLocked(
+        nowMillis: Long = System.currentTimeMillis()
+    ): Int {
+        val openRecurring = database.taskDao().getOpenRecurringTasks()
+        val loserIds = selectRecurringDuplicateLoserIds(openRecurring)
+        if (loserIds.isEmpty()) return 0
+
+        val loserSet = loserIds.toSet()
+        val losers = openRecurring.filter { it.id in loserSet }
+        if (losers.isEmpty()) return 0
+
+        database.withTransaction {
+            for (loser in losers) {
+                val tombstoneAt = maxOf(nowMillis, loser.updatedAt + 1L)
+                database.checklistDao().softDeleteByTaskId(loser.id, tombstoneAt)
+                database.taskDao().upsertTaskWithTags(
+                    loser.copy(
+                        title = "",
+                        notes = "",
+                        recurrenceRuleJson = null,
+                        tagIdsJson = "[]",
+                        scheduledStartMinutes = null,
+                        durationMinutes = null,
+                        isDeleted = true,
+                        isDirty = true,
+                        updatedAt = tombstoneAt
+                    ),
+                    emptyList()
+                )
+            }
+        }
+        for (loser in losers) {
+            reminderScheduler.cancelReminder(loser.id)
+        }
+        return losers.size
+    }
+
     private fun lastNtfyMsgIdKeyForTopic(channelTopic: String) =
         stringPreferencesKey("last_ntfy_msg_id_$channelTopic")
 
@@ -1218,6 +1260,12 @@ class SyncRepository @Inject constructor(
         }
 
         updatedTasks.forEach { syncTaskReminderSchedule(it) }
+        if (batch.tasks.isNotEmpty()) {
+            val deduped = deduplicateOpenRecurringTasksLocked(nowMillis)
+            if (deduped > 0) {
+                triggerBackgroundSync()
+            }
+        }
 
         val clampedBatchTs = clampRemoteTimestamp(batch.batchTimestamp, nowMillis)
         if (clampedBatchTs > maxTimestamp) {
@@ -1691,6 +1739,13 @@ class SyncRepository @Inject constructor(
                 val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
                 if (clamped > maxTimestamp) maxTimestamp = clamped
             }
+
+            if (!taskSnapshots.isEmpty) {
+                val deduped = deduplicateOpenRecurringTasksLocked(nowMillis)
+                if (deduped > 0) {
+                    triggerBackgroundSync()
+                }
+            }
         }
 
         if (needsAttachmentsBackfill ||
@@ -1736,6 +1791,7 @@ class SyncRepository @Inject constructor(
                             dbApplyMutex.withLock {
                                 var maxTs = getLastSyncTimestamp(userId)
                                 var changed = false
+                                var appliedAnyTask = false
                                 for (change in snapshot.documentChanges) {
                                     runCatchingCancellable {
                                         val dto = TaskFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
@@ -1745,6 +1801,7 @@ class SyncRepository @Inject constructor(
                                                 val entity = dto.toEntity()
                                                 database.taskDao().upsertTaskWithTags(entity, dto.tagIds)
                                                 syncTaskReminderSchedule(entity)
+                                                appliedAnyTask = true
                                             }
                                             val clamped = clampRemoteTimestamp(dto.updatedAt)
                                             if (clamped > maxTs) {
@@ -1752,6 +1809,12 @@ class SyncRepository @Inject constructor(
                                                 changed = true
                                             }
                                         }
+                                    }
+                                }
+                                if (appliedAnyTask) {
+                                    val deduped = deduplicateOpenRecurringTasksLocked()
+                                    if (deduped > 0) {
+                                        triggerBackgroundSync()
                                     }
                                 }
                                 if (changed) saveLastSyncTimestamp(userId, maxTs)
@@ -2094,12 +2157,106 @@ class SyncRepository @Inject constructor(
         const val MAX_NTFY_CHUNK_BYTES = 3800
         const val FAST_PUSH_COALESCE_MS = 35L
 
+        private val dedupJson = Json {
+            ignoreUnknownKeys = true
+            isLenient = true
+        }
+
         fun deriveUidWakeChannelTopic(uid: String): String {
             val seed = "thingsbook-uid-v2:${uid.trim()}"
             val digest = MessageDigest.getInstance("SHA-256")
                 .digest(seed.toByteArray(StandardCharsets.UTF_8))
                 .joinToString("") { "%02x".format(it) }
             return "tb_uid_${digest.take(28)}"
+        }
+
+        fun formatDeterministicUuidFromSha256Hex(sha256HexDigest: String): String {
+            val h = sha256HexDigest.trim().lowercase(Locale.ROOT)
+            return "${h.substring(0, 8)}-${h.substring(8, 12)}-5${h.substring(13, 16)}-a${h.substring(17, 20)}-${h.substring(20, 32)}"
+        }
+
+        fun deriveRecurringNextTaskId(completedTaskId: String, nextWhenYyyyMmDd: String): String {
+            val seed = "thingsbook-rec-next-v1:${completedTaskId.trim()}:${nextWhenYyyyMmDd.trim()}"
+            val hex = MessageDigest.getInstance("SHA-256")
+                .digest(seed.toByteArray(StandardCharsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
+            return formatDeterministicUuidFromSha256Hex(hex)
+        }
+
+        fun deriveRecurringChecklistItemId(nextTaskId: String, sourceChecklistId: String): String {
+            val seed = "thingsbook-rec-chk-v1:${nextTaskId.trim()}:${sourceChecklistId.trim()}"
+            val hex = MessageDigest.getInstance("SHA-256")
+                .digest(seed.toByteArray(StandardCharsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
+            return formatDeterministicUuidFromSha256Hex(hex)
+        }
+
+        fun canonicalizeRecurrenceRuleKey(rule: RecurrenceRule?): String? {
+            if (rule == null) return null
+            val interval = rule.interval.coerceIn(1, 3650)
+            val validDays = rule.daysOfWeek
+                .filter { it in 1..7 }
+                .distinct()
+                .sorted()
+                .joinToString(",")
+            val dom = rule.dayOfMonth?.toString().orEmpty()
+            val endMs = rule.endDateEpochMillis?.toString().orEmpty()
+            return "${rule.mode.name}|${rule.unit.name}|$interval|$validDays|$dom|$endMs"
+        }
+
+        fun buildRecurringSeriesKey(entity: TaskEntity): String? {
+            if (entity.isDeleted || entity.status != TaskStatus.OPEN) return null
+            val normTitle = entity.title.trim()
+            if (normTitle.isEmpty()) return null
+            val rawRule = entity.recurrenceRuleJson ?: return null
+            val rule = runCatching { dedupJson.decodeFromString<RecurrenceRule>(rawRule) }.getOrNull()
+                ?: return null
+            val ruleKey = canonicalizeRecurrenceRuleKey(rule) ?: return null
+            val normNotes = entity.notes.trim()
+            val proj = entity.projectId?.trim().orEmpty()
+            val head = entity.headingId?.trim().orEmpty()
+            val area = entity.areaId?.trim().orEmpty()
+            val normContainer = if (proj.isNotEmpty()) "P:$proj|H:$head" else "A:$area"
+            val normTags = runCatching { dedupJson.decodeFromString<List<String>>(entity.tagIdsJson) }
+                .getOrDefault(emptyList())
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
+                .sorted()
+                .joinToString(",")
+            val normTimeblock = "${entity.scheduledStartMinutes?.toString().orEmpty()}:${entity.durationMinutes?.toString().orEmpty()}"
+            return "$normTitle\u001F$normNotes\u001F$normContainer\u001F$ruleKey\u001F$normTags\u001F$normTimeblock"
+        }
+
+        fun compareRecurringTaskPriority(a: TaskEntity, b: TaskEntity): Int {
+            val aWhen = a.whenDate ?: -1L
+            val bWhen = b.whenDate ?: -1L
+            if (aWhen != bWhen) {
+                return if (aWhen > bWhen) -1 else 1
+            }
+            val aCreated = if (a.createdAt > 0L) a.createdAt else Long.MAX_VALUE
+            val bCreated = if (b.createdAt > 0L) b.createdAt else Long.MAX_VALUE
+            if (aCreated != bCreated) {
+                return if (aCreated < bCreated) -1 else 1
+            }
+            return a.id.compareTo(b.id)
+        }
+
+        fun selectRecurringDuplicateLoserIds(tasks: List<TaskEntity>): List<String> {
+            val groups = LinkedHashMap<String, MutableList<TaskEntity>>()
+            for (task in tasks) {
+                val key = buildRecurringSeriesKey(task) ?: continue
+                groups.getOrPut(key) { mutableListOf() }.add(task)
+            }
+            val losers = mutableListOf<String>()
+            for (group in groups.values) {
+                if (group.size < 2) continue
+                val sorted = group.sortedWith(::compareRecurringTaskPriority)
+                for (i in 1 until sorted.size) {
+                    losers.add(sorted[i].id)
+                }
+            }
+            return losers
         }
 
         fun computeDeltaQueryFloor(lastSyncTimestamp: Long): Long =

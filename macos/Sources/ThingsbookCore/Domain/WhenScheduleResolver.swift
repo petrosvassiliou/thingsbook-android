@@ -132,42 +132,60 @@ public enum WhenScheduleResolver {
         calendar: Calendar = .current
     ) -> Date? {
         let safeInterval = min(3650, max(1, rule.interval))
+        let todayStart = calendar.startOfDay(for: DateEpochConverter.date(fromMillis: nowMillis))
         let baseMillis: Int64 = (rule.mode == .afterCompletion) ? nowMillis : (completedWhenMillis ?? nowMillis)
         let baseDate = calendar.startOfDay(for: DateEpochConverter.date(fromMillis: baseMillis))
 
-        let nextDate: Date
-        switch rule.unit {
-        case .days:
-            nextDate = calendar.date(byAdding: .day, value: safeInterval, to: baseDate) ?? baseDate
-        case .weeks:
-            let validDays = Array(Set(rule.daysOfWeek.filter { (1...7).contains($0) })).sorted()
-            if rule.mode == .fixedSchedule && !validDays.isEmpty {
-                let currentDow = DateEpochConverter.isoWeekday(for: baseDate, calendar: calendar)
-                if let nextSameWeek = validDays.first(where: { $0 > currentDow }) {
-                    nextDate = calendar.date(byAdding: .day, value: nextSameWeek - currentDow, to: baseDate) ?? baseDate
+        func stepOnce(from current: Date) -> Date {
+            let stepped: Date
+            switch rule.unit {
+            case .days:
+                stepped = calendar.date(byAdding: .day, value: safeInterval, to: current) ?? current
+            case .weeks:
+                let validDays = Array(Set(rule.daysOfWeek.filter { (1...7).contains($0) })).sorted()
+                if rule.mode == .fixedSchedule && !validDays.isEmpty {
+                    let currentDow = DateEpochConverter.isoWeekday(for: current, calendar: calendar)
+                    if let nextSameWeek = validDays.first(where: { $0 > currentDow }) {
+                        stepped = calendar.date(byAdding: .day, value: nextSameWeek - currentDow, to: current) ?? current
+                    } else {
+                        let firstDow = validDays[0]
+                        let mondayOfCurrent = calendar.date(byAdding: .day, value: -(currentDow - 1), to: current) ?? current
+                        let mondayOfTarget = calendar.date(byAdding: .day, value: safeInterval * 7, to: mondayOfCurrent) ?? mondayOfCurrent
+                        stepped = calendar.date(byAdding: .day, value: firstDow - 1, to: mondayOfTarget) ?? mondayOfTarget
+                    }
                 } else {
-                    let firstDow = validDays[0]
-                    let mondayOfCurrent = calendar.date(byAdding: .day, value: -(currentDow - 1), to: baseDate) ?? baseDate
-                    let mondayOfTarget = calendar.date(byAdding: .day, value: safeInterval * 7, to: mondayOfCurrent) ?? mondayOfCurrent
-                    nextDate = calendar.date(byAdding: .day, value: firstDow - 1, to: mondayOfTarget) ?? mondayOfTarget
+                    stepped = calendar.date(byAdding: .day, value: safeInterval * 7, to: current) ?? current
                 }
-            } else {
-                nextDate = calendar.date(byAdding: .day, value: safeInterval * 7, to: baseDate) ?? baseDate
+            case .months:
+                let monthAdvanced = calendar.date(byAdding: .month, value: safeInterval, to: current) ?? current
+                if rule.mode == .fixedSchedule, let dom = rule.dayOfMonth {
+                    let range = calendar.range(of: .day, in: .month, for: monthAdvanced) ?? 1..<29
+                    let maxDom = range.upperBound - 1
+                    let targetDom = dom == -1 ? maxDom : min(maxDom, max(1, dom))
+                    var comps = calendar.dateComponents([.year, .month], from: monthAdvanced)
+                    comps.day = targetDom
+                    stepped = calendar.date(from: comps) ?? monthAdvanced
+                } else {
+                    stepped = monthAdvanced
+                }
+            case .years:
+                stepped = calendar.date(byAdding: .year, value: safeInterval, to: current) ?? current
             }
-        case .months:
-            let monthAdvanced = calendar.date(byAdding: .month, value: safeInterval, to: baseDate) ?? baseDate
-            if rule.mode == .fixedSchedule, let dom = rule.dayOfMonth {
-                let range = calendar.range(of: .day, in: .month, for: monthAdvanced) ?? 1..<29
-                let maxDom = range.upperBound - 1
-                let targetDom = dom == -1 ? maxDom : min(maxDom, max(1, dom))
-                var comps = calendar.dateComponents([.year, .month], from: monthAdvanced)
-                comps.day = targetDom
-                nextDate = calendar.date(from: comps) ?? monthAdvanced
-            } else {
-                nextDate = monthAdvanced
+            return calendar.startOfDay(for: stepped)
+        }
+
+        var nextDate = stepOnce(from: baseDate)
+        if rule.mode == .fixedSchedule && nextDate <= todayStart {
+            var guardCount = 0
+            while nextDate <= todayStart && guardCount < 500 {
+                let candidate = stepOnce(from: nextDate)
+                if candidate <= nextDate { break }
+                nextDate = candidate
+                guardCount += 1
             }
-        case .years:
-            nextDate = calendar.date(byAdding: .year, value: safeInterval, to: baseDate) ?? baseDate
+            if nextDate <= todayStart {
+                nextDate = stepOnce(from: todayStart)
+            }
         }
 
         let nextEpoch = DateEpochConverter.startOfDayMillis(for: nextDate, calendar: calendar)

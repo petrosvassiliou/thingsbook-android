@@ -2124,11 +2124,175 @@ final class ThingsbookCoreTests: XCTestCase {
             .scheduleShow(anchorId: "gemini", text: "Gemini KI (⌘G)", delayMs: 160)
         )
     }
+
+    // MARK: - 20. v2.0.0-beta.13 Recurring Task Sync Duplicate Prevention & Non-Poisoning Midnight Rollover
+
+    func testRecurringTaskSyncDuplicatePreventionAndNonPoisoningRollover() throws {
+        // 1. Exact cross-platform SHA-256 deterministic UUID vectors (must match Android & ChromeOS PWA)
+        let derivedTaskId = ThingsSQLiteDatabase.deriveRecurringNextTaskId(
+            completedTaskId: " task-daily-001 ",
+            nextWhenYyyyMmDd: "2026-11-17"
+        )
+        XCTAssertEqual(derivedTaskId, "e2d2925b-820d-5122-a510-f8164e907815")
+
+        let derivedChkId = ThingsSQLiteDatabase.deriveRecurringChecklistItemId(
+            nextTaskId: derivedTaskId,
+            sourceChecklistId: "chk-step-001"
+        )
+        XCTAssertEqual(derivedChkId, "55d4ccdc-7b54-53cb-a216-e0f79e8fb359")
+
+        // 2. Overdue FIXED_SCHEDULE daily task completed Today advances strictly past Today to Tomorrow
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let nov15 = DateEpochConverter.startOfDayMillis(
+            for: cal.date(from: DateComponents(year: 2026, month: 11, day: 15))!,
+            calendar: cal
+        )
+        let nov16Noon = DateEpochConverter.startOfDayMillis(
+            for: cal.date(from: DateComponents(year: 2026, month: 11, day: 16))!,
+            calendar: cal
+        ) + 12 * 3_600_000
+        let nov17 = DateEpochConverter.startOfDayMillis(
+            for: cal.date(from: DateComponents(year: 2026, month: 11, day: 17))!,
+            calendar: cal
+        )
+        let dailyRule = RecurrenceRule(mode: .fixedSchedule, interval: 1, unit: .days)
+        let nextDate = try XCTUnwrap(
+            WhenScheduleResolver.computeNextOccurrenceDate(
+                rule: dailyRule,
+                completedWhenMillis: nov15,
+                nowMillis: nov16Noon,
+                calendar: cal
+            )
+        )
+        XCTAssertEqual(DateEpochConverter.startOfDayMillis(for: nextDate, calendar: cal), nov17)
+
+        // 3. Midnight rollover does NOT bump updatedAt or mark tasks isDirty, preventing stale device resurrection
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let nov16 = DateEpochConverter.startOfDayMillis(
+            for: cal.date(from: DateComponents(year: 2026, month: 11, day: 16))!,
+            calendar: cal
+        )
+        let initialRemoteRecurring = TaskItem(
+            id: "rec-daily-today",
+            title: "Morning Journal",
+            notes: "5 minutes",
+            status: .open,
+            scheduleState: .upcoming,
+            whenDate: nov16,
+            recurrenceRule: dailyRule,
+            sortOrder: 1000,
+            createdAt: 1_760_000_000_000,
+            updatedAt: 1_760_000_100_000
+        )
+        _ = try db.applyRemoteDeltas(RemoteDeltaBatch(tasks: [initialRemoteRecurring]))
+        XCTAssertTrue(try db.fetchDirtySyncBatch().tasks.isEmpty)
+
+        // Device B wakes up at 6:00 PM on Nov 16 and runs performMidnightRollover BEFORE pulling remote completion
+        let nov16Evening = Date(timeIntervalSince1970: Double(nov16 + 18 * 3_600_000) / 1000.0)
+        _ = try db.performMidnightRollover(referenceDate: nov16Evening, calendar: cal)
+        XCTAssertTrue(
+            try db.fetchDirtySyncBatch().tasks.isEmpty,
+            "Local midnight rollover must NOT mark tasks dirty or poison LWW updatedAt"
+        )
+        XCTAssertEqual(try db.loadWorkspaceSnapshot().todayDaytimeTasks.map(\.id), ["rec-daily-today"])
+
+        // Remote completion from Device A at 9:00 AM (earlier than 6:00 PM!) + Tomorrow's spawned task arrives
+        var remoteCompletedToday = initialRemoteRecurring
+        remoteCompletedToday.status = .completed
+        remoteCompletedToday.completedAt = 1_760_000_200_000
+        remoteCompletedToday.updatedAt = 1_760_000_200_000
+
+        let spawnedTomorrow = TaskItem(
+            id: ThingsSQLiteDatabase.deriveRecurringNextTaskId(
+                completedTaskId: "rec-daily-today",
+                nextWhenYyyyMmDd: "2026-11-17"
+            ),
+            title: "Morning Journal",
+            notes: "5 minutes",
+            status: .open,
+            scheduleState: .upcoming,
+            whenDate: nov17,
+            recurrenceRule: dailyRule,
+            sortOrder: 2000,
+            createdAt: 1_760_000_200_000,
+            updatedAt: 1_760_000_200_000
+        )
+        _ = try db.applyRemoteDeltas(RemoteDeltaBatch(tasks: [remoteCompletedToday, spawnedTomorrow]))
+        let snapAfterSync = try db.loadWorkspaceSnapshot()
+        XCTAssertEqual(snapAfterSync.allOpenTasks.map(\.id), [spawnedTomorrow.id])
+        XCTAssertEqual(snapAfterSync.logbookTasks.map(\.id), ["rec-daily-today"])
+
+        // 4. Sync-time deduplicator silently tombstones duplicate OPEN recurring series (without cluttering Trash)
+        //    including cross-platform project container parity (projectId="p1", areaId=nil vs areaId="a1")
+        //    while preserving distinct non-recurring tasks with identical titles.
+        let dupStale = TaskItem(
+            id: "dup-stale-nov16",
+            title: "Morning Journal",
+            notes: "5 minutes",
+            status: .open,
+            scheduleState: .today,
+            whenDate: nov16,
+            projectId: "proj-1",
+            areaId: "area-1",
+            recurrenceRule: dailyRule,
+            sortOrder: 1000,
+            createdAt: 1_760_000_050_000,
+            updatedAt: 1_760_000_300_000
+        )
+        let dupLatest = TaskItem(
+            id: "dup-latest-nov17",
+            title: "Morning Journal",
+            notes: "5 minutes",
+            status: .open,
+            scheduleState: .upcoming,
+            whenDate: nov17,
+            projectId: "proj-1",
+            areaId: nil, // ChromeOS sets areaId=nil when projectId != nil
+            recurrenceRule: dailyRule,
+            sortOrder: 2000,
+            createdAt: 1_760_000_250_000,
+            updatedAt: 1_760_000_300_000
+        )
+        let nonRecurringTwinA = TaskItem(
+            id: "plain-a",
+            title: "Buy Milk",
+            status: .open,
+            scheduleState: .today,
+            whenDate: nov16,
+            createdAt: 1_760_000_100_000,
+            updatedAt: 1_760_000_300_000
+        )
+        let nonRecurringTwinB = TaskItem(
+            id: "plain-b",
+            title: "Buy Milk",
+            status: .open,
+            scheduleState: .today,
+            whenDate: nov16,
+            createdAt: 1_760_000_101_000,
+            updatedAt: 1_760_000_300_000
+        )
+        XCTAssertEqual(
+            ThingsSQLiteDatabase.selectRecurringDuplicateLoserIds([
+                dupStale, dupLatest, nonRecurringTwinA, nonRecurringTwinB
+            ]),
+            ["dup-stale-nov16"]
+        )
+
+        let dbDedup = try ThingsSQLiteDatabase(path: ":memory:")
+        _ = try dbDedup.applyRemoteDeltas(
+            RemoteDeltaBatch(tasks: [dupStale, dupLatest, nonRecurringTwinA, nonRecurringTwinB])
+        )
+        let dedupSnap = try dbDedup.loadWorkspaceSnapshot()
+        XCTAssertEqual(
+            Set(dedupSnap.allOpenTasks.map(\.id)),
+            Set(["dup-latest-nov17", "plain-a", "plain-b"])
+        )
+        XCTAssertTrue(dedupSnap.trashedTasks.isEmpty, "Silently tombstoned duplicate must NOT appear in Trash")
+        let dirtyTombstones = try dbDedup.fetchDirtySyncBatch().tasks
+        XCTAssertEqual(dirtyTombstones.map(\.id), ["dup-stale-nov16"])
+        XCTAssertTrue(dirtyTombstones[0].isDeleted)
+        XCTAssertEqual(dirtyTombstones[0].title, "")
+    }
 }
-
-
-
-
-
-
 

@@ -329,10 +329,13 @@ function taskToFirestoreMap(task: TaskRecord): Record<string, unknown> {
 function taskFromFirestoreMap(map: Record<string, unknown>): TaskRecord | null {
   const id = nullableString(map.id);
   if (!id) return null;
+  const title = typeof map.title === 'string' ? map.title : '';
+  const notes = typeof map.notes === 'string' ? map.notes : '';
+  const isDeleted = Boolean(map.isDeleted);
   return {
     id,
-    title: typeof map.title === 'string' ? map.title : '',
-    notes: typeof map.notes === 'string' ? map.notes : '',
+    title,
+    notes,
     status: normalizeTaskStatus(typeof map.status === 'string' ? map.status : 'OPEN'),
     scheduleState: normalizeScheduleState(
       typeof map.scheduleState === 'string' ? map.scheduleState : 'INBOX',
@@ -352,9 +355,9 @@ function taskFromFirestoreMap(map: Record<string, unknown>): TaskRecord | null {
     tagIds: stringList(map.tagIds),
     createdAt: Math.trunc(finiteNumber(map.createdAt)),
     updatedAt: Math.trunc(finiteNumber(map.updatedAt)),
-    isDeleted: Boolean(map.isDeleted),
+    isDeleted,
     isDirty: false,
-    purgedFromTrash: Boolean(map.purgedFromTrash)
+    purgedFromTrash: Boolean(map.purgedFromTrash || (isDeleted && !title && !notes))
   };
 }
 

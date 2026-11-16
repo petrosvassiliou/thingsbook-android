@@ -462,7 +462,7 @@ interface TaskDao {
     @Query(
         """
         UPDATE tasks
-        SET scheduleState = 'TODAY', updatedAt = :now, isDirty = 1
+        SET scheduleState = 'TODAY'
         WHERE isDeleted = 0
           AND status = 'OPEN'
           AND scheduleState = 'UPCOMING'
@@ -470,12 +470,12 @@ interface TaskDao {
           AND whenDate <= :endOfTodayMillis
         """
     )
-    suspend fun rolloverDueUpcomingTasksToToday(endOfTodayMillis: Long, now: Long): Int
+    suspend fun rolloverDueUpcomingTasksToToday(endOfTodayMillis: Long): Int
 
     @Query(
         """
         UPDATE tasks
-        SET scheduleState = 'TODAY', whenDate = :startOfTodayMillis, updatedAt = :now, isDirty = 1
+        SET scheduleState = 'TODAY', whenDate = :startOfTodayMillis
         WHERE isDeleted = 0
           AND status = 'OPEN'
           AND scheduleState = 'THIS_EVENING'
@@ -485,7 +485,17 @@ interface TaskDao {
           )
         """
     )
-    suspend fun rolloverYesterdayEveningTasksToToday(startOfTodayMillis: Long, now: Long): Int
+    suspend fun rolloverYesterdayEveningTasksToToday(startOfTodayMillis: Long): Int
+
+    @Query(
+        """
+        SELECT * FROM tasks
+        WHERE isDeleted = 0
+          AND status = 'OPEN'
+          AND recurrenceRuleJson IS NOT NULL
+        """
+    )
+    suspend fun getOpenRecurringTasks(): List<TaskEntity>
 
     @Query(
         """

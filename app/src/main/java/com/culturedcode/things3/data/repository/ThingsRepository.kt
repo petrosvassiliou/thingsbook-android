@@ -63,6 +63,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.time.Instant
@@ -93,6 +95,7 @@ class ThingsRepository @Inject constructor(
         val headingId: String?
     )
 
+    private val statusMutationMutex = Mutex()
     private val lastSpawnedRecurringTaskByCompletedId = ConcurrentHashMap<String, String>()
     private val detachedTasksByDeletedProjectId = ConcurrentHashMap<String, List<DetachedProjectTaskSnapshot>>()
     private val deletedTaskIdsByDeletedProjectId = ConcurrentHashMap<String, List<String>>()
@@ -119,7 +122,8 @@ class ThingsRepository @Inject constructor(
 
     /**
      * Re-evaluates the current local day boundaries (e.g. when crossing 00:00 midnight, resuming the app,
-     * or changing timezone) and rolls over any due UPCOMING tasks or yesterday's THIS_EVENING tasks to TODAY.
+     * or changing timezone) and rolls over any due UPCOMING tasks or yesterday's THIS_EVENING tasks to TODAY
+     * without bumping updatedAt or dirtying rows, then deduplicates any duplicate open recurring tasks.
      */
     suspend fun refreshCurrentDayAndRollover(): Boolean {
         val zone = ZoneId.systemDefault()
@@ -132,18 +136,20 @@ class ThingsRepository @Inject constructor(
         _endOfTodayMillis.value = endOfToday
         _currentEpochDay.value = epochDay
 
-        val now = System.currentTimeMillis()
         val promotedUpcoming = runCatchingCancellable {
-            database.taskDao().rolloverDueUpcomingTasksToToday(endOfToday, now)
+            database.taskDao().rolloverDueUpcomingTasksToToday(endOfToday)
         }.getOrDefault(0)
         val promotedEvening = runCatchingCancellable {
-            database.taskDao().rolloverYesterdayEveningTasksToToday(startOfToday, now)
+            database.taskDao().rolloverYesterdayEveningTasksToToday(startOfToday)
+        }.getOrDefault(0)
+        val deduped = runCatchingCancellable {
+            syncRepository.deduplicateOpenRecurringTasks()
         }.getOrDefault(0)
 
-        if (promotedUpcoming > 0 || promotedEvening > 0) {
+        if (deduped > 0) {
             syncRepository.triggerBackgroundSync()
         }
-        return dayChanged || promotedUpcoming > 0 || promotedEvening > 0
+        return dayChanged || promotedUpcoming > 0 || promotedEvening > 0 || deduped > 0
     }
 
     fun observeInboxTasks(): Flow<List<TaskItem>> =
@@ -469,30 +475,106 @@ class ThingsRepository @Inject constructor(
                 lastSpawnedRecurringTaskByCompletedId[id] = nextId
             }
         } else if (existing != null && existing.status != TaskStatus.OPEN && status == TaskStatus.OPEN) {
-            softDeleteSpawnedRecurrenceIfAny(id, now)
+            softDeleteSpawnedRecurrenceIfAny(id, entity, now)
         }
 
         syncRepository.triggerBackgroundSync()
         return id
     }
 
-    private suspend fun softDeleteSpawnedRecurrenceIfAny(completedTaskId: String, now: Long) {
-        val spawnedNextId = lastSpawnedRecurringTaskByCompletedId.remove(completedTaskId) ?: return
-        val spawnedTask = database.taskDao().getById(spawnedNextId) ?: return
-        if (!spawnedTask.isDeleted) {
-            reminderScheduler.cancelReminder(spawnedNextId)
-            database.withTransaction {
-                database.checklistDao().softDeleteByTaskId(spawnedNextId, now)
-                database.attachmentDao().softDeleteByTaskId(spawnedNextId, now)
-                database.taskDao().upsert(
-                    spawnedTask.copy(
+    private suspend fun silentlyPurgeTaskEntities(targets: List<TaskEntity>, now: Long) {
+        if (targets.isEmpty()) return
+        for (target in targets) {
+            reminderScheduler.cancelReminder(target.id)
+        }
+        database.withTransaction {
+            for (target in targets) {
+                if (target.isDeleted) continue
+                val tombstoneAt = maxOf(now, target.updatedAt + 1L)
+                database.checklistDao().softDeleteByTaskId(target.id, tombstoneAt)
+                database.attachmentDao().softDeleteByTaskId(target.id, tombstoneAt)
+                database.taskDao().upsertTaskWithTags(
+                    target.copy(
+                        title = "",
+                        notes = "",
+                        recurrenceRuleJson = null,
+                        tagIdsJson = "[]",
+                        scheduledStartMinutes = null,
+                        durationMinutes = null,
                         isDeleted = true,
-                        updatedAt = now,
+                        updatedAt = tombstoneAt,
                         isDirty = true
-                    )
+                    ),
+                    emptyList()
                 )
             }
         }
+    }
+
+    private suspend fun softDeleteSpawnedRecurrenceIfAny(
+        completedTaskId: String,
+        reopenedTask: TaskEntity,
+        now: Long
+    ) {
+        val toPurgeById = LinkedHashMap<String, TaskEntity>()
+        val spawnedNextId = lastSpawnedRecurringTaskByCompletedId.remove(completedTaskId)
+        if (spawnedNextId != null && spawnedNextId != completedTaskId) {
+            val spawnedTask = database.taskDao().getById(spawnedNextId)
+            if (spawnedTask != null && !spawnedTask.isDeleted) {
+                toPurgeById[spawnedTask.id] = spawnedTask
+            }
+        }
+        val seriesKey = SyncRepository.buildRecurringSeriesKey(reopenedTask)
+        if (seriesKey != null) {
+            val openRecurring = database.taskDao().getOpenRecurringTasks()
+            for (candidate in openRecurring) {
+                if (candidate.id != completedTaskId &&
+                    SyncRepository.buildRecurringSeriesKey(candidate) == seriesKey
+                ) {
+                    toPurgeById[candidate.id] = candidate
+                }
+            }
+        }
+        if (toPurgeById.isNotEmpty()) {
+            silentlyPurgeTaskEntities(toPurgeById.values.toList(), now)
+        }
+    }
+
+    private fun stepRecurrenceDateOnce(
+        baseDate: LocalDate,
+        rule: RecurrenceRule,
+        safeInterval: Long
+    ): LocalDate = when (rule.unit) {
+        RecurrenceUnit.DAYS -> baseDate.plusDays(safeInterval)
+        RecurrenceUnit.WEEKS -> {
+            val validDays = rule.daysOfWeek.filter { it in 1..7 }.distinct().sorted()
+            if (rule.mode == RecurrenceMode.FIXED_SCHEDULE && validDays.isNotEmpty()) {
+                val currentDow = baseDate.dayOfWeek.value
+                val nextDaySameWeek = validDays.firstOrNull { it > currentDow }
+                if (nextDaySameWeek != null) {
+                    baseDate.plusDays((nextDaySameWeek - currentDow).toLong())
+                } else {
+                    val firstDow = validDays.first()
+                    val startOfTargetWeek = baseDate
+                        .minusDays((currentDow - 1).toLong())
+                        .plusWeeks(safeInterval)
+                    startOfTargetWeek.plusDays((firstDow - 1).toLong())
+                }
+            } else {
+                baseDate.plusWeeks(safeInterval)
+            }
+        }
+        RecurrenceUnit.MONTHS -> {
+            val targetMonthDate = baseDate.plusMonths(safeInterval)
+            if (rule.mode == RecurrenceMode.FIXED_SCHEDULE && rule.dayOfMonth != null) {
+                val maxDom = targetMonthDate.lengthOfMonth()
+                val targetDom = if (rule.dayOfMonth == -1) maxDom else rule.dayOfMonth.coerceIn(1, maxDom)
+                targetMonthDate.withDayOfMonth(targetDom)
+            } else {
+                targetMonthDate
+            }
+        }
+        RecurrenceUnit.YEARS -> baseDate.plusYears(safeInterval)
     }
 
     private suspend fun spawnNextRecurrenceInstance(
@@ -502,45 +584,27 @@ class ThingsRepository @Inject constructor(
         now: Long
     ): String? {
         val zone = ZoneId.systemDefault()
+        val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
         val safeInterval = rule.interval.coerceIn(1, 3650).toLong()
         val baseEpoch = when (rule.mode) {
             RecurrenceMode.AFTER_COMPLETION -> now
             RecurrenceMode.FIXED_SCHEDULE -> completedTask.whenDate ?: now
         }
         val baseDate = runCatching { Instant.ofEpochMilli(baseEpoch).atZone(zone).toLocalDate() }
-            .getOrElse { LocalDate.now(zone) }
+            .getOrElse { today }
 
-        val nextDate: LocalDate = when (rule.unit) {
-            RecurrenceUnit.DAYS -> baseDate.plusDays(safeInterval)
-            RecurrenceUnit.WEEKS -> {
-                val validDays = rule.daysOfWeek.filter { it in 1..7 }.distinct().sorted()
-                if (rule.mode == RecurrenceMode.FIXED_SCHEDULE && validDays.isNotEmpty()) {
-                    val currentDow = baseDate.dayOfWeek.value
-                    val nextDaySameWeek = validDays.firstOrNull { it > currentDow }
-                    if (nextDaySameWeek != null) {
-                        baseDate.plusDays((nextDaySameWeek - currentDow).toLong())
-                    } else {
-                        val firstDow = validDays.first()
-                        val startOfTargetWeek = baseDate
-                            .minusDays((currentDow - 1).toLong())
-                            .plusWeeks(safeInterval)
-                        startOfTargetWeek.plusDays((firstDow - 1).toLong())
-                    }
-                } else {
-                    baseDate.plusWeeks(safeInterval)
-                }
+        var nextDate: LocalDate = stepRecurrenceDateOnce(baseDate, rule, safeInterval)
+        if (rule.mode == RecurrenceMode.FIXED_SCHEDULE && !nextDate.isAfter(today)) {
+            var guard = 0
+            while (!nextDate.isAfter(today) && guard < 500) {
+                val candidate = stepRecurrenceDateOnce(nextDate, rule, safeInterval)
+                if (!candidate.isAfter(nextDate)) break
+                nextDate = candidate
+                guard++
             }
-            RecurrenceUnit.MONTHS -> {
-                val targetMonthDate = baseDate.plusMonths(safeInterval)
-                if (rule.mode == RecurrenceMode.FIXED_SCHEDULE && rule.dayOfMonth != null) {
-                    val maxDom = targetMonthDate.lengthOfMonth()
-                    val targetDom = if (rule.dayOfMonth == -1) maxDom else rule.dayOfMonth.coerceIn(1, maxDom)
-                    targetMonthDate.withDayOfMonth(targetDom)
-                } else {
-                    targetMonthDate
-                }
+            if (!nextDate.isAfter(today)) {
+                nextDate = stepRecurrenceDateOnce(today, rule, safeInterval)
             }
-            RecurrenceUnit.YEARS -> baseDate.plusYears(safeInterval)
         }
 
         val nextWhenEpoch = nextDate.atStartOfDay(zone).toInstant().toEpochMilli()
@@ -563,7 +627,7 @@ class ThingsRepository @Inject constructor(
             }.getOrNull()
         }
 
-        val todayEpoch = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
+        val todayEpoch = today.atStartOfDay(zone).toInstant().toEpochMilli()
         val nextScheduleState = when {
             nextWhenEpoch <= todayEpoch && completedTask.scheduleState == ScheduleState.THIS_EVENING ->
                 ScheduleState.THIS_EVENING
@@ -571,7 +635,15 @@ class ThingsRepository @Inject constructor(
             else -> ScheduleState.UPCOMING
         }
 
-        val nextTaskId = UUID.randomUUID().toString()
+        val dateKey = String.format(
+            Locale.US,
+            "%04d-%02d-%02d",
+            nextDate.year,
+            nextDate.monthValue,
+            nextDate.dayOfMonth
+        )
+        val nextTaskId = SyncRepository.deriveRecurringNextTaskId(completedTask.id, dateKey)
+        val existingById = database.taskDao().getById(nextTaskId)
         val nextEntity = completedTask.copy(
             id = nextTaskId,
             status = TaskStatus.OPEN,
@@ -580,10 +652,39 @@ class ThingsRepository @Inject constructor(
             deadline = nextDeadlineEpoch,
             reminderTime = nextReminderTime,
             completedAt = null,
-            createdAt = now,
-            updatedAt = now,
+            createdAt = existingById?.createdAt ?: now,
+            updatedAt = if (existingById != null) maxOf(now, existingById.updatedAt + 1L) else now,
+            isDeleted = false,
             isDirty = true
         )
+
+        val seriesKey = SyncRepository.buildRecurringSeriesKey(nextEntity)
+        if (seriesKey != null) {
+            val openSiblings = database.taskDao().getOpenRecurringTasks()
+                .filter { it.id != completedTask.id && SyncRepository.buildRecurringSeriesKey(it) == seriesKey }
+            if (openSiblings.isNotEmpty()) {
+                val primary = openSiblings.first()
+                if (openSiblings.size > 1) {
+                    silentlyPurgeTaskEntities(openSiblings.drop(1), now)
+                }
+                if ((primary.whenDate ?: 0L) < nextWhenEpoch) {
+                    val advanced = primary.copy(
+                        whenDate = nextWhenEpoch,
+                        scheduleState = nextScheduleState,
+                        deadline = nextDeadlineEpoch,
+                        reminderTime = nextReminderTime,
+                        updatedAt = maxOf(now, primary.updatedAt + 1L),
+                        isDirty = true
+                    )
+                    database.taskDao().upsertTaskWithTags(advanced, tagIds)
+                    if (nextReminderTime != null && nextReminderTime > now) {
+                        reminderScheduler.scheduleExactReminder(primary.id, advanced.title, nextReminderTime)
+                    }
+                }
+                return primary.id
+            }
+        }
+
         database.taskDao().upsertTaskWithTags(nextEntity, tagIds)
 
         if (nextReminderTime != null && nextReminderTime > now) {
@@ -593,12 +694,15 @@ class ThingsRepository @Inject constructor(
         val existingSubtasks = database.checklistDao().getForTaskSync(completedTask.id)
         if (existingSubtasks.isNotEmpty()) {
             val clonedSubtasks = existingSubtasks.map { item ->
+                val nextChkId = SyncRepository.deriveRecurringChecklistItemId(nextTaskId, item.id)
+                val existingChk = database.checklistDao().getById(nextChkId)
                 item.copy(
-                    id = UUID.randomUUID().toString(),
+                    id = nextChkId,
                     taskId = nextTaskId,
                     isCompleted = false,
-                    createdAt = now,
-                    updatedAt = now,
+                    createdAt = existingChk?.createdAt ?: now,
+                    updatedAt = if (existingChk != null) maxOf(now, existingChk.updatedAt + 1L) else now,
+                    isDeleted = false,
                     isDirty = true
                 )
             }
@@ -709,35 +813,40 @@ class ThingsRepository @Inject constructor(
     }
 
     suspend fun updateTaskStatus(taskId: String, newStatus: TaskStatus) {
-        val existing = database.taskDao().getById(taskId) ?: return
-        val now = System.currentTimeMillis()
-        val updated = existing.copy(
-            status = newStatus,
-            completedAt = if (newStatus == TaskStatus.OPEN) null else now,
-            updatedAt = now,
-            isDirty = true
-        )
-        database.taskDao().upsert(updated)
+        val didMutate = statusMutationMutex.withLock {
+            val existing = database.taskDao().getById(taskId) ?: return@withLock false
+            if (existing.status == newStatus) return@withLock false
+            val now = System.currentTimeMillis()
+            val updated = existing.copy(
+                status = newStatus,
+                completedAt = if (newStatus == TaskStatus.OPEN) null else now,
+                updatedAt = maxOf(now, existing.updatedAt + 1L),
+                isDirty = true
+            )
+            database.taskDao().upsert(updated)
 
-        if (newStatus != TaskStatus.OPEN) {
-            reminderScheduler.cancelReminder(taskId)
-        } else if (existing.reminderTime != null && existing.reminderTime > now) {
-            reminderScheduler.scheduleExactReminder(taskId, existing.title, existing.reminderTime)
-        }
-
-        if (existing.status == TaskStatus.OPEN && newStatus == TaskStatus.COMPLETED && existing.recurrenceRuleJson != null) {
-            val rule = runCatching { json.decodeFromString<RecurrenceRule>(existing.recurrenceRuleJson) }.getOrNull()
-            if (rule != null) {
-                val tagIds = decodeStringList(existing.tagIdsJson)
-                spawnNextRecurrenceInstance(updated, rule, tagIds, now)?.let { nextId ->
-                    lastSpawnedRecurringTaskByCompletedId[taskId] = nextId
-                }
+            if (newStatus != TaskStatus.OPEN) {
+                reminderScheduler.cancelReminder(taskId)
+            } else if (existing.reminderTime != null && existing.reminderTime > now) {
+                reminderScheduler.scheduleExactReminder(taskId, existing.title, existing.reminderTime)
             }
-        } else if (existing.status != TaskStatus.OPEN && newStatus == TaskStatus.OPEN) {
-            softDeleteSpawnedRecurrenceIfAny(taskId, now)
-        }
 
-        syncRepository.triggerBackgroundSync()
+            if (existing.status == TaskStatus.OPEN && newStatus == TaskStatus.COMPLETED && existing.recurrenceRuleJson != null) {
+                val rule = runCatching { json.decodeFromString<RecurrenceRule>(existing.recurrenceRuleJson) }.getOrNull()
+                if (rule != null) {
+                    val tagIds = decodeStringList(existing.tagIdsJson)
+                    spawnNextRecurrenceInstance(updated, rule, tagIds, now)?.let { nextId ->
+                        lastSpawnedRecurringTaskByCompletedId[taskId] = nextId
+                    }
+                }
+            } else if (existing.status != TaskStatus.OPEN && newStatus == TaskStatus.OPEN) {
+                softDeleteSpawnedRecurrenceIfAny(taskId, updated, now)
+            }
+            true
+        }
+        if (didMutate) {
+            syncRepository.triggerBackgroundSync()
+        }
     }
 
     suspend fun deferTaskToThisEvening(taskId: String) {
@@ -951,7 +1060,6 @@ class ThingsRepository @Inject constructor(
 
         val misclassified = database.taskDao().getMisclassifiedAnytimeTasks()
         if (misclassified.isNotEmpty()) {
-            val now = System.currentTimeMillis()
             val zone = ZoneId.systemDefault()
             val todayEpoch = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
             val endOfToday = endOfTodayEpochMillis()
@@ -960,9 +1068,7 @@ class ThingsRepository @Inject constructor(
                 val resolvedState = if (resolvedWhen > endOfToday) ScheduleState.UPCOMING else ScheduleState.TODAY
                 task.copy(
                     whenDate = resolvedWhen,
-                    scheduleState = resolvedState,
-                    updatedAt = now,
-                    isDirty = true
+                    scheduleState = resolvedState
                 )
             }
             database.taskDao().upsertAll(fixed)

@@ -1372,9 +1372,8 @@ class SyncRepository @Inject constructor(
                     }
                     try {
                         BufferedReader(InputStreamReader(conn.inputStream, StandardCharsets.UTF_8)).use { reader ->
-                            var line: String?
-                            while (isActive && !isLocalOnlyDbModeEnabled() && reader.readLine().also { line = it } != null) {
-                                val raw = line?.trim().orEmpty()
+                            while (isActive && !isLocalOnlyDbModeEnabled()) {
+                                val raw = (reader.readLine() ?: break).trim()
                                 if (raw.isEmpty()) continue
                                 val streamLine = runCatching { json.decodeFromString<NtfyStreamLine>(raw) }.getOrNull() ?: continue
                                 if (streamLine.event != "message" || streamLine.message.isBlank()) continue

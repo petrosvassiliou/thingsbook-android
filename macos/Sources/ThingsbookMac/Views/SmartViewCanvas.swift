@@ -75,7 +75,8 @@ public struct SmartViewCanvas: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 176)
+                .fixedSize()
+                .help("\(store.tr("v2_list_view")) / \(store.tr("v2_timeline_view"))")
 
                 if store.todayViewMode == .list {
                     let grouped = store.preferences.groupTodayByProjectOrArea
@@ -89,7 +90,9 @@ public struct SmartViewCanvas: View {
                                 .font(.system(size: 11, weight: .semibold))
                             Text(grouped ? store.tr("macos_today_grouped_badge") : store.tr("macos_today_list_badge"))
                                 .font(.system(size: 12, weight: .semibold))
+                                .lineLimit(1)
                         }
+                        .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(grouped ? ThingsMacPalette.accentBlue : .secondary)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
@@ -99,6 +102,7 @@ public struct SmartViewCanvas: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .fixedSize(horizontal: true, vertical: false)
                     .help(store.tr("settings_group_today_title"))
                 }
             }
@@ -111,7 +115,9 @@ public struct SmartViewCanvas: View {
                     HStack(spacing: 5) {
                         Image(systemName: "sparkles")
                         Text(store.tr("gemini_logbook_review_title"))
+                            .lineLimit(1)
                     }
+                    .fixedSize(horizontal: true, vertical: false)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(ThingsMacPalette.geminiPurple)
                     .padding(.horizontal, 12)
@@ -119,6 +125,8 @@ public struct SmartViewCanvas: View {
                     .background(Capsule().fill(ThingsMacPalette.geminiPurple.opacity(0.12)))
                 }
                 .buttonStyle(.plain)
+                .fixedSize(horizontal: true, vertical: false)
+                .help(store.tr("gemini_logbook_review_action"))
             }
 
             if view == .trash && (!store.trashedTasks.isEmpty || !store.trashedProjects.isEmpty) {
@@ -127,9 +135,12 @@ public struct SmartViewCanvas: View {
                 } label: {
                     Label(store.tr("trash_empty_btn"), systemImage: "trash.slash")
                         .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .fixedSize(horizontal: true, vertical: false)
+                .help(store.tr("trash_empty_btn"))
             }
         }
 
@@ -342,6 +353,7 @@ public struct SmartViewCanvas: View {
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
+                    .help(badgeLabel)
                 }
 
                 Spacer()
@@ -354,6 +366,7 @@ public struct SmartViewCanvas: View {
                             .font(.system(size: 12.5, weight: .medium))
                     }
                     .buttonStyle(.borderless)
+                    .help(store.tr("project_move_up"))
 
                     Button {
                         store.moveProjectOrder(project, direction: 1)
@@ -362,6 +375,7 @@ public struct SmartViewCanvas: View {
                             .font(.system(size: 12.5, weight: .medium))
                     }
                     .buttonStyle(.borderless)
+                    .help(store.tr("project_move_down"))
 
                     Button {
                         store.editingProject = project
@@ -423,6 +437,7 @@ public struct SmartViewCanvas: View {
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
+                    .help(store.tr("macos_tooltip_project_options"))
                 }
             }
 
@@ -433,7 +448,7 @@ public struct SmartViewCanvas: View {
             }
 
             // Metadata & Quick Action Pills Row (matching Thingsbook Project Header)
-            HStack(spacing: 8) {
+            ThingsFlowLayout(horizontalSpacing: 8, verticalSpacing: 8) {
                 if let dl = project.deadline {
                     let todayDay = DateEpochConverter.epochDay(for: Date())
                     let dlDay = DateEpochConverter.epochDay(forMillis: dl)
@@ -452,7 +467,9 @@ public struct SmartViewCanvas: View {
                                 .font(.system(size: 11, weight: .semibold))
                             Text("\(store.tr("project_target_date_label")): \(dlText)")
                                 .font(.system(size: 12, weight: .semibold))
+                                .lineLimit(1)
                         }
+                        .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(diff <= 0 ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.accentBlue)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
@@ -462,6 +479,8 @@ public struct SmartViewCanvas: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .help(store.tr("project_set_target_date"))
                 }
 
                 if let aid = project.areaId, let area = store.area(byId: aid) {
@@ -473,7 +492,9 @@ public struct SmartViewCanvas: View {
                                 .font(.system(size: 11, weight: .semibold))
                             Text("\(store.tr("entity_area")): \(area.title)")
                                 .font(.system(size: 12, weight: .semibold))
+                                .lineLimit(1)
                         }
+                        .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(ThingsMacPalette.accentBlue)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
@@ -483,65 +504,33 @@ public struct SmartViewCanvas: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .help("\(store.tr("entity_area")): \(area.title)")
                 }
 
-                Button {
+                ThingsActionChipButton(
+                    title: store.tr("entity_todo"),
+                    systemImage: "plus",
+                    helpText: "\(store.tr("entity_new_todo")) (⌘N)"
+                ) {
                     store.createNewTaskInCurrentContext()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 11, weight: .semibold))
-                        Text(store.tr("entity_todo"))
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(Color.primary.opacity(0.06))
-                    )
                 }
-                .buttonStyle(.plain)
 
-                Button {
+                ThingsActionChipButton(
+                    title: store.tr("entity_heading"),
+                    systemImage: "text.insert",
+                    helpText: store.tr("entity_new_heading")
+                ) {
                     isAddingHeading = true
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("H")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .foregroundStyle(.secondary)
-                        Text("+ \(store.tr("entity_heading"))")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(Color.primary.opacity(0.06))
-                    )
                 }
-                .buttonStyle(.plain)
 
-                Button {
+                ThingsActionChipButton(
+                    title: store.tr("action_attach_file"),
+                    systemImage: "paperclip",
+                    helpText: store.tr("action_attach_file")
+                ) {
                     store.pickAndAttachFiles(projectId: project.id)
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "paperclip")
-                            .font(.system(size: 11, weight: .semibold))
-                        Text(store.tr("action_attach_file"))
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(Color.primary.opacity(0.06))
-                    )
                 }
-                .buttonStyle(.plain)
             }
 
             let projAttachments = store.projectAttachments[project.id] ?? []
@@ -778,9 +767,12 @@ public struct SmartViewCanvas: View {
                 } label: {
                     Label(store.tr("entity_new_project"), systemImage: "plus.circle")
                         .font(.system(size: 12))
+                        .lineLimit(1)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .fixedSize(horizontal: true, vertical: false)
+                .help(store.trf("sidebar_new_project_in_area", area.title))
             }
 
             let areaProjects = store.projectsForArea(area.id)
@@ -924,14 +916,19 @@ public struct SmartViewCanvas: View {
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .help(store.tr("trash_restore_btn"))
 
                                 Button(role: .destructive) {
                                     store.permanentlyDeleteProject(proj)
                                 } label: {
                                     Text(store.tr("trash_delete_forever_btn"))
+                                        .lineLimit(1)
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .help(store.tr("trash_delete_forever_btn"))
                             }
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
@@ -969,14 +966,19 @@ public struct SmartViewCanvas: View {
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .help(store.tr("trash_restore_btn"))
 
                                 Button(role: .destructive) {
                                     store.permanentlyDeleteTask(task.id)
                                 } label: {
                                     Text(store.tr("trash_delete_forever_btn"))
+                                        .lineLimit(1)
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .help(store.tr("trash_delete_forever_btn"))
                             }
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
@@ -1618,6 +1620,8 @@ private struct TodayDailyTimelineView: View {
                 }
                 .controlSize(.small)
                 .buttonStyle(.bordered)
+                .fixedSize(horizontal: true, vertical: false)
+                .help(store.tr("macos_tooltip_shift_15m"))
 
                 Button {
                     store.startFocusTimer(for: task)
@@ -1628,9 +1632,11 @@ private struct TodayDailyTimelineView: View {
                         Text("\(task.durationMinutes ?? 25)m")
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                     }
+                    .fixedSize(horizontal: true, vertical: false)
                 }
                 .controlSize(.small)
                 .buttonStyle(.borderedProminent)
+                .fixedSize(horizontal: true, vertical: false)
                 .help(store.tr("action_focus_timer"))
 
                 Button {
@@ -1675,7 +1681,8 @@ private struct TodayDailyTimelineView: View {
             Spacer()
 
             ForEach([9, 11, 14, 16], id: \.self) { hour in
-                Button(String(format: "%02d:00", hour)) {
+                let slotLabel = String(format: "%02d:00", hour)
+                Button(slotLabel) {
                     store.setTaskTimeblock(
                         task.id,
                         startMinutes: hour * 60,
@@ -1685,16 +1692,18 @@ private struct TodayDailyTimelineView: View {
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .controlSize(.small)
                 .buttonStyle(.bordered)
+                .fixedSize(horizontal: true, vertical: false)
+                .help("\(store.tr("macos_tooltip_timeblock")) — \(slotLabel)")
             }
 
-            Button {
+            ThingsActionChipButton(
+                title: store.tr("v2_timeblock_title"),
+                systemImage: "clock.badge.checkmark",
+                activeTint: ThingsMacPalette.anytimeTeal,
+                helpText: store.tr("macos_tooltip_timeblock")
+            ) {
                 activePopoverTaskId = "unsched_\(task.id)"
-            } label: {
-                Label(store.tr("v2_timeblock_title"), systemImage: "clock.badge.checkmark")
-                    .font(.system(size: 11.5, weight: .medium))
             }
-            .controlSize(.small)
-            .buttonStyle(.bordered)
             .popover(isPresented: isPopoverPresented) {
                 TimeblockPopoverView(
                     store: store,

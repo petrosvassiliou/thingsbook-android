@@ -196,17 +196,21 @@ public struct MainWorkspaceView: View {
                     .font(.system(size: 17, weight: .bold, design: .monospaced))
                     .foregroundStyle(ThingsMacPalette.accentBlue)
 
+                let pauseLabel = focus.isPaused ? store.tr("focus_timer_resume") : store.tr("focus_timer_pause")
                 Button {
                     store.toggleFocusTimerPause()
                 } label: {
                     Label(
-                        focus.isPaused ? store.tr("focus_timer_resume") : store.tr("focus_timer_pause"),
+                        pauseLabel,
                         systemImage: focus.isPaused ? "play.fill" : "pause.fill"
                     )
                     .font(.system(size: 11.5, weight: .semibold))
+                    .lineLimit(1)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .fixedSize(horizontal: true, vertical: false)
+                .help(pauseLabel)
 
                 Button(store.tr("focus_timer_plus_5m")) {
                     store.addFiveMinutesToFocusTimer()
@@ -214,6 +218,8 @@ public struct MainWorkspaceView: View {
                 .font(.system(size: 11.5, weight: .semibold))
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .fixedSize(horizontal: true, vertical: false)
+                .help(store.tr("focus_timer_plus_5m"))
 
                 Button {
                     if let task = store.allOpenTasks.first(where: { $0.id == focus.taskId }) {
@@ -224,9 +230,12 @@ public struct MainWorkspaceView: View {
                     Label(store.tr("action_complete"), systemImage: "checkmark")
                         .font(.system(size: 11.5, weight: .semibold))
                         .foregroundStyle(ThingsMacPalette.logbookGreen)
+                        .lineLimit(1)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .fixedSize(horizontal: true, vertical: false)
+                .help(store.tr("action_complete"))
 
                 Button {
                     store.stopFocusTimer()
@@ -451,14 +460,18 @@ public struct MainWorkspaceView: View {
             }
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(ThingsMacPalette.todayYellow)
+            .fixedSize(horizontal: true, vertical: false)
             .buttonStyle(.plain)
+            .help("\(store.tr("action_when")): \(store.tr("view_today"))")
 
             Button(store.tr("action_delete")) {
                 store.deleteSelectedTasks()
             }
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(ThingsMacPalette.upcomingRed)
+            .fixedSize(horizontal: true, vertical: false)
             .buttonStyle(.plain)
+            .help(store.tr("action_delete"))
 
             Button {
                 store.selectedTaskIds.removeAll()
@@ -493,7 +506,9 @@ public struct MainWorkspaceView: View {
             }
             .font(.system(size: 12.5, weight: .bold))
             .foregroundStyle(ThingsMacPalette.todayYellow)
+            .fixedSize(horizontal: true, vertical: false)
             .buttonStyle(.plain)
+            .help("\(store.tr("action_undo")) (⌘Z)")
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 10)

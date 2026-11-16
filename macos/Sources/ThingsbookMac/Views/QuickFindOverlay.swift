@@ -62,6 +62,7 @@ public struct QuickFindOverlay: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .help(store.tr("quick_find_clear"))
                 }
 
                 Button("ESC") {
@@ -70,6 +71,8 @@ public struct QuickFindOverlay: View {
                 .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
+                .fixedSize(horizontal: true, vertical: false)
+                .help("\(store.tr("action_done")) (Esc)")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 13)
@@ -82,7 +85,8 @@ public struct QuickFindOverlay: View {
                     filterTogglePill(
                         icon: "eye.slash",
                         title: store.tr("search_filter_hide_completed"),
-                        isActive: filter.hideCompleted
+                        isActive: filter.hideCompleted,
+                        helpText: store.tr("search_filter_hide_completed")
                     ) {
                         filter.hideCompleted.toggle()
                     }
@@ -109,11 +113,13 @@ public struct QuickFindOverlay: View {
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
+                    .help("\(store.tr("action_when")): \(store.tr(filter.dateFilter.titleKey))")
 
                     filterTogglePill(
                         icon: "flag",
                         title: store.tr("search_filter_has_deadline"),
-                        isActive: filter.hasDeadlineOnly
+                        isActive: filter.hasDeadlineOnly,
+                        helpText: store.tr("search_filter_has_deadline")
                     ) {
                         filter.hasDeadlineOnly.toggle()
                     }
@@ -121,7 +127,8 @@ public struct QuickFindOverlay: View {
                     filterTogglePill(
                         icon: "checklist",
                         title: store.tr("search_filter_has_checklist"),
-                        isActive: filter.hasChecklistOnly
+                        isActive: filter.hasChecklistOnly,
+                        helpText: store.tr("search_filter_has_checklist")
                     ) {
                         filter.hasChecklistOnly.toggle()
                     }
@@ -160,6 +167,7 @@ public struct QuickFindOverlay: View {
                         }
                         .menuStyle(.borderlessButton)
                         .fixedSize()
+                        .help("\(store.tr("action_tags")): \(selectedTagTitle)")
                     }
 
                     Menu {
@@ -184,6 +192,7 @@ public struct QuickFindOverlay: View {
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
+                    .help(store.tr(filter.scope.titleKey))
 
                     if filter.hasActiveFilters {
                         Button {
@@ -194,7 +203,9 @@ public struct QuickFindOverlay: View {
                                     .font(.system(size: 10.5, weight: .semibold))
                                 Text(store.tr("search_filter_reset"))
                                     .font(.system(size: 11.5, weight: .medium))
+                                    .lineLimit(1)
                             }
+                            .fixedSize(horizontal: true, vertical: false)
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 9)
                             .padding(.vertical, 5)
@@ -204,6 +215,8 @@ public struct QuickFindOverlay: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .help(store.tr("search_filter_reset"))
                     }
                 }
                 .padding(.horizontal, 14)
@@ -381,6 +394,7 @@ public struct QuickFindOverlay: View {
         icon: String,
         title: String,
         isActive: Bool,
+        helpText: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -389,7 +403,9 @@ public struct QuickFindOverlay: View {
                     .font(.system(size: 11, weight: .medium))
                 Text(title)
                     .font(.system(size: 11.5, weight: isActive ? .semibold : .medium))
+                    .lineLimit(1)
             }
+            .fixedSize(horizontal: true, vertical: false)
             .foregroundStyle(isActive ? ThingsMacPalette.accentBlue : .secondary)
             .padding(.horizontal, 9.5)
             .padding(.vertical, 5)
@@ -406,6 +422,8 @@ public struct QuickFindOverlay: View {
             )
         }
         .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: false)
+        .help(helpText)
     }
 
     private func filterMenuLabel(icon: String, title: String, isActive: Bool) -> some View {
@@ -414,9 +432,11 @@ public struct QuickFindOverlay: View {
                 .font(.system(size: 11, weight: .medium))
             Text(title)
                 .font(.system(size: 11.5, weight: isActive ? .semibold : .medium))
+                .lineLimit(1)
             Image(systemName: "chevron.down")
                 .font(.system(size: 9, weight: .semibold))
         }
+        .fixedSize(horizontal: true, vertical: false)
         .foregroundStyle(isActive ? ThingsMacPalette.accentBlue : .secondary)
         .padding(.horizontal, 9.5)
         .padding(.vertical, 5)

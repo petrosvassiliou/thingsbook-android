@@ -193,12 +193,20 @@ public struct TagPillBadge: View {
     public let title: String
     public var isSelected: Bool = false
     public var showIcon: Bool = false
+    public var helpText: String? = nil
     public var onTap: (() -> Void)? = nil
 
-    public init(title: String, isSelected: Bool = false, showIcon: Bool = false, onTap: (() -> Void)? = nil) {
+    public init(
+        title: String,
+        isSelected: Bool = false,
+        showIcon: Bool = false,
+        helpText: String? = nil,
+        onTap: (() -> Void)? = nil
+    ) {
         self.title = title
         self.isSelected = isSelected
         self.showIcon = showIcon
+        self.helpText = helpText
         self.onTap = onTap
     }
 
@@ -210,7 +218,9 @@ public struct TagPillBadge: View {
             }
             Text(title)
                 .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
+                .lineLimit(1)
         }
+        .fixedSize(horizontal: true, vertical: false)
         .foregroundStyle(isSelected ? Color.white : Color.secondary)
         .padding(.horizontal, 9)
         .padding(.vertical, 3.5)
@@ -226,9 +236,247 @@ public struct TagPillBadge: View {
         if let onTap {
             Button(action: onTap) { content }
                 .buttonStyle(.plain)
+                .help(helpText ?? "#\(title)")
+        } else if let helpText {
+            content.help(helpText)
         } else {
             content
         }
+    }
+}
+
+/// Responsive wrapping flow layout (macOS 14+) that measures each subview at its natural
+/// untruncated width and wraps onto subsequent rows instead of compressing button labels.
+public struct ThingsFlowLayout: Layout {
+    public var horizontalSpacing: CGFloat
+    public var verticalSpacing: CGFloat
+
+    public init(horizontalSpacing: CGFloat = 8, verticalSpacing: CGFloat = 8) {
+        self.horizontalSpacing = horizontalSpacing
+        self.verticalSpacing = verticalSpacing
+    }
+
+    public func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard !subviews.isEmpty else { return .zero }
+        let widestItem = subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
+        let maxWidth: CGFloat
+        if let proposedWidth = proposal.width, proposedWidth.isFinite {
+            maxWidth = max(proposedWidth, widestItem)
+        } else {
+            maxWidth = .infinity
+        }
+
+        let rows = computeRows(maxWidth: maxWidth, subviews: subviews)
+        var naturalWidth: CGFloat = 0
+        var totalHeight: CGFloat = 0
+        for (index, row) in rows.enumerated() {
+            naturalWidth = max(naturalWidth, row.width)
+            totalHeight += row.height
+            if index > 0 {
+                totalHeight += verticalSpacing
+            }
+        }
+
+        if let proposedWidth = proposal.width, proposedWidth.isFinite, proposedWidth > 0 {
+            return CGSize(width: max(proposedWidth, naturalWidth), height: totalHeight)
+        }
+        return CGSize(width: naturalWidth, height: totalHeight)
+    }
+
+    public func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard !subviews.isEmpty else { return }
+        let widestItem = subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
+        let maxWidth = bounds.width > 0 ? max(bounds.width, widestItem) : .infinity
+        let rows = computeRows(maxWidth: maxWidth, subviews: subviews)
+
+        var y = bounds.minY
+        for row in rows {
+            var x = bounds.minX
+            for item in row.items {
+                let yOffset = (row.height - item.size.height) / 2.0
+                item.subview.place(
+                    at: CGPoint(x: x, y: y + yOffset),
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(item.size)
+                )
+                x += item.size.width + horizontalSpacing
+            }
+            y += row.height + verticalSpacing
+        }
+    }
+
+    private struct RowItem {
+        let subview: LayoutSubview
+        let size: CGSize
+    }
+
+    private struct Row {
+        var items: [RowItem] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    private func computeRows(maxWidth: CGFloat, subviews: Subviews) -> [Row] {
+        var rows: [Row] = []
+        var currentRow = Row()
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            let nextWidth = currentRow.items.isEmpty
+                ? size.width
+                : currentRow.width + horizontalSpacing + size.width
+
+            if !currentRow.items.isEmpty && nextWidth > maxWidth {
+                rows.append(currentRow)
+                currentRow = Row(
+                    items: [RowItem(subview: subview, size: size)],
+                    width: size.width,
+                    height: size.height
+                )
+            } else {
+                currentRow.items.append(RowItem(subview: subview, size: size))
+                currentRow.width = nextWidth
+                currentRow.height = max(currentRow.height, size.height)
+            }
+        }
+
+        if !currentRow.items.isEmpty {
+            rows.append(currentRow)
+        }
+        return rows
+    }
+}
+
+/// Readable, non-truncating Things-style action button with hover illumination and native macOS tooltip.
+public struct ThingsActionChipButton: View {
+    public let title: String
+    public let systemImage: String
+    public var isActive: Bool = false
+    public var activeTint: Color = ThingsMacPalette.accentBlue
+    public let helpText: String
+    public let action: () -> Void
+
+    @State private var isHovering = false
+
+    public init(
+        title: String,
+        systemImage: String,
+        isActive: Bool = false,
+        activeTint: Color = ThingsMacPalette.accentBlue,
+        helpText: String,
+        action: @escaping () -> Void
+    ) {
+        self.title = title
+        self.systemImage = systemImage
+        self.isActive = isActive
+        self.activeTint = activeTint
+        self.helpText = helpText
+        self.action = action
+    }
+
+    public var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5.5) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 11.5, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 12, weight: isActive ? .semibold : .medium))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .foregroundStyle(
+                isActive
+                    ? activeTint
+                    : (isHovering ? Color.primary : Color.primary.opacity(0.88))
+            )
+            .padding(.horizontal, 10.5)
+            .padding(.vertical, 5.5)
+            .background(
+                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                    .fill(
+                        isActive
+                            ? activeTint.opacity(isHovering ? 0.18 : 0.11)
+                            : (isHovering ? Color.primary.opacity(0.08) : ThingsMacPalette.subtleContainer)
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                    .strokeBorder(
+                        isActive
+                            ? activeTint.opacity(isHovering ? 0.48 : 0.32)
+                            : Color.primary.opacity(isHovering ? 0.24 : 0.13),
+                        lineWidth: 0.9
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: false)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
+        .help(helpText)
+        .accessibilityLabel(title)
+        .accessibilityHint(helpText)
+    }
+}
+
+/// Rounded icon utility button with hover highlight and reliable button-level macOS tooltip.
+public struct ThingsUtilityIconButton: View {
+    public let systemImage: String
+    public var tint: Color = ThingsMacPalette.accentBlue
+    public let helpText: String
+    public let action: () -> Void
+
+    @State private var isHovering = false
+
+    public init(
+        systemImage: String,
+        tint: Color = ThingsMacPalette.accentBlue,
+        helpText: String,
+        action: @escaping () -> Void
+    ) {
+        self.systemImage = systemImage
+        self.tint = tint
+        self.helpText = helpText
+        self.action = action
+    }
+
+    public var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(isHovering ? tint : tint.opacity(0.86))
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(isHovering ? tint.opacity(0.13) : Color.primary.opacity(0.035))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(isHovering ? tint.opacity(0.28) : Color.primary.opacity(0.08), lineWidth: 0.8)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
+        .help(helpText)
+        .accessibilityLabel(helpText)
     }
 }
 

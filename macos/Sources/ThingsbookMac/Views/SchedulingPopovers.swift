@@ -975,6 +975,7 @@ public struct ManageAreasSheetView: View {
                                 }
                                 .buttonStyle(.borderless)
                                 .disabled(index == 0)
+                                .help(store.tr("area_move_up"))
 
                                 Button {
                                     store.moveAreaOrder(area, direction: 1)
@@ -984,6 +985,7 @@ public struct ManageAreasSheetView: View {
                                 }
                                 .buttonStyle(.borderless)
                                 .disabled(index == store.areas.count - 1)
+                                .help(store.tr("area_move_down"))
 
                                 Button {
                                     renamingAreaId = area.id

@@ -145,7 +145,9 @@ public struct QuickEntrySheetView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .fixedSize(horizontal: true, vertical: false)
                     .disabled(isSmartParsing)
+                    .help(store.tr("gemini_brain_dump_action"))
 
                     Spacer()
                 }

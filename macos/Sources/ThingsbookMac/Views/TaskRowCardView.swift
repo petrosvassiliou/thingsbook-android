@@ -22,6 +22,7 @@ public struct TaskRowCardView: View {
     @State private var isGeneratingChecklist = false
     @State private var isEditingNotes = false
     @State private var isHoveringRow = false
+    @State private var isHoveringDone = false
     @State private var isFileDropTargeted = false
     @State private var draftSaveTask: Task<Void, Never>?
     @FocusState private var isTitleFocused: Bool
@@ -162,6 +163,7 @@ public struct TaskRowCardView: View {
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2.5)
                     .background(Capsule().fill(Color.primary.opacity(0.055)))
+                    .help("\(store.tr("attachments_section_title")): \(task.attachments.count)")
                 }
 
                 if let tbPill = task.formattedTimeblockPill {
@@ -180,6 +182,7 @@ public struct TaskRowCardView: View {
                         .background(Capsule().fill(ThingsMacPalette.anytimeTeal.opacity(0.12)))
                     }
                     .buttonStyle(.plain)
+                    .help("\(store.tr("macos_tooltip_timeblock")) — \(tbPill)")
                     .popover(isPresented: $isCollapsedTimeblockPopoverOpen) {
                         TimeblockPopoverView(
                             store: store,
@@ -202,6 +205,7 @@ public struct TaskRowCardView: View {
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2.5)
                     .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.11)))
+                    .help(store.trf("when_task_reminder_set", shortTimeString(rem)))
                 }
 
                 if !task.checklistItems.isEmpty {
@@ -216,6 +220,7 @@ public struct TaskRowCardView: View {
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2.5)
                     .background(Capsule().fill(Color.primary.opacity(0.055)))
+                    .help("\(store.tr("placeholder_checklist")): \(done)/\(task.checklistItems.count)")
                 }
 
                 if let rule = task.recurrenceRule {
@@ -229,6 +234,7 @@ public struct TaskRowCardView: View {
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2.5)
                     .background(Capsule().fill(Color.primary.opacity(0.055)))
+                    .help("\(store.tr("action_repeat")): \(rule.formatShortLabel(locale: store.preferences.language.locale))")
                 }
 
                 ForEach(task.tags.prefix(3)) { tag in
@@ -390,7 +396,9 @@ public struct TaskRowCardView: View {
                                         .font(.system(size: 10.5, weight: .semibold))
                                     Text("\(link.displayLabel) ↗")
                                         .font(.system(size: 11.5, weight: .semibold))
+                                        .lineLimit(1)
                                 }
+                                .fixedSize(horizontal: true, vertical: false)
                                 .foregroundStyle(ThingsMacPalette.accentBlue)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 4)
@@ -404,17 +412,21 @@ public struct TaskRowCardView: View {
                                 )
                             }
                             .buttonStyle(.plain)
+                            .help(link.targetUri)
                         }
 
                         Spacer()
 
                         if !draftNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Button(isEditingNotes ? store.tr("macos_preview_markdown") : store.tr("macos_edit_markdown")) {
+                            let toggleLabel = isEditingNotes ? store.tr("macos_preview_markdown") : store.tr("macos_edit_markdown")
+                            Button(toggleLabel) {
                                 isEditingNotes.toggle()
                             }
                             .font(.system(size: 11.5, weight: .medium))
                             .buttonStyle(.plain)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .help(toggleLabel)
                         }
                     }
                 }
@@ -496,13 +508,16 @@ public struct TaskRowCardView: View {
                             }
                             Text(store.tr("gemini_magic_breakdown"))
                                 .font(.system(size: 11.5, weight: .semibold))
+                                .lineLimit(1)
                         }
+                        .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(ThingsMacPalette.geminiPurple)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4.5)
                         .background(Capsule().fill(ThingsMacPalette.geminiPurple.opacity(0.12)))
                     }
                     .buttonStyle(.plain)
+                    .fixedSize(horizontal: true, vertical: false)
                     .disabled(isGeneratingChecklist)
                     .help(store.tr("gemini_magic_breakdown_desc"))
                 }
@@ -512,7 +527,7 @@ public struct TaskRowCardView: View {
             // Active Badges Summary Row
             let hasContext = contextBreadcrumb != nil
             if task.whenDate != nil || task.formattedTimeblockPill != nil || task.reminderTime != nil || task.deadline != nil || task.recurrenceRule != nil || hasContext || !task.tags.isEmpty {
-                HStack(spacing: 6) {
+                ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
                     if let whenStr = whenSummaryLabel {
                         HStack(spacing: 4) {
                             Image(systemName: task.scheduleState == .thisEvening ? "moon.stars.fill" : "star.fill")
@@ -521,10 +536,13 @@ public struct TaskRowCardView: View {
                             Text(whenStr)
                                 .font(.system(size: 11.5, weight: .semibold))
                                 .foregroundStyle(ThingsMacPalette.accentBlue)
+                                .lineLimit(1)
                         }
+                        .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 3.5)
                         .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.10)))
+                        .help(whenButtonTooltip)
                     }
 
                     if let tbPill = task.formattedTimeblockPill {
@@ -533,11 +551,14 @@ public struct TaskRowCardView: View {
                                 .font(.system(size: 10.5, weight: .semibold))
                             Text(tbPill)
                                 .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                                .lineLimit(1)
                         }
+                        .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(ThingsMacPalette.anytimeTeal)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 3.5)
                         .background(Capsule().fill(ThingsMacPalette.anytimeTeal.opacity(0.12)))
+                        .help(timeblockButtonTooltip)
                     }
 
                     if let rem = task.reminderTime {
@@ -546,11 +567,14 @@ public struct TaskRowCardView: View {
                                 .font(.system(size: 10, weight: .semibold))
                             Text(shortTimeString(rem))
                                 .font(.system(size: 11.5, weight: .semibold))
+                                .lineLimit(1)
                         }
+                        .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(ThingsMacPalette.accentBlue)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 3.5)
                         .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.10)))
+                        .help(store.trf("when_task_reminder_set", shortTimeString(rem)))
                     }
 
                     if let dl = task.deadline {
@@ -563,21 +587,26 @@ public struct TaskRowCardView: View {
                                 .font(.system(size: 10.5))
                             Text(crumb)
                                 .font(.system(size: 11.5, weight: .medium))
+                                .lineLimit(1)
                         }
+                        .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 3.5)
                         .background(Capsule().fill(Color.primary.opacity(0.06)))
+                        .help(moveButtonTooltip)
                     }
 
                     if let rule = task.recurrenceRule {
                         Label(rule.formatShortLabel(locale: store.preferences.language.locale), systemImage: "repeat")
                             .font(.system(size: 11.5, weight: .medium))
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .help(repeatButtonTooltip)
                     }
 
                     ForEach(task.tags) { tag in
-                        TagPillBadge(title: tag.title, showIcon: true)
+                        TagPillBadge(title: tag.title, showIcon: true, helpText: "#\(tag.title)")
                     }
                 }
                 .padding(.leading, 30)
@@ -586,208 +615,221 @@ public struct TaskRowCardView: View {
             Divider()
                 .opacity(0.6)
 
-            // Bottom Action Bar + Done Pill Button
-            HStack(spacing: 8) {
-                Button {
-                    commitDraftEditsIfNeeded()
-                    isWhenPopoverOpen = true
-                } label: {
-                    Label(store.tr("action_when"), systemImage: "calendar")
-                        .font(.system(size: 12, weight: .medium))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .popover(isPresented: $isWhenPopoverOpen) {
-                    WhenPopoverView(
-                        store: store,
-                        currentSchedule: latestTask.scheduleState,
-                        currentWhenMillis: latestTask.whenDate,
-                        currentReminderMillis: latestTask.reminderTime
-                    ) { resolved in
-                        var copy = latestTask
-                        copy.title = draftTitle
-                        copy.notes = draftNotes
-                        copy.scheduleState = resolved.scheduleState
-                        copy.whenDate = resolved.whenDateEpochMillis
-                        copy.reminderTime = resolved.reminderEpochMillis
-                        store.updateTask(copy)
+            // Bottom Scheduling & Organization Action Bar + Utility Footer
+            VStack(alignment: .leading, spacing: 9) {
+                ThingsFlowLayout(horizontalSpacing: 8, verticalSpacing: 8) {
+                    ThingsActionChipButton(
+                        title: store.tr("action_when"),
+                        systemImage: "calendar",
+                        isActive: whenSummaryLabel != nil || latestTask.reminderTime != nil,
+                        activeTint: latestTask.scheduleState == .thisEvening ? ThingsMacPalette.eveningPurple : ThingsMacPalette.accentBlue,
+                        helpText: whenButtonTooltip
+                    ) {
+                        commitDraftEditsIfNeeded()
+                        isWhenPopoverOpen = true
                     }
-                }
-
-                Button {
-                    commitDraftEditsIfNeeded()
-                    isRepeatPopoverOpen = true
-                } label: {
-                    Label(store.tr("action_repeat"), systemImage: "repeat")
-                        .font(.system(size: 12, weight: .medium))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .popover(isPresented: $isRepeatPopoverOpen) {
-                    RepeatEditorPopoverView(store: store, currentRule: latestTask.recurrenceRule) { newRule in
-                        var copy = latestTask
-                        copy.title = draftTitle
-                        copy.notes = draftNotes
-                        copy.recurrenceRule = newRule
-                        if newRule != nil && copy.whenDate == nil {
-                            copy.scheduleState = .today
-                            copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
-                        }
-                        store.updateTask(copy)
-                    }
-                }
-
-                Button {
-                    commitDraftEditsIfNeeded()
-                    isMovePopoverOpen = true
-                } label: {
-                    Label(store.tr("action_move"), systemImage: "folder")
-                        .font(.system(size: 12, weight: .medium))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .popover(isPresented: $isMovePopoverOpen) {
-                    MoveDestinationPopoverView(store: store, task: latestTask) { projId, headId, areaId, schedOverride in
-                        var copy = latestTask
-                        copy.title = draftTitle
-                        copy.notes = draftNotes
-                        copy.projectId = projId
-                        copy.headingId = headId
-                        copy.areaId = areaId
-                        if let schedOverride { copy.scheduleState = schedOverride }
-                        store.updateTask(copy)
-                    }
-                }
-
-                Button {
-                    commitDraftEditsIfNeeded()
-                    isTagPopoverOpen = true
-                } label: {
-                    Label(store.tr("action_tags"), systemImage: "tag")
-                        .font(.system(size: 12, weight: .medium))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .popover(isPresented: $isTagPopoverOpen) {
-                    TagPickerPopoverView(
-                        store: store,
-                        selectedTagIds: Set(latestTask.tagIds),
-                        onToggleTag: { tagId in
-                            let base = latestTask
-                            var tids = Set(base.tagIds)
-                            if tids.contains(tagId) { tids.remove(tagId) } else { tids.insert(tagId) }
-                            var copy = base
+                    .popover(isPresented: $isWhenPopoverOpen) {
+                        WhenPopoverView(
+                            store: store,
+                            currentSchedule: latestTask.scheduleState,
+                            currentWhenMillis: latestTask.whenDate,
+                            currentReminderMillis: latestTask.reminderTime
+                        ) { resolved in
+                            var copy = latestTask
                             copy.title = draftTitle
                             copy.notes = draftNotes
-                            store.updateTask(copy, tagIds: Array(tids))
+                            copy.scheduleState = resolved.scheduleState
+                            copy.whenDate = resolved.whenDateEpochMillis
+                            copy.reminderTime = resolved.reminderEpochMillis
+                            store.updateTask(copy)
                         }
-                    )
-                }
+                    }
 
-                Button {
-                    commitDraftEditsIfNeeded()
-                    isDeadlinePopoverOpen = true
-                } label: {
-                    Label(store.tr("action_deadline"), systemImage: "flag")
-                        .font(.system(size: 12, weight: .medium))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .popover(isPresented: $isDeadlinePopoverOpen) {
-                    DeadlinePopoverView(store: store, currentDeadlineMillis: latestTask.deadline) { dl in
-                        var copy = latestTask
-                        copy.title = draftTitle
-                        copy.notes = draftNotes
-                        copy.deadline = dl
-                        store.updateTask(copy)
+                    ThingsActionChipButton(
+                        title: store.tr("action_repeat"),
+                        systemImage: "repeat",
+                        isActive: latestTask.recurrenceRule != nil,
+                        helpText: repeatButtonTooltip
+                    ) {
+                        commitDraftEditsIfNeeded()
+                        isRepeatPopoverOpen = true
+                    }
+                    .popover(isPresented: $isRepeatPopoverOpen) {
+                        RepeatEditorPopoverView(store: store, currentRule: latestTask.recurrenceRule) { newRule in
+                            var copy = latestTask
+                            copy.title = draftTitle
+                            copy.notes = draftNotes
+                            copy.recurrenceRule = newRule
+                            if newRule != nil && copy.whenDate == nil {
+                                copy.scheduleState = .today
+                                copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
+                            }
+                            store.updateTask(copy)
+                        }
+                    }
+
+                    ThingsActionChipButton(
+                        title: store.tr("action_move"),
+                        systemImage: "folder",
+                        isActive: latestTask.projectId != nil || latestTask.areaId != nil,
+                        helpText: moveButtonTooltip
+                    ) {
+                        commitDraftEditsIfNeeded()
+                        isMovePopoverOpen = true
+                    }
+                    .popover(isPresented: $isMovePopoverOpen) {
+                        MoveDestinationPopoverView(store: store, task: latestTask) { projId, headId, areaId, schedOverride in
+                            var copy = latestTask
+                            copy.title = draftTitle
+                            copy.notes = draftNotes
+                            copy.projectId = projId
+                            copy.headingId = headId
+                            copy.areaId = areaId
+                            if let schedOverride { copy.scheduleState = schedOverride }
+                            store.updateTask(copy)
+                        }
+                    }
+
+                    ThingsActionChipButton(
+                        title: store.tr("action_tags"),
+                        systemImage: "tag",
+                        isActive: !latestTask.tags.isEmpty,
+                        helpText: tagsButtonTooltip
+                    ) {
+                        commitDraftEditsIfNeeded()
+                        isTagPopoverOpen = true
+                    }
+                    .popover(isPresented: $isTagPopoverOpen) {
+                        TagPickerPopoverView(
+                            store: store,
+                            selectedTagIds: Set(latestTask.tagIds),
+                            onToggleTag: { tagId in
+                                let base = latestTask
+                                var tids = Set(base.tagIds)
+                                if tids.contains(tagId) { tids.remove(tagId) } else { tids.insert(tagId) }
+                                var copy = base
+                                copy.title = draftTitle
+                                copy.notes = draftNotes
+                                store.updateTask(copy, tagIds: Array(tids))
+                            }
+                        )
+                    }
+
+                    ThingsActionChipButton(
+                        title: store.tr("action_deadline"),
+                        systemImage: "flag",
+                        isActive: latestTask.deadline != nil,
+                        activeTint: ThingsMacPalette.deadlineCrimson,
+                        helpText: store.tr("context_adjust_deadline")
+                    ) {
+                        commitDraftEditsIfNeeded()
+                        isDeadlinePopoverOpen = true
+                    }
+                    .popover(isPresented: $isDeadlinePopoverOpen) {
+                        DeadlinePopoverView(store: store, currentDeadlineMillis: latestTask.deadline) { dl in
+                            var copy = latestTask
+                            copy.title = draftTitle
+                            copy.notes = draftNotes
+                            copy.deadline = dl
+                            store.updateTask(copy)
+                        }
+                    }
+
+                    ThingsActionChipButton(
+                        title: store.tr("v2_timeblock_title"),
+                        systemImage: "clock.badge.checkmark",
+                        isActive: latestTask.formattedTimeblockPill != nil,
+                        activeTint: ThingsMacPalette.anytimeTeal,
+                        helpText: timeblockButtonTooltip
+                    ) {
+                        commitDraftEditsIfNeeded()
+                        isTimeblockPopoverOpen = true
+                    }
+                    .popover(isPresented: $isTimeblockPopoverOpen) {
+                        TimeblockPopoverView(
+                            store: store,
+                            currentStartMinutes: latestTask.scheduledStartMinutes,
+                            currentDurationMinutes: latestTask.durationMinutes
+                        ) { startMins, durMins in
+                            var copy = latestTask
+                            copy.title = draftTitle
+                            copy.notes = draftNotes
+                            copy.scheduledStartMinutes = startMins
+                            copy.durationMinutes = durMins
+                            store.updateTask(copy)
+                        }
                     }
                 }
 
-                Button {
-                    commitDraftEditsIfNeeded()
-                    isTimeblockPopoverOpen = true
-                } label: {
-                    Label(store.tr("v2_timeblock_title"), systemImage: "clock.badge.checkmark")
-                        .font(.system(size: 12, weight: .medium))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .popover(isPresented: $isTimeblockPopoverOpen) {
-                    TimeblockPopoverView(
-                        store: store,
-                        currentStartMinutes: latestTask.scheduledStartMinutes,
-                        currentDurationMinutes: latestTask.durationMinutes
-                    ) { startMins, durMins in
-                        var copy = latestTask
-                        copy.title = draftTitle
-                        copy.notes = draftNotes
-                        copy.scheduledStartMinutes = startMins
-                        copy.durationMinutes = durMins
-                        store.updateTask(copy)
+                HStack(spacing: 7) {
+                    ThingsUtilityIconButton(
+                        systemImage: "paperclip",
+                        helpText: store.tr("action_attach_file")
+                    ) {
+                        commitDraftEditsIfNeeded()
+                        store.pickAndAttachFiles(taskId: task.id)
                     }
-                }
 
-                Button {
-                    commitDraftEditsIfNeeded()
-                    store.pickAndAttachFiles(taskId: task.id)
-                } label: {
-                    Image(systemName: "paperclip")
-                        .foregroundStyle(ThingsMacPalette.accentBlue)
-                        .help(store.tr("action_attach_file"))
-                }
-                .buttonStyle(.borderless)
-
-                Button {
-                    commitDraftEditsIfNeeded()
-                    store.startFocusTimer(for: latestTask)
-                } label: {
-                    Image(systemName: "timer")
-                        .foregroundStyle(ThingsMacPalette.accentBlue)
-                        .help(store.tr("action_focus_timer"))
-                }
-                .buttonStyle(.borderless)
-
-                Button {
-                    commitDraftEditsIfNeeded(commitPendingChecklist: true)
-                    _ = try? store.database.duplicateTask(task.id)
-                } label: {
-                    Image(systemName: "plus.square.on.square")
-                        .foregroundStyle(ThingsMacPalette.accentBlue)
-                        .help(store.tr("action_duplicate_todo"))
-                }
-                .buttonStyle(.borderless)
-
-                Button(role: .destructive) {
-                    draftSaveTask?.cancel()
-                    store.deleteTask(latestTask)
-                } label: {
-                    Image(systemName: "trash")
-                        .foregroundStyle(ThingsMacPalette.deadlineCrimson)
-                        .help(store.tr("action_delete"))
-                }
-                .buttonStyle(.borderless)
-
-                Spacer()
-
-                Button {
-                    commitDraftEditsIfNeeded(commitPendingChecklist: true)
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.86)) {
-                        store.expandedTaskId = nil
+                    ThingsUtilityIconButton(
+                        systemImage: "timer",
+                        helpText: store.tr("action_focus_timer")
+                    ) {
+                        commitDraftEditsIfNeeded()
+                        store.startFocusTimer(for: latestTask)
                     }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 11, weight: .bold))
-                        Text(store.tr("action_done"))
-                            .font(.system(size: 12.5, weight: .bold))
+
+                    ThingsUtilityIconButton(
+                        systemImage: "plus.square.on.square",
+                        helpText: store.tr("action_duplicate_todo")
+                    ) {
+                        commitDraftEditsIfNeeded(commitPendingChecklist: true)
+                        _ = try? store.database.duplicateTask(task.id)
                     }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(ThingsMacPalette.accentBlue))
+
+                    ThingsUtilityIconButton(
+                        systemImage: "trash",
+                        tint: ThingsMacPalette.deadlineCrimson,
+                        helpText: store.tr("action_delete")
+                    ) {
+                        draftSaveTask?.cancel()
+                        store.deleteTask(latestTask)
+                    }
+
+                    Spacer(minLength: 12)
+
+                    Button {
+                        commitDraftEditsIfNeeded(commitPendingChecklist: true)
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.86)) {
+                            store.expandedTaskId = nil
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 11, weight: .bold))
+                            Text(store.tr("action_done"))
+                                .font(.system(size: 12.5, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 6.5)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(ThingsMacPalette.accentBlue)
+                                .brightness(isHoveringDone ? 0.06 : 0.0)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .onHover { hovering in
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            isHoveringDone = hovering
+                        }
+                    }
+                    .help("\(store.tr("action_done")) (Esc)")
+                    .keyboardShortcut(.escape, modifiers: [])
                 }
-                .buttonStyle(.plain)
-                .keyboardShortcut(.escape, modifiers: [])
             }
             .padding(.leading, 30)
         }
@@ -956,6 +998,47 @@ public struct TaskRowCardView: View {
         }
     }
 
+    private var whenButtonTooltip: String {
+        let base = store.tr("context_when_date_reminder")
+        if let whenSummaryLabel {
+            return "\(base) — \(whenSummaryLabel)"
+        }
+        return base
+    }
+
+    private var repeatButtonTooltip: String {
+        let base = store.tr("context_configure_repeat")
+        if let rule = latestTask.recurrenceRule {
+            return "\(base) — \(rule.formatShortLabel(locale: store.preferences.language.locale))"
+        }
+        return base
+    }
+
+    private var moveButtonTooltip: String {
+        let base = store.tr("move_dialog_title")
+        if let contextBreadcrumb {
+            return "\(base) — \(contextBreadcrumb)"
+        }
+        return base
+    }
+
+    private var tagsButtonTooltip: String {
+        let base = store.tr("context_assign_tags")
+        if !latestTask.tags.isEmpty {
+            let names = latestTask.tags.map { "#\($0.title)" }.joined(separator: ", ")
+            return "\(base) — \(names)"
+        }
+        return base
+    }
+
+    private var timeblockButtonTooltip: String {
+        let base = store.tr("macos_tooltip_timeblock")
+        if let pill = latestTask.formattedTimeblockPill {
+            return "\(base) — \(pill)"
+        }
+        return base
+    }
+
     private func deadlineChip(_ millis: Int64) -> some View {
         let todayDay = DateEpochConverter.epochDay(for: Date())
         let dlDay = DateEpochConverter.epochDay(forMillis: millis)
@@ -972,13 +1055,16 @@ public struct TaskRowCardView: View {
                 .font(.system(size: 10, weight: .semibold))
             Text(label)
                 .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
         }
+        .fixedSize(horizontal: true, vertical: false)
         .foregroundStyle(isUrgent ? ThingsMacPalette.deadlineCrimson : Color.secondary)
         .padding(.horizontal, 8)
         .padding(.vertical, 2.5)
         .background(
             Capsule().fill(isUrgent ? ThingsMacPalette.deadlineCrimson.opacity(0.12) : Color.primary.opacity(0.055))
         )
+        .help("\(store.tr("action_deadline")): \(label)")
     }
 
     private func shortTimeString(_ millis: Int64) -> String {
@@ -1024,6 +1110,7 @@ private struct ChecklistItemRowView: View {
                     .foregroundStyle(item.isCompleted ? ThingsMacPalette.accentBlue : .secondary)
             }
             .buttonStyle(.plain)
+            .help(item.isCompleted ? store.tr("action_reopen_todo") : store.tr("action_complete"))
 
             TextField("", text: $text)
                 .textFieldStyle(.plain)

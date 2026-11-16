@@ -190,7 +190,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.9"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.10"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -405,12 +405,12 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(searchHits.tasks.map(\.id), ["remote-sync-task-1"], "FTS5 must index remotely synced tasks")
     }
 
-    // MARK: - 7. v2.0.0-beta.9 AppUpdateService Beta Channel, Stable Isolation & Version Bump
+    // MARK: - 7. v2.0.0-beta.10 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.9")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.9")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 53)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.10")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.10")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 54)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
 
         // Core [major, minor, patch] + build metadata comparisons on stable channel (includeBeta inferred false for 1.8.1)
@@ -438,6 +438,7 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.8", current: "2.0.0-beta.7"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.9", current: "2.0.0-beta.8"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.10", current: "2.0.0-beta.9"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.11", current: "2.0.0-beta.10"))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.9", current: "2.0.0-beta.10"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.1"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.99"))
@@ -1955,6 +1956,53 @@ final class ThingsbookCoreTests: XCTestCase {
                 XCTAssertNotEqual(localized, key, "Unresolved key \(key) in \(lang)")
             }
         }
+    }
+
+    // MARK: - 17. v2.0.0-beta.10 Readable Action Chip Labels & Localized Hover Tooltips Across All 5 Languages
+
+    func testActionButtonsAndTooltipsLocalizationV200Beta10() {
+        let requiredKeys = [
+            "action_when",
+            "context_when_date_reminder",
+            "action_repeat",
+            "context_configure_repeat",
+            "action_move",
+            "move_dialog_title",
+            "action_tags",
+            "context_assign_tags",
+            "action_deadline",
+            "context_adjust_deadline",
+            "v2_timeblock_title",
+            "macos_tooltip_timeblock",
+            "macos_tooltip_shift_15m",
+            "macos_tooltip_project_options",
+            "macos_tooltip_zoom_in",
+            "macos_tooltip_zoom_out",
+            "macos_tooltip_zoom_reset",
+            "action_attach_file",
+            "v2_focus_start_25",
+            "context_duplicate_todo",
+            "action_delete",
+            "action_done"
+        ]
+
+        for lang in ["en", "de", "fr", "it", "es"] {
+            let appLang = AppLanguage(rawValue: lang) ?? .en
+            for key in requiredKeys {
+                let localized = ThingsStrings.shared.text(key, lang: appLang)
+                XCTAssertFalse(localized.isEmpty, "Missing \(key) in \(lang)")
+                XCTAssertNotEqual(localized, key, "Unresolved key \(key) in \(lang)")
+                XCTAssertFalse(localized.hasSuffix("..."), "Action/tooltip label \(key) in \(lang) must not be pre-truncated: \(localized)")
+            }
+        }
+
+        // Verify exact full German labels for the 6 primary expanded task card buttons shown in user screenshot
+        XCTAssertEqual(ThingsStrings.shared.text("action_when", lang: .de), "Wann")
+        XCTAssertEqual(ThingsStrings.shared.text("action_repeat", lang: .de), "Wiederholen")
+        XCTAssertEqual(ThingsStrings.shared.text("action_move", lang: .de), "Bewegen")
+        XCTAssertEqual(ThingsStrings.shared.text("action_tags", lang: .de), "Tags")
+        XCTAssertEqual(ThingsStrings.shared.text("action_deadline", lang: .de), "Frist")
+        XCTAssertEqual(ThingsStrings.shared.text("v2_timeblock_title", lang: .de), "Zeitblock")
     }
 }
 

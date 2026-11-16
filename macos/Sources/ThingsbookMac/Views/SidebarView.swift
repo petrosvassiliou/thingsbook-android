@@ -146,6 +146,7 @@ public struct SidebarView: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
+                .help(store.tr("entity_new_project"))
 
                 Spacer()
 

@@ -307,10 +307,13 @@ public struct AttachmentsStripView: View {
                             .font(.system(size: 10, weight: .bold))
                         Text(store.tr("action_attach_file"))
                             .font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                     .foregroundStyle(ThingsMacPalette.accentBlue)
                 }
                 .buttonStyle(.plain)
+                .help(store.tr("action_attach_file"))
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -456,11 +459,17 @@ public struct AttachmentPreviewSheet: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                        .help(store.tr("macos_tooltip_zoom_out"))
 
-                        Text("\(Int((imageZoom * 100).rounded()))%")
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .frame(width: 44)
-                            .onTapGesture { imageZoom = 1.0 }
+                        Button {
+                            imageZoom = 1.0
+                        } label: {
+                            Text("\(Int((imageZoom * 100).rounded()))%")
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                .frame(width: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .help(store.tr("macos_tooltip_zoom_reset"))
 
                         Button {
                             imageZoom = min(4.0, imageZoom + 0.25)
@@ -469,6 +478,7 @@ public struct AttachmentPreviewSheet: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                        .help(store.tr("macos_tooltip_zoom_in"))
                     }
                 }
 
@@ -477,17 +487,23 @@ public struct AttachmentPreviewSheet: View {
                         NSWorkspace.shared.activateFileViewerSelecting([url])
                     } label: {
                         Label(store.tr("macos_attachment_quicklook"), systemImage: "folder")
+                            .lineLimit(1)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .help(store.tr("macos_attachment_quicklook"))
 
                     Button {
                         NSWorkspace.shared.open(url)
                     } label: {
                         Label(store.tr("attachment_open_external"), systemImage: "arrow.up.forward.square")
+                            .lineLimit(1)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .help(store.tr("attachment_open_external"))
                 }
 
                 Button(role: .destructive) {
@@ -506,6 +522,8 @@ public struct AttachmentPreviewSheet: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
+                .fixedSize(horizontal: true, vertical: false)
+                .help(store.tr("action_done"))
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 12)

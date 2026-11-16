@@ -1247,6 +1247,7 @@ fun ThingsTemplatesAndImportModal(
                     }
                 }
             }
+            }
         }
     }
 }
@@ -1288,19 +1289,21 @@ private fun TemplateGalleryCard(
                     }
                 }
                 if (onDelete != null) {
-                    IconButton(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onDelete()
-                        },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.DeleteOutline,
-                            contentDescription = stringResource(R.string.action_delete),
-                            tint = colors.deadlineUrgentRed,
-                            modifier = Modifier.size(16.dp)
-                        )
+                    ThingsHoverTooltip(text = stringResource(R.string.action_delete)) {
+                        IconButton(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onDelete()
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.DeleteOutline,
+                                contentDescription = stringResource(R.string.action_delete),
+                                tint = colors.deadlineUrgentRed,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -1335,7 +1338,6 @@ private fun TemplateGalleryCard(
                     )
                 }
             }
-        }
         }
     }
 }

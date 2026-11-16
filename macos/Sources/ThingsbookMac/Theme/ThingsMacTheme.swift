@@ -526,7 +526,7 @@ private struct ThingsMacTooltipModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(ThingsTooltipTrackingRepresentable(text: text))
-            .accessibilityHelp(text)
+            .accessibilityHint(text)
     }
 }
 

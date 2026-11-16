@@ -5410,7 +5410,7 @@ private fun QuickFindFilterChip(
     val borderColor = when {
         isReset -> colors.deadlineUrgentRed.copy(alpha = 0.35f)
         active -> colors.thingsBlue.copy(alpha = 0.45f)
-        else -> colors.dividerHairline
+        else -> colors.hairlineDivider
     }
 
     Surface(

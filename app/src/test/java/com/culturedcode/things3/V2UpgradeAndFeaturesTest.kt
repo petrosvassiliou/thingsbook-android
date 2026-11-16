@@ -749,9 +749,9 @@ class V2UpgradeAndFeaturesTest {
     }
 
     @Test
-    fun `v2_0_0_beta_12 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
-        assertEquals(56, BuildConfig.VERSION_CODE)
-        assertEquals("2.0.0-beta.12", BuildConfig.VERSION_NAME)
+    fun `v2_0_0_beta_13 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
+        assertEquals(57, BuildConfig.VERSION_CODE)
+        assertEquals("2.0.0-beta.13", BuildConfig.VERSION_NAME)
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -1126,6 +1126,39 @@ class V2UpgradeAndFeaturesTest {
         assertFalse(host.isShowing)
         fakeNowMs = 3_050L
         assertEquals(160L, host.resolveHoverDelayMs())
+    }
+
+    @Test
+    fun `v2_0_0_beta_13 fast sync UID wake topic matches ChromeOS and macOS vector and wakeOnly payload roundtrips`() {
+        assertEquals(35L, SyncRepository.FAST_PUSH_COALESCE_MS)
+        assertEquals(
+            "tb_uid_9d8ecb07e35952112a013d4819b4",
+            SyncRepository.deriveUidWakeChannelTopic(" user-abc-123 ")
+        )
+
+        val jsonCodec = Json {
+            ignoreUnknownKeys = true
+            encodeDefaults = true
+        }
+        val wakeEnvelope = CloudDeltaBatchPayload(
+            userId = "user-abc-123",
+            deviceId = "dev-android",
+            batchTimestamp = 1_763_000_000_789L,
+            wakeOnly = true
+        )
+        val encoded = jsonCodec.encodeToString(wakeEnvelope)
+        assertTrue(encoded.toByteArray(StandardCharsets.UTF_8).size < SyncRepository.MAX_NTFY_CHUNK_BYTES)
+        val decoded = jsonCodec.decodeFromString<CloudDeltaBatchPayload>(encoded)
+        assertTrue(decoded.wakeOnly)
+        assertEquals("user-abc-123", decoded.userId)
+        assertEquals("dev-android", decoded.deviceId)
+        assertEquals(1_763_000_000_789L, decoded.batchTimestamp)
+
+        // Legacy peers omitting wakeOnly deserialize cleanly with wakeOnly = false
+        val legacyDecoded = jsonCodec.decodeFromString<CloudDeltaBatchPayload>(
+            """{"userId":"user-abc-123","deviceId":"dev-cros","batchTimestamp":1763000000123}"""
+        )
+        assertFalse(legacyDecoded.wakeOnly)
     }
 }
 

@@ -49,13 +49,16 @@ import { loadPreferences, localDb, savePreferences } from './localDb';
 import {
   ATTACHMENT_BACKFILL_STORAGE_PREFIX,
   ATTACHMENT_BATCH_CHUNK_SIZE,
+  FAST_SYNC_COALESCE_MS,
   METADATA_BATCH_CHUNK_SIZE,
   PROJECTS_REVIEW_BACKFILL_STORAGE_PREFIX,
   attachmentToFirestoreMap,
-  buildBoundedNtfyRelayPayload,
+  buildNtfyRelayOrWakePayload,
   chunkItems,
   clampRemoteCursorTimestamp,
-  computeEffectivePullCursor
+  computeEffectivePullCursor,
+  formatUidWakeChannelFromHex,
+  formatUidWakeSeed
 } from './syncUtils';
 
 function extractAuthErrorCode(err: unknown): string {
@@ -448,13 +451,21 @@ type SyncListener = (snapshot: CloudSyncSnapshot) => void;
 class ThingsCloudSyncService {
   private listeners = new Set<SyncListener>();
   private firestoreUnsubs: FirestoreUnsubscribe[] = [];
+  private liveEventSource: EventSource | null = null;
+  private liveEventSourceReconnectTimer: number | null = null;
+  private realtimeReconnectTimer: number | null = null;
   private authUnsub: AuthUnsubscribe | null = null;
   private boundAuthInstance: Auth | null = null;
   private listenersRegistered = false;
   private debounceTimer: number | null = null;
+  private fastPushTimer: number | null = null;
+  private fastPullTimer: number | null = null;
+  private isPushingPromise: Promise<void> | null = null;
+  private pendingFastPush = false;
   private isSyncingPromise: Promise<void> | null = null;
   private pendingResyncRequested = false;
   private pendingForceFullPull = false;
+  private lastHandledPulseAt = 0;
   private authFlowInProgress = false;
   private state: CloudSyncSnapshot = {
     status: 'OFFLINE',
@@ -466,7 +477,7 @@ class ThingsCloudSyncService {
 
   constructor() {
     localDb.setSyncTrigger((immediate) => {
-      this.triggerBackgroundSync(immediate ? 0 : 600);
+      this.triggerFastPush(immediate ? 0 : FAST_SYNC_COALESCE_MS);
     });
   }
 
@@ -583,8 +594,8 @@ class ThingsCloudSyncService {
         });
 
         if (!this.isLocalOnly()) {
-          await this.syncBidirectionalDeltas();
           this.attachRealtimeListeners(user.uid);
+          await this.syncBidirectionalDeltas();
         } else {
           this.emit({ status: 'OFFLINE' });
         }
@@ -604,12 +615,32 @@ class ThingsCloudSyncService {
       this.listenersRegistered = true;
       window.addEventListener('online', () => {
         if (!this.isLocalOnly() && this.state.userId) {
-          this.triggerBackgroundSync(250);
+          this.attachRealtimeListeners(this.state.userId);
+          this.triggerFastPush(0);
+          this.triggerBackgroundSync(40);
         }
       });
       window.addEventListener('offline', () => {
         this.emit({ status: 'OFFLINE' });
       });
+      window.addEventListener('focus', () => {
+        if (!this.isLocalOnly() && this.state.userId && navigator.onLine) {
+          this.triggerIncrementalPull(0);
+        }
+      });
+      if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', () => {
+          if (
+            document.visibilityState === 'visible' &&
+            !this.isLocalOnly() &&
+            this.state.userId &&
+            navigator.onLine
+          ) {
+            this.triggerFastPush(0);
+            this.triggerIncrementalPull(0);
+          }
+        });
+      }
     }
   }
 
@@ -619,12 +650,48 @@ class ThingsCloudSyncService {
       this.emit({ status: 'OFFLINE' });
     } else if (this.state.userId) {
       const forceFull = this.getLastSyncTs(this.state.userId) === 0;
-      void this.syncBidirectionalDeltas(forceFull);
       this.attachRealtimeListeners(this.state.userId);
+      void this.syncBidirectionalDeltas(forceFull);
     }
   }
 
-  triggerBackgroundSync(delayMs = 500) {
+  /**
+   * Sub-100ms outbound Firestore push path decoupled from full 8-collection pulls and ntfy polling,
+   * ensuring local edits propagate to peers immediately without 3-4s queueing delays.
+   */
+  triggerFastPush(delayMs = FAST_SYNC_COALESCE_MS) {
+    if (this.isLocalOnly() || !this.state.userId) return;
+    if (this.fastPushTimer != null) {
+      window.clearTimeout(this.fastPushTimer);
+      this.fastPushTimer = null;
+    }
+    if (delayMs <= 0) {
+      void this.runFastPushLoop();
+      return;
+    }
+    this.fastPushTimer = window.setTimeout(() => {
+      this.fastPushTimer = null;
+      void this.runFastPushLoop();
+    }, delayMs);
+  }
+
+  triggerIncrementalPull(delayMs = 20) {
+    if (this.isLocalOnly() || !this.state.userId) return;
+    if (this.fastPullTimer != null) {
+      window.clearTimeout(this.fastPullTimer);
+      this.fastPullTimer = null;
+    }
+    if (delayMs <= 0) {
+      void this.syncBidirectionalDeltas(false);
+      return;
+    }
+    this.fastPullTimer = window.setTimeout(() => {
+      this.fastPullTimer = null;
+      void this.syncBidirectionalDeltas(false);
+    }, delayMs);
+  }
+
+  triggerBackgroundSync(delayMs = FAST_SYNC_COALESCE_MS) {
     if (this.isLocalOnly() || !this.state.userId) return;
     if (this.debounceTimer != null) {
       window.clearTimeout(this.debounceTimer);
@@ -961,7 +1028,56 @@ class ThingsCloudSyncService {
     });
   }
 
-  // ==================== Bidirectional Delta Sync ====================
+  // ==================== Fast Outbound Push & Bidirectional Delta Sync ====================
+
+  private async deriveUidWakeTopic(userId: string): Promise<string> {
+    const hex = await sha256Hex(formatUidWakeSeed(userId));
+    return formatUidWakeChannelFromHex(hex);
+  }
+
+  private async runFastPushLoop(): Promise<void> {
+    if (this.isLocalOnly() || !navigator.onLine) return;
+    if (this.isPushingPromise) {
+      this.pendingFastPush = true;
+      return this.isPushingPromise;
+    }
+
+    this.isPushingPromise = (async () => {
+      try {
+        while (true) {
+          this.pendingFastPush = false;
+          const auth = getFirebaseAuthInstance();
+          const userId = auth.currentUser?.uid || this.state.userId;
+          if (!userId || this.isLocalOnly() || !navigator.onLine) break;
+
+          const relayPushMaps = await this.pushDirtyRecordsToFirestore(userId);
+          if (relayPushMaps) {
+            this.emit({ status: 'SYNCED', errorMessage: null });
+            const meta = this.loadPersistedMeta();
+            const localDeviceId = meta?.deviceId || this.getOrCreateDeviceId();
+            void this.broadcastNtfyWakeAndDeltas(
+              userId,
+              meta?.channelTopic ?? null,
+              localDeviceId,
+              relayPushMaps
+            );
+          }
+
+          if (!this.pendingFastPush || this.isLocalOnly() || !navigator.onLine) {
+            this.pendingFastPush = false;
+            break;
+          }
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.emit({ status: 'OFFLINE', errorMessage: msg });
+      } finally {
+        this.isPushingPromise = null;
+      }
+    })();
+
+    return this.isPushingPromise;
+  }
 
   async syncBidirectionalDeltas(forceFullPull = false): Promise<void> {
     void this.initializeSession();
@@ -1011,7 +1127,9 @@ class ThingsCloudSyncService {
       return;
     }
 
-    this.emit({ status: 'SYNCING', errorMessage: null });
+    if (this.state.status !== 'SYNCED') {
+      this.emit({ status: 'SYNCING', errorMessage: null });
+    }
 
     try {
       const lastSync = forceFullPull ? 0 : this.getLastSyncTs(userId);
@@ -1021,14 +1139,22 @@ class ThingsCloudSyncService {
       const pulledMax = clampRemoteCursorTimestamp(rawPulledMax, Date.now());
 
       const meta = this.loadPersistedMeta();
-      if (meta?.channelTopic) {
-        await this.syncSecondaryNtfyRelay(
+      const localDeviceId = meta?.deviceId || this.getOrCreateDeviceId();
+      if (relayPushMaps) {
+        void this.broadcastNtfyWakeAndDeltas(
+          userId,
+          meta?.channelTopic ?? null,
+          localDeviceId,
+          relayPushMaps
+        );
+      }
+      if (forceFullPull && meta?.channelTopic) {
+        void this.pollNtfyHistoryInBackground(
           userId,
           meta.channelTopic,
-          meta.deviceId,
-          lastSync,
-          relayPushMaps
-        ).catch(() => undefined);
+          localDeviceId,
+          lastSync
+        );
       }
 
       const nextSyncTs =
@@ -1096,13 +1222,25 @@ class ThingsCloudSyncService {
     if (metadataOps.length === 0 && dirty.attachments.length === 0) return null;
 
     const db = getFirestoreInstance();
+    const localDeviceId = this.getOrCreateDeviceId();
+    const pulseAt = Date.now();
+    const pulseRef = doc(db, 'users', userId, 'sync_meta', 'pulse');
+    const pulseDoc = {
+      pulseAt,
+      senderDeviceId: localDeviceId
+    };
 
     if (metadataOps.length > 0) {
-      for (const slice of chunkItems(metadataOps, METADATA_BATCH_CHUNK_SIZE)) {
+      const slices = chunkItems(metadataOps, METADATA_BATCH_CHUNK_SIZE);
+      for (let sIdx = 0; sIdx < slices.length; sIdx++) {
+        const slice = slices[sIdx];
         const batch = writeBatch(db);
         for (const op of slice) {
           const ref = doc(db, 'users', userId, op.col, op.id);
           batch.set(ref, op.data, { merge: true });
+        }
+        if (sIdx === slices.length - 1 && dirty.attachments.length === 0) {
+          batch.set(pulseRef, pulseDoc, { merge: true });
         }
         await batch.commit();
       }
@@ -1113,11 +1251,16 @@ class ThingsCloudSyncService {
         id: att.id,
         data: attachmentMaps[idx]
       }));
-      for (const attChunk of chunkItems(attachmentPairs, ATTACHMENT_BATCH_CHUNK_SIZE)) {
+      const attChunks = chunkItems(attachmentPairs, ATTACHMENT_BATCH_CHUNK_SIZE);
+      for (let aIdx = 0; aIdx < attChunks.length; aIdx++) {
+        const attChunk = attChunks[aIdx];
         const batch = writeBatch(db);
         for (const item of attChunk) {
           const ref = doc(db, 'users', userId, 'attachments', item.id);
           batch.set(ref, item.data, { merge: true });
+        }
+        if (aIdx === attChunks.length - 1) {
+          batch.set(pulseRef, pulseDoc, { merge: true });
         }
         await batch.commit();
       }
@@ -1258,11 +1401,24 @@ class ThingsCloudSyncService {
     return clampRemoteCursorTimestamp(appliedMax, Date.now());
   }
 
+  private scheduleRealtimeReconnect(userId: string) {
+    if (typeof window === 'undefined' || this.isLocalOnly()) return;
+    if (this.realtimeReconnectTimer != null) return;
+    this.realtimeReconnectTimer = window.setTimeout(() => {
+      this.realtimeReconnectTimer = null;
+      if (!this.isLocalOnly() && this.state.userId === userId && navigator.onLine) {
+        this.attachRealtimeListeners(userId);
+        this.triggerIncrementalPull(0);
+      }
+    }, 1200);
+  }
+
   private attachRealtimeListeners(userId: string) {
     this.detachRealtimeListeners();
     if (this.isLocalOnly()) return;
 
     const db = getFirestoreInstance();
+    const localDeviceId = this.getOrCreateDeviceId();
     const collections = [
       'tags',
       'areas',
@@ -1338,17 +1494,179 @@ class ThingsCloudSyncService {
           if (clampedMax > this.getLastSyncTs(userId)) {
             this.setLastSyncTs(userId, clampedMax);
           }
-          this.emit({ status: 'SYNCED' });
+          this.emit({ status: 'SYNCED', errorMessage: null });
         },
         () => {
-          // Silently fallback on transient listener disconnect
+          this.scheduleRealtimeReconnect(userId);
         }
       );
       this.firestoreUnsubs.push(unsub);
     }
+
+    // Ultra-low-latency single-document pulse listener: fires in <80ms across all peer platforms
+    // without query index or clock-skew filtering.
+    const pulseRef = doc(db, 'users', userId, 'sync_meta', 'pulse');
+    const pulseUnsub = onSnapshot(
+      pulseRef,
+      (snap) => {
+        if (!snap.exists() || snap.metadata.hasPendingWrites) return;
+        const data = snap.data();
+        const sender = typeof data?.senderDeviceId === 'string' ? data.senderDeviceId : '';
+        const pulseAt = finiteNumber(data?.pulseAt, 0);
+        if (sender && sender !== localDeviceId && pulseAt > this.lastHandledPulseAt) {
+          this.lastHandledPulseAt = pulseAt;
+          this.triggerIncrementalPull(15);
+        }
+      },
+      () => {
+        this.scheduleRealtimeReconnect(userId);
+      }
+    );
+    this.firestoreUnsubs.push(pulseUnsub);
+
+    void this.attachLiveWakeEventSource(userId, localDeviceId);
+  }
+
+  private async attachLiveWakeEventSource(userId: string, localDeviceId: string) {
+    if (typeof window === 'undefined' || typeof EventSource === 'undefined') return;
+    if (this.isLocalOnly() || this.state.userId !== userId) return;
+
+    const uidWakeTopic = await this.deriveUidWakeTopic(userId);
+    if (this.isLocalOnly() || this.state.userId !== userId) return;
+
+    if (this.liveEventSource) {
+      try {
+        this.liveEventSource.close();
+      } catch {
+        // ignore
+      }
+      this.liveEventSource = null;
+    }
+
+    try {
+      const es = new EventSource(`https://ntfy.sh/${encodeURIComponent(uidWakeTopic)}/sse`);
+      this.liveEventSource = es;
+      es.onmessage = (ev) => {
+        if (this.isLocalOnly() || this.state.userId !== userId) return;
+        void this.handleIncomingNtfyEnvelope(ev.data, userId, localDeviceId);
+      };
+      es.onerror = () => {
+        try {
+          es.close();
+        } catch {
+          // ignore
+        }
+        if (this.liveEventSource === es) {
+          this.liveEventSource = null;
+        }
+        if (
+          this.liveEventSourceReconnectTimer == null &&
+          !this.isLocalOnly() &&
+          this.state.userId === userId
+        ) {
+          this.liveEventSourceReconnectTimer = window.setTimeout(() => {
+            this.liveEventSourceReconnectTimer = null;
+            void this.attachLiveWakeEventSource(userId, localDeviceId);
+          }, 4000);
+        }
+      };
+    } catch {
+      // Ignore EventSource errors in restricted/offline environments
+    }
+  }
+
+  private async handleIncomingNtfyEnvelope(
+    rawEnvelopeOrBatch: string,
+    userId: string,
+    localDeviceId: string
+  ): Promise<void> {
+    try {
+      const parsed = JSON.parse(rawEnvelopeOrBatch);
+      const batch =
+        typeof parsed?.message === 'string' ? JSON.parse(parsed.message) : parsed;
+      if (!batch || batch.userId !== userId) return;
+      if (batch.deviceId === localDeviceId) return;
+
+      if (batch.wakeOnly === true) {
+        this.triggerIncrementalPull(0);
+        return;
+      }
+
+      const maxApplied = await this.applyParsedNtfyBatch(batch);
+      if (maxApplied > 0) {
+        const clamped = clampRemoteCursorTimestamp(maxApplied, Date.now());
+        if (clamped > this.getLastSyncTs(userId)) {
+          this.setLastSyncTs(userId, clamped);
+        }
+        this.emit({ status: 'SYNCED', errorMessage: null });
+      }
+    } catch {
+      // Ignore malformed relay message
+    }
+  }
+
+  private async applyParsedNtfyBatch(batch: Record<string, unknown>): Promise<number> {
+    return await localDb.applyRemoteDeltas({
+      tags: Array.isArray(batch.tags)
+        ? batch.tags
+            .map(tagFromFirestoreMap)
+            .filter((x: TagRecord | null): x is TagRecord => x !== null)
+        : undefined,
+      areas: Array.isArray(batch.areas)
+        ? batch.areas
+            .map(areaFromFirestoreMap)
+            .filter((x: AreaRecord | null): x is AreaRecord => x !== null)
+        : undefined,
+      projects: Array.isArray(batch.projects)
+        ? batch.projects
+            .map(projectFromFirestoreMap)
+            .filter((x: ProjectRecord | null): x is ProjectRecord => x !== null)
+        : undefined,
+      headings: Array.isArray(batch.headings)
+        ? batch.headings
+            .map(headingFromFirestoreMap)
+            .filter((x: HeadingRecord | null): x is HeadingRecord => x !== null)
+        : undefined,
+      tasks: Array.isArray(batch.tasks)
+        ? batch.tasks
+            .map(taskFromFirestoreMap)
+            .filter((x: TaskRecord | null): x is TaskRecord => x !== null)
+        : undefined,
+      checklistItems: Array.isArray(batch.checklistItems)
+        ? batch.checklistItems
+            .map(checklistFromFirestoreMap)
+            .filter((x: ChecklistItemRecord | null): x is ChecklistItemRecord => x !== null)
+        : undefined,
+      attachments: Array.isArray(batch.attachments)
+        ? batch.attachments
+            .map(attachmentFromFirestoreMap)
+            .filter((x: AttachmentRecord | null): x is AttachmentRecord => x !== null)
+        : undefined,
+      projectTemplates: Array.isArray(batch.projectTemplates)
+        ? batch.projectTemplates
+            .map(projectTemplateFromFirestoreMap)
+            .filter((x: ProjectTemplate | null): x is ProjectTemplate => x !== null)
+        : undefined
+    });
   }
 
   private detachRealtimeListeners() {
+    if (this.realtimeReconnectTimer != null && typeof window !== 'undefined') {
+      window.clearTimeout(this.realtimeReconnectTimer);
+      this.realtimeReconnectTimer = null;
+    }
+    if (this.liveEventSourceReconnectTimer != null && typeof window !== 'undefined') {
+      window.clearTimeout(this.liveEventSourceReconnectTimer);
+      this.liveEventSourceReconnectTimer = null;
+    }
+    if (this.liveEventSource) {
+      try {
+        this.liveEventSource.close();
+      } catch {
+        // ignore
+      }
+      this.liveEventSource = null;
+    }
     for (const u of this.firestoreUnsubs) {
       try {
         u();
@@ -1359,11 +1677,10 @@ class ThingsCloudSyncService {
     this.firestoreUnsubs = [];
   }
 
-  private async syncSecondaryNtfyRelay(
+  private async broadcastNtfyWakeAndDeltas(
     userId: string,
-    channelTopic: string,
+    legacyChannelTopic: string | null,
     localDeviceId: string,
-    sinceTimestamp: number,
     pushedDirtyMaps: {
       tags: Record<string, unknown>[];
       areas: Record<string, unknown>[];
@@ -1373,32 +1690,47 @@ class ThingsCloudSyncService {
       checklistItems: Record<string, unknown>[];
       attachments: Record<string, unknown>[];
       projectTemplates: Record<string, unknown>[];
-    } | null
+    }
   ): Promise<void> {
-    if (pushedDirtyMaps) {
-      const payload = buildBoundedNtfyRelayPayload({
-        userId,
-        deviceId: localDeviceId,
-        batchTimestamp: Date.now(),
-        tags: pushedDirtyMaps.tags,
-        areas: pushedDirtyMaps.areas,
-        projects: pushedDirtyMaps.projects,
-        headings: pushedDirtyMaps.headings,
-        tasks: pushedDirtyMaps.tasks,
-        checklistItems: pushedDirtyMaps.checklistItems,
-        attachments: pushedDirtyMaps.attachments,
-        projectTemplates: pushedDirtyMaps.projectTemplates
-      });
-      if (payload !== null) {
-        await fetch(`https://ntfy.sh/${encodeURIComponent(channelTopic)}`, {
+    const payload = buildNtfyRelayOrWakePayload({
+      userId,
+      deviceId: localDeviceId,
+      batchTimestamp: Date.now(),
+      tags: pushedDirtyMaps.tags,
+      areas: pushedDirtyMaps.areas,
+      projects: pushedDirtyMaps.projects,
+      headings: pushedDirtyMaps.headings,
+      tasks: pushedDirtyMaps.tasks,
+      checklistItems: pushedDirtyMaps.checklistItems,
+      attachments: pushedDirtyMaps.attachments,
+      projectTemplates: pushedDirtyMaps.projectTemplates
+    });
+    if (payload === null) return;
+
+    const uidWakeTopic = await this.deriveUidWakeTopic(userId);
+    const topics = new Set<string>([uidWakeTopic]);
+    if (legacyChannelTopic && legacyChannelTopic.trim().length > 0) {
+      topics.add(legacyChannelTopic.trim());
+    }
+
+    await Promise.all(
+      Array.from(topics).map((topic) =>
+        fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: payload,
-          signal: AbortSignal.timeout(3500)
-        }).catch(() => undefined);
-      }
-    }
+          signal: AbortSignal.timeout(2500)
+        }).catch(() => undefined)
+      )
+    );
+  }
 
+  private async pollNtfyHistoryInBackground(
+    userId: string,
+    channelTopic: string,
+    localDeviceId: string,
+    sinceTimestamp: number
+  ): Promise<void> {
     const sinceStorageKey = `thingsbook_ntfy_since_${channelTopic}`;
     const lastMsgId = localStorage.getItem(sinceStorageKey) || '24h';
 
@@ -1406,10 +1738,10 @@ class ThingsCloudSyncService {
       `https://ntfy.sh/${encodeURIComponent(channelTopic)}/json?poll=1&since=${encodeURIComponent(lastMsgId)}`,
       {
         method: 'GET',
-        signal: AbortSignal.timeout(3500)
+        signal: AbortSignal.timeout(2500)
       }
-    );
-    if (!res.ok) return;
+    ).catch(() => null);
+    if (!res || !res.ok) return;
     const text = await res.text();
     const lines = text
       .split('\n')
@@ -1424,9 +1756,10 @@ class ThingsCloudSyncService {
           newestMsgId = env.id.trim();
         }
         if (env?.event !== 'message' || typeof env?.message !== 'string') continue;
-        const batch = JSON.parse(env.message);
+        const batch = JSON.parse(env.message) as Record<string, unknown>;
         if (batch?.userId !== userId) continue;
         if (batch?.deviceId === localDeviceId) continue;
+        if (batch?.wakeOnly === true) continue;
         if (
           sinceTimestamp > 0 &&
           typeof batch?.batchTimestamp === 'number' &&
@@ -1434,48 +1767,7 @@ class ThingsCloudSyncService {
         ) {
           continue;
         }
-        await localDb.applyRemoteDeltas({
-          tags: Array.isArray(batch.tags)
-            ? batch.tags
-                .map(tagFromFirestoreMap)
-                .filter((x: TagRecord | null): x is TagRecord => x !== null)
-            : undefined,
-          areas: Array.isArray(batch.areas)
-            ? batch.areas
-                .map(areaFromFirestoreMap)
-                .filter((x: AreaRecord | null): x is AreaRecord => x !== null)
-            : undefined,
-          projects: Array.isArray(batch.projects)
-            ? batch.projects
-                .map(projectFromFirestoreMap)
-                .filter((x: ProjectRecord | null): x is ProjectRecord => x !== null)
-            : undefined,
-          headings: Array.isArray(batch.headings)
-            ? batch.headings
-                .map(headingFromFirestoreMap)
-                .filter((x: HeadingRecord | null): x is HeadingRecord => x !== null)
-            : undefined,
-          tasks: Array.isArray(batch.tasks)
-            ? batch.tasks
-                .map(taskFromFirestoreMap)
-                .filter((x: TaskRecord | null): x is TaskRecord => x !== null)
-            : undefined,
-          checklistItems: Array.isArray(batch.checklistItems)
-            ? batch.checklistItems
-                .map(checklistFromFirestoreMap)
-                .filter((x: ChecklistItemRecord | null): x is ChecklistItemRecord => x !== null)
-            : undefined,
-          attachments: Array.isArray(batch.attachments)
-            ? batch.attachments
-                .map(attachmentFromFirestoreMap)
-                .filter((x: AttachmentRecord | null): x is AttachmentRecord => x !== null)
-            : undefined,
-          projectTemplates: Array.isArray(batch.projectTemplates)
-            ? batch.projectTemplates
-                .map(projectTemplateFromFirestoreMap)
-                .filter((x: ProjectTemplate | null): x is ProjectTemplate => x !== null)
-            : undefined
-        });
+        await this.applyParsedNtfyBatch(batch);
       } catch {
         // skip malformed relay message
       }

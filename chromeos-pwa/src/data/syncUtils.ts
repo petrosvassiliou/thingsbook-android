@@ -6,8 +6,17 @@ export const METADATA_BATCH_CHUNK_SIZE = 450;
 export const CLOCK_SKEW_OVERLAP_MS = 120_000;
 export const MAX_FUTURE_CURSOR_DRIFT_MS = 60_000;
 export const MAX_NTFY_PAYLOAD_BYTES = 3_800;
+export const FAST_SYNC_COALESCE_MS = 50;
 export const ATTACHMENT_BACKFILL_STORAGE_PREFIX = 'thingsbook_att_backfill_v1_';
 export const PROJECTS_REVIEW_BACKFILL_STORAGE_PREFIX = 'thingsbook_proj_review_backfill_v1_';
+
+export function formatUidWakeSeed(userId: string): string {
+  return `thingsbook-uid-v2:${userId.trim()}`;
+}
+
+export function formatUidWakeChannelFromHex(sha256HexDigest: string): string {
+  return `tb_uid_${sha256HexDigest.trim().toLowerCase().slice(0, 28)}`;
+}
 
 function finiteNumber(v: unknown, fallback = 0): number {
   const n = typeof v === 'number' ? v : Number(v);
@@ -160,4 +169,36 @@ export function buildBoundedNtfyRelayPayload(
     return null;
   }
   return json;
+}
+
+/**
+ * Builds either the inline compact delta payload (when `< maxBytes`) or a tiny wake-only envelope
+ * so peers subscribed via SSE / HTTP stream immediately trigger an incremental Firestore delta pull
+ * even when notes or batch sizes exceed 3,800 bytes.
+ */
+export function buildNtfyRelayOrWakePayload(
+  input: NtfyRelayBatchInput,
+  maxBytes: number = MAX_NTFY_PAYLOAD_BYTES
+): string | null {
+  const inline = buildBoundedNtfyRelayPayload(input, maxBytes);
+  if (inline !== null) return inline;
+
+  const hasAny =
+    (input.tags?.length ?? 0) > 0 ||
+    (input.areas?.length ?? 0) > 0 ||
+    (input.projects?.length ?? 0) > 0 ||
+    (input.headings?.length ?? 0) > 0 ||
+    (input.tasks?.length ?? 0) > 0 ||
+    (input.checklistItems?.length ?? 0) > 0 ||
+    (input.attachments?.length ?? 0) > 0 ||
+    (input.projectTemplates?.length ?? 0) > 0;
+  if (!hasAny) return null;
+
+  const wakeJson = JSON.stringify({
+    userId: input.userId,
+    deviceId: input.deviceId,
+    batchTimestamp: Math.trunc(input.batchTimestamp),
+    wakeOnly: true
+  });
+  return new TextEncoder().encode(wakeJson).byteLength < maxBytes ? wakeJson : null;
 }

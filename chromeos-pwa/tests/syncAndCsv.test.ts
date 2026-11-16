@@ -1,16 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import {
   ATTACHMENT_BATCH_CHUNK_SIZE,
   CLOCK_SKEW_OVERLAP_MS,
+  FAST_SYNC_COALESCE_MS,
   MAX_ATTACHMENT_INLINE_BYTES,
   MAX_FUTURE_CURSOR_DRIFT_MS,
   MAX_NTFY_PAYLOAD_BYTES,
   attachmentToFirestoreMap,
   buildBoundedNtfyRelayPayload,
+  buildNtfyRelayOrWakePayload,
   chunkItems,
   clampRemoteCursorTimestamp,
-  computeEffectivePullCursor
+  computeEffectivePullCursor,
+  formatUidWakeChannelFromHex,
+  formatUidWakeSeed
 } from '../src/data/syncUtils.ts';
 import {
   detectCsvDelimiter,
@@ -158,6 +163,52 @@ test('buildBoundedNtfyRelayPayload strips inline attachment base64 and guards <3
     ]
   });
   assert.equal(hugePayload, null);
+});
+
+test('v2.0.0-beta.13 fast sync UID wake topic matches Android/macOS SHA-256 vector and emits wakeOnly envelope for >=3800B batches', () => {
+  assert.equal(FAST_SYNC_COALESCE_MS, 50);
+  const seed = formatUidWakeSeed(' user-abc-123 ');
+  assert.equal(seed, 'thingsbook-uid-v2:user-abc-123');
+  const shaHex = createHash('sha256').update(seed, 'utf8').digest('hex');
+  assert.equal(formatUidWakeChannelFromHex(shaHex), 'tb_uid_9d8ecb07e35952112a013d4819b4');
+
+  // Empty batch returns null
+  assert.equal(
+    buildNtfyRelayOrWakePayload({
+      userId: 'user-abc-123',
+      deviceId: 'dev-cros',
+      batchTimestamp: 1_763_000_000_123
+    }),
+    null
+  );
+
+  // Small batch returns inline compact delta without wakeOnly
+  const inlineJson = buildNtfyRelayOrWakePayload({
+    userId: 'user-abc-123',
+    deviceId: 'dev-cros',
+    batchTimestamp: 1_763_000_000_123,
+    tasks: [{ id: 't-fast', title: 'Instant Sync', status: 'OPEN', scheduleState: 'TODAY' }]
+  });
+  assert.ok(inlineJson);
+  const parsedInline = JSON.parse(inlineJson);
+  assert.equal(parsedInline.wakeOnly, undefined);
+  assert.equal(parsedInline.tasks[0].id, 't-fast');
+
+  // Oversized >=3800B batch falls back to compact wakeOnly envelope instead of dropping wake signal
+  const wakeJson = buildNtfyRelayOrWakePayload({
+    userId: 'user-abc-123',
+    deviceId: 'dev-cros',
+    batchTimestamp: 1_763_000_000_456,
+    tasks: [{ id: 't-large', title: 'Huge Notes', notes: 'n'.repeat(5_000), status: 'OPEN', scheduleState: 'INBOX' }]
+  });
+  assert.ok(wakeJson);
+  assert.ok(new TextEncoder().encode(wakeJson).byteLength < MAX_NTFY_PAYLOAD_BYTES);
+  assert.deepEqual(JSON.parse(wakeJson), {
+    userId: 'user-abc-123',
+    deviceId: 'dev-cros',
+    batchTimestamp: 1_763_000_000_456,
+    wakeOnly: true
+  });
 });
 
 test('csvCodec escapes semicolons in checklist/tags, detects headerless delimiters, supports MM/DD/YYYY, and parses FR/IT/ES headers', () => {

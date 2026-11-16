@@ -928,9 +928,9 @@ public final class ThingsbookStore: ObservableObject {
         guard !preferences.localOnlyDbMode else { return }
         syncDebounceTask?.cancel()
         syncDebounceTask = Task {
-            try? await Task.sleep(nanoseconds: 700_000_000)
+            try? await Task.sleep(nanoseconds: 50_000_000)
             guard !Task.isCancelled else { return }
-            await cloudSync.syncBidirectionalDeltas(forceFullPull: false, localOnlyMode: preferences.localOnlyDbMode)
+            await cloudSync.pushDirtyFast(localOnlyMode: preferences.localOnlyDbMode)
         }
     }
 
@@ -939,7 +939,7 @@ public final class ThingsbookStore: ObservableObject {
         syncDebounceTask?.cancel()
         syncDebounceTask = Task {
             guard !Task.isCancelled else { return }
-            await cloudSync.syncBidirectionalDeltas(forceFullPull: false, localOnlyMode: preferences.localOnlyDbMode)
+            await cloudSync.pushDirtyFast(localOnlyMode: preferences.localOnlyDbMode)
         }
     }
 
@@ -1293,12 +1293,17 @@ public final class ThingsbookStore: ObservableObject {
         backgroundSyncTask?.cancel()
         backgroundSyncTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                let isAppActive = await MainActor.run { NSApplication.shared.isActive }
+                let intervalNs: UInt64 = isAppActive ? 1_800_000_000 : 8_000_000_000
+                try? await Task.sleep(nanoseconds: intervalNs)
                 guard !Task.isCancelled, let self else { break }
                 let localOnly = await MainActor.run { self.preferences.localOnlyDbMode }
-                guard !localOnly else { continue }
+                if localOnly {
+                    await self.cloudSync.stopLiveWakeStream()
+                    continue
+                }
                 if await self.cloudSync.isAuthenticated {
-                    await self.cloudSync.syncBidirectionalDeltas(forceFullPull: false, localOnlyMode: false)
+                    await self.cloudSync.checkRemotePulseAndSyncIfNeeded(localOnlyMode: false)
                 }
             }
         }
@@ -1311,7 +1316,9 @@ public final class ThingsbookStore: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self, !self.preferences.localOnlyDbMode else { return }
                 if await self.cloudSync.isAuthenticated {
-                    await self.cloudSync.syncBidirectionalDeltas(forceFullPull: false, localOnlyMode: false)
+                    await self.cloudSync.ensureLiveWakeStreamRunning(localOnlyMode: false)
+                    await self.cloudSync.pushDirtyFast(localOnlyMode: false)
+                    await self.cloudSync.pullIncrementalDeltasOnly(localOnlyMode: false)
                 }
             }
         }
@@ -1324,6 +1331,8 @@ public final class ThingsbookStore: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self, !self.preferences.localOnlyDbMode else { return }
                 if await self.cloudSync.isAuthenticated {
+                    await self.cloudSync.stopLiveWakeStream()
+                    await self.cloudSync.ensureLiveWakeStreamRunning(localOnlyMode: false)
                     await self.cloudSync.syncBidirectionalDeltas(forceFullPull: true, localOnlyMode: false)
                 }
             }

@@ -1336,7 +1336,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <button
                   type="button"
                   className="btn-primary"
-                  onClick={() => void applyPendingSwUpdate()}
+                  onClick={() => void applyPendingSwUpdate(updateInfo)}
                 >
                   {t.settingsApplyUpdateBtn} (v{updateInfo.latestVersion})
                 </button>

@@ -98,6 +98,7 @@ public enum CloudSyncError: LocalizedError {
 public actor FirebaseCloudSyncService {
     private let database: ThingsSQLiteDatabase
     private let session: URLSession
+    private let liveStreamSession: URLSession
     private var authSession: PersistedAuthSession?
     private var snapshot = CloudSyncSnapshot()
     private var onStateChange: (@Sendable (CloudSyncSnapshot) -> Void)?
@@ -105,6 +106,12 @@ public actor FirebaseCloudSyncService {
     private var pendingResyncRequested = false
     private var pendingForceFullPull = false
     private var pendingPullBeforePush = false
+    private var isPushingFast = false
+    private var pendingFastPush = false
+    private var liveWakeStreamTask: Task<Void, Never>?
+    private var liveWakeStreamUid: String?
+    private var lastObservedRemotePulseAt: Int64 = 0
+    private var lastFullFallbackPullMillis: Int64 = 0
 
     public static let maxInlineAttachmentBytes = 700_000
     public static func attachmentBackfillDefaultsKey(uid: String) -> String {
@@ -116,6 +123,11 @@ public actor FirebaseCloudSyncService {
     public static func projectReviewBackfillDefaultsKey(uid: String) -> String {
         "thingsbook.sync.projReviewBackfillV1.\(uid)"
     }
+    public static func deriveUidWakeTopic(uid: String) -> String {
+        let trimmed = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let digest = sha256Hex("thingsbook-uid-v2:\(trimmed)")
+        return "tb_uid_" + String(digest.prefix(28))
+    }
 
     private static let keychainAccount = "firebase_auth_session_v1"
     private static let lastSyncCursorPrefix = "thingsbook_macos_last_sync_ts_"
@@ -126,6 +138,11 @@ public actor FirebaseCloudSyncService {
     public init(database: ThingsSQLiteDatabase, session: URLSession = .shared) {
         self.database = database
         self.session = session
+        let streamCfg = URLSessionConfiguration.ephemeral
+        streamCfg.timeoutIntervalForRequest = 90
+        streamCfg.timeoutIntervalForResource = 3600
+        streamCfg.requestCachePolicy = .reloadIgnoringLocalCacheData
+        self.liveStreamSession = URLSession(configuration: streamCfg)
     }
 
     public func setObserver(_ observer: @escaping @Sendable (CloudSyncSnapshot) -> Void) {
@@ -161,6 +178,7 @@ public actor FirebaseCloudSyncService {
             )
         )
         if !localOnlyMode {
+            ensureLiveWakeStreamRunning(localOnlyMode: false)
             // Reconcile full cloud state on launch so upgrades (v1.7 -> v1.8) and offline edits never miss records
             await syncBidirectionalDeltas(forceFullPull: true, localOnlyMode: false)
         }
@@ -381,10 +399,13 @@ public actor FirebaseCloudSyncService {
     }
 
     public func signOut() {
+        stopLiveWakeStream()
         authSession = nil
         pendingResyncRequested = false
         pendingForceFullPull = false
         pendingPullBeforePush = false
+        pendingFastPush = false
+        lastObservedRemotePulseAt = 0
         KeychainStore.delete(account: Self.keychainAccount)
         updateSnapshot(CloudSyncSnapshot(status: .offline, userEmailOrId: nil, userId: nil, lastSyncedAt: 0, errorMessage: nil))
     }
@@ -429,6 +450,7 @@ public actor FirebaseCloudSyncService {
         )
 
         if !localOnlyMode {
+            ensureLiveWakeStreamRunning(localOnlyMode: false)
             // Pull remote changes BEFORE pushing local dirty records on login (matching Android)
             await syncBidirectionalDeltas(forceFullPull: true, pullBeforePush: true, localOnlyMode: false)
         }
@@ -445,12 +467,336 @@ public actor FirebaseCloudSyncService {
             guard hasAny else { return }
             let validToken = try await validIdToken()
             let config = FirebaseConfig.loadActive()
-            if !current.channelTopic.isEmpty {
-                await pushDirtyBatchToNtfyRelay(dirty: dirty, uid: current.uid, topic: current.channelTopic, deviceId: current.deviceId)
-            }
-            try await pushDirtyBatchToFirestore(dirty: dirty, uid: current.uid, idToken: validToken, projectId: config.projectId)
+            try await pushDirtyBatchToFirestore(
+                dirty: dirty,
+                uid: current.uid,
+                deviceId: current.deviceId,
+                idToken: validToken,
+                projectId: config.projectId
+            )
+            await broadcastDirtyBatchToNtfyTopics(
+                dirty: dirty,
+                uid: current.uid,
+                channelTopic: current.channelTopic,
+                deviceId: current.deviceId
+            )
         } catch {
             // Best-effort termination push; dirty flags remain intact on failure for next launch.
+        }
+    }
+
+    // MARK: - Sub-300ms Fast Outbound Push & Live Wake Stream
+
+    public func pushDirtyFast(localOnlyMode: Bool) async {
+        if localOnlyMode {
+            stopLiveWakeStream()
+            updateSnapshot(patchStatus: .offline, error: nil)
+            return
+        }
+        guard authSession != nil else { return }
+        ensureLiveWakeStreamRunning(localOnlyMode: false)
+
+        pendingFastPush = true
+        guard !isPushingFast else { return }
+        isPushingFast = true
+
+        while pendingFastPush {
+            pendingFastPush = false
+            guard !localOnlyMode, let current = authSession else { break }
+            do {
+                let dirty = try database.fetchDirtyBatch()
+                let hasAny = !dirty.tags.isEmpty || !dirty.areas.isEmpty || !dirty.projects.isEmpty
+                    || !dirty.headings.isEmpty || !dirty.tasks.isEmpty || !dirty.checklistItems.isEmpty
+                    || !dirty.attachments.isEmpty || !dirty.projectTemplates.isEmpty
+                guard hasAny else { continue }
+
+                let validToken = try await validIdToken()
+                let config = FirebaseConfig.loadActive()
+                try await pushDirtyBatchToFirestore(
+                    dirty: dirty,
+                    uid: current.uid,
+                    deviceId: current.deviceId,
+                    idToken: validToken,
+                    projectId: config.projectId
+                )
+
+                let now = Int64(Date().timeIntervalSince1970 * 1000.0)
+                saveLastWallSyncTimestamp(uid: current.uid, timestamp: now)
+                updateSnapshot(
+                    CloudSyncSnapshot(
+                        status: .synced,
+                        userEmailOrId: current.email,
+                        userId: current.uid,
+                        lastSyncedAt: now,
+                        errorMessage: nil
+                    )
+                )
+
+                let uidCopy = current.uid
+                let topicCopy = current.channelTopic
+                let deviceCopy = current.deviceId
+                Task {
+                    await self.broadcastDirtyBatchToNtfyTopics(
+                        dirty: dirty,
+                        uid: uidCopy,
+                        channelTopic: topicCopy,
+                        deviceId: deviceCopy
+                    )
+                }
+            } catch {
+                // Fall back to secondary relay if primary Firestore is temporarily unreachable
+                if let current = authSession {
+                    if let dirty = try? database.fetchDirtyBatch() {
+                        await broadcastDirtyBatchToNtfyTopics(
+                            dirty: dirty,
+                            uid: current.uid,
+                            channelTopic: current.channelTopic,
+                            deviceId: current.deviceId
+                        )
+                    }
+                }
+            }
+        }
+
+        isPushingFast = false
+    }
+
+    public func ensureLiveWakeStreamRunning(localOnlyMode: Bool) {
+        if localOnlyMode {
+            stopLiveWakeStream()
+            return
+        }
+        guard let current = authSession else {
+            stopLiveWakeStream()
+            return
+        }
+        if liveWakeStreamTask != nil, liveWakeStreamUid == current.uid {
+            return
+        }
+        stopLiveWakeStream()
+        let targetUid = current.uid
+        let uidWakeTopic = Self.deriveUidWakeTopic(uid: targetUid)
+        liveWakeStreamUid = targetUid
+
+        liveWakeStreamTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { break }
+                let activeSession = await self.currentAuthSessionForUid(targetUid)
+                guard let activeSession else { break }
+
+                if let encoded = uidWakeTopic.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+                   let url = URL(string: "https://ntfy.sh/\(encoded)/json?since=none") {
+                    var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 90)
+                    req.setValue("application/x-ndjson", forHTTPHeaderField: "Accept")
+                    do {
+                        let (asyncBytes, response) = try await self.liveStreamSession.bytes(for: req)
+                        if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
+                            for try await line in asyncBytes.lines {
+                                if Task.isCancelled { break }
+                                await self.handleLiveNtfyEnvelopeLine(
+                                    line,
+                                    expectedUid: targetUid,
+                                    localDeviceId: activeSession.deviceId
+                                )
+                            }
+                        }
+                    } catch {
+                        // Stream closed or timed out after idle keepalive window; reconnect after brief backoff
+                    }
+                }
+
+                if Task.isCancelled { break }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+        }
+    }
+
+    public func stopLiveWakeStream() {
+        liveWakeStreamTask?.cancel()
+        liveWakeStreamTask = nil
+        liveWakeStreamUid = nil
+    }
+
+    private func currentAuthSessionForUid(_ expectedUid: String) -> PersistedAuthSession? {
+        guard let s = authSession, s.uid == expectedUid else { return nil }
+        return s
+    }
+
+    private func handleLiveNtfyEnvelopeLine(_ rawLine: String, expectedUid: String, localDeviceId: String) async {
+        let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let lineData = trimmed.data(using: .utf8),
+              let env = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+              env["event"] as? String == "message",
+              let msgStr = env["message"] as? String,
+              let msgData = msgStr.data(using: .utf8),
+              let batch = try? JSONSerialization.jsonObject(with: msgData) as? [String: Any],
+              batch["userId"] as? String == expectedUid else { return }
+
+        if let senderDevice = batch["deviceId"] as? String, !senderDevice.isEmpty, senderDevice == localDeviceId {
+            return
+        }
+
+        if batch["wakeOnly"] as? Bool == true {
+            await pullIncrementalDeltasOnly(localOnlyMode: false)
+            return
+        }
+
+        let tags = (batch["tags"] as? [[String: Any]] ?? []).compactMap(Self.parseTag)
+        let areas = (batch["areas"] as? [[String: Any]] ?? []).compactMap(Self.parseArea)
+        let projects = (batch["projects"] as? [[String: Any]] ?? []).compactMap(Self.parseProject)
+        let headings = (batch["headings"] as? [[String: Any]] ?? []).compactMap(Self.parseHeading)
+        var taskTags: [String: [String]] = [:]
+        let tasks = (batch["tasks"] as? [[String: Any]] ?? []).compactMap { m -> TaskItem? in
+            guard let (t, tids) = Self.parseTask(m) else { return nil }
+            taskTags[t.id] = tids
+            return t
+        }
+        let checklists = (batch["checklistItems"] as? [[String: Any]] ?? []).compactMap(Self.parseChecklist)
+        let attachments = (batch["attachments"] as? [[String: Any]] ?? []).compactMap(Self.parseAttachment)
+        let projectTemplates = (batch["projectTemplates"] as? [[String: Any]] ?? []).compactMap(Self.parseProjectTemplate)
+
+        let hasAttachments = !attachments.isEmpty
+        if let batchMax = try? database.applyRemoteDeltas(
+            RemoteDeltaBatch(
+                tags: tags,
+                areas: areas,
+                projects: projects,
+                headings: headings,
+                tasks: tasks,
+                taskTagIdsByTaskId: taskTags,
+                checklistItems: checklists,
+                attachments: attachments,
+                projectTemplates: projectTemplates
+            )
+        ) {
+            let now = Int64(Date().timeIntervalSince1970 * 1000.0)
+            let cursor = loadLastSyncCursor(uid: expectedUid)
+            if batchMax > cursor {
+                saveLastSyncCursor(uid: expectedUid, timestamp: min(batchMax, now + 60_000))
+            }
+            saveLastWallSyncTimestamp(uid: expectedUid, timestamp: now)
+            if let current = authSession, current.uid == expectedUid {
+                updateSnapshot(
+                    CloudSyncSnapshot(
+                        status: .synced,
+                        userEmailOrId: current.email,
+                        userId: current.uid,
+                        lastSyncedAt: now,
+                        errorMessage: nil
+                    )
+                )
+            }
+        }
+
+        if hasAttachments {
+            // Pull binary attachment payload from Firestore since ntfy carries compact metadata only
+            await pullIncrementalDeltasOnly(localOnlyMode: false)
+        }
+    }
+
+    public func pullIncrementalDeltasOnly(localOnlyMode: Bool) async {
+        guard !localOnlyMode, let current = authSession else { return }
+        guard !isSyncing else {
+            pendingResyncRequested = true
+            return
+        }
+        isSyncing = true
+        defer { isSyncing = false }
+
+        do {
+            let validToken = try await validIdToken()
+            let config = FirebaseConfig.loadActive()
+            let cursor = loadLastSyncCursor(uid: current.uid)
+            let safeQuerySince = max(0, cursor - Self.clockSkewOverlapMillis)
+            let firestoreMax = try await pullDeltasFromFirestore(
+                uid: current.uid,
+                idToken: validToken,
+                projectId: config.projectId,
+                sinceTimestamp: safeQuerySince
+            )
+            _ = try? database.performMidnightRollover()
+            let now = Int64(Date().timeIntervalSince1970 * 1000.0)
+            if firestoreMax > cursor {
+                saveLastSyncCursor(uid: current.uid, timestamp: min(firestoreMax, now + 60_000))
+            }
+            saveLastWallSyncTimestamp(uid: current.uid, timestamp: now)
+            lastFullFallbackPullMillis = now
+            updateSnapshot(
+                CloudSyncSnapshot(
+                    status: .synced,
+                    userEmailOrId: current.email,
+                    userId: current.uid,
+                    lastSyncedAt: now,
+                    errorMessage: nil
+                )
+            )
+        } catch {
+            // Leave existing cursor intact on transient network hiccup
+        }
+    }
+
+    /// Lightweight single-document check on `/users/{uid}/sync_meta/pulse` so active macOS windows
+    /// detect remote edits in ~1-2s even on networks that block ntfy.sh streaming.
+    public func checkRemotePulseAndSyncIfNeeded(localOnlyMode: Bool) async {
+        if localOnlyMode {
+            stopLiveWakeStream()
+            updateSnapshot(patchStatus: .offline, error: nil)
+            return
+        }
+        guard let current = authSession else { return }
+        ensureLiveWakeStreamRunning(localOnlyMode: false)
+
+        // Flush any local dirty records first if present
+        if !isPushingFast {
+            if let dirty = try? database.fetchDirtyBatch() {
+                let hasDirty = !dirty.tags.isEmpty || !dirty.areas.isEmpty || !dirty.projects.isEmpty
+                    || !dirty.headings.isEmpty || !dirty.tasks.isEmpty || !dirty.checklistItems.isEmpty
+                    || !dirty.attachments.isEmpty || !dirty.projectTemplates.isEmpty
+                if hasDirty {
+                    await pushDirtyFast(localOnlyMode: false)
+                }
+            }
+        }
+
+        guard !isSyncing else { return }
+        let nowMillis = Int64(Date().timeIntervalSince1970 * 1000.0)
+
+        do {
+            let validToken = try await validIdToken()
+            let config = FirebaseConfig.loadActive()
+            let pulseURL = URL(string: "https://firestore.googleapis.com/v1/projects/\(config.projectId)/databases/(default)/documents/users/\(current.uid)/sync_meta/pulse")!
+            var req = URLRequest(url: pulseURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 4.0)
+            req.httpMethod = "GET"
+            req.setValue("Bearer \(validToken)", forHTTPHeaderField: "Authorization")
+
+            let (data, res) = try await session.data(for: req)
+            if let http = res as? HTTPURLResponse {
+                if http.statusCode == 401 {
+                    invalidateCachedIdTokenExpiry()
+                    return
+                }
+                if (200..<300).contains(http.statusCode),
+                   let doc = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let fields = doc["fields"] as? [String: [String: Any]] {
+                    let sender = fields["senderDeviceId"].flatMap(Self.unwrapFirestoreValue) as? String
+                    let pulseAt = Self.asInt64(fields["pulseAt"].flatMap(Self.unwrapFirestoreValue)) ?? 0
+                    if pulseAt > 0 && pulseAt != lastObservedRemotePulseAt {
+                        lastObservedRemotePulseAt = pulseAt
+                        if sender != current.deviceId {
+                            await pullIncrementalDeltasOnly(localOnlyMode: false)
+                            return
+                        }
+                    }
+                }
+            }
+        } catch {
+            // Ignore transient pulse read errors
+        }
+
+        if nowMillis - lastFullFallbackPullMillis >= 45_000 {
+            lastFullFallbackPullMillis = nowMillis
+            await pullIncrementalDeltasOnly(localOnlyMode: false)
         }
     }
 
@@ -462,10 +808,12 @@ public actor FirebaseCloudSyncService {
         localOnlyMode: Bool
     ) async {
         if localOnlyMode {
+            stopLiveWakeStream()
             updateSnapshot(patchStatus: .offline, error: nil)
             return
         }
         guard authSession != nil else { return }
+        ensureLiveWakeStreamRunning(localOnlyMode: false)
 
         if isSyncing {
             pendingResyncRequested = true
@@ -507,7 +855,7 @@ public actor FirebaseCloudSyncService {
                         projectId: config.projectId,
                         sinceTimestamp: safeQuerySince
                     )
-                    if !current.channelTopic.isEmpty {
+                    if !current.channelTopic.isEmpty && cursor == 0 {
                         ntfyMax = (try? await pollSecondaryNtfyRelay(
                             uid: current.uid,
                             topic: current.channelTopic,
@@ -517,42 +865,62 @@ public actor FirebaseCloudSyncService {
                         )) ?? 0
                     }
 
-                    // 2. Push remaining local dirty records to secondary ntfy.sh relay + primary Firestore
+                    // 2. Push remaining local dirty records to primary Firestore FIRST, then async ntfy wake
                     let dirty = try database.fetchDirtyBatch()
-                    if !current.channelTopic.isEmpty {
-                        await pushDirtyBatchToNtfyRelay(dirty: dirty, uid: current.uid, topic: current.channelTopic, deviceId: current.deviceId)
+                    try await pushDirtyBatchToFirestore(
+                        dirty: dirty,
+                        uid: current.uid,
+                        deviceId: current.deviceId,
+                        idToken: validToken,
+                        projectId: config.projectId
+                    )
+                    let uidCopy = current.uid
+                    let topicCopy = current.channelTopic
+                    let deviceCopy = current.deviceId
+                    Task {
+                        await self.broadcastDirtyBatchToNtfyTopics(
+                            dirty: dirty,
+                            uid: uidCopy,
+                            channelTopic: topicCopy,
+                            deviceId: deviceCopy
+                        )
                     }
-                    try await pushDirtyBatchToFirestore(dirty: dirty, uid: current.uid, idToken: validToken, projectId: config.projectId)
                 } else {
-                    // 1. Push local dirty batch to secondary ntfy.sh relay + primary Firestore
+                    // 1. Push local dirty batch to primary Firestore FIRST, then async ntfy wake
                     let dirty = try database.fetchDirtyBatch()
-                    if !current.channelTopic.isEmpty {
-                        await pushDirtyBatchToNtfyRelay(dirty: dirty, uid: current.uid, topic: current.channelTopic, deviceId: current.deviceId)
+                    try await pushDirtyBatchToFirestore(
+                        dirty: dirty,
+                        uid: current.uid,
+                        deviceId: current.deviceId,
+                        idToken: validToken,
+                        projectId: config.projectId
+                    )
+                    let uidCopy = current.uid
+                    let topicCopy = current.channelTopic
+                    let deviceCopy = current.deviceId
+                    Task {
+                        await self.broadcastDirtyBatchToNtfyTopics(
+                            dirty: dirty,
+                            uid: uidCopy,
+                            channelTopic: topicCopy,
+                            deviceId: deviceCopy
+                        )
                     }
-                    try await pushDirtyBatchToFirestore(dirty: dirty, uid: current.uid, idToken: validToken, projectId: config.projectId)
 
-                    // 2. Pull remote deltas from primary Firestore + secondary ntfy.sh relay
+                    // 2. Pull remote deltas from primary Firestore in parallel across 8 collections
                     firestoreMax = try await pullDeltasFromFirestore(
                         uid: current.uid,
                         idToken: validToken,
                         projectId: config.projectId,
                         sinceTimestamp: safeQuerySince
                     )
-                    if !current.channelTopic.isEmpty {
-                        ntfyMax = (try? await pollSecondaryNtfyRelay(
-                            uid: current.uid,
-                            topic: current.channelTopic,
-                            deviceId: current.deviceId,
-                            sinceTimestamp: safeQuerySince,
-                            fetchAllHistory: runForceFull
-                        )) ?? 0
-                    }
                 }
 
                 // Promote any due UPCOMING tasks pulled from remote into TODAY cleanly
                 _ = try? database.performMidnightRollover()
 
                 let now = Int64(Date().timeIntervalSince1970 * 1000.0)
+                lastFullFallbackPullMillis = now
                 let observedMax = max(firestoreMax, ntfyMax)
                 let nextCursor: Int64
                 if observedMax > cursor {
@@ -590,7 +958,13 @@ public actor FirebaseCloudSyncService {
         isSyncing = false
     }
 
-    private func pushDirtyBatchToFirestore(dirty: SyncDirtyBatch, uid: String, idToken: String, projectId: String) async throws {
+    private func pushDirtyBatchToFirestore(
+        dirty: SyncDirtyBatch,
+        uid: String,
+        deviceId: String,
+        idToken: String,
+        projectId: String
+    ) async throws {
         var writes: [[String: Any]] = []
         let baseDocPrefix = "projects/\(projectId)/databases/(default)/documents/users/\(uid)"
 
@@ -712,12 +1086,25 @@ public actor FirebaseCloudSyncService {
 
         guard !writes.isEmpty || !dirty.attachments.isEmpty else { return }
 
+        let pulseNow = Int64(Date().timeIntervalSince1970 * 1000.0)
+        let pulseWrite = Self.makeUpdateWrite(
+            path: "\(baseDocPrefix)/sync_meta/pulse",
+            fields: [
+                "pulseAt": Self.fsInt(pulseNow),
+                "senderDeviceId": Self.fsString(deviceId)
+            ]
+        )
+
         let commitURL = URL(string: "https://firestore.googleapis.com/v1/projects/\(projectId)/databases/(default)/documents:commit")!
         if !writes.isEmpty {
-            let chunkSize = 450
+            let chunkSize = 449
             var idx = 0
             while idx < writes.count {
-                let slice = Array(writes[idx..<min(idx + chunkSize, writes.count)])
+                let end = min(idx + chunkSize, writes.count)
+                var slice = Array(writes[idx..<end])
+                if end == writes.count && dirty.attachments.isEmpty {
+                    slice.append(pulseWrite)
+                }
                 var req = URLRequest(url: commitURL)
                 req.httpMethod = "POST"
                 req.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
@@ -743,7 +1130,11 @@ public actor FirebaseCloudSyncService {
             let attChunkSize = 8
             var attIdx = 0
             while attIdx < attWrites.count {
-                let slice = Array(attWrites[attIdx..<min(attIdx + attChunkSize, attWrites.count)])
+                let end = min(attIdx + attChunkSize, attWrites.count)
+                var slice = Array(attWrites[attIdx..<end])
+                if end == attWrites.count {
+                    slice.append(pulseWrite)
+                }
                 var req = URLRequest(url: commitURL)
                 req.httpMethod = "POST"
                 req.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
@@ -763,13 +1154,16 @@ public actor FirebaseCloudSyncService {
         try database.markDirtyBatchSynced(dirty)
     }
 
-    private func pushDirtyBatchToNtfyRelay(dirty: SyncDirtyBatch, uid: String, topic: String, deviceId: String) async {
+    private func broadcastDirtyBatchToNtfyTopics(
+        dirty: SyncDirtyBatch,
+        uid: String,
+        channelTopic: String,
+        deviceId: String
+    ) async {
         let hasEntities = !dirty.tags.isEmpty || !dirty.areas.isEmpty || !dirty.projects.isEmpty
             || !dirty.headings.isEmpty || !dirty.tasks.isEmpty || !dirty.checklistItems.isEmpty
-            || !dirty.projectTemplates.isEmpty
-        guard hasEntities,
-              let encoded = topic.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-              let url = URL(string: "https://ntfy.sh/\(encoded)") else { return }
+            || !dirty.attachments.isEmpty || !dirty.projectTemplates.isEmpty
+        guard hasEntities else { return }
 
         let now = Int64(Date().timeIntervalSince1970 * 1000.0)
         let jsonEncoder = JSONEncoder()
@@ -868,6 +1262,20 @@ public actor FirebaseCloudSyncService {
                 "isDeleted": chk.isDeleted
             ]
         }
+        let attMaps: [[String: Any]] = dirty.attachments.map { att in
+            [
+                "id": att.id,
+                "taskId": att.taskId as Any,
+                "projectId": att.projectId as Any,
+                "fileName": att.fileName,
+                "mimeType": att.mimeType,
+                "sizeBytes": att.sizeBytes,
+                "localRelativePath": "",
+                "createdAt": att.createdAt,
+                "updatedAt": att.updatedAt,
+                "isDeleted": att.isDeleted
+            ]
+        }
         let tmplMaps: [[String: Any]] = dirty.projectTemplates.map { tmpl in
             [
                 "id": tmpl.id,
@@ -900,61 +1308,50 @@ public actor FirebaseCloudSyncService {
             return out
         }
 
-        let fullBatch: [String: Any] = [
+        var fullBatch: [String: Any] = [
+            "userId": uid,
+            "deviceId": deviceId,
+            "batchTimestamp": now
+        ]
+        if !tagMaps.isEmpty { fullBatch["tags"] = tagMaps.map(sanitize) }
+        if !areaMaps.isEmpty { fullBatch["areas"] = areaMaps.map(sanitize) }
+        if !projMaps.isEmpty { fullBatch["projects"] = projMaps.map(sanitize) }
+        if !headMaps.isEmpty { fullBatch["headings"] = headMaps.map(sanitize) }
+        if !taskMaps.isEmpty { fullBatch["tasks"] = taskMaps.map(sanitize) }
+        if !chkMaps.isEmpty { fullBatch["checklistItems"] = chkMaps.map(sanitize) }
+        if !attMaps.isEmpty { fullBatch["attachments"] = attMaps.map(sanitize) }
+        if !tmplMaps.isEmpty { fullBatch["projectTemplates"] = tmplMaps.map(sanitize) }
+
+        let bodyToSend: Data
+        if let single = try? JSONSerialization.data(withJSONObject: fullBatch), single.count < 3800 {
+            bodyToSend = single
+        } else if let wakeOnlyData = try? JSONSerialization.data(withJSONObject: [
             "userId": uid,
             "deviceId": deviceId,
             "batchTimestamp": now,
-            "tags": tagMaps.map(sanitize),
-            "areas": areaMaps.map(sanitize),
-            "projects": projMaps.map(sanitize),
-            "headings": headMaps.map(sanitize),
-            "tasks": taskMaps.map(sanitize),
-            "checklistItems": chkMaps.map(sanitize),
-            "projectTemplates": tmplMaps.map(sanitize)
-        ]
-
-        var payloads: [Data] = []
-        if let single = try? JSONSerialization.data(withJSONObject: fullBatch), single.count <= 3800 {
-            payloads.append(single)
+            "wakeOnly": true
+        ]) {
+            bodyToSend = wakeOnlyData
         } else {
-            if !tagMaps.isEmpty || !areaMaps.isEmpty || !projMaps.isEmpty || !headMaps.isEmpty || !tmplMaps.isEmpty {
-                let metaBatch: [String: Any] = [
-                    "userId": uid,
-                    "deviceId": deviceId,
-                    "batchTimestamp": now,
-                    "tags": tagMaps.map(sanitize),
-                    "areas": areaMaps.map(sanitize),
-                    "projects": projMaps.map(sanitize),
-                    "headings": headMaps.map(sanitize),
-                    "projectTemplates": tmplMaps.map(sanitize)
-                ]
-                if let d = try? JSONSerialization.data(withJSONObject: metaBatch) { payloads.append(d) }
-            }
-            var tIdx = 0
-            while tIdx < taskMaps.count {
-                let slice = Array(taskMaps[tIdx..<min(tIdx + 10, taskMaps.count)]).map(sanitize)
-                if let d = try? JSONSerialization.data(withJSONObject: [
-                    "userId": uid, "deviceId": deviceId, "batchTimestamp": now, "tasks": slice
-                ]) { payloads.append(d) }
-                tIdx += 10
-            }
-            var cIdx = 0
-            while cIdx < chkMaps.count {
-                let slice = Array(chkMaps[cIdx..<min(cIdx + 25, chkMaps.count)]).map(sanitize)
-                if let d = try? JSONSerialization.data(withJSONObject: [
-                    "userId": uid, "deviceId": deviceId, "batchTimestamp": now, "checklistItems": slice
-                ]) { payloads.append(d) }
-                cIdx += 25
-            }
+            return
         }
 
-        for body in payloads {
+        let uidWakeTopic = Self.deriveUidWakeTopic(uid: uid)
+        var targetTopics: [String] = []
+        if !uidWakeTopic.isEmpty { targetTopics.append(uidWakeTopic) }
+        if !channelTopic.isEmpty && !targetTopics.contains(channelTopic) {
+            targetTopics.append(channelTopic)
+        }
+
+        for topic in targetTopics {
+            guard let encoded = topic.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+                  let url = URL(string: "https://ntfy.sh/\(encoded)") else { continue }
             var req = URLRequest(url: url)
             req.httpMethod = "POST"
-            req.timeoutInterval = 4.0
+            req.timeoutInterval = 2.5
             req.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")
             req.setValue("yes", forHTTPHeaderField: "Cache")
-            req.httpBody = body
+            req.httpBody = bodyToSend
             _ = try? await session.data(for: req)
         }
     }
@@ -1107,7 +1504,7 @@ public actor FirebaseCloudSyncService {
         guard let encoded = topic.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
               let url = URL(string: "https://ntfy.sh/\(encoded)/json?poll=1&since=\(sinceParam)") else { return 0 }
         var req = URLRequest(url: url)
-        req.timeoutInterval = 4.0
+        req.timeoutInterval = 3.0
         let (data, res) = try await session.data(for: req)
         guard let http = res as? HTTPURLResponse, (200..<300).contains(http.statusCode),
               let text = String(data: data, encoding: .utf8) else { return 0 }
@@ -1124,6 +1521,9 @@ public actor FirebaseCloudSyncService {
 
             let batchTs = Self.asInt64(batch["batchTimestamp"]) ?? 0
             if batch["deviceId"] as? String == deviceId, sinceTimestamp > 0, batchTs <= sinceTimestamp {
+                continue
+            }
+            if batch["wakeOnly"] as? Bool == true {
                 continue
             }
 

@@ -2185,7 +2185,7 @@ export const App: React.FC = () => {
                 className="chip-btn active"
                 data-testid="topbar-update-available-btn"
                 title={`${t.settingsApplyUpdateBtn} (v${availableUpdate.latestVersion})`}
-                onClick={() => void applyPendingSwUpdate()}
+                onClick={() => void applyPendingSwUpdate(availableUpdate)}
               >
                 <span>v{availableUpdate.latestVersion}</span>
               </button>

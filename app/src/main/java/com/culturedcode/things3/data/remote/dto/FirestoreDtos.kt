@@ -37,6 +37,7 @@ data class CloudDeltaBatchPayload(
     val userId: String = "",
     val deviceId: String = "",
     val batchTimestamp: Long = 0L,
+    val wakeOnly: Boolean = false,
     val tags: List<TagFirestoreDto> = emptyList(),
     val areas: List<AreaFirestoreDto> = emptyList(),
     val projects: List<ProjectFirestoreDto> = emptyList(),

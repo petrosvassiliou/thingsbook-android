@@ -155,16 +155,76 @@ export async function checkForSwAndReleaseUpdates(
   };
 }
 
-export async function applyPendingSwUpdate(): Promise<void> {
-  if (swUpdateFn) {
+export async function applyPendingSwUpdate(
+  targetUpdate?: UpdateCheckResult | null
+): Promise<'reloaded' | 'opened_release'> {
+  if (swUpdateAvailable && swUpdateFn) {
     try {
       await swUpdateFn(true);
-      return;
+      return 'reloaded';
     } catch {
-      // fallback reload
+      // Fall through to manual SW & origin probe
     }
   }
+
   if (typeof window !== 'undefined') {
+    let foundFreshWorkerOrAsset = false;
+
+    try {
+      if (swRegistrationRef) {
+        await swRegistrationRef.update();
+        if (swRegistrationRef.waiting || swRegistrationRef.installing) {
+          foundFreshWorkerOrAsset = true;
+        }
+      }
+    } catch {
+      // Ignore transient SW check error
+    }
+
+    if (!foundFreshWorkerOrAsset) {
+      try {
+        const res = await fetch(`/?_tb_update_probe=${Date.now()}`, {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' }
+        });
+        if (res.ok) {
+          const html = await res.text();
+          const currentScripts = Array.from(
+            document.querySelectorAll<HTMLScriptElement>('script[src]')
+          )
+            .map((s) => s.getAttribute('src') || '')
+            .filter((src) => src.includes('/assets/'));
+          if (
+            currentScripts.length > 0 &&
+            currentScripts.some((src) => !html.includes(src))
+          ) {
+            foundFreshWorkerOrAsset = true;
+          }
+        }
+      } catch {
+        // Ignore offline fetch error
+      }
+    }
+
+    if (foundFreshWorkerOrAsset) {
+      if (swUpdateFn) {
+        try {
+          await swUpdateFn(true);
+          return 'reloaded';
+        } catch {
+          // Fallback to direct reload
+        }
+      }
+      window.location.reload();
+      return 'reloaded';
+    }
+
+    if (targetUpdate?.releaseUrl && /^https:\/\//i.test(targetUpdate.releaseUrl)) {
+      window.open(targetUpdate.releaseUrl, '_blank', 'noopener,noreferrer');
+      return 'opened_release';
+    }
+
     window.location.reload();
   }
+  return 'reloaded';
 }

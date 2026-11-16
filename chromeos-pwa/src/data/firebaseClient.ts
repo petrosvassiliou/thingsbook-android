@@ -6,7 +6,7 @@ import {
   type FirebaseOptions
 } from 'firebase/app';
 import { getAuth, type Auth } from 'firebase/auth';
-import { getFirestore, type Firestore } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, type Firestore } from 'firebase/firestore';
 
 export const DEFAULT_FIREBASE_CONFIG: FirebaseOptions = {
   apiKey: 'AIzaSyCUtSvssQOesHW-heLhNzNvykI1zCl7deY',
@@ -127,7 +127,14 @@ export function getFirebaseAuthInstance(): Auth {
 export function getFirestoreInstance(): Firestore {
   ensureConfigFresh();
   if (!cachedDb) {
-    cachedDb = getFirestore(getFirebaseAppInstance());
+    const app = getFirebaseAppInstance();
+    try {
+      cachedDb = initializeFirestore(app, {
+        experimentalAutoDetectLongPolling: true
+      });
+    } catch {
+      cachedDb = getFirestore(app);
+    }
   }
   return cachedDb;
 }

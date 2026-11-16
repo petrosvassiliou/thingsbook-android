@@ -615,6 +615,79 @@ button {
   font-size: 14.5px;
 }
 
+.inline-qf-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.inline-qf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 27px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-canvas);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.inline-qf-chip:hover {
+  border-color: var(--things-blue);
+  color: var(--text-primary);
+}
+
+.inline-qf-chip.active {
+  background: var(--things-blue-soft);
+  border-color: var(--things-blue);
+  color: var(--things-blue);
+  font-weight: 600;
+}
+
+.inline-qf-chip.reset {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.inline-qf-chip.reset:hover {
+  color: var(--upcoming-coral);
+  border-color: var(--upcoming-coral);
+}
+
+.inline-qf-select {
+  height: 27px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-canvas);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.inline-qf-select:hover,
+.inline-qf-select:focus {
+  border-color: var(--things-blue);
+}
+
+.inline-qf-select.active {
+  background: var(--things-blue-soft);
+  border-color: var(--things-blue);
+  color: var(--things-blue);
+  font-weight: 600;
+}
+
 .inline-qf-results {
   max-height: 54vh;
   overflow-y: auto;

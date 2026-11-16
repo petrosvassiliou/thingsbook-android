@@ -2052,3 +2052,215 @@ export function computeClampedContextMenuPosition(
     top: Math.round(Math.min(Math.max(safeMargin, anchorY), maxTop))
   };
 }
+
+export type QuickFindDateFilter =
+  | 'ALL'
+  | 'TODAY'
+  | 'OVERDUE'
+  | 'NEXT_7_DAYS'
+  | 'THIS_MONTH'
+  | 'NO_DATE';
+
+export type QuickFindEntityScope = 'ALL' | 'TASKS' | 'PROJECTS';
+
+export interface QuickFindFilter {
+  hideCompleted: boolean;
+  dateFilter: QuickFindDateFilter;
+  hasDeadlineOnly: boolean;
+  hasChecklistOnly: boolean;
+  tagId: string | null;
+  scope: QuickFindEntityScope;
+}
+
+export const DEFAULT_QUICK_FIND_FILTER: QuickFindFilter = {
+  hideCompleted: false,
+  dateFilter: 'ALL',
+  hasDeadlineOnly: false,
+  hasChecklistOnly: false,
+  tagId: null,
+  scope: 'ALL'
+};
+
+export function hasActiveQuickFindFilters(filter: QuickFindFilter): boolean {
+  return (
+    filter.hideCompleted ||
+    filter.dateFilter !== 'ALL' ||
+    filter.hasDeadlineOnly ||
+    filter.hasChecklistOnly ||
+    filter.tagId !== null ||
+    filter.scope !== 'ALL'
+  );
+}
+
+export function shouldShowSmartViewsAndAreasInQuickFind(
+  query: string,
+  filter: QuickFindFilter
+): boolean {
+  if (
+    filter.scope !== 'ALL' ||
+    filter.dateFilter !== 'ALL' ||
+    filter.hasDeadlineOnly ||
+    filter.hasChecklistOnly ||
+    filter.tagId !== null
+  ) {
+    return false;
+  }
+  if (filter.hideCompleted && query.trim().length === 0) {
+    return false;
+  }
+  return true;
+}
+
+interface QuickFindDateBounds {
+  todayStart: number;
+  tomorrowStart: number;
+  next7DaysEndExclusive: number;
+  monthStart: number;
+  nextMonthStart: number;
+}
+
+function computeQuickFindDateBounds(nowMs: number): QuickFindDateBounds {
+  const todayStart = startOfDayEpoch(new Date(nowMs));
+  const base = new Date(todayStart);
+  const tomorrowStart = new Date(
+    base.getFullYear(),
+    base.getMonth(),
+    base.getDate() + 1,
+    0,
+    0,
+    0,
+    0
+  ).getTime();
+  const next7DaysEndExclusive = new Date(
+    base.getFullYear(),
+    base.getMonth(),
+    base.getDate() + 8,
+    0,
+    0,
+    0,
+    0
+  ).getTime();
+  const monthStart = new Date(base.getFullYear(), base.getMonth(), 1, 0, 0, 0, 0).getTime();
+  const nextMonthStart = new Date(
+    base.getFullYear(),
+    base.getMonth() + 1,
+    1,
+    0,
+    0,
+    0,
+    0
+  ).getTime();
+
+  return {
+    todayStart,
+    tomorrowStart,
+    next7DaysEndExclusive,
+    monthStart,
+    nextMonthStart
+  };
+}
+
+function matchesQuickFindDatePredicate(
+  dateFilter: QuickFindDateFilter,
+  whenDate: number | null,
+  deadline: number | null,
+  scheduleState: ScheduleState,
+  isOpenOrActive: boolean,
+  bounds: QuickFindDateBounds
+): boolean {
+  const isTodaySchedule = scheduleState === 'TODAY' || scheduleState === 'THIS_EVENING';
+  switch (dateFilter) {
+    case 'ALL':
+      return true;
+    case 'TODAY':
+      return (
+        (isOpenOrActive && isTodaySchedule) ||
+        (whenDate != null && whenDate >= bounds.todayStart && whenDate < bounds.tomorrowStart) ||
+        (deadline != null && deadline >= bounds.todayStart && deadline < bounds.tomorrowStart)
+      );
+    case 'OVERDUE':
+      return (
+        isOpenOrActive &&
+        ((deadline != null && deadline < bounds.todayStart) ||
+          (whenDate != null && whenDate < bounds.todayStart))
+      );
+    case 'NEXT_7_DAYS':
+      return (
+        (isOpenOrActive && isTodaySchedule) ||
+        (whenDate != null &&
+          whenDate >= bounds.todayStart &&
+          whenDate < bounds.next7DaysEndExclusive) ||
+        (deadline != null &&
+          deadline >= bounds.todayStart &&
+          deadline < bounds.next7DaysEndExclusive)
+      );
+    case 'THIS_MONTH':
+      return (
+        (isOpenOrActive && isTodaySchedule) ||
+        (whenDate != null && whenDate >= bounds.monthStart && whenDate < bounds.nextMonthStart) ||
+        (deadline != null && deadline >= bounds.monthStart && deadline < bounds.nextMonthStart)
+      );
+    case 'NO_DATE':
+      return (
+        whenDate == null &&
+        deadline == null &&
+        scheduleState !== 'TODAY' &&
+        scheduleState !== 'THIS_EVENING' &&
+        scheduleState !== 'UPCOMING'
+      );
+  }
+}
+
+export function matchesQuickFindTask(
+  task: Pick<
+    TaskRecord,
+    'status' | 'scheduleState' | 'whenDate' | 'deadline' | 'tagIds' | 'isDeleted'
+  >,
+  filter: QuickFindFilter,
+  hasChecklist: boolean,
+  nowMs: number = Date.now()
+): boolean {
+  if (task.isDeleted) return false;
+  if (filter.scope === 'PROJECTS') return false;
+  if (filter.hideCompleted && task.status !== 'OPEN') return false;
+  if (filter.hasDeadlineOnly && task.deadline == null) return false;
+  if (filter.hasChecklistOnly && !hasChecklist) return false;
+  if (filter.tagId !== null && !task.tagIds.includes(filter.tagId)) return false;
+
+  const bounds = computeQuickFindDateBounds(nowMs);
+  return matchesQuickFindDatePredicate(
+    filter.dateFilter,
+    task.whenDate,
+    task.deadline,
+    task.scheduleState,
+    task.status === 'OPEN',
+    bounds
+  );
+}
+
+export function matchesQuickFindProject(
+  project: Pick<
+    ProjectRecord,
+    'status' | 'scheduleState' | 'whenDate' | 'deadline' | 'tagIds' | 'isDeleted'
+  >,
+  filter: QuickFindFilter,
+  nowMs: number = Date.now()
+): boolean {
+  if (project.isDeleted) return false;
+  if (filter.scope === 'TASKS') return false;
+  if (filter.hasChecklistOnly) return false;
+  if (filter.hideCompleted && project.status !== 'ACTIVE') return false;
+  if (filter.hasDeadlineOnly && project.deadline == null) return false;
+  if (filter.tagId !== null && !project.tagIds.includes(filter.tagId)) return false;
+
+  const bounds = computeQuickFindDateBounds(nowMs);
+  return matchesQuickFindDatePredicate(
+    filter.dateFilter,
+    project.whenDate,
+    project.deadline,
+    project.scheduleState,
+    project.status === 'ACTIVE',
+    bounds
+  );
+}
+

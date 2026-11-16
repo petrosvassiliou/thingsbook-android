@@ -5,6 +5,7 @@ import {
   BookOpenCheck,
   CalendarDays,
   CheckSquare,
+  EyeOff,
   Flag,
   Folder,
   Inbox,
@@ -12,6 +13,7 @@ import {
   Moon,
   Package,
   Repeat,
+  RotateCcw,
   Search,
   Star,
   Tag,
@@ -30,6 +32,16 @@ import {
   type TagRecord,
   type TaskRecord
 } from '../domain/types';
+import {
+  DEFAULT_QUICK_FIND_FILTER,
+  hasActiveQuickFindFilters,
+  matchesQuickFindProject,
+  matchesQuickFindTask,
+  shouldShowSmartViewsAndAreasInQuickFind,
+  type QuickFindDateFilter,
+  type QuickFindEntityScope,
+  type QuickFindFilter
+} from '../domain/v2Utils';
 import type { TranslationStrings } from '../i18n/translations';
 import { ProjectProgressRing } from './ProjectProgressRing';
 
@@ -57,7 +69,10 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
   onClose
 }) => {
   const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<QuickFindFilter>(DEFAULT_QUICK_FIND_FILTER);
+  const [referenceNowMs] = useState(() => Date.now());
 
+  const activeTags = useMemo(() => tags.filter((tg) => !tg.isDeleted), [tags]);
   const areasMap = useMemo(
     () => new Map(areas.filter((a) => !a.isDeleted).map((a) => [a.id, a])),
     [areas]
@@ -67,11 +82,20 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
     [projects]
   );
   const tagsMap = useMemo(
-    () => new Map(tags.filter((tg) => !tg.isDeleted).map((tg) => [tg.id, tg])),
-    [tags]
+    () => new Map(activeTags.map((tg) => [tg.id, tg])),
+    [activeTags]
   );
+  const taskHasChecklistSet = useMemo(() => {
+    const s = new Set<string>();
+    for (const chk of checklistItems) {
+      if (!chk.isDeleted) s.add(chk.taskId);
+    }
+    return s;
+  }, [checklistItems]);
 
   const q = query.trim().toLowerCase();
+  const hasFilters = hasActiveQuickFindFilters(filter);
+  const showViewsAndAreas = shouldShowSmartViewsAndAreasInQuickFind(q, filter);
 
   const smartViews: Array<{ view: SmartViewType; label: string; icon: React.ReactNode }> = useMemo(
     () => [
@@ -87,31 +111,40 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
   );
 
   const matchedViews = useMemo(() => {
+    if (!showViewsAndAreas) return [];
     if (!q) return smartViews;
     return smartViews.filter((sv) => sv.label.toLowerCase().includes(q));
-  }, [q, smartViews]);
+  }, [q, smartViews, showViewsAndAreas]);
 
   const matchedAreas = useMemo(() => {
+    if (!showViewsAndAreas) return [];
     const active = areas.filter((a) => !a.isDeleted);
     if (!q) return active;
     return active.filter((a) => a.title.toLowerCase().includes(q));
-  }, [areas, q]);
+  }, [areas, q, showViewsAndAreas]);
 
   const matchedProjects = useMemo(() => {
-    const active = projects.filter((p) => !p.isDeleted);
-    if (!q) return active.slice(0, 8);
-    return active.filter(
-      (p) =>
-        p.title.toLowerCase().includes(q) ||
-        p.notes.toLowerCase().includes(q) ||
-        (p.areaId && (areasMap.get(p.areaId)?.title.toLowerCase().includes(q) ?? false))
-    );
-  }, [projects, areasMap, q]);
+    const filtered = projects.filter((p) => matchesQuickFindProject(p, filter, referenceNowMs));
+    if (!q) return hasFilters ? filtered.slice(0, 25) : filtered.slice(0, 8);
+    return filtered
+      .filter(
+        (p) =>
+          p.title.toLowerCase().includes(q) ||
+          p.notes.toLowerCase().includes(q) ||
+          (p.areaId && (areasMap.get(p.areaId)?.title.toLowerCase().includes(q) ?? false))
+      )
+      .slice(0, 25);
+  }, [projects, areasMap, q, filter, hasFilters, referenceNowMs]);
 
   const matchedTasks = useMemo(() => {
-    const nonDeleted = tasks.filter((tk) => !tk.isDeleted);
-    if (!q) return nonDeleted.filter((tk) => tk.status === 'OPEN').slice(0, 12);
-    return nonDeleted
+    const filtered = tasks.filter((tk) =>
+      matchesQuickFindTask(tk, filter, taskHasChecklistSet.has(tk.id), referenceNowMs)
+    );
+    if (!q) {
+      if (hasFilters) return filtered.slice(0, 50);
+      return filtered.filter((tk) => tk.status === 'OPEN').slice(0, 12);
+    }
+    return filtered
       .filter((tk) => {
         const tagMatch = tk.tagIds.some((id) => tagsMap.get(id)?.title.toLowerCase().includes(q));
         const proj = tk.projectId ? projectsMap.get(tk.projectId) : undefined;
@@ -133,8 +166,8 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
           (area?.title.toLowerCase().includes(q) ?? false)
         );
       })
-      .slice(0, 40);
-  }, [tasks, q, tagsMap, projectsMap, areasMap, checklistItems]);
+      .slice(0, 50);
+  }, [tasks, q, filter, hasFilters, taskHasChecklistSet, tagsMap, projectsMap, areasMap, checklistItems, referenceNowMs]);
 
   const totalHits =
     matchedViews.length + matchedAreas.length + matchedProjects.length + matchedTasks.length;
@@ -206,6 +239,7 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
               if (e.key === 'Escape') {
                 e.stopPropagation();
                 if (query) setQuery('');
+                else if (hasFilters) setFilter(DEFAULT_QUICK_FIND_FILTER);
                 else onClose();
               }
             }}
@@ -233,6 +267,94 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
           >
             {t.actionDone}
           </button>
+        </div>
+
+        {/* Search Filter Strip */}
+        <div className="inline-qf-filters">
+          <button
+            type="button"
+            className={`inline-qf-chip ${filter.hideCompleted ? 'active' : ''}`}
+            onClick={() => setFilter((f) => ({ ...f, hideCompleted: !f.hideCompleted }))}
+          >
+            <EyeOff size={12.5} />
+            <span>{t.searchFilterHideCompleted}</span>
+          </button>
+
+          <select
+            className={`inline-qf-select ${filter.dateFilter !== 'ALL' ? 'active' : ''}`}
+            value={filter.dateFilter}
+            aria-label={t.searchFilterDateAll}
+            onChange={(e) =>
+              setFilter((f) => ({ ...f, dateFilter: e.target.value as QuickFindDateFilter }))
+            }
+          >
+            <option value="ALL">📅 {t.searchFilterDateAll}</option>
+            <option value="TODAY">⭐ {t.searchFilterDateToday}</option>
+            <option value="OVERDUE">⚠️ {t.searchFilterDateOverdue}</option>
+            <option value="NEXT_7_DAYS">🗓️ {t.searchFilterDateNext7Days}</option>
+            <option value="THIS_MONTH">📆 {t.searchFilterDateThisMonth}</option>
+            <option value="NO_DATE">⏳ {t.searchFilterDateNone}</option>
+          </select>
+
+          <button
+            type="button"
+            className={`inline-qf-chip ${filter.hasDeadlineOnly ? 'active' : ''}`}
+            onClick={() => setFilter((f) => ({ ...f, hasDeadlineOnly: !f.hasDeadlineOnly }))}
+          >
+            <Flag size={12} />
+            <span>{t.searchFilterHasDeadline}</span>
+          </button>
+
+          <button
+            type="button"
+            className={`inline-qf-chip ${filter.hasChecklistOnly ? 'active' : ''}`}
+            onClick={() => setFilter((f) => ({ ...f, hasChecklistOnly: !f.hasChecklistOnly }))}
+          >
+            <CheckSquare size={12} />
+            <span>{t.searchFilterHasChecklist}</span>
+          </button>
+
+          {activeTags.length > 0 && (
+            <select
+              className={`inline-qf-select ${filter.tagId !== null ? 'active' : ''}`}
+              value={filter.tagId ?? ''}
+              aria-label={t.searchFilterAllTags}
+              onChange={(e) =>
+                setFilter((f) => ({ ...f, tagId: e.target.value || null }))
+              }
+            >
+              <option value="">🏷️ {t.searchFilterAllTags}</option>
+              {activeTags.map((tg) => (
+                <option key={tg.id} value={tg.id}>
+                  #{tg.title}
+                </option>
+              ))}
+            </select>
+          )}
+
+          <select
+            className={`inline-qf-select ${filter.scope !== 'ALL' ? 'active' : ''}`}
+            value={filter.scope}
+            aria-label={t.searchFilterScopeAll}
+            onChange={(e) =>
+              setFilter((f) => ({ ...f, scope: e.target.value as QuickFindEntityScope }))
+            }
+          >
+            <option value="ALL">{t.searchFilterScopeAll}</option>
+            <option value="TASKS">{t.searchFilterScopeTasks}</option>
+            <option value="PROJECTS">{t.searchFilterScopeProjects}</option>
+          </select>
+
+          {hasFilters && (
+            <button
+              type="button"
+              className="inline-qf-chip reset"
+              onClick={() => setFilter(DEFAULT_QUICK_FIND_FILTER)}
+            >
+              <RotateCcw size={11.5} />
+              <span>{t.searchFilterReset}</span>
+            </button>
+          )}
         </div>
 
         <div className="inline-qf-results">

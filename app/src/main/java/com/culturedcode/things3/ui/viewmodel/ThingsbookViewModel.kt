@@ -40,6 +40,7 @@ import com.culturedcode.things3.domain.model.Heading
 import com.culturedcode.things3.domain.model.Project
 import com.culturedcode.things3.domain.model.ProjectStatus
 import com.culturedcode.things3.domain.model.ProjectTemplate
+import com.culturedcode.things3.domain.model.QuickFindFilter
 import com.culturedcode.things3.domain.model.RecurrenceRule
 import com.culturedcode.things3.domain.model.ScheduleState
 import com.culturedcode.things3.domain.model.Tag
@@ -242,6 +243,9 @@ class ThingsbookViewModel @Inject constructor(
     private val _quickFindQuery = MutableStateFlow("")
     val quickFindQuery: StateFlow<String> = _quickFindQuery.asStateFlow()
 
+    private val _quickFindFilter = MutableStateFlow(QuickFindFilter())
+    val quickFindFilter: StateFlow<QuickFindFilter> = _quickFindFilter.asStateFlow()
+
     // Gemini AI States
     private val _isGeminiModalOpen = MutableStateFlow(false)
     val isGeminiModalOpen: StateFlow<Boolean> = _isGeminiModalOpen.asStateFlow()
@@ -397,16 +401,16 @@ class ThingsbookViewModel @Inject constructor(
         .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Real-time FTS5 Quick Find Results
-    val quickFindTaskResults: StateFlow<List<TaskItem>> = _quickFindQuery
-        .flatMapLatest { q ->
-            if (q.isBlank()) flowOf(emptyList()) else repository.searchTasksFts5(q)
+    val quickFindTaskResults: StateFlow<List<TaskItem>> = combine(_quickFindQuery, _quickFindFilter) { q, f -> q to f }
+        .flatMapLatest { (q, f) ->
+            if (q.isBlank() && !f.hasActiveFilters) flowOf(emptyList()) else repository.searchTasksFts5(q, f)
         }
         .catch { emit(emptyList()) }
         .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val quickFindProjectResults: StateFlow<List<Project>> = _quickFindQuery
-        .flatMapLatest { q ->
-            if (q.isBlank()) flowOf(emptyList()) else repository.searchProjectsFts5(q)
+    val quickFindProjectResults: StateFlow<List<Project>> = combine(_quickFindQuery, _quickFindFilter) { q, f -> q to f }
+        .flatMapLatest { (q, f) ->
+            if (q.isBlank() && !f.hasActiveFilters) flowOf(emptyList()) else repository.searchProjectsFts5(q, f)
         }
         .catch { emit(emptyList()) }
         .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -497,11 +501,18 @@ class ThingsbookViewModel @Inject constructor(
 
     fun setQuickFindOpen(open: Boolean) {
         _isQuickFindOpen.value = open
-        if (!open) _quickFindQuery.value = ""
+        if (!open) {
+            _quickFindQuery.value = ""
+            _quickFindFilter.value = QuickFindFilter()
+        }
     }
 
     fun updateQuickFindQuery(query: String) {
         _quickFindQuery.value = query
+    }
+
+    fun updateQuickFindFilter(filter: QuickFindFilter) {
+        _quickFindFilter.value = filter
     }
 
     fun setGeminiModalOpen(open: Boolean) {

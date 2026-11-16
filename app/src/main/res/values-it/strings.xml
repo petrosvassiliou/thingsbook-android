@@ -445,4 +445,18 @@
     <string name="project_delete_prompt_tasks_body">Questo progetto contiene %1$d attività associate. Vuoi eliminare anche tutte le attività associate o mantenerle senza progetto?</string>
     <string name="project_delete_with_tasks_btn">Elimina progetto e attività</string>
     <string name="project_delete_keep_tasks_btn">Mantieni attività (elimina solo progetto)</string>
+    <string name="search_filter_hide_completed">Nascondi completati</string>
+    <string name="search_filter_date_all">Qualsiasi data</string>
+    <string name="search_filter_date_today">Oggi</string>
+    <string name="search_filter_date_overdue">In ritardo</string>
+    <string name="search_filter_date_next_7_days">Prossimi 7 giorni</string>
+    <string name="search_filter_date_this_month">Questo mese</string>
+    <string name="search_filter_date_none">Senza data</string>
+    <string name="search_filter_has_deadline">Con scadenza</string>
+    <string name="search_filter_has_checklist">Con checklist</string>
+    <string name="search_filter_all_tags">Tutti i tag</string>
+    <string name="search_filter_scope_all">Tutti i tipi</string>
+    <string name="search_filter_scope_tasks">Solo attività</string>
+    <string name="search_filter_scope_projects">Solo progetti</string>
+    <string name="search_filter_reset">Reimposta filtri</string>
 </resources>

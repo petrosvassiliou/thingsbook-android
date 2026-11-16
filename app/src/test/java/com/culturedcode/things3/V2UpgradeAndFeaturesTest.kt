@@ -11,6 +11,7 @@ import com.culturedcode.things3.data.backup.BackupTaskDto
 import com.culturedcode.things3.data.backup.ThingsBackupCodec
 import com.culturedcode.things3.data.backup.ThingsbookBackupEnvelope
 import com.culturedcode.things3.data.backup.ThingsbookBackupPayload
+import com.culturedcode.things3.data.local.ThingsDatabase
 import com.culturedcode.things3.data.local.entity.ProjectEntity
 import com.culturedcode.things3.data.remote.dto.CloudDeltaBatchPayload
 import com.culturedcode.things3.data.remote.dto.ProjectFirestoreDto
@@ -18,15 +19,20 @@ import com.culturedcode.things3.data.remote.dto.ProjectTemplateFirestoreDto
 import com.culturedcode.things3.data.remote.dto.TaskFirestoreDto
 import com.culturedcode.things3.data.repository.SyncRepository
 import com.culturedcode.things3.domain.model.CalendarEventItem
+import com.culturedcode.things3.domain.model.ChecklistItem
 import com.culturedcode.things3.domain.model.Project
 import com.culturedcode.things3.domain.model.ProjectOutlineImporter
 import com.culturedcode.things3.domain.model.ProjectStatus
 import com.culturedcode.things3.domain.model.ProjectTemplateBlueprint
 import com.culturedcode.things3.domain.model.ProjectTemplateCodec
+import com.culturedcode.things3.domain.model.QuickFindDateFilter
+import com.culturedcode.things3.domain.model.QuickFindEntityScope
+import com.culturedcode.things3.domain.model.QuickFindFilter
 import com.culturedcode.things3.domain.model.ScheduleState
 import com.culturedcode.things3.domain.model.StalledProjectDetector
 import com.culturedcode.things3.domain.model.StalledProjectReason
 import com.culturedcode.things3.domain.model.StarterProjectTemplates
+import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
 import com.culturedcode.things3.domain.model.TemplateHeadingBlueprint
@@ -740,9 +746,9 @@ class V2UpgradeAndFeaturesTest {
     }
 
     @Test
-    fun `v2_0_0_beta_8 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
-        assertEquals(52, BuildConfig.VERSION_CODE)
-        assertEquals("2.0.0-beta.8", BuildConfig.VERSION_NAME)
+    fun `v2_0_0_beta_9 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
+        assertEquals(53, BuildConfig.VERSION_CODE)
+        assertEquals("2.0.0-beta.9", BuildConfig.VERSION_NAME)
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -886,4 +892,184 @@ class V2UpgradeAndFeaturesTest {
         )
         assertNull(StalledProjectDetector.evaluateProject(syncedDomainOnDeviceB, nowMillis = now + 5_000L))
     }
+
+    @Test
+    fun `v2_0_0_beta_9 QuickFindFilter predicates FTS5 SQL builders and 5-language search_filter keys`() {
+        val zone = ZoneOffset.UTC
+        val refDay = LocalDate.of(2026, 11, 15)
+        val todayStart = refDay.atStartOfDay(zone).toInstant().toEpochMilli()
+        val refNoon = todayStart + 12L * 3_600_000L
+        val dayMs = 86_400_000L
+
+        val urgentTag = Tag(
+            id = "tag-urgent",
+            title = "Urgent",
+            parentTagId = null,
+            shortcut = "u",
+            sortOrder = 1.0,
+            createdAt = todayStart,
+            updatedAt = todayStart
+        )
+        val homeTag = urgentTag.copy(id = "tag-home", title = "Home", shortcut = "h")
+
+        val todayTask = TaskItem(
+            id = "t-today",
+            title = "Sprint keynote",
+            notes = "",
+            status = TaskStatus.OPEN,
+            scheduleState = ScheduleState.TODAY,
+            whenDate = todayStart,
+            deadline = todayStart + 2L * dayMs,
+            reminderTime = null,
+            completedAt = null,
+            projectId = null,
+            headingId = null,
+            areaId = null,
+            recurrenceRule = null,
+            sortOrder = 1.0,
+            tags = listOf(urgentTag),
+            checklistItems = listOf(
+                ChecklistItem(
+                    id = "c-1",
+                    taskId = "t-today",
+                    title = "Check slides",
+                    isCompleted = false,
+                    sortOrder = 1.0,
+                    createdAt = todayStart,
+                    updatedAt = todayStart
+                )
+            ),
+            createdAt = todayStart,
+            updatedAt = todayStart
+        )
+        val overdueTask = todayTask.copy(
+            id = "t-overdue",
+            scheduleState = ScheduleState.UPCOMING,
+            whenDate = todayStart - 2L * dayMs,
+            deadline = todayStart - dayMs,
+            tags = listOf(homeTag),
+            checklistItems = emptyList()
+        )
+        val noDateTask = todayTask.copy(
+            id = "t-nodate",
+            scheduleState = ScheduleState.SOMEDAY,
+            whenDate = null,
+            deadline = null,
+            tags = emptyList(),
+            checklistItems = emptyList()
+        )
+        val completedTask = todayTask.copy(
+            id = "t-done",
+            status = TaskStatus.COMPLETED,
+            scheduleState = ScheduleState.ANYTIME,
+            whenDate = null,
+            deadline = null,
+            checklistItems = emptyList()
+        )
+
+        val activeProject = Project(
+            id = "p-active",
+            areaId = null,
+            title = "Q4 Sprint",
+            notes = "",
+            status = ProjectStatus.ACTIVE,
+            scheduleState = ScheduleState.ANYTIME,
+            whenDate = null,
+            deadline = todayStart + 4L * dayMs,
+            completedAt = null,
+            lastReviewedAt = todayStart,
+            sortOrder = 1.0,
+            tagIds = listOf(urgentTag.id),
+            createdAt = todayStart,
+            updatedAt = todayStart
+        )
+        val completedProject = activeProject.copy(
+            id = "p-done",
+            status = ProjectStatus.COMPLETED,
+            deadline = null,
+            tagIds = emptyList()
+        )
+
+        val defaultFilter = QuickFindFilter()
+        assertFalse(defaultFilter.hasActiveFilters)
+        assertTrue(defaultFilter.shouldShowSmartViewsAndAreas("Today"))
+        assertFalse(QuickFindFilter(hideCompleted = true).shouldShowSmartViewsAndAreas(""))
+        assertTrue(QuickFindFilter(hideCompleted = true).shouldShowSmartViewsAndAreas("Tod"))
+        assertFalse(QuickFindFilter(scope = QuickFindEntityScope.TASKS).shouldShowSmartViewsAndAreas("Tod"))
+
+        // Hide completed
+        val hideDone = QuickFindFilter(hideCompleted = true)
+        assertTrue(hideDone.matchesTask(todayTask, refNoon, zone))
+        assertFalse(hideDone.matchesTask(completedTask, refNoon, zone))
+        assertTrue(hideDone.matchesProject(activeProject, refNoon, zone))
+        assertFalse(hideDone.matchesProject(completedProject, refNoon, zone))
+
+        // Date filters
+        assertTrue(QuickFindFilter(dateFilter = QuickFindDateFilter.TODAY).matchesTask(todayTask, refNoon, zone))
+        assertFalse(QuickFindFilter(dateFilter = QuickFindDateFilter.TODAY).matchesTask(overdueTask, refNoon, zone))
+        assertTrue(QuickFindFilter(dateFilter = QuickFindDateFilter.OVERDUE).matchesTask(overdueTask, refNoon, zone))
+        assertTrue(QuickFindFilter(dateFilter = QuickFindDateFilter.NEXT_7_DAYS).matchesProject(activeProject, refNoon, zone))
+        assertTrue(QuickFindFilter(dateFilter = QuickFindDateFilter.THIS_MONTH).matchesTask(overdueTask, refNoon, zone))
+        assertTrue(QuickFindFilter(dateFilter = QuickFindDateFilter.NO_DATE).matchesTask(noDateTask, refNoon, zone))
+        assertFalse(QuickFindFilter(dateFilter = QuickFindDateFilter.NO_DATE).matchesTask(todayTask, refNoon, zone))
+
+        // Checklist, Deadline, Tag, Scope
+        assertTrue(QuickFindFilter(hasChecklistOnly = true).matchesTask(todayTask, refNoon, zone))
+        assertFalse(QuickFindFilter(hasChecklistOnly = true).matchesTask(overdueTask, refNoon, zone))
+        assertFalse(QuickFindFilter(hasChecklistOnly = true).matchesProject(activeProject, refNoon, zone))
+        assertTrue(
+            QuickFindFilter(
+                hasDeadlineOnly = true,
+                tagId = urgentTag.id,
+                scope = QuickFindEntityScope.PROJECTS
+            ).matchesProject(activeProject, refNoon, zone)
+        )
+        assertFalse(QuickFindFilter(scope = QuickFindEntityScope.PROJECTS).matchesTask(todayTask, refNoon, zone))
+
+        // SQLite query builders support empty-query filter-only and hideCompleted SQL pushdown
+        val openTasksFilterSql = ThingsDatabase.buildTasksFts5SqlQuery("", hideCompleted = true).sql
+        assertTrue(openTasksFilterSql.contains("status = 'OPEN'"))
+        assertTrue(openTasksFilterSql.contains("LIMIT 250"))
+
+        val activeProjFtsSql = ThingsDatabase.buildProjectsFts5SqlQuery("Sprint", hideCompleted = true).sql
+        assertTrue(activeProjFtsSql.contains("status = 'ACTIVE'"))
+        assertTrue(activeProjFtsSql.contains("LIMIT 100"))
+
+        // Verify all 14 search_filter_* keys across all 5 localized strings.xml files
+        val expectedFilterKeys = setOf(
+            "search_filter_hide_completed",
+            "search_filter_date_all",
+            "search_filter_date_today",
+            "search_filter_date_overdue",
+            "search_filter_date_next_7_days",
+            "search_filter_date_this_month",
+            "search_filter_date_none",
+            "search_filter_has_deadline",
+            "search_filter_has_checklist",
+            "search_filter_all_tags",
+            "search_filter_scope_all",
+            "search_filter_scope_tasks",
+            "search_filter_scope_projects",
+            "search_filter_reset"
+        )
+        assertEquals(14, expectedFilterKeys.size)
+
+        val resRoot = sequenceOf(File("src/main/res"), File("app/src/main/res")).first { it.isDirectory }
+        for (folder in listOf("values", "values-de", "values-fr", "values-it", "values-es")) {
+            val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(File(resRoot, "$folder/strings.xml"))
+            val nodes = doc.getElementsByTagName("string")
+            val keysInFile = mutableMapOf<String, String>()
+            for (i in 0 until nodes.length) {
+                val elem = nodes.item(i)
+                val name = elem.attributes?.getNamedItem("name")?.nodeValue ?: continue
+                keysInFile[name] = elem.textContent.orEmpty()
+            }
+            for (k in expectedFilterKeys) {
+                val v = keysInFile[k]
+                assertNotNull("Missing $k in $folder/strings.xml", v)
+                assertTrue("Blank $k in $folder/strings.xml", v!!.isNotBlank())
+            }
+        }
+    }
 }
+

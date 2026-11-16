@@ -445,4 +445,18 @@
     <string name="project_delete_prompt_tasks_body">Dieses Projekt enthält %1$d zugehörige Aufgaben. Sollen alle zugehörigen Aufgaben ebenfalls gelöscht werden oder ohne Projekt erhalten bleiben?</string>
     <string name="project_delete_with_tasks_btn">Projekt &amp; Aufgaben löschen</string>
     <string name="project_delete_keep_tasks_btn">Aufgaben behalten (nur Projekt löschen)</string>
+    <string name="search_filter_hide_completed">Erledigte ausblenden</string>
+    <string name="search_filter_date_all">Beliebiges Datum</string>
+    <string name="search_filter_date_today">Heute</string>
+    <string name="search_filter_date_overdue">Überfällig</string>
+    <string name="search_filter_date_next_7_days">Nächste 7 Tage</string>
+    <string name="search_filter_date_this_month">Diesen Monat</string>
+    <string name="search_filter_date_none">Ohne Datum</string>
+    <string name="search_filter_has_deadline">Mit Frist</string>
+    <string name="search_filter_has_checklist">Mit Checkliste</string>
+    <string name="search_filter_all_tags">Alle Tags</string>
+    <string name="search_filter_scope_all">Alle Typen</string>
+    <string name="search_filter_scope_tasks">Nur Aufgaben</string>
+    <string name="search_filter_scope_projects">Nur Projekte</string>
+    <string name="search_filter_reset">Filter zurücksetzen</string>
 </resources>

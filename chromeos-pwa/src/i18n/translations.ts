@@ -48,6 +48,20 @@ export interface TranslationStrings {
   quickFindNoResults: string;
   quickFindSmartViews: string;
   quickFindHits: (n: number) => string;
+  searchFilterHideCompleted: string;
+  searchFilterDateAll: string;
+  searchFilterDateToday: string;
+  searchFilterDateOverdue: string;
+  searchFilterDateNext7Days: string;
+  searchFilterDateThisMonth: string;
+  searchFilterDateNone: string;
+  searchFilterHasDeadline: string;
+  searchFilterHasChecklist: string;
+  searchFilterAllTags: string;
+  searchFilterScopeAll: string;
+  searchFilterScopeTasks: string;
+  searchFilterScopeProjects: string;
+  searchFilterReset: string;
   deadlineToday: string;
   deadlineDaysLeft: (d: number) => string;
   deadlineDaysOverdue: (d: number) => string;
@@ -374,6 +388,20 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     quickFindNoResults: 'No matching To-Dos, Projects, Areas, or Views',
     quickFindSmartViews: 'Views',
     quickFindHits: (n) => `${n} ${n === 1 ? 'result' : 'results'}`,
+    searchFilterHideCompleted: 'Hide completed',
+    searchFilterDateAll: 'Any date',
+    searchFilterDateToday: 'Today',
+    searchFilterDateOverdue: 'Overdue',
+    searchFilterDateNext7Days: 'Next 7 days',
+    searchFilterDateThisMonth: 'This month',
+    searchFilterDateNone: 'No date',
+    searchFilterHasDeadline: 'With deadline',
+    searchFilterHasChecklist: 'With checklist',
+    searchFilterAllTags: 'All tags',
+    searchFilterScopeAll: 'All types',
+    searchFilterScopeTasks: 'To-Dos only',
+    searchFilterScopeProjects: 'Projects only',
+    searchFilterReset: 'Reset filters',
     deadlineToday: 'Today',
     deadlineDaysLeft: (d) => `${d}d left`,
     deadlineDaysOverdue: (d) => `${d}d overdue`,
@@ -716,6 +744,20 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     quickFindNoResults: 'Keine passenden Aufgaben, Projekte, Bereiche oder Ansichten',
     quickFindSmartViews: 'Ansichten',
     quickFindHits: (n) => `${n} ${n === 1 ? 'Treffer' : 'Treffer'}`,
+    searchFilterHideCompleted: 'Erledigte ausblenden',
+    searchFilterDateAll: 'Beliebiges Datum',
+    searchFilterDateToday: 'Heute',
+    searchFilterDateOverdue: 'Überfällig',
+    searchFilterDateNext7Days: 'Nächste 7 Tage',
+    searchFilterDateThisMonth: 'Diesen Monat',
+    searchFilterDateNone: 'Ohne Datum',
+    searchFilterHasDeadline: 'Mit Frist',
+    searchFilterHasChecklist: 'Mit Checkliste',
+    searchFilterAllTags: 'Alle Tags',
+    searchFilterScopeAll: 'Alle Typen',
+    searchFilterScopeTasks: 'Nur Aufgaben',
+    searchFilterScopeProjects: 'Nur Projekte',
+    searchFilterReset: 'Filter zurücksetzen',
     deadlineToday: 'Heute',
     deadlineDaysLeft: (d) => `Noch ${d} Tg.`,
     deadlineDaysOverdue: (d) => `${d} Tg. überfällig`,
@@ -1061,6 +1103,20 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     quickFindNoResults: 'Aucune tâche, projet ou domaine correspondant',
     quickFindSmartViews: 'Vues',
     quickFindHits: (n) => `${n} ${n === 1 ? 'résultat' : 'résultats'}`,
+    searchFilterHideCompleted: 'Masquer les terminées',
+    searchFilterDateAll: 'Toute date',
+    searchFilterDateToday: "Aujourd'hui",
+    searchFilterDateOverdue: 'En retard',
+    searchFilterDateNext7Days: '7 prochains jours',
+    searchFilterDateThisMonth: 'Ce mois-ci',
+    searchFilterDateNone: 'Sans date',
+    searchFilterHasDeadline: 'Avec échéance',
+    searchFilterHasChecklist: 'Avec sous-tâches',
+    searchFilterAllTags: 'Tous les tags',
+    searchFilterScopeAll: 'Tous les types',
+    searchFilterScopeTasks: 'Tâches uniquement',
+    searchFilterScopeProjects: 'Projets uniquement',
+    searchFilterReset: 'Réinitialiser',
     deadlineToday: "Aujourd'hui",
     deadlineDaysLeft: (d) => `Reste ${d} j.`,
     deadlineDaysOverdue: (d) => `${d} j. de retard`,
@@ -1404,6 +1460,20 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     quickFindNoResults: 'Nessuna attività, progetto o area corrispondente',
     quickFindSmartViews: 'Viste',
     quickFindHits: (n) => `${n} ${n === 1 ? 'risultato' : 'risultati'}`,
+    searchFilterHideCompleted: 'Nascondi completati',
+    searchFilterDateAll: 'Qualsiasi data',
+    searchFilterDateToday: 'Oggi',
+    searchFilterDateOverdue: 'In ritardo',
+    searchFilterDateNext7Days: 'Prossimi 7 giorni',
+    searchFilterDateThisMonth: 'Questo mese',
+    searchFilterDateNone: 'Senza data',
+    searchFilterHasDeadline: 'Con scadenza',
+    searchFilterHasChecklist: 'Con checklist',
+    searchFilterAllTags: 'Tutti i tag',
+    searchFilterScopeAll: 'Tutti i tipi',
+    searchFilterScopeTasks: 'Solo attività',
+    searchFilterScopeProjects: 'Solo progetti',
+    searchFilterReset: 'Reimposta filtri',
     deadlineToday: 'Oggi',
     deadlineDaysLeft: (d) => `${d} gg rimasti`,
     deadlineDaysOverdue: (d) => `${d} gg in ritardo`,
@@ -1747,6 +1817,20 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     quickFindNoResults: 'No hay tareas, proyectos ni áreas coincidentes',
     quickFindSmartViews: 'Vistas',
     quickFindHits: (n) => `${n} ${n === 1 ? 'resultado' : 'resultados'}`,
+    searchFilterHideCompleted: 'Ocultar completadas',
+    searchFilterDateAll: 'Cualquier fecha',
+    searchFilterDateToday: 'Hoy',
+    searchFilterDateOverdue: 'Vencidas',
+    searchFilterDateNext7Days: 'Próximos 7 días',
+    searchFilterDateThisMonth: 'Este mes',
+    searchFilterDateNone: 'Sin fecha',
+    searchFilterHasDeadline: 'Con fecha límite',
+    searchFilterHasChecklist: 'Con sub-tareas',
+    searchFilterAllTags: 'Todas las etiquetas',
+    searchFilterScopeAll: 'Todos los tipos',
+    searchFilterScopeTasks: 'Solo tareas',
+    searchFilterScopeProjects: 'Solo proyectos',
+    searchFilterReset: 'Restablecer filtros',
     deadlineToday: 'Hoy',
     deadlineDaysLeft: (d) => `Quedan ${d} d.`,
     deadlineDaysOverdue: (d) => `${d} d. de retraso`,

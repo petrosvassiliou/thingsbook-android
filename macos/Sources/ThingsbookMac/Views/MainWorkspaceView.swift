@@ -6,7 +6,7 @@ public struct MainWorkspaceView: View {
     @ObservedObject var store: ThingsbookStore
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @State private var detailPaneWidth: CGFloat = 880
+    @State private var detailPaneWidth: CGFloat = 618
     @State private var isMagicPlusMenuOpen = false
     @State private var isMagicPlusHovered = false
     @State private var isQuickFindHovered = false
@@ -53,10 +53,16 @@ public struct MainWorkspaceView: View {
                     .background(MacWindowTitlebarConfigurator())
                     .background(
                         GeometryReader { geo in
-                            Color.clear.preference(
-                                key: DetailPaneWidthPreferenceKey.self,
-                                value: geo.size.width
-                            )
+                            Color.clear
+                                .preference(
+                                    key: DetailPaneWidthPreferenceKey.self,
+                                    value: geo.size.width
+                                )
+                                .onChange(of: geo.size.width, initial: true) { _, newWidth in
+                                    if newWidth > 200, abs(newWidth - detailPaneWidth) >= 2 {
+                                        detailPaneWidth = newWidth
+                                    }
+                                }
                         }
                     )
 
@@ -86,16 +92,8 @@ public struct MainWorkspaceView: View {
                 }
                 .toolbarBackground(.hidden, for: .windowToolbar)
                 .toolbar {
-                    ToolbarItem(placement: .navigation) {
-                        quickFindToolbarButton(metrics: toolbarMetrics)
-                    }
-
-                    ToolbarItem {
-                        Spacer()
-                    }
-
                     ToolbarItem(placement: .primaryAction) {
-                        detailToolbarActionsBar(metrics: toolbarMetrics)
+                        unifiedDetailToolbar(metrics: toolbarMetrics)
                     }
                 }
             }
@@ -693,6 +691,16 @@ public struct MainWorkspaceView: View {
 
     // MARK: - Adaptive Top Toolbar Controls
 
+    private func unifiedDetailToolbar(metrics: MacToolbarLayoutMetrics) -> some View {
+        HStack(spacing: 0) {
+            quickFindToolbarButton(metrics: metrics)
+            Color.clear
+                .frame(width: CGFloat(metrics.centerGap), height: 1)
+            detailToolbarActionsBar(metrics: metrics)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
     private func quickFindToolbarButton(metrics: MacToolbarLayoutMetrics) -> some View {
         Button {
             guard !store.isLocked else { return }
@@ -701,10 +709,10 @@ public struct MainWorkspaceView: View {
             HStack(spacing: 7) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(isQuickFindHovered ? ThingsMacPalette.accentBlue : .secondary)
 
                 Text(store.tr("quick_find_title"))
-                    .font(.system(size: 12.5, weight: .medium))
+                    .font(.system(size: 12.5, weight: .regular))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
@@ -722,17 +730,23 @@ public struct MainWorkspaceView: View {
                         )
                 }
             }
-            .padding(.horizontal, 11)
+            .padding(.horizontal, 10)
             .frame(width: CGFloat(metrics.searchWidth), height: CGFloat(metrics.buttonHeight))
             .background(
-                Capsule(style: .continuous)
-                    .fill(Color.primary.opacity(isQuickFindHovered ? 0.085 : 0.05))
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(ThingsMacPalette.cardSurface.opacity(isQuickFindHovered ? 1.0 : 0.88))
             )
             .overlay(
-                Capsule(style: .continuous)
-                    .strokeBorder(Color.primary.opacity(isQuickFindHovered ? 0.13 : 0.065), lineWidth: 0.75)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(
+                        isQuickFindHovered
+                            ? ThingsMacPalette.accentBlue.opacity(0.45)
+                            : Color.primary.opacity(0.14),
+                        lineWidth: 1
+                    )
             )
-            .contentShape(Capsule(style: .continuous))
+            .shadow(color: Color.black.opacity(0.03), radius: 1.5, x: 0, y: 0.5)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
         .fixedSize(horizontal: true, vertical: false)

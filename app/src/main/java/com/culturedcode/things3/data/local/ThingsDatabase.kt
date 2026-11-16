@@ -189,15 +189,29 @@ abstract class ThingsDatabase : RoomDatabase() {
                 .replace("_", "\\_")
         }
 
-        fun buildTasksFts5SqlQuery(rawQuery: String): SupportSQLiteQuery {
+        fun buildTasksFts5SqlQuery(rawQuery: String, hideCompleted: Boolean = false): SupportSQLiteQuery {
             val cleaned = rawQuery.replace("\u0000", "").trim()
+            val statusClauseT = if (hideCompleted) "AND t.status = 'OPEN'" else ""
+            val statusClausePlain = if (hideCompleted) "AND status = 'OPEN'" else ""
+
+            if (cleaned.isBlank()) {
+                return SimpleSQLiteQuery(
+                    """
+                    SELECT * FROM tasks
+                    WHERE isDeleted = 0 $statusClausePlain
+                    ORDER BY CASE WHEN status = 'OPEN' THEN 0 ELSE 1 END ASC, updatedAt DESC
+                    LIMIT 250
+                    """.trimIndent()
+                )
+            }
+
             val likePattern = "%${escapeSqlLikePattern(cleaned)}%"
-            val ftsMatch = if (fts5Available && cleaned.isNotBlank()) sanitizeFts5Query(cleaned) else ""
+            val ftsMatch = if (fts5Available) sanitizeFts5Query(cleaned) else ""
             if (fts5Available && ftsMatch.isNotBlank()) {
                 return SimpleSQLiteQuery(
                     """
                     SELECT t.* FROM tasks t
-                    WHERE t.isDeleted = 0 AND (
+                    WHERE t.isDeleted = 0 $statusClauseT AND (
                         t.id IN (SELECT task_id FROM tasks_fts WHERE tasks_fts MATCH ?)
                         OR EXISTS (
                             SELECT 1 FROM attachments a
@@ -207,7 +221,7 @@ abstract class ThingsDatabase : RoomDatabase() {
                         )
                     )
                     ORDER BY CASE WHEN t.status = 'OPEN' THEN 0 ELSE 1 END ASC, t.sortOrder ASC
-                    LIMIT 50
+                    LIMIT 250
                     """.trimIndent(),
                     arrayOf(ftsMatch, likePattern)
                 )
@@ -215,7 +229,7 @@ abstract class ThingsDatabase : RoomDatabase() {
             return SimpleSQLiteQuery(
                 """
                 SELECT * FROM tasks
-                WHERE isDeleted = 0 AND (
+                WHERE isDeleted = 0 $statusClausePlain AND (
                     (title COLLATE NOCASE) LIKE ? ESCAPE '\'
                     OR (notes COLLATE NOCASE) LIKE ? ESCAPE '\'
                     OR EXISTS (
@@ -226,23 +240,37 @@ abstract class ThingsDatabase : RoomDatabase() {
                     )
                 )
                 ORDER BY CASE WHEN status = 'OPEN' THEN 0 ELSE 1 END ASC, sortOrder ASC
-                LIMIT 50
+                LIMIT 250
                 """.trimIndent(),
                 arrayOf(likePattern, likePattern, likePattern)
             )
         }
 
-        fun buildProjectsFts5SqlQuery(rawQuery: String): SupportSQLiteQuery {
+        fun buildProjectsFts5SqlQuery(rawQuery: String, hideCompleted: Boolean = false): SupportSQLiteQuery {
             val cleaned = rawQuery.replace("\u0000", "").trim()
-            val ftsMatch = if (fts5Available && cleaned.isNotBlank()) sanitizeFts5Query(cleaned) else ""
+            val statusClauseP = if (hideCompleted) "AND p.status = 'ACTIVE'" else ""
+            val statusClausePlain = if (hideCompleted) "AND status = 'ACTIVE'" else ""
+
+            if (cleaned.isBlank()) {
+                return SimpleSQLiteQuery(
+                    """
+                    SELECT * FROM projects
+                    WHERE isDeleted = 0 $statusClausePlain
+                    ORDER BY sortOrder ASC
+                    LIMIT 100
+                    """.trimIndent()
+                )
+            }
+
+            val ftsMatch = if (fts5Available) sanitizeFts5Query(cleaned) else ""
             if (fts5Available && ftsMatch.isNotBlank()) {
                 return SimpleSQLiteQuery(
                     """
                     SELECT p.* FROM projects p
                     INNER JOIN projects_fts fts ON p.id = fts.project_id
-                    WHERE p.isDeleted = 0 AND projects_fts MATCH ?
+                    WHERE p.isDeleted = 0 $statusClauseP AND projects_fts MATCH ?
                     ORDER BY p.sortOrder ASC
-                    LIMIT 25
+                    LIMIT 100
                     """.trimIndent(),
                     arrayOf(ftsMatch)
                 )
@@ -251,9 +279,9 @@ abstract class ThingsDatabase : RoomDatabase() {
             return SimpleSQLiteQuery(
                 """
                 SELECT * FROM projects
-                WHERE isDeleted = 0 AND ((title COLLATE NOCASE) LIKE ? ESCAPE '\' OR (notes COLLATE NOCASE) LIKE ? ESCAPE '\')
+                WHERE isDeleted = 0 $statusClausePlain AND ((title COLLATE NOCASE) LIKE ? ESCAPE '\' OR (notes COLLATE NOCASE) LIKE ? ESCAPE '\')
                 ORDER BY sortOrder ASC
-                LIMIT 25
+                LIMIT 100
                 """.trimIndent(),
                 arrayOf(likePattern, likePattern)
             )

@@ -728,9 +728,14 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         }
     }
 
-    public func searchQuickFind(rawQuery: String) throws -> (tasks: [TaskItem], projects: [Project]) {
+    public func searchQuickFind(
+        rawQuery: String,
+        filter: QuickFindFilter = QuickFindFilter(),
+        referenceDate: Date = Date(),
+        calendar: Calendar = .current
+    ) throws -> (tasks: [TaskItem], projects: [Project]) {
         let sanitized = Self.buildSafeFtsQuery(rawQuery)
-        guard !sanitized.isEmpty else { return ([], []) }
+        guard !sanitized.isEmpty || filter.hasActiveFilters else { return ([], []) }
 
         return try queue.sync {
             let tags = try fetchActiveTagsLocked()
@@ -741,57 +746,106 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             let tagIdsByTask = try fetchAllTaskTagIdsLocked()
             let projectTagIdsByProject = try fetchAllProjectTagIdsLocked()
 
-            let taskStmt = try prepareLocked("""
-                SELECT t.id, t.title, t.notes, t.status, t.schedule_state, t.when_date, t.deadline,
-                       t.reminder_time, t.completed_at, t.project_id, t.heading_id, t.area_id,
-                       t.recurrence_rule, t.sort_order, t.tag_ids_json, t.created_at, t.updated_at, t.is_deleted,
-                       t.scheduled_start_minutes, t.duration_minutes
-                FROM tasks t
-                JOIN tasks_fts fts ON t.rowid = fts.rowid
-                WHERE tasks_fts MATCH ? AND t.is_deleted = 0
-                ORDER BY bm25(tasks_fts), t.updated_at DESC
-                LIMIT 50;
-            """)
-            defer { sqlite3_finalize(taskStmt) }
-            bindText(taskStmt, 1, sanitized)
-
             var matchedTasks: [TaskItem] = []
-            while sqlite3_step(taskStmt) == SQLITE_ROW {
-                matchedTasks.append(
-                    readTaskRowLocked(
+            if filter.scope != .projects {
+                let statusClause = filter.hideCompleted ? " AND t.status = 'OPEN'" : ""
+                let taskSql: String
+                if !sanitized.isEmpty {
+                    taskSql = """
+                        SELECT t.id, t.title, t.notes, t.status, t.schedule_state, t.when_date, t.deadline,
+                               t.reminder_time, t.completed_at, t.project_id, t.heading_id, t.area_id,
+                               t.recurrence_rule, t.sort_order, t.tag_ids_json, t.created_at, t.updated_at, t.is_deleted,
+                               t.scheduled_start_minutes, t.duration_minutes
+                        FROM tasks t
+                        JOIN tasks_fts fts ON t.rowid = fts.rowid
+                        WHERE tasks_fts MATCH ? AND t.is_deleted = 0\(statusClause)
+                        ORDER BY bm25(tasks_fts), t.updated_at DESC
+                        LIMIT 250;
+                    """
+                } else {
+                    taskSql = """
+                        SELECT t.id, t.title, t.notes, t.status, t.schedule_state, t.when_date, t.deadline,
+                               t.reminder_time, t.completed_at, t.project_id, t.heading_id, t.area_id,
+                               t.recurrence_rule, t.sort_order, t.tag_ids_json, t.created_at, t.updated_at, t.is_deleted,
+                               t.scheduled_start_minutes, t.duration_minutes
+                        FROM tasks t
+                        WHERE t.is_deleted = 0\(statusClause)
+                        ORDER BY CASE WHEN t.status = 'OPEN' THEN 0 ELSE 1 END ASC, t.updated_at DESC
+                        LIMIT 300;
+                    """
+                }
+                let taskStmt = try prepareLocked(taskSql)
+                defer { sqlite3_finalize(taskStmt) }
+                if !sanitized.isEmpty {
+                    bindText(taskStmt, 1, sanitized)
+                }
+
+                while sqlite3_step(taskStmt) == SQLITE_ROW {
+                    let item = readTaskRowLocked(
                         taskStmt,
                         tagsById: tagsById,
                         tagIdsByTask: tagIdsByTask,
                         checklistsByTask: checklistsByTask,
                         attachmentsByTask: attachmentsByTask
                     )
-                )
+                    if filter.matchesTask(item, referenceDate: referenceDate, calendar: calendar) {
+                        matchedTasks.append(item)
+                        if matchedTasks.count >= 50 {
+                            break
+                        }
+                    }
+                }
             }
 
-            let projStmt = try prepareLocked("""
-                SELECT p.id, p.area_id, p.title, p.notes, p.status, p.schedule_state, p.when_date,
-                       p.deadline, p.completed_at, p.sort_order, p.tag_ids_json, p.created_at, p.updated_at, p.is_deleted,
-                       (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status != 'CANCELED') AS total_cnt,
-                       (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status = 'COMPLETED') AS comp_cnt,
-                       p.last_reviewed_at
-                FROM projects p
-                JOIN projects_fts fts ON p.rowid = fts.rowid
-                WHERE projects_fts MATCH ? AND p.is_deleted = 0
-                ORDER BY bm25(projects_fts), p.sort_order ASC
-                LIMIT 25;
-            """)
-            defer { sqlite3_finalize(projStmt) }
-            bindText(projStmt, 1, sanitized)
-
             var matchedProjects: [Project] = []
-            while sqlite3_step(projStmt) == SQLITE_ROW {
-                matchedProjects.append(
-                    readProjectRowLocked(
+            if filter.scope != .tasks && !filter.hasChecklistOnly {
+                let projStatusClause = filter.hideCompleted ? " AND p.status = 'ACTIVE'" : ""
+                let projSql: String
+                if !sanitized.isEmpty {
+                    projSql = """
+                        SELECT p.id, p.area_id, p.title, p.notes, p.status, p.schedule_state, p.when_date,
+                               p.deadline, p.completed_at, p.sort_order, p.tag_ids_json, p.created_at, p.updated_at, p.is_deleted,
+                               (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status != 'CANCELED') AS total_cnt,
+                               (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status = 'COMPLETED') AS comp_cnt,
+                               p.last_reviewed_at
+                        FROM projects p
+                        JOIN projects_fts fts ON p.rowid = fts.rowid
+                        WHERE projects_fts MATCH ? AND p.is_deleted = 0\(projStatusClause)
+                        ORDER BY bm25(projects_fts), p.sort_order ASC
+                        LIMIT 100;
+                    """
+                } else {
+                    projSql = """
+                        SELECT p.id, p.area_id, p.title, p.notes, p.status, p.schedule_state, p.when_date,
+                               p.deadline, p.completed_at, p.sort_order, p.tag_ids_json, p.created_at, p.updated_at, p.is_deleted,
+                               (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status != 'CANCELED') AS total_cnt,
+                               (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status = 'COMPLETED') AS comp_cnt,
+                               p.last_reviewed_at
+                        FROM projects p
+                        WHERE p.is_deleted = 0\(projStatusClause)
+                        ORDER BY p.sort_order ASC
+                        LIMIT 100;
+                    """
+                }
+                let projStmt = try prepareLocked(projSql)
+                defer { sqlite3_finalize(projStmt) }
+                if !sanitized.isEmpty {
+                    bindText(projStmt, 1, sanitized)
+                }
+
+                while sqlite3_step(projStmt) == SQLITE_ROW {
+                    let proj = readProjectRowLocked(
                         projStmt,
                         activeTagIds: activeTagIds,
                         projectTagIdsByProject: projectTagIdsByProject
                     )
-                )
+                    if filter.matchesProject(proj, referenceDate: referenceDate, calendar: calendar) {
+                        matchedProjects.append(proj)
+                        if matchedProjects.count >= 25 {
+                            break
+                        }
+                    }
+                }
             }
 
             return (matchedTasks, matchedProjects)

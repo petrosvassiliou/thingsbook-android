@@ -1691,6 +1691,8 @@ public struct MacToolbarLayoutMetrics: Equatable, Sendable {
     public let geminiPillMinWidth: Double
     public let itemSpacing: Double
     public let groupDividerPadding: Double
+    public let trailingActionsPadding: Double
+    public let centerGap: Double
     public let showSearchShortcutBadge: Bool
 
     public var estimatedActionsBarWidth: Double {
@@ -1698,20 +1700,24 @@ public struct MacToolbarLayoutMetrics: Equatable, Sendable {
         let divider = (2.0 * groupDividerPadding) + 1.0
         let group2 = (4.0 * buttonWidth) + (3.0 * itemSpacing)
         let group3 = (3.0 * buttonWidth) + syncButtonWidth + (3.0 * itemSpacing)
-        return group1 + divider + group2 + divider + group3
+        return group1 + divider + group2 + divider + group3 + trailingActionsPadding
     }
 
     public var estimatedTotalControlsWidth: Double {
         searchWidth + estimatedActionsBarWidth
     }
 
+    public var totalBarWidth: Double {
+        searchWidth + centerGap + estimatedActionsBarWidth
+    }
+
     public static func compute(
         detailWidth: Double,
         isSidebarCollapsed: Bool = false
     ) -> MacToolbarLayoutMetrics {
-        let leadingReserved = isSidebarCollapsed ? 124.0 : 0.0
-        let toolbarMargins = 44.0
-        let usable = max(500.0, detailWidth - leadingReserved - toolbarMargins)
+        let leadingReserved = isSidebarCollapsed ? 136.0 : 0.0
+        let toolbarMargins = 56.0
+        let usable = max(494.0, detailWidth - leadingReserved - toolbarMargins)
 
         let lerp: (Double, Double, Double) -> Double = { a, b, frac in
             a + (b - a) * frac
@@ -1723,39 +1729,47 @@ public struct MacToolbarLayoutMetrics: Equatable, Sendable {
         let rawSpacing: Double
         let rawDivPad: Double
 
-        if usable < 574.0 {
-            // Compact sidebar-expanded minimum window tier (500pt..574pt usable)
-            let s = max(0.0, (usable - 500.0) / 74.0)
-            rawSearchW = lerp(132.0, 148.0, s)
-            rawBtnW = lerp(25.0, 28.0, s)
+        if usable < 562.0 {
+            // Compact sidebar-expanded minimum window tier (494pt..562pt usable)
+            let s = max(0.0, (usable - 494.0) / 68.0)
+            rawSearchW = lerp(126.0, 144.0, s)
+            rawBtnW = lerp(24.0, 27.0, s)
             rawGeminiMinW = lerp(72.0, 78.0, s)
             rawSpacing = lerp(2.0, 3.0, s)
-            rawDivPad = lerp(4.0, 6.0, s)
-        } else if usable <= 834.0 {
-            // Standard tier up to default 1140pt window / 878pt detail pane (574pt..834pt usable)
-            let t = (usable - 574.0) / 260.0
-            rawSearchW = lerp(148.0, 216.0, t)
-            rawBtnW = lerp(28.0, 34.0, t)
+            rawDivPad = lerp(3.0, 5.0, s)
+        } else if usable <= 822.0 {
+            // Standard tier up to default 1140pt window / 878pt detail pane (562pt..822pt usable)
+            let t = (usable - 562.0) / 260.0
+            rawSearchW = lerp(144.0, 208.0, t)
+            rawBtnW = lerp(27.0, 33.0, t)
             rawGeminiMinW = lerp(78.0, 88.0, t)
-            rawSpacing = lerp(3.0, 11.0, t)
-            rawDivPad = lerp(6.0, 14.0, t)
+            rawSpacing = lerp(3.0, 10.0, t)
+            rawDivPad = lerp(5.0, 13.0, t)
         } else {
-            // Wide & fullscreen tier (834pt..1060pt+ usable)
-            let u = min(1.0, (usable - 834.0) / 226.0)
-            rawSearchW = lerp(216.0, 248.0, u)
-            rawBtnW = lerp(34.0, 37.0, u)
+            // Wide & fullscreen tier (822pt..1050pt+ usable)
+            let u = min(1.0, (usable - 822.0) / 228.0)
+            rawSearchW = lerp(208.0, 252.0, u)
+            rawBtnW = lerp(33.0, 37.0, u)
             rawGeminiMinW = lerp(88.0, 93.0, u)
-            rawSpacing = lerp(11.0, 15.0, u)
-            rawDivPad = lerp(14.0, 18.0, u)
+            rawSpacing = lerp(10.0, 15.0, u)
+            rawDivPad = lerp(13.0, 18.0, u)
         }
 
-        let roundRule: FloatingPointRoundingRule = usable < 600.0 ? .down : .toNearestOrAwayFromZero
+        let roundRule: FloatingPointRoundingRule = usable < 590.0 ? .down : .toNearestOrAwayFromZero
         let searchW = rawSearchW.rounded(roundRule)
         let btnW = rawBtnW.rounded(roundRule)
         let syncW = btnW + 8.0
         let geminiMinW = rawGeminiMinW.rounded(roundRule)
         let spacing = rawSpacing.rounded(roundRule)
         let divPad = rawDivPad.rounded(roundRule)
+        let trailingPad = 4.0
+
+        let group1 = geminiMinW + (2.0 * btnW) + (2.0 * spacing)
+        let divider = (2.0 * divPad) + 1.0
+        let group2 = (4.0 * btnW) + (3.0 * spacing)
+        let group3 = (3.0 * btnW) + syncW + (3.0 * spacing)
+        let actionsW = group1 + divider + group2 + divider + group3 + trailingPad
+        let computedGap = max(8.0, (usable - searchW - actionsW).rounded(.down))
 
         return MacToolbarLayoutMetrics(
             usableWidth: usable,
@@ -1766,8 +1780,201 @@ public struct MacToolbarLayoutMetrics: Equatable, Sendable {
             geminiPillMinWidth: geminiMinW,
             itemSpacing: spacing,
             groupDividerPadding: divPad,
+            trailingActionsPadding: trailingPad,
+            centerGap: computedGap,
             showSearchShortcutBadge: searchW >= 165.0
         )
     }
 }
+
+public enum QuickFindDateFilter: String, CaseIterable, Identifiable, Equatable, Hashable, Codable, Sendable {
+    case all = "ALL"
+    case today = "TODAY"
+    case overdue = "OVERDUE"
+    case next7Days = "NEXT_7_DAYS"
+    case thisMonth = "THIS_MONTH"
+    case noDate = "NO_DATE"
+
+    public var id: String { rawValue }
+
+    public var titleKey: String {
+        switch self {
+        case .all: return "search_filter_date_all"
+        case .today: return "search_filter_date_today"
+        case .overdue: return "search_filter_date_overdue"
+        case .next7Days: return "search_filter_date_next_7_days"
+        case .thisMonth: return "search_filter_date_this_month"
+        case .noDate: return "search_filter_date_none"
+        }
+    }
+}
+
+public enum QuickFindEntityScope: String, CaseIterable, Identifiable, Equatable, Hashable, Codable, Sendable {
+    case all = "ALL"
+    case tasks = "TASKS"
+    case projects = "PROJECTS"
+
+    public var id: String { rawValue }
+
+    public var titleKey: String {
+        switch self {
+        case .all: return "search_filter_scope_all"
+        case .tasks: return "search_filter_scope_tasks"
+        case .projects: return "search_filter_scope_projects"
+        }
+    }
+}
+
+public struct QuickFindFilter: Equatable, Hashable, Sendable {
+    public var hideCompleted: Bool
+    public var dateFilter: QuickFindDateFilter
+    public var hasDeadlineOnly: Bool
+    public var hasChecklistOnly: Bool
+    public var tagId: String?
+    public var scope: QuickFindEntityScope
+
+    public init(
+        hideCompleted: Bool = false,
+        dateFilter: QuickFindDateFilter = .all,
+        hasDeadlineOnly: Bool = false,
+        hasChecklistOnly: Bool = false,
+        tagId: String? = nil,
+        scope: QuickFindEntityScope = .all
+    ) {
+        self.hideCompleted = hideCompleted
+        self.dateFilter = dateFilter
+        self.hasDeadlineOnly = hasDeadlineOnly
+        self.hasChecklistOnly = hasChecklistOnly
+        self.tagId = tagId
+        self.scope = scope
+    }
+
+    public var hasActiveFilters: Bool {
+        hideCompleted
+            || dateFilter != .all
+            || hasDeadlineOnly
+            || hasChecklistOnly
+            || tagId != nil
+            || scope != .all
+    }
+
+    public func shouldShowSmartViewsAndAreas(forQuery query: String) -> Bool {
+        guard scope == .all,
+              dateFilter == .all,
+              !hasDeadlineOnly,
+              !hasChecklistOnly,
+              tagId == nil else {
+            return false
+        }
+        if hideCompleted && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return false
+        }
+        return true
+    }
+
+    public func matchesTask(
+        _ task: TaskItem,
+        referenceDate: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Bool {
+        guard !task.isDeleted else { return false }
+        if scope == .projects { return false }
+        if hideCompleted && task.status != .open { return false }
+        if hasDeadlineOnly && task.deadline == nil { return false }
+        if hasChecklistOnly && task.checklistItems.isEmpty { return false }
+        if let requiredTagId = tagId, !task.tags.contains(where: { $0.id == requiredTagId }) {
+            return false
+        }
+
+        return Self.matchesDatePredicate(
+            dateFilter: dateFilter,
+            whenDate: task.whenDate,
+            deadline: task.deadline,
+            scheduleState: task.scheduleState,
+            isOpenOrActive: task.status == .open,
+            referenceDate: referenceDate,
+            calendar: calendar
+        )
+    }
+
+    public func matchesProject(
+        _ project: Project,
+        referenceDate: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Bool {
+        guard !project.isDeleted else { return false }
+        if scope == .tasks { return false }
+        if hasChecklistOnly { return false }
+        if hideCompleted && project.status != .active { return false }
+        if hasDeadlineOnly && project.deadline == nil { return false }
+        if let requiredTagId = tagId, !project.tagIds.contains(requiredTagId) {
+            return false
+        }
+
+        return Self.matchesDatePredicate(
+            dateFilter: dateFilter,
+            whenDate: project.whenDate,
+            deadline: project.deadline,
+            scheduleState: project.scheduleState,
+            isOpenOrActive: project.status == .active,
+            referenceDate: referenceDate,
+            calendar: calendar
+        )
+    }
+
+    private static func matchesDatePredicate(
+        dateFilter: QuickFindDateFilter,
+        whenDate: Int64?,
+        deadline: Int64?,
+        scheduleState: ScheduleState,
+        isOpenOrActive: Bool,
+        referenceDate: Date,
+        calendar: Calendar
+    ) -> Bool {
+        guard dateFilter != .all else { return true }
+
+        let startOfTodayDate = calendar.startOfDay(for: referenceDate)
+        let todayStart = Int64(startOfTodayDate.timeIntervalSince1970 * 1000.0)
+        let tomorrowDate = calendar.date(byAdding: .day, value: 1, to: startOfTodayDate) ?? startOfTodayDate.addingTimeInterval(86_400)
+        let tomorrowStart = Int64(tomorrowDate.timeIntervalSince1970 * 1000.0)
+        let next7EndDate = calendar.date(byAdding: .day, value: 8, to: startOfTodayDate) ?? startOfTodayDate.addingTimeInterval(8 * 86_400)
+        let next7EndExclusive = Int64(next7EndDate.timeIntervalSince1970 * 1000.0)
+
+        let monthComps = calendar.dateComponents([.year, .month], from: startOfTodayDate)
+        let startOfMonthDate = calendar.date(from: monthComps) ?? startOfTodayDate
+        let monthStart = Int64(startOfMonthDate.timeIntervalSince1970 * 1000.0)
+        let nextMonthDate = calendar.date(byAdding: .month, value: 1, to: startOfMonthDate) ?? startOfMonthDate.addingTimeInterval(31 * 86_400)
+        let nextMonthStart = Int64(nextMonthDate.timeIntervalSince1970 * 1000.0)
+
+        let isTodaySchedule = scheduleState == .today || scheduleState == .thisEvening
+
+        switch dateFilter {
+        case .all:
+            return true
+        case .today:
+            let whenToday = whenDate.map { $0 >= todayStart && $0 < tomorrowStart } ?? false
+            let deadlineToday = deadline.map { $0 >= todayStart && $0 < tomorrowStart } ?? false
+            return (isOpenOrActive && isTodaySchedule) || whenToday || deadlineToday
+        case .overdue:
+            let deadlinePast = deadline.map { $0 < todayStart } ?? false
+            let whenPast = whenDate.map { $0 < todayStart } ?? false
+            return isOpenOrActive && (deadlinePast || whenPast)
+        case .next7Days:
+            let whenIn7 = whenDate.map { $0 >= todayStart && $0 < next7EndExclusive } ?? false
+            let deadlineIn7 = deadline.map { $0 >= todayStart && $0 < next7EndExclusive } ?? false
+            return (isOpenOrActive && isTodaySchedule) || whenIn7 || deadlineIn7
+        case .thisMonth:
+            let whenInMonth = whenDate.map { $0 >= monthStart && $0 < nextMonthStart } ?? false
+            let deadlineInMonth = deadline.map { $0 >= monthStart && $0 < nextMonthStart } ?? false
+            return (isOpenOrActive && isTodaySchedule) || whenInMonth || deadlineInMonth
+        case .noDate:
+            return whenDate == nil
+                && deadline == nil
+                && scheduleState != .today
+                && scheduleState != .thisEvening
+                && scheduleState != .upcoming
+        }
+    }
+}
+
 

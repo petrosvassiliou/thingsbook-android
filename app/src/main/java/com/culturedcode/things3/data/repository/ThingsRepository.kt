@@ -40,6 +40,8 @@ import com.culturedcode.things3.domain.model.ProjectStatus
 import com.culturedcode.things3.domain.model.ProjectTemplate
 import com.culturedcode.things3.domain.model.ProjectTemplateBlueprint
 import com.culturedcode.things3.domain.model.ProjectTemplateCodec
+import com.culturedcode.things3.domain.model.QuickFindEntityScope
+import com.culturedcode.things3.domain.model.QuickFindFilter
 import com.culturedcode.things3.domain.model.RecurrenceMode
 import com.culturedcode.things3.domain.model.RecurrenceRule
 import com.culturedcode.things3.domain.model.RecurrenceUnit
@@ -59,6 +61,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -323,15 +326,30 @@ class ThingsRepository @Inject constructor(
             }
             .catch { emit(emptyList()) }
 
-    fun searchTasksFts5(rawQuery: String): Flow<List<TaskItem>> {
-        val sql = ThingsDatabase.buildTasksFts5SqlQuery(rawQuery)
+    fun searchTasksFts5(rawQuery: String, filter: QuickFindFilter = QuickFindFilter()): Flow<List<TaskItem>> {
+        if ((rawQuery.isBlank() && !filter.hasActiveFilters) || filter.scope == QuickFindEntityScope.PROJECTS) {
+            return flowOf(emptyList())
+        }
+        val sql = ThingsDatabase.buildTasksFts5SqlQuery(rawQuery, filter.hideCompleted)
         return database.taskDao().searchTasksFts5(sql)
-            .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
+            .map { list ->
+                list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }
+                    .distinctBy { it.id }
+                    .filter { filter.matchesTask(it) }
+                    .take(50)
+            }
             .catch { emit(emptyList()) }
     }
 
-    fun searchProjectsFts5(rawQuery: String): Flow<List<Project>> {
-        val sql = ThingsDatabase.buildProjectsFts5SqlQuery(rawQuery)
+    fun searchProjectsFts5(rawQuery: String, filter: QuickFindFilter = QuickFindFilter()): Flow<List<Project>> {
+        if (
+            (rawQuery.isBlank() && !filter.hasActiveFilters) ||
+            filter.scope == QuickFindEntityScope.TASKS ||
+            filter.hasChecklistOnly
+        ) {
+            return flowOf(emptyList())
+        }
+        val sql = ThingsDatabase.buildProjectsFts5SqlQuery(rawQuery, filter.hideCompleted)
         return database.taskDao().searchProjectsFts5(sql)
             .map { list ->
                 list.mapNotNull { entity ->
@@ -354,7 +372,10 @@ class ThingsRepository @Inject constructor(
                             isDeleted = entity.isDeleted
                         )
                     }.getOrNull()
-                }.distinctBy { it.id }
+                }
+                    .distinctBy { it.id }
+                    .filter { filter.matchesProject(it) }
+                    .take(25)
             }
             .catch { emit(emptyList()) }
     }

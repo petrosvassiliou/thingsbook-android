@@ -445,4 +445,18 @@
     <string name="project_delete_prompt_tasks_body">Este proyecto contiene %1$d tareas asociadas. ¿Deseas eliminar también todas las tareas asociadas o conservarlas sin proyecto?</string>
     <string name="project_delete_with_tasks_btn">Eliminar proyecto y tareas</string>
     <string name="project_delete_keep_tasks_btn">Conservar tareas (solo eliminar proyecto)</string>
+    <string name="search_filter_hide_completed">Ocultar completadas</string>
+    <string name="search_filter_date_all">Cualquier fecha</string>
+    <string name="search_filter_date_today">Hoy</string>
+    <string name="search_filter_date_overdue">Vencidas</string>
+    <string name="search_filter_date_next_7_days">Próximos 7 días</string>
+    <string name="search_filter_date_this_month">Este mes</string>
+    <string name="search_filter_date_none">Sin fecha</string>
+    <string name="search_filter_has_deadline">Con fecha límite</string>
+    <string name="search_filter_has_checklist">Con sub-tareas</string>
+    <string name="search_filter_all_tags">Todas las etiquetas</string>
+    <string name="search_filter_scope_all">Todos los tipos</string>
+    <string name="search_filter_scope_tasks">Solo tareas</string>
+    <string name="search_filter_scope_projects">Solo proyectos</string>
+    <string name="search_filter_reset">Restablecer filtros</string>
 </resources>

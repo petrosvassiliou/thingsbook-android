@@ -190,7 +190,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.8"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.9"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -405,12 +405,12 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(searchHits.tasks.map(\.id), ["remote-sync-task-1"], "FTS5 must index remotely synced tasks")
     }
 
-    // MARK: - 7. v2.0.0-beta.8 AppUpdateService Beta Channel, Stable Isolation & Version Bump
+    // MARK: - 7. v2.0.0-beta.9 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.8")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.8")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 52)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.9")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.9")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 53)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
 
         // Core [major, minor, patch] + build metadata comparisons on stable channel (includeBeta inferred false for 1.8.1)
@@ -436,8 +436,9 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.6", current: "2.0.0-beta.5"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.7", current: "2.0.0-beta.6"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.8", current: "2.0.0-beta.7"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.10", current: "2.0.0-beta.8"))
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.8", current: "2.0.0-beta.10"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.9", current: "2.0.0-beta.8"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.10", current: "2.0.0-beta.9"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.9", current: "2.0.0-beta.10"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.1"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.99"))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.99", current: "2.0.0", includeBeta: true))
@@ -1723,67 +1724,240 @@ final class ThingsbookCoreTests: XCTestCase {
         )
     }
 
-    // MARK: - 16. v2.0.0-beta.8 Adaptive macOS Top Toolbar Spacing & Overflow Guard
+    // MARK: - 16. v2.0.0-beta.9 Unified macOS Top Toolbar Search Box + Action Bar Layout & Quick Find Search Filters
 
     func testMacToolbarLayoutMetricsSpacingAndNoOverflowAcrossWindowWidths() {
         // 1. Default 1140pt window minus 262pt sidebar = 878pt detail pane:
-        //    generous icon targets (34x30pt), 11pt inter-item spacing, 14pt group divider padding, 216pt Quick Find pill
+        //    unified single-item toolbar containing 208pt Search Box + 50pt finite centerGap + 564pt grouped action bar = 822pt
         let defaultMetrics = MacToolbarLayoutMetrics.compute(detailWidth: 878.0, isSidebarCollapsed: false)
-        XCTAssertEqual(defaultMetrics.usableWidth, 834.0)
-        XCTAssertEqual(defaultMetrics.searchWidth, 216.0)
-        XCTAssertEqual(defaultMetrics.buttonWidth, 34.0)
+        XCTAssertEqual(defaultMetrics.usableWidth, 822.0)
+        XCTAssertEqual(defaultMetrics.searchWidth, 208.0)
+        XCTAssertEqual(defaultMetrics.buttonWidth, 33.0)
         XCTAssertEqual(defaultMetrics.buttonHeight, 30.0)
-        XCTAssertEqual(defaultMetrics.syncButtonWidth, 42.0)
+        XCTAssertEqual(defaultMetrics.syncButtonWidth, 41.0)
         XCTAssertEqual(defaultMetrics.geminiPillMinWidth, 88.0)
-        XCTAssertEqual(defaultMetrics.itemSpacing, 11.0)
-        XCTAssertEqual(defaultMetrics.groupDividerPadding, 14.0)
+        XCTAssertEqual(defaultMetrics.itemSpacing, 10.0)
+        XCTAssertEqual(defaultMetrics.groupDividerPadding, 13.0)
+        XCTAssertEqual(defaultMetrics.trailingActionsPadding, 4.0)
         XCTAssertTrue(defaultMetrics.showSearchShortcutBadge)
-        XCTAssertEqual(defaultMetrics.estimatedActionsBarWidth, 582.0)
-        XCTAssertEqual(defaultMetrics.estimatedTotalControlsWidth, 798.0)
-        XCTAssertLessThanOrEqual(defaultMetrics.estimatedTotalControlsWidth, defaultMetrics.usableWidth)
+        XCTAssertEqual(defaultMetrics.estimatedActionsBarWidth, 564.0)
+        XCTAssertEqual(defaultMetrics.estimatedTotalControlsWidth, 772.0)
+        XCTAssertEqual(defaultMetrics.centerGap, 50.0)
+        XCTAssertEqual(defaultMetrics.totalBarWidth, 822.0)
+        XCTAssertLessThanOrEqual(defaultMetrics.totalBarWidth, defaultMetrics.usableWidth)
 
-        // 2. Minimum 880pt window with default 262pt sidebar (618pt detail pane)
+        // 2. Minimum 880pt window with default 262pt sidebar (618pt detail pane — safe frame-0 initial width!)
         let minStandardMetrics = MacToolbarLayoutMetrics.compute(detailWidth: 618.0, isSidebarCollapsed: false)
-        XCTAssertEqual(minStandardMetrics.usableWidth, 574.0)
-        XCTAssertEqual(minStandardMetrics.searchWidth, 148.0)
-        XCTAssertEqual(minStandardMetrics.buttonWidth, 28.0)
+        XCTAssertEqual(minStandardMetrics.usableWidth, 562.0)
+        XCTAssertEqual(minStandardMetrics.searchWidth, 144.0)
+        XCTAssertEqual(minStandardMetrics.buttonWidth, 27.0)
         XCTAssertEqual(minStandardMetrics.itemSpacing, 3.0)
-        XCTAssertEqual(minStandardMetrics.groupDividerPadding, 6.0)
+        XCTAssertEqual(minStandardMetrics.groupDividerPadding, 5.0)
         XCTAssertFalse(minStandardMetrics.showSearchShortcutBadge)
-        XCTAssertEqual(minStandardMetrics.estimatedTotalControlsWidth, 564.0)
-        XCTAssertLessThanOrEqual(minStandardMetrics.estimatedTotalControlsWidth, minStandardMetrics.usableWidth)
+        XCTAssertEqual(minStandardMetrics.estimatedActionsBarWidth, 406.0)
+        XCTAssertEqual(minStandardMetrics.estimatedTotalControlsWidth, 550.0)
+        XCTAssertEqual(minStandardMetrics.centerGap, 12.0)
+        XCTAssertEqual(minStandardMetrics.totalBarWidth, 562.0)
+        XCTAssertLessThanOrEqual(minStandardMetrics.totalBarWidth, minStandardMetrics.usableWidth)
 
         // 3. Minimum 880pt window with maximum 330pt sidebar (550pt detail pane)
         let minMaxSidebarMetrics = MacToolbarLayoutMetrics.compute(detailWidth: 550.0, isSidebarCollapsed: false)
-        XCTAssertEqual(minMaxSidebarMetrics.usableWidth, 506.0)
+        XCTAssertEqual(minMaxSidebarMetrics.usableWidth, 494.0)
+        XCTAssertEqual(minMaxSidebarMetrics.searchWidth, 126.0)
+        XCTAssertEqual(minMaxSidebarMetrics.centerGap, 14.0)
+        XCTAssertEqual(minMaxSidebarMetrics.totalBarWidth, 494.0)
         XCTAssertFalse(minMaxSidebarMetrics.showSearchShortcutBadge)
-        XCTAssertLessThanOrEqual(minMaxSidebarMetrics.estimatedTotalControlsWidth, minMaxSidebarMetrics.usableWidth)
+        XCTAssertLessThanOrEqual(minMaxSidebarMetrics.totalBarWidth, minMaxSidebarMetrics.usableWidth)
 
         // 4. Wide / fullscreen 1280pt detail pane
         let wideMetrics = MacToolbarLayoutMetrics.compute(detailWidth: 1280.0, isSidebarCollapsed: false)
-        XCTAssertEqual(wideMetrics.searchWidth, 248.0)
+        XCTAssertEqual(wideMetrics.usableWidth, 1224.0)
+        XCTAssertEqual(wideMetrics.searchWidth, 252.0)
         XCTAssertEqual(wideMetrics.buttonWidth, 37.0)
         XCTAssertEqual(wideMetrics.itemSpacing, 15.0)
         XCTAssertEqual(wideMetrics.groupDividerPadding, 18.0)
         XCTAssertTrue(wideMetrics.showSearchShortcutBadge)
-        XCTAssertEqual(wideMetrics.estimatedTotalControlsWidth, 913.0)
-        XCTAssertLessThanOrEqual(wideMetrics.estimatedTotalControlsWidth, wideMetrics.usableWidth)
+        XCTAssertEqual(wideMetrics.estimatedActionsBarWidth, 669.0)
+        XCTAssertEqual(wideMetrics.estimatedTotalControlsWidth, 921.0)
+        XCTAssertEqual(wideMetrics.centerGap, 303.0)
+        XCTAssertEqual(wideMetrics.totalBarWidth, 1224.0)
+        XCTAssertLessThanOrEqual(wideMetrics.totalBarWidth, wideMetrics.usableWidth)
 
-        // 5. Continuous sweep across all window widths and collapsed-sidebar states guarantees zero NSToolbar overflow
+        // 5. Continuous sweep across all window widths and collapsed-sidebar states guarantees Search Box >= 126pt & zero NSToolbar overflow
         for collapsed in [false, true] {
             var width = 540.0
             while width <= 1600.0 {
                 let metrics = MacToolbarLayoutMetrics.compute(detailWidth: width, isSidebarCollapsed: collapsed)
+                XCTAssertGreaterThanOrEqual(metrics.searchWidth, 126.0)
+                XCTAssertGreaterThanOrEqual(metrics.centerGap, 8.0)
                 XCTAssertLessThanOrEqual(
-                    metrics.estimatedTotalControlsWidth,
+                    metrics.totalBarWidth,
                     metrics.usableWidth,
-                    "Toolbar overflowed at detailWidth=\(width), collapsed=\(collapsed)"
+                    "Unified toolbar overflowed at detailWidth=\(width), collapsed=\(collapsed)"
                 )
                 width += 10.0
             }
         }
     }
+
+    func testQuickFindFiltersHideCompletedDatesDeadlinesChecklistsTagsAndScope() throws {
+        var utcCal = Calendar(identifier: .gregorian)
+        utcCal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let refDate = utcCal.date(from: DateComponents(year: 2026, month: 11, day: 15, hour: 12, minute: 0))!
+        let startOfToday = Int64(utcCal.startOfDay(for: refDate).timeIntervalSince1970 * 1000.0)
+        let dayMs: Int64 = 86_400_000
+
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let urgentTag = try db.createOrUpdateTag(title: "Urgent", shortcut: "u")
+        let homeTag = try db.createOrUpdateTag(title: "Home", shortcut: "h")
+
+        var activeProj = try db.createProject(title: "Q4 Launch Sprint", notes: "Sprint roadmap")
+        activeProj.deadline = startOfToday + 3 * dayMs
+        activeProj.tagIds = [urgentTag.id]
+        try db.updateProject(activeProj)
+
+        var completedProj = try db.createProject(title: "Legacy Sprint Archive", notes: "Sprint retrospective")
+        completedProj.status = .completed
+        completedProj.completedAt = startOfToday - dayMs
+        try db.updateProject(completedProj)
+
+        let todayTask = try db.createTask(
+            title: "Sprint keynote rehearsal",
+            notes: "Main stage",
+            scheduleState: .today,
+            whenDate: startOfToday,
+            deadline: startOfToday + 2 * dayMs,
+            tagIds: [urgentTag.id],
+            checklistTitles: ["Check slides", "Test mic"]
+        )
+
+        let overdueTask = try db.createTask(
+            title: "Sprint tax filing",
+            scheduleState: .upcoming,
+            whenDate: startOfToday - 2 * dayMs,
+            deadline: startOfToday - dayMs,
+            tagIds: [homeTag.id]
+        )
+
+        let somedayNoDateTask = try db.createTask(
+            title: "Sprint book idea",
+            scheduleState: .someday
+        )
+
+        let completedTask = try db.createTask(
+            title: "Sprint kickoff notes",
+            scheduleState: .anytime
+        )
+        try db.setTaskStatus(taskId: completedTask.id, status: .completed)
+
+        // 1. Default unfiltered search for "Sprint" returns both open & completed tasks and projects
+        let unfiltered = try db.searchQuickFind(rawQuery: "Sprint", filter: QuickFindFilter(), referenceDate: refDate, calendar: utcCal)
+        XCTAssertEqual(unfiltered.tasks.count, 4)
+        XCTAssertEqual(unfiltered.projects.count, 2)
+        XCTAssertFalse(QuickFindFilter().hasActiveFilters)
+        XCTAssertTrue(QuickFindFilter().shouldShowSmartViewsAndAreas(forQuery: "Tod"))
+
+        // 2. hideCompleted excludes completed tasks & completed projects
+        let hideDoneFilter = QuickFindFilter(hideCompleted: true)
+        XCTAssertTrue(hideDoneFilter.hasActiveFilters)
+        XCTAssertFalse(hideDoneFilter.shouldShowSmartViewsAndAreas(forQuery: ""))
+        XCTAssertTrue(hideDoneFilter.shouldShowSmartViewsAndAreas(forQuery: "Sprint"))
+        let openOnly = try db.searchQuickFind(rawQuery: "Sprint", filter: hideDoneFilter, referenceDate: refDate, calendar: utcCal)
+        XCTAssertEqual(Set(openOnly.tasks.map(\.id)), Set([todayTask.id, overdueTask.id, somedayNoDateTask.id]))
+        XCTAssertEqual(openOnly.projects.map(\.id), [activeProj.id])
+
+        // 3. Empty-query filter-only searches work across date, deadline, checklist, tag, and scope filters!
+        let todayHits = try db.searchQuickFind(
+            rawQuery: "",
+            filter: QuickFindFilter(dateFilter: .today),
+            referenceDate: refDate,
+            calendar: utcCal
+        )
+        XCTAssertEqual(todayHits.tasks.map(\.id), [todayTask.id])
+        XCTAssertTrue(todayHits.projects.isEmpty)
+
+        let overdueHits = try db.searchQuickFind(
+            rawQuery: "",
+            filter: QuickFindFilter(dateFilter: .overdue),
+            referenceDate: refDate,
+            calendar: utcCal
+        )
+        XCTAssertEqual(overdueHits.tasks.map(\.id), [overdueTask.id])
+
+        let next7Hits = try db.searchQuickFind(
+            rawQuery: "",
+            filter: QuickFindFilter(dateFilter: .next7Days),
+            referenceDate: refDate,
+            calendar: utcCal
+        )
+        XCTAssertEqual(next7Hits.tasks.map(\.id), [todayTask.id])
+        XCTAssertEqual(next7Hits.projects.map(\.id), [activeProj.id])
+
+        let thisMonthHits = try db.searchQuickFind(
+            rawQuery: "",
+            filter: QuickFindFilter(hideCompleted: true, dateFilter: .thisMonth),
+            referenceDate: refDate,
+            calendar: utcCal
+        )
+        XCTAssertEqual(Set(thisMonthHits.tasks.map(\.id)), Set([todayTask.id, overdueTask.id]))
+        XCTAssertEqual(thisMonthHits.projects.map(\.id), [activeProj.id])
+
+        let noDateHits = try db.searchQuickFind(
+            rawQuery: "",
+            filter: QuickFindFilter(hideCompleted: true, dateFilter: .noDate),
+            referenceDate: refDate,
+            calendar: utcCal
+        )
+        XCTAssertEqual(noDateHits.tasks.map(\.id), [somedayNoDateTask.id])
+        XCTAssertTrue(noDateHits.projects.isEmpty)
+
+        // 4. Deadline, Checklist, Tag, and Entity Scope filters
+        let checklistHits = try db.searchQuickFind(
+            rawQuery: "",
+            filter: QuickFindFilter(hasChecklistOnly: true),
+            referenceDate: refDate,
+            calendar: utcCal
+        )
+        XCTAssertEqual(checklistHits.tasks.map(\.id), [todayTask.id])
+        XCTAssertTrue(checklistHits.projects.isEmpty)
+
+        let deadlineProjectsOnly = try db.searchQuickFind(
+            rawQuery: "",
+            filter: QuickFindFilter(hasDeadlineOnly: true, tagId: urgentTag.id, scope: .projects),
+            referenceDate: refDate,
+            calendar: utcCal
+        )
+        XCTAssertTrue(deadlineProjectsOnly.tasks.isEmpty)
+        XCTAssertEqual(deadlineProjectsOnly.projects.map(\.id), [activeProj.id])
+
+        // 5. All 14 search_filter_* keys exist in macOS ThingsStrings across EN, DE, FR, IT, ES
+        let filterKeys = [
+            "search_filter_hide_completed",
+            "search_filter_date_all",
+            "search_filter_date_today",
+            "search_filter_date_overdue",
+            "search_filter_date_next_7_days",
+            "search_filter_date_this_month",
+            "search_filter_date_none",
+            "search_filter_has_deadline",
+            "search_filter_has_checklist",
+            "search_filter_all_tags",
+            "search_filter_scope_all",
+            "search_filter_scope_tasks",
+            "search_filter_scope_projects",
+            "search_filter_reset"
+        ]
+        for lang in ["en", "de", "fr", "it", "es"] {
+            let appLang = AppLanguage(rawValue: lang) ?? .en
+            for key in filterKeys {
+                let localized = ThingsStrings.shared.text(key, lang: appLang)
+                XCTAssertFalse(localized.isEmpty, "Missing \(key) in \(lang)")
+                XCTAssertNotEqual(localized, key, "Unresolved key \(key) in \(lang)")
+            }
+        }
+    }
 }
+
 
 
 

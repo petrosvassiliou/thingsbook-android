@@ -134,6 +134,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -166,6 +167,9 @@ import com.culturedcode.things3.domain.model.Area
 import com.culturedcode.things3.domain.model.CalendarEventItem
 import com.culturedcode.things3.domain.model.Heading
 import com.culturedcode.things3.domain.model.Project
+import com.culturedcode.things3.domain.model.QuickFindDateFilter
+import com.culturedcode.things3.domain.model.QuickFindEntityScope
+import com.culturedcode.things3.domain.model.QuickFindFilter
 import com.culturedcode.things3.domain.model.RecurrenceMode
 import com.culturedcode.things3.domain.model.RecurrenceUnit
 import com.culturedcode.things3.domain.model.ScheduleState
@@ -1437,8 +1441,10 @@ private fun ThingsTopHeaderAndQuickFindSection(
     val syncStatus by viewModel.syncStatus.collectAsState()
     val dailyDigestConfig by viewModel.dailyDigestConfig.collectAsState()
     val quickFindQuery by viewModel.quickFindQuery.collectAsState()
+    val quickFindFilter by viewModel.quickFindFilter.collectAsState()
     val quickFindTasks by viewModel.quickFindTaskResults.collectAsState()
     val quickFindProjects by viewModel.quickFindProjectResults.collectAsState()
+    val allTags by viewModel.allTags.collectAsState()
     val uiErrorMessage by viewModel.uiErrorMessage.collectAsState()
     val hasSampleTasks by viewModel.hasSampleTasks.collectAsState()
     val isInitialSetupBannerDismissed by viewModel.isInitialSetupBannerDismissed.collectAsState()
@@ -1540,12 +1546,15 @@ private fun ThingsTopHeaderAndQuickFindSection(
     ) {
         InlineQuickFindSection(
             query = quickFindQuery,
+            filter = quickFindFilter,
             taskResults = quickFindTasks,
             projectResults = quickFindProjects,
             areas = areas,
             allProjects = activeProjects,
+            allTags = allTags,
             locale = activeLocale,
             onQueryChange = { viewModel.updateQuickFindQuery(it) },
+            onFilterChange = { viewModel.updateQuickFindFilter(it) },
             onSelectSmartView = {
                 viewModel.setQuickFindOpen(false)
                 viewModel.selectSmartView(it)
@@ -1562,6 +1571,7 @@ private fun ThingsTopHeaderAndQuickFindSection(
                 viewModel.setQuickFindOpen(false)
                 when {
                     task.projectId != null -> viewModel.selectProject(task.projectId)
+                    task.status != TaskStatus.OPEN -> viewModel.selectSmartView(SmartViewType.LOGBOOK)
                     task.areaId != null && task.scheduleState == ScheduleState.ANYTIME -> viewModel.selectArea(task.areaId)
                     task.scheduleState == ScheduleState.INBOX -> viewModel.selectSmartView(SmartViewType.INBOX)
                     task.scheduleState == ScheduleState.TODAY || task.scheduleState == ScheduleState.THIS_EVENING ->
@@ -4823,12 +4833,15 @@ private fun ProjectHeadingSectionHeader(
 @Composable
 private fun InlineQuickFindSection(
     query: String,
+    filter: QuickFindFilter = QuickFindFilter(),
     taskResults: List<TaskItem>,
     projectResults: List<Project>,
     areas: List<Area>,
     allProjects: List<Project>,
+    allTags: List<Tag> = emptyList(),
     locale: Locale,
     onQueryChange: (String) -> Unit,
+    onFilterChange: (QuickFindFilter) -> Unit = {},
     onSelectSmartView: (SmartViewType) -> Unit,
     onSelectArea: (String) -> Unit,
     onSelectProject: (String) -> Unit,
@@ -4837,6 +4850,9 @@ private fun InlineQuickFindSection(
 ) {
     val colors = ThingsTheme.colors
     val searchFocusRequester = remember { FocusRequester() }
+    var showDateMenu by remember { mutableStateOf(false) }
+    var showTagMenu by remember { mutableStateOf(false) }
+    var showScopeMenu by remember { mutableStateOf(false) }
     var searchField by remember {
         mutableStateOf(
             TextFieldValue(
@@ -4849,6 +4865,23 @@ private fun InlineQuickFindSection(
     LaunchedEffect(Unit) {
         delay(40)
         runCatching { searchFocusRequester.requestFocus() }
+    }
+
+    val dateFilterLabelRes = when (filter.dateFilter) {
+        QuickFindDateFilter.ALL -> R.string.search_filter_date_all
+        QuickFindDateFilter.TODAY -> R.string.search_filter_date_today
+        QuickFindDateFilter.OVERDUE -> R.string.search_filter_date_overdue
+        QuickFindDateFilter.NEXT_7_DAYS -> R.string.search_filter_date_next_7_days
+        QuickFindDateFilter.THIS_MONTH -> R.string.search_filter_date_this_month
+        QuickFindDateFilter.NO_DATE -> R.string.search_filter_date_none
+    }
+    val scopeFilterLabelRes = when (filter.scope) {
+        QuickFindEntityScope.ALL -> R.string.search_filter_scope_all
+        QuickFindEntityScope.TASKS -> R.string.search_filter_scope_tasks
+        QuickFindEntityScope.PROJECTS -> R.string.search_filter_scope_projects
+    }
+    val selectedTagTitle = remember(filter.tagId, allTags) {
+        filter.tagId?.let { id -> allTags.find { it.id == id }?.title }
     }
 
     Surface(
@@ -4931,17 +4964,169 @@ private fun InlineQuickFindSection(
                 }
             }
 
-            // Matching Smart Views & Areas
-            val matchingViews = SmartViewType.entries.filter { viewType ->
-                val localizedName = stringResource(viewType.titleRes)
-                query.isNotBlank() && localizedName.contains(query, ignoreCase = true)
+            // Interactive Search Filter Strip
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                QuickFindFilterChip(
+                    label = stringResource(R.string.search_filter_hide_completed),
+                    icon = Icons.Outlined.CheckCircleOutline,
+                    active = filter.hideCompleted,
+                    onClick = { onFilterChange(filter.copy(hideCompleted = !filter.hideCompleted)) }
+                )
+
+                Box {
+                    QuickFindFilterChip(
+                        label = stringResource(dateFilterLabelRes),
+                        icon = Icons.Outlined.CalendarToday,
+                        active = filter.dateFilter != QuickFindDateFilter.ALL,
+                        hasDropdown = true,
+                        onClick = { showDateMenu = true }
+                    )
+                    DropdownMenu(
+                        expanded = showDateMenu,
+                        onDismissRequest = { showDateMenu = false }
+                    ) {
+                        QuickFindDateFilter.entries.forEach { option ->
+                            val labelRes = when (option) {
+                                QuickFindDateFilter.ALL -> R.string.search_filter_date_all
+                                QuickFindDateFilter.TODAY -> R.string.search_filter_date_today
+                                QuickFindDateFilter.OVERDUE -> R.string.search_filter_date_overdue
+                                QuickFindDateFilter.NEXT_7_DAYS -> R.string.search_filter_date_next_7_days
+                                QuickFindDateFilter.THIS_MONTH -> R.string.search_filter_date_this_month
+                                QuickFindDateFilter.NO_DATE -> R.string.search_filter_date_none
+                            }
+                            DropdownMenuItem(
+                                text = { Text(stringResource(labelRes)) },
+                                trailingIcon = if (filter.dateFilter == option) {
+                                    { Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                } else null,
+                                onClick = {
+                                    showDateMenu = false
+                                    onFilterChange(filter.copy(dateFilter = option))
+                                }
+                            )
+                        }
+                    }
+                }
+
+                QuickFindFilterChip(
+                    label = stringResource(R.string.search_filter_has_deadline),
+                    icon = Icons.Outlined.Flag,
+                    active = filter.hasDeadlineOnly,
+                    onClick = { onFilterChange(filter.copy(hasDeadlineOnly = !filter.hasDeadlineOnly)) }
+                )
+
+                QuickFindFilterChip(
+                    label = stringResource(R.string.search_filter_has_checklist),
+                    icon = Icons.Outlined.Checklist,
+                    active = filter.hasChecklistOnly,
+                    onClick = { onFilterChange(filter.copy(hasChecklistOnly = !filter.hasChecklistOnly)) }
+                )
+
+                if (allTags.isNotEmpty()) {
+                    Box {
+                        QuickFindFilterChip(
+                            label = selectedTagTitle?.let { "#$it" } ?: stringResource(R.string.search_filter_all_tags),
+                            icon = Icons.Outlined.LocalOffer,
+                            active = filter.tagId != null,
+                            hasDropdown = true,
+                            onClick = { showTagMenu = true }
+                        )
+                        DropdownMenu(
+                            expanded = showTagMenu,
+                            onDismissRequest = { showTagMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.search_filter_all_tags)) },
+                                trailingIcon = if (filter.tagId == null) {
+                                    { Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                } else null,
+                                onClick = {
+                                    showTagMenu = false
+                                    onFilterChange(filter.copy(tagId = null))
+                                }
+                            )
+                            allTags.forEach { tag ->
+                                DropdownMenuItem(
+                                    text = { Text("#${tag.title}") },
+                                    trailingIcon = if (filter.tagId == tag.id) {
+                                        { Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                    } else null,
+                                    onClick = {
+                                        showTagMenu = false
+                                        onFilterChange(filter.copy(tagId = tag.id))
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Box {
+                    QuickFindFilterChip(
+                        label = stringResource(scopeFilterLabelRes),
+                        icon = Icons.Outlined.Folder,
+                        active = filter.scope != QuickFindEntityScope.ALL,
+                        hasDropdown = true,
+                        onClick = { showScopeMenu = true }
+                    )
+                    DropdownMenu(
+                        expanded = showScopeMenu,
+                        onDismissRequest = { showScopeMenu = false }
+                    ) {
+                        QuickFindEntityScope.entries.forEach { option ->
+                            val labelRes = when (option) {
+                                QuickFindEntityScope.ALL -> R.string.search_filter_scope_all
+                                QuickFindEntityScope.TASKS -> R.string.search_filter_scope_tasks
+                                QuickFindEntityScope.PROJECTS -> R.string.search_filter_scope_projects
+                            }
+                            DropdownMenuItem(
+                                text = { Text(stringResource(labelRes)) },
+                                trailingIcon = if (filter.scope == option) {
+                                    { Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                } else null,
+                                onClick = {
+                                    showScopeMenu = false
+                                    onFilterChange(filter.copy(scope = option))
+                                }
+                            )
+                        }
+                    }
+                }
+
+                if (filter.hasActiveFilters) {
+                    QuickFindFilterChip(
+                        label = stringResource(R.string.search_filter_reset),
+                        icon = Icons.Outlined.Close,
+                        active = false,
+                        isReset = true,
+                        onClick = { onFilterChange(QuickFindFilter()) }
+                    )
+                }
             }
-            val matchingAreas = remember(query, areas) {
-                if (query.isBlank()) emptyList()
+
+            // Matching Smart Views & Areas
+            val showViewsAndAreas = filter.shouldShowSmartViewsAndAreas(query)
+            val matchingViews = if (!showViewsAndAreas) {
+                emptyList()
+            } else {
+                SmartViewType.entries.filter { viewType ->
+                    val localizedName = stringResource(viewType.titleRes)
+                    query.isNotBlank() && localizedName.contains(query, ignoreCase = true)
+                }
+            }
+            val matchingAreas = remember(query, areas, showViewsAndAreas) {
+                if (!showViewsAndAreas || query.isBlank()) emptyList()
                 else areas.filter { it.title.contains(query, ignoreCase = true) }
             }
 
-            if (query.isBlank()) {
+            if (query.isBlank() && !filter.hasActiveFilters) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = stringResource(R.string.quick_find_empty_hint),
@@ -4952,12 +5137,24 @@ private fun InlineQuickFindSection(
                 Spacer(modifier = Modifier.height(10.dp))
                 val totalHits = matchingViews.size + matchingAreas.size + projectResults.size + taskResults.size
                 Text(
-                    text = stringResource(R.string.quick_find_results_for, totalHits, query),
+                    text = if (query.isNotBlank()) {
+                        stringResource(R.string.quick_find_results_for, totalHits, query)
+                    } else {
+                        stringResource(R.string.settings_stat_records_count, totalHits)
+                    },
                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                     color = colors.thingsBlue
                 )
                 Spacer(modifier = Modifier.height(6.dp))
 
+                if (totalHits == 0) {
+                    Text(
+                        text = stringResource(R.string.quick_find_no_results),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.secondaryText,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                } else {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -5184,6 +5381,72 @@ private fun InlineQuickFindSection(
                         }
                     }
                 }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickFindFilterChip(
+    label: String,
+    icon: ImageVector,
+    active: Boolean,
+    hasDropdown: Boolean = false,
+    isReset: Boolean = false,
+    onClick: () -> Unit
+) {
+    val colors = ThingsTheme.colors
+    val containerColor = when {
+        isReset -> colors.deadlineUrgentRed.copy(alpha = 0.12f)
+        active -> colors.thingsBlue.copy(alpha = 0.16f)
+        else -> colors.tagPillBg.copy(alpha = 0.55f)
+    }
+    val contentColor = when {
+        isReset -> colors.deadlineUrgentRed
+        active -> colors.thingsBlue
+        else -> colors.secondaryText
+    }
+    val borderColor = when {
+        isReset -> colors.deadlineUrgentRed.copy(alpha = 0.35f)
+        active -> colors.thingsBlue.copy(alpha = 0.45f)
+        else -> colors.dividerHairline
+    }
+
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = containerColor,
+        border = BorderStroke(1.dp, borderColor),
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(14.dp)
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = if (active || isReset) FontWeight.SemiBold else FontWeight.Medium
+                ),
+                color = if (active) colors.thingsBlue else if (isReset) colors.deadlineUrgentRed else colors.primaryText,
+                maxLines = 1
+            )
+            if (hasDropdown) {
+                Icon(
+                    imageVector = Icons.Outlined.ExpandMore,
+                    contentDescription = null,
+                    tint = contentColor,
+                    modifier = Modifier.size(14.dp)
+                )
             }
         }
     }

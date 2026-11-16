@@ -445,4 +445,18 @@
     <string name="project_delete_prompt_tasks_body">This project has %1$d associated to-dos. Should all associated to-dos be deleted too, or kept without a project?</string>
     <string name="project_delete_with_tasks_btn">Delete Project &amp; To-Dos</string>
     <string name="project_delete_keep_tasks_btn">Keep To-Dos (Delete Project Only)</string>
+    <string name="search_filter_hide_completed">Hide completed</string>
+    <string name="search_filter_date_all">Any date</string>
+    <string name="search_filter_date_today">Today</string>
+    <string name="search_filter_date_overdue">Overdue</string>
+    <string name="search_filter_date_next_7_days">Next 7 days</string>
+    <string name="search_filter_date_this_month">This month</string>
+    <string name="search_filter_date_none">No date</string>
+    <string name="search_filter_has_deadline">With deadline</string>
+    <string name="search_filter_has_checklist">With checklist</string>
+    <string name="search_filter_all_tags">All tags</string>
+    <string name="search_filter_scope_all">All types</string>
+    <string name="search_filter_scope_tasks">To-Dos only</string>
+    <string name="search_filter_scope_projects">Projects only</string>
+    <string name="search_filter_reset">Reset filters</string>
 </resources>

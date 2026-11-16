@@ -10,6 +10,7 @@ import {
 } from '../src/data/backupCodec.ts';
 import { mergeMonotonicReviewTimestamp } from '../src/data/syncUtils.ts';
 import {
+  DEFAULT_QUICK_FIND_FILTER,
   STARTER_GTD_TEMPLATES,
   buildDailyTimeline,
   buildProjectTemplateBlueprint,
@@ -19,9 +20,13 @@ import {
   formatMinutesAsClock,
   formatTimeblockRange,
   getStarterGtdTemplates,
+  hasActiveQuickFindFilters,
+  matchesQuickFindProject,
+  matchesQuickFindTask,
   parseClockToMinutes,
   parseProjectOutlineInput,
-  parseTemplateBlueprintJson
+  parseTemplateBlueprintJson,
+  shouldShowSmartViewsAndAreasInQuickFind
 } from '../src/domain/v2Utils.ts';
 import { TRANSLATIONS } from '../src/i18n/translations.ts';
 import type {
@@ -851,4 +856,167 @@ test('ChromeOS 12-item task context menu clamps cleanly inside viewport across t
   const compactSplit = computeClampedContextMenuPosition(200, 310, menuWidth, 396, 680, 420, 12);
   assert.deepEqual(compactSplit, { left: 200, top: 12 });
 });
+
+test('Quick Find search filters accurately filter tasks, projects, dates, deadlines, checklists, tags, scope, and all 5 languages', () => {
+  const refDate = new Date(2026, 10, 15, 12, 0, 0, 0).getTime(); // Nov 15, 2026 local noon
+  const todayStart = new Date(2026, 10, 15, 0, 0, 0, 0).getTime();
+  const dayMs = 86_400_000;
+
+  assert.equal(hasActiveQuickFindFilters(DEFAULT_QUICK_FIND_FILTER), false);
+  assert.equal(shouldShowSmartViewsAndAreasInQuickFind('Today', DEFAULT_QUICK_FIND_FILTER), true);
+  assert.equal(
+    shouldShowSmartViewsAndAreasInQuickFind('', { ...DEFAULT_QUICK_FIND_FILTER, hideCompleted: true }),
+    false
+  );
+  assert.equal(
+    shouldShowSmartViewsAndAreasInQuickFind('Tod', { ...DEFAULT_QUICK_FIND_FILTER, hideCompleted: true }),
+    true
+  );
+  assert.equal(
+    shouldShowSmartViewsAndAreasInQuickFind('Tod', { ...DEFAULT_QUICK_FIND_FILTER, scope: 'TASKS' }),
+    false
+  );
+
+  const openTodayTask = {
+    status: 'OPEN' as const,
+    scheduleState: 'TODAY' as const,
+    whenDate: todayStart,
+    deadline: todayStart + 2 * dayMs,
+    tagIds: ['tag-urgent'],
+    isDeleted: false
+  };
+  const overdueTask = {
+    status: 'OPEN' as const,
+    scheduleState: 'UPCOMING' as const,
+    whenDate: todayStart - 2 * dayMs,
+    deadline: todayStart - dayMs,
+    tagIds: ['tag-home'],
+    isDeleted: false
+  };
+  const noDateTask = {
+    status: 'OPEN' as const,
+    scheduleState: 'SOMEDAY' as const,
+    whenDate: null,
+    deadline: null,
+    tagIds: [] as string[],
+    isDeleted: false
+  };
+  const completedTask = {
+    status: 'COMPLETED' as const,
+    scheduleState: 'ANYTIME' as const,
+    whenDate: null,
+    deadline: null,
+    tagIds: ['tag-urgent'],
+    isDeleted: false
+  };
+
+  const activeProject = {
+    status: 'ACTIVE' as const,
+    scheduleState: 'ANYTIME' as const,
+    whenDate: null,
+    deadline: todayStart + 4 * dayMs,
+    tagIds: ['tag-urgent'],
+    isDeleted: false
+  };
+  const completedProject = {
+    status: 'COMPLETED' as const,
+    scheduleState: 'ANYTIME' as const,
+    whenDate: null,
+    deadline: null,
+    tagIds: [] as string[],
+    isDeleted: false
+  };
+
+  // Hide completed
+  const hideCompletedFilter = { ...DEFAULT_QUICK_FIND_FILTER, hideCompleted: true };
+  assert.equal(matchesQuickFindTask(openTodayTask, hideCompletedFilter, true, refDate), true);
+  assert.equal(matchesQuickFindTask(completedTask, hideCompletedFilter, false, refDate), false);
+  assert.equal(matchesQuickFindProject(activeProject, hideCompletedFilter, refDate), true);
+  assert.equal(matchesQuickFindProject(completedProject, hideCompletedFilter, refDate), false);
+
+  // Date filters: TODAY, OVERDUE, NEXT_7_DAYS, THIS_MONTH, NO_DATE
+  assert.equal(
+    matchesQuickFindTask(openTodayTask, { ...DEFAULT_QUICK_FIND_FILTER, dateFilter: 'TODAY' }, true, refDate),
+    true
+  );
+  assert.equal(
+    matchesQuickFindTask(overdueTask, { ...DEFAULT_QUICK_FIND_FILTER, dateFilter: 'TODAY' }, false, refDate),
+    false
+  );
+  assert.equal(
+    matchesQuickFindTask(overdueTask, { ...DEFAULT_QUICK_FIND_FILTER, dateFilter: 'OVERDUE' }, false, refDate),
+    true
+  );
+  assert.equal(
+    matchesQuickFindProject(activeProject, { ...DEFAULT_QUICK_FIND_FILTER, dateFilter: 'NEXT_7_DAYS' }, refDate),
+    true
+  );
+  assert.equal(
+    matchesQuickFindTask(overdueTask, { ...DEFAULT_QUICK_FIND_FILTER, dateFilter: 'THIS_MONTH' }, false, refDate),
+    true
+  );
+  assert.equal(
+    matchesQuickFindTask(noDateTask, { ...DEFAULT_QUICK_FIND_FILTER, dateFilter: 'NO_DATE' }, false, refDate),
+    true
+  );
+  assert.equal(
+    matchesQuickFindTask(openTodayTask, { ...DEFAULT_QUICK_FIND_FILTER, dateFilter: 'NO_DATE' }, true, refDate),
+    false
+  );
+
+  // Deadline, Checklist, Tag, and Scope filters
+  assert.equal(
+    matchesQuickFindTask(openTodayTask, { ...DEFAULT_QUICK_FIND_FILTER, hasChecklistOnly: true }, true, refDate),
+    true
+  );
+  assert.equal(
+    matchesQuickFindTask(openTodayTask, { ...DEFAULT_QUICK_FIND_FILTER, hasChecklistOnly: true }, false, refDate),
+    false
+  );
+  assert.equal(
+    matchesQuickFindProject(activeProject, { ...DEFAULT_QUICK_FIND_FILTER, hasChecklistOnly: true }, refDate),
+    false
+  );
+  assert.equal(
+    matchesQuickFindProject(
+      activeProject,
+      { ...DEFAULT_QUICK_FIND_FILTER, hasDeadlineOnly: true, tagId: 'tag-urgent', scope: 'PROJECTS' },
+      refDate
+    ),
+    true
+  );
+  assert.equal(
+    matchesQuickFindTask(
+      openTodayTask,
+      { ...DEFAULT_QUICK_FIND_FILTER, scope: 'PROJECTS' },
+      true,
+      refDate
+    ),
+    false
+  );
+
+  // Verify all 14 searchFilter* keys exist and are non-empty across EN, DE, FR, IT, ES
+  const filterKeys = [
+    'searchFilterHideCompleted',
+    'searchFilterDateAll',
+    'searchFilterDateToday',
+    'searchFilterDateOverdue',
+    'searchFilterDateNext7Days',
+    'searchFilterDateThisMonth',
+    'searchFilterDateNone',
+    'searchFilterHasDeadline',
+    'searchFilterHasChecklist',
+    'searchFilterAllTags',
+    'searchFilterScopeAll',
+    'searchFilterScopeTasks',
+    'searchFilterScopeProjects',
+    'searchFilterReset'
+  ] as const;
+  for (const lang of ['en', 'de', 'fr', 'it', 'es'] as const) {
+    for (const key of filterKeys) {
+      assert.ok(TRANSLATIONS[lang][key].trim().length > 0, `Missing ${key} in ${lang}`);
+    }
+  }
+});
+
 

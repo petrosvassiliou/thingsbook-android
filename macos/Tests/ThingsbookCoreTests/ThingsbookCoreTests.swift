@@ -2186,13 +2186,13 @@ final class ThingsbookCoreTests: XCTestCase {
             updatedAt: 1_760_000_100_000
         )
         _ = try db.applyRemoteDeltas(RemoteDeltaBatch(tasks: [initialRemoteRecurring]))
-        XCTAssertTrue(try db.fetchDirtySyncBatch().tasks.isEmpty)
+        XCTAssertTrue(try db.fetchDirtyBatch().tasks.isEmpty)
 
         // Device B wakes up at 6:00 PM on Nov 16 and runs performMidnightRollover BEFORE pulling remote completion
         let nov16Evening = Date(timeIntervalSince1970: Double(nov16 + 18 * 3_600_000) / 1000.0)
         _ = try db.performMidnightRollover(referenceDate: nov16Evening, calendar: cal)
         XCTAssertTrue(
-            try db.fetchDirtySyncBatch().tasks.isEmpty,
+            try db.fetchDirtyBatch().tasks.isEmpty,
             "Local midnight rollover must NOT mark tasks dirty or poison LWW updatedAt"
         )
         XCTAssertEqual(try db.loadWorkspaceSnapshot().todayDaytimeTasks.map(\.id), ["rec-daily-today"])
@@ -2289,7 +2289,7 @@ final class ThingsbookCoreTests: XCTestCase {
             Set(["dup-latest-nov17", "plain-a", "plain-b"])
         )
         XCTAssertTrue(dedupSnap.trashedTasks.isEmpty, "Silently tombstoned duplicate must NOT appear in Trash")
-        let dirtyTombstones = try dbDedup.fetchDirtySyncBatch().tasks
+        let dirtyTombstones = try dbDedup.fetchDirtyBatch().tasks
         XCTAssertEqual(dirtyTombstones.map(\.id), ["dup-stale-nov16"])
         XCTAssertTrue(dirtyTombstones[0].isDeleted)
         XCTAssertEqual(dirtyTombstones[0].title, "")

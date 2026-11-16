@@ -58,11 +58,13 @@ public enum MacInAppUpdateError: LocalizedError, Equatable, Sendable {
 }
 
 public enum AppUpdateService {
-    public static let currentVersion = "2.0.0-beta.11"
-    public static let displayVersion = "2.0.0-beta.11"
-    public static let currentBuildNumber = 55
+    public static let currentVersion = "2.0.0-beta.12"
+    public static let displayVersion = "2.0.0-beta.12"
+    public static let currentBuildNumber = 56
     public static let expectedBundleIdentifier = "com.thingsbook.macos"
     private static let releasesEndpoint = "https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases?per_page=30"
+    private static let rawBetaManifestEndpoint = "https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/beta-2.0/macos/PARITY_MANIFEST.json"
+    private static let rawStableManifestEndpoint = "https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/main/macos/PARITY_MANIFEST.json"
 
     public static var currentVersionIsPrerelease: Bool {
         defaultIncludeBeta(for: currentVersion)
@@ -73,22 +75,110 @@ public enum AppUpdateService {
         return trimmed.split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false).first?.contains("-") == true
     }
 
+    /// Always enables pre-release updates when the currently running app is itself a pre-release build
+    /// (preventing a persisted `false` preference carried over from 1.8.x from stranding beta users),
+    /// while returning to the user's saved `requested` preference once promoted to a stable final release.
+    public static func resolveEffectiveIncludeBeta(
+        requested: Bool?,
+        current: String = currentVersion
+    ) -> Bool {
+        return (requested == true) || defaultIncludeBeta(for: current)
+    }
+
     public static func checkForUpdates(
         current: String = currentVersion,
         includeBeta: Bool? = nil
     ) async throws -> ReleaseUpdateInfo? {
+        let effectiveIncludeBeta = resolveEffectiveIncludeBeta(requested: includeBeta, current: current)
         guard let url = URL(string: releasesEndpoint) else { return nil }
-        var req = URLRequest(url: url)
+        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 12)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        req.timeoutInterval = 10
+        req.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        req.setValue("Thingsbook-macOS/\(current)", forHTTPHeaderField: "User-Agent")
 
-        let (data, res) = try await URLSession.shared.data(for: req)
-        guard let http = res as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-            return nil
+        var primaryFailure: Error?
+        do {
+            let (data, res) = try await URLSession.shared.data(for: req)
+            if let http = res as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+               let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                return selectEligibleRelease(from: arr, current: current, includeBeta: effectiveIncludeBeta)
+            } else if let http = res as? HTTPURLResponse {
+                primaryFailure = MacInAppUpdateError.downloadFailed(statusCode: http.statusCode)
+            }
+        } catch {
+            primaryFailure = error
         }
 
-        return selectEligibleRelease(from: arr, current: current, includeBeta: includeBeta)
+        // Fallback to raw.githubusercontent.com PARITY_MANIFEST.json (immune to unauthenticated GitHub REST API 60 req/hr rate limits)
+        var manifestEndpoints: [String] = [rawStableManifestEndpoint]
+        if effectiveIncludeBeta {
+            manifestEndpoints.insert(rawBetaManifestEndpoint, at: 0)
+        }
+
+        var fallbackSucceeded = false
+        var bestFallback: ReleaseUpdateInfo?
+        for endpoint in manifestEndpoints {
+            guard let rawUrl = URL(string: endpoint) else { continue }
+            var rawReq = URLRequest(url: rawUrl, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
+            rawReq.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+            rawReq.setValue("Thingsbook-macOS/\(current)", forHTTPHeaderField: "User-Agent")
+            if let (rawData, rawRes) = try? await URLSession.shared.data(for: rawReq),
+               let rawHttp = rawRes as? HTTPURLResponse,
+               (200..<300).contains(rawHttp.statusCode) {
+                fallbackSucceeded = true
+                if let candidate = parseFallbackParityManifestData(
+                    rawData,
+                    current: current,
+                    includeBeta: effectiveIncludeBeta
+                ) {
+                    if let existing = bestFallback {
+                        if isSemanticNewer(remote: candidate.versionString, current: existing.versionString, includeBeta: true) {
+                            bestFallback = candidate
+                        }
+                    } else {
+                        bestFallback = candidate
+                    }
+                }
+            }
+        }
+
+        if let bestFallback {
+            return bestFallback
+        }
+        if fallbackSucceeded {
+            return nil
+        }
+        if let primaryFailure {
+            throw primaryFailure
+        }
+        return nil
+    }
+
+    public static func parseFallbackParityManifestData(
+        _ data: Data,
+        current: String = currentVersion,
+        includeBeta: Bool? = nil
+    ) -> ReleaseUpdateInfo? {
+        let effectiveIncludeBeta = resolveEffectiveIncludeBeta(requested: includeBeta, current: current)
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        let rawVer = ((obj["macosVersion"] as? String) ?? (obj["syncedAndroidVersionName"] as? String) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanVer = stripLeadingVersionPrefix(rawVer)
+        guard !cleanVer.isEmpty else { return nil }
+        let tag = "v\(cleanVer)"
+        guard isValidReleaseTag(tag, allowPrerelease: effectiveIncludeBeta),
+              isSemanticNewer(remote: cleanVer, current: current, includeBeta: effectiveIncludeBeta) else {
+            return nil
+        }
+        return ReleaseUpdateInfo(
+            tagName: tag,
+            versionString: cleanVer,
+            releaseNotes: "",
+            htmlUrl: "https://github.com/petrosvassiliou/thingsbook-android/releases/tag/\(tag)",
+            dmgDownloadUrl: "https://github.com/petrosvassiliou/thingsbook-android/releases/download/\(tag)/Thingsbook-macOS-Universal.dmg"
+        )
     }
 
     public static func selectEligibleRelease(
@@ -96,7 +186,7 @@ public enum AppUpdateService {
         current: String = currentVersion,
         includeBeta: Bool? = nil
     ) -> ReleaseUpdateInfo? {
-        let effectiveIncludeBeta = includeBeta ?? defaultIncludeBeta(for: current)
+        let effectiveIncludeBeta = resolveEffectiveIncludeBeta(requested: includeBeta, current: current)
         var bestCandidate: ReleaseUpdateInfo?
 
         for rel in releases {
@@ -163,7 +253,7 @@ public enum AppUpdateService {
         let cTrim = stripLeadingVersionPrefix(current)
         guard !rTrim.isEmpty, !cTrim.isEmpty else { return false }
 
-        let effectiveIncludeBeta = includeBeta ?? defaultIncludeBeta(for: current)
+        let effectiveIncludeBeta = resolveEffectiveIncludeBeta(requested: includeBeta, current: current)
 
         let rPlusParts = rTrim.split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false)
         let cPlusParts = cTrim.split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false)

@@ -408,9 +408,9 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.11")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.11")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 55)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.12")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.12")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 56)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
 
         // Core [major, minor, patch] + build metadata comparisons on stable channel (includeBeta inferred false for 1.8.1)
@@ -439,6 +439,7 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.9", current: "2.0.0-beta.8"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.10", current: "2.0.0-beta.9"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.11", current: "2.0.0-beta.10"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.12", current: "2.0.0-beta.11"))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.9", current: "2.0.0-beta.10"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.1"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.99"))
@@ -497,8 +498,14 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(selectedBetaOptIn?.tagName, "v2.0.0-beta.1")
         XCTAssertEqual(selectedBetaOptIn?.dmgDownloadUrl, "https://example.com/2.0.0-beta.1.dmg")
 
-        // 3. Running 2.0.0-beta.1 upgrades to highest beta (2.0.0-beta.10 > 2.0.0-beta.2) and then final 2.0.0
+        // 3. Running 2.0.0-beta.1 or 2.0.0-beta.9 upgrades to highest beta EVEN if includeBeta: false was persisted from 1.8.x!
         let betaProgressionFeed: [[String: Any]] = mockReleases + [
+            [
+                "tag_name": "v2.0.0-beta.9",
+                "draft": false,
+                "prerelease": true,
+                "assets": [["name": "Thingsbook-2.0.0-beta.9.dmg", "browser_download_url": "https://example.com/2.0.0-beta.9.dmg"]]
+            ],
             [
                 "tag_name": "v2.0.0-beta.2",
                 "draft": false,
@@ -514,6 +521,22 @@ final class ThingsbookCoreTests: XCTestCase {
         ]
         let selectedNextBeta = AppUpdateService.selectEligibleRelease(from: betaProgressionFeed, current: "2.0.0-beta.1")
         XCTAssertEqual(selectedNextBeta?.tagName, "v2.0.0-beta.10")
+        let selectedFromBeta9WithFalsePref = AppUpdateService.selectEligibleRelease(
+            from: betaProgressionFeed,
+            current: "2.0.0-beta.9",
+            includeBeta: false
+        )
+        XCTAssertEqual(selectedFromBeta9WithFalsePref?.tagName, "v2.0.0-beta.10")
+
+        // 4. Raw PARITY_MANIFEST.json fallback works when GitHub REST API is rate-limited
+        let manifestJson = #"{"macosVersion":"2.0.0-beta.12","syncedAndroidVersionName":"2.0.0-beta.12"}"#.data(using: .utf8)!
+        let fallbackBeta = AppUpdateService.parseFallbackParityManifestData(manifestJson, current: "2.0.0-beta.9", includeBeta: false)
+        XCTAssertEqual(fallbackBeta?.tagName, "v2.0.0-beta.12")
+        XCTAssertEqual(
+            fallbackBeta?.dmgDownloadUrl,
+            "https://github.com/petrosvassiliou/thingsbook-android/releases/download/v2.0.0-beta.12/Thingsbook-macOS-Universal.dmg"
+        )
+        XCTAssertNil(AppUpdateService.parseFallbackParityManifestData(manifestJson, current: "1.8.1", includeBeta: false))
 
         let finalFeed: [[String: Any]] = betaProgressionFeed + [
             [

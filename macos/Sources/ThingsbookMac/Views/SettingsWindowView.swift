@@ -1054,9 +1054,21 @@ public struct SettingsWindowView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Toggle("", isOn: $store.preferences.includeBetaUpdates)
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { store.preferences.includeBetaUpdates || AppUpdateService.currentVersionIsPrerelease },
+                            set: { enabled in
+                                store.preferences.includeBetaUpdates = enabled
+                                if enabled {
+                                    Task { _ = await store.performManualUpdateCheckResult() }
+                                }
+                            }
+                        )
+                    )
                         .toggleStyle(.switch)
                         .labelsHidden()
+                        .disabled(AppUpdateService.currentVersionIsPrerelease)
                 }
 
                 Divider()
@@ -1066,19 +1078,27 @@ public struct SettingsWindowView: View {
                         isCheckingUpdate = true
                         updateStatusText = store.tr("settings_updates_checking")
                         Task {
-                            let found = await store.performManualUpdateCheck()
+                            let result = await store.performManualUpdateCheckResult()
                             await MainActor.run {
                                 isCheckingUpdate = false
-                                if let found {
+                                switch result {
+                                case .success(let found):
+                                    if let found {
+                                        updateStatusText = store.trf(
+                                            "settings_updates_available_title",
+                                            found.versionString,
+                                            AppUpdateService.displayVersion
+                                        )
+                                    } else {
+                                        updateStatusText = store.trf(
+                                            "settings_updates_up_to_date",
+                                            AppUpdateService.displayVersion
+                                        )
+                                    }
+                                case .failure(let err):
                                     updateStatusText = store.trf(
-                                        "settings_updates_available_title",
-                                        found.versionString,
-                                        AppUpdateService.displayVersion
-                                    )
-                                } else {
-                                    updateStatusText = store.trf(
-                                        "settings_updates_up_to_date",
-                                        AppUpdateService.displayVersion
+                                        "settings_updates_check_failed",
+                                        err.localizedDescription
                                     )
                                 }
                             }

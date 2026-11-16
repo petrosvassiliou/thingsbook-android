@@ -156,8 +156,15 @@ if [ -n "${THINGSBOOK_DMG_URL:-}" ]; then
   DMG_URL="$THINGSBOOK_DMG_URL"
 else
   echo "🔍 Locating newest $APP_NAME Universal macOS release (including 2.0 Beta channel)..."
-  RELEASES_JSON="$(curl -fsSL -H "Accept: application/vnd.github+json" "$RELEASES_API" 2>/dev/null || true)"
+  RELEASES_JSON="$(curl -fsSL -H "Accept: application/vnd.github+json" -H "User-Agent: Thingsbook-Installer" "$RELEASES_API" 2>/dev/null || true)"
   DMG_URL="$(resolve_beta_or_stable_dmg_url "$RELEASES_JSON")"
+  if [ -z "$DMG_URL" ]; then
+    RAW_MANIFEST="$(curl -fsSL "https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/beta-2.0/macos/PARITY_MANIFEST.json" 2>/dev/null || true)"
+    FALLBACK_VER="$(printf '%s' "$RAW_MANIFEST" | sed -n 's/.*"macosVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+    if [ -n "$FALLBACK_VER" ]; then
+      DMG_URL="https://github.com/petrosvassiliou/thingsbook-android/releases/download/v${FALLBACK_VER#v}/Thingsbook-macOS-Universal.dmg"
+    fi
+  fi
 fi
 
 if [ -z "$DMG_URL" ]; then

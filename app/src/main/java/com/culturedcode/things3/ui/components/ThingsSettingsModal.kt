@@ -1220,12 +1220,14 @@ private fun AppUpdateSettingsSection(
     Spacer(modifier = Modifier.height(8.dp))
 
     // Beta-Channel Updates Toggle Row
+    val isBetaBuild = BuildConfig.VERSION_NAME.contains("-")
+    val effectiveBetaChecked = includeBetaUpdates || isBetaBuild
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(11.dp))
             .background(colors.tagPillBg.copy(alpha = 0.6f))
-            .clickable {
+            .clickable(enabled = !isBetaBuild) {
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onSetIncludeBetaUpdates(!includeBetaUpdates)
             }
@@ -1247,10 +1249,13 @@ private fun AppUpdateSettingsSection(
         }
         Spacer(modifier = Modifier.width(10.dp))
         Switch(
-            checked = includeBetaUpdates,
+            checked = effectiveBetaChecked,
+            enabled = !isBetaBuild,
             onCheckedChange = { enabled ->
-                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                onSetIncludeBetaUpdates(enabled)
+                if (!isBetaBuild) {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onSetIncludeBetaUpdates(enabled)
+                }
             },
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,

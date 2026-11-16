@@ -1112,7 +1112,8 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func checkForAppUpdatesSilently() async {
-        guard let info = try? await AppUpdateService.checkForUpdates(includeBeta: preferences.includeBetaUpdates) else {
+        let effectiveBeta = AppUpdateService.resolveEffectiveIncludeBeta(requested: preferences.includeBetaUpdates)
+        guard let info = try? await AppUpdateService.checkForUpdates(includeBeta: effectiveBeta) else {
             return
         }
         self.availableUpdate = info
@@ -1122,20 +1123,29 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func performManualUpdateCheck() async -> ReleaseUpdateInfo? {
-        let found = try? await AppUpdateService.checkForUpdates(includeBeta: preferences.includeBetaUpdates)
-        self.availableUpdate = found
-        if let found {
-            if preferences.autoUpdateCheckEnabled && Self.isRunningFromAppBundle {
-                stageUpdateIfNeeded(found, installWhenReady: false)
+        try? await performManualUpdateCheckResult().get()
+    }
+
+    public func performManualUpdateCheckResult() async -> Result<ReleaseUpdateInfo?, Error> {
+        let effectiveBeta = AppUpdateService.resolveEffectiveIncludeBeta(requested: preferences.includeBetaUpdates)
+        do {
+            let found = try await AppUpdateService.checkForUpdates(includeBeta: effectiveBeta)
+            self.availableUpdate = found
+            if let found {
+                if preferences.autoUpdateCheckEnabled && Self.isRunningFromAppBundle {
+                    stageUpdateIfNeeded(found, installWhenReady: false)
+                }
+            } else {
+                installImmediatelyWhenStaged = false
+                updateDownloadTask?.cancel()
+                updateDownloadTask = nil
+                cleanupStagedUpdateDirectoryIfNeeded(except: nil)
+                updatePhase = .idle
             }
-        } else {
-            installImmediatelyWhenStaged = false
-            updateDownloadTask?.cancel()
-            updateDownloadTask = nil
-            cleanupStagedUpdateDirectoryIfNeeded(except: nil)
-            updatePhase = .idle
+            return .success(found)
+        } catch {
+            return .failure(error)
         }
-        return found
     }
 
     public func installAvailableUpdateNow() {

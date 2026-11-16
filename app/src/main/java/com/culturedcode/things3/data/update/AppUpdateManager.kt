@@ -487,6 +487,7 @@ class AppUpdateManager @Inject constructor(
                 connectTimeout = connectTimeoutMs
                 readTimeout = readTimeoutMs
                 useCaches = false
+                setRequestProperty("Cache-Control", "no-cache")
                 setRequestProperty("User-Agent", "Thingsbook-Android/${BuildConfig.VERSION_NAME}")
                 setRequestProperty("Accept", acceptHeader)
             }

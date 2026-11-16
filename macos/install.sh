@@ -102,6 +102,43 @@ except Exception:
     sys.exit(0)
 items = parsed if isinstance(parsed, list) else ([parsed] if isinstance(parsed, dict) else [])
 tag_re = re.compile(r"^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?(\+\d+)?$" if allow_beta else r"^v\d+\.\d+\.\d+(\+\d+)?$", re.IGNORECASE)
+
+def cmp_semver(a_tag: str, b_tag: str) -> int:
+    def split_ver(t: str):
+        s = t.strip().lstrip("vV")
+        main, build = (s.split("+", 1) + [""])[:2]
+        core_s, pre = (main.split("-", 1) + [""])[:2]
+        core = [int(x) if x.isdigit() else 0 for x in core_s.split(".")]
+        while len(core) < 3:
+            core.append(0)
+        b_num = int(re.match(r"^\d+", build).group(0)) if re.match(r"^\d+", build) else 0
+        return core, pre, b_num
+    ac, ap, ab = split_ver(a_tag)
+    bc, bp, bb = split_ver(b_tag)
+    for av, bv in zip(ac, bc):
+        if av != bv:
+            return 1 if av > bv else -1
+    if not ap and bp:
+        return 1
+    if ap and not bp:
+        return -1
+    if ap and bp and ap != bp:
+        at, bt = ap.split("."), bp.split(".")
+        for i in range(max(len(at), len(bt))):
+            if i >= len(at): return -1
+            if i >= len(bt): return 1
+            if at[i] == bt[i]: continue
+            an = int(at[i]) if at[i].isdigit() else None
+            bn = int(bt[i]) if bt[i].isdigit() else None
+            if an is not None and bn is not None: return 1 if an > bn else -1
+            if an is not None: return -1
+            if bn is not None: return 1
+            return 1 if at[i].lower() > bt[i].lower() else -1
+    if ab != bb:
+        return 1 if ab > bb else -1
+    return 0
+
+best_tag, best_url = "", ""
 for r in items:
     if not isinstance(r, dict) or r.get("draft") is True:
         continue
@@ -112,8 +149,12 @@ for r in items:
         continue
     for a in (r.get("assets") or []):
         if isinstance(a, dict) and str(a.get("name") or "").lower().endswith(".dmg") and a.get("browser_download_url"):
-            print(str(a["browser_download_url"]).strip())
-            sys.exit(0)
+            url = str(a["browser_download_url"]).strip()
+            if url and (not best_url or cmp_semver(tag, best_tag) > 0):
+                best_tag, best_url = tag, url
+            break
+if best_url:
+    print(best_url)
 ' 2>/dev/null || true
   fi
 }
@@ -122,15 +163,29 @@ if [ -n "${THINGSBOOK_DMG_URL:-}" ]; then
   DMG_URL="$THINGSBOOK_DMG_URL"
 elif [ "$INCLUDE_BETA" = "1" ]; then
   echo "🔍 Locating newest $APP_NAME Universal macOS release (including Beta channel)..."
-  RELEASES_JSON="$(curl -fsSL -H "Accept: application/vnd.github+json" "$RELEASES_API" 2>/dev/null || true)"
+  RELEASES_JSON="$(curl -fsSL -H "Accept: application/vnd.github+json" -H "User-Agent: Thingsbook-Installer" "$RELEASES_API" 2>/dev/null || true)"
   DMG_URL="$(resolve_dmg_url "$RELEASES_JSON" "1")"
+  if [ -z "$DMG_URL" ]; then
+    RAW_MANIFEST="$(curl -fsSL "https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/beta-2.0/macos/PARITY_MANIFEST.json" 2>/dev/null || true)"
+    FALLBACK_VER="$(printf '%s' "$RAW_MANIFEST" | sed -n 's/.*"macosVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+    if [ -n "$FALLBACK_VER" ]; then
+      DMG_URL="https://github.com/petrosvassiliou/thingsbook-android/releases/download/v${FALLBACK_VER#v}/Thingsbook-macOS-Universal.dmg"
+    fi
+  fi
 else
   echo "🔍 Locating latest stable $APP_NAME Universal macOS release..."
-  LATEST_JSON="$(curl -fsSL -H "Accept: application/vnd.github+json" "$LATEST_RELEASE_API" 2>/dev/null || true)"
+  LATEST_JSON="$(curl -fsSL -H "Accept: application/vnd.github+json" -H "User-Agent: Thingsbook-Installer" "$LATEST_RELEASE_API" 2>/dev/null || true)"
   DMG_URL="$(resolve_dmg_url "$LATEST_JSON" "0")"
   if [ -z "$DMG_URL" ]; then
-    RELEASES_JSON="$(curl -fsSL -H "Accept: application/vnd.github+json" "$RELEASES_API" 2>/dev/null || true)"
+    RELEASES_JSON="$(curl -fsSL -H "Accept: application/vnd.github+json" -H "User-Agent: Thingsbook-Installer" "$RELEASES_API" 2>/dev/null || true)"
     DMG_URL="$(resolve_dmg_url "$RELEASES_JSON" "0")"
+  fi
+  if [ -z "$DMG_URL" ]; then
+    RAW_MANIFEST="$(curl -fsSL "https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/main/macos/PARITY_MANIFEST.json" 2>/dev/null || true)"
+    FALLBACK_VER="$(printf '%s' "$RAW_MANIFEST" | sed -n 's/.*"macosVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+    if [ -n "$FALLBACK_VER" ]; then
+      DMG_URL="https://github.com/petrosvassiliou/thingsbook-android/releases/download/v${FALLBACK_VER#v}/Thingsbook-macOS-Universal.dmg"
+    fi
   fi
 fi
 

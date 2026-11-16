@@ -55,8 +55,9 @@ export interface UpdateCheckResult {
 
 export async function checkForSwAndReleaseUpdates(
   currentVersion: string = APP_VERSION,
-  includeBeta: boolean = currentVersion.split('+')[0].includes('-')
+  includeBeta: boolean = isPrereleaseVersion(currentVersion)
 ): Promise<UpdateCheckResult> {
+  const effectiveIncludeBeta = Boolean(includeBeta) || isPrereleaseVersion(currentVersion);
   let swWaiting = swUpdateAvailable;
   try {
     if (swRegistrationRef) {
@@ -71,15 +72,16 @@ export async function checkForSwAndReleaseUpdates(
   }
 
   try {
-    const endpoint = includeBeta
+    const endpoint = effectiveIncludeBeta
       ? 'https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases?per_page=30'
       : 'https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases/latest';
     const res = await fetch(endpoint, {
+      cache: 'no-store',
       headers: { Accept: 'application/vnd.github+json' }
     });
     if (res.ok) {
       const data: unknown = await res.json();
-      const rec = includeBeta
+      const rec = effectiveIncludeBeta
         ? selectLatestEligibleRelease(data, currentVersion, true)
         : isEligibleReleasePayload(data, currentVersion, false)
           ? (data as Record<string, unknown>)
@@ -97,9 +99,53 @@ export async function checkForSwAndReleaseUpdates(
           swWaiting
         };
       }
+      return {
+        hasUpdate: swWaiting,
+        latestVersion: currentVersion,
+        swWaiting
+      };
     }
   } catch {
-    // Offline or blocked GitHub API: fall back to SW update state
+    // Fall through to raw.githubusercontent.com fallback
+  }
+
+  // Fallback to raw.githubusercontent.com PARITY_MANIFEST.json when GitHub REST API is rate-limited
+  try {
+    const rawUrls = effectiveIncludeBeta
+      ? [
+          'https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/beta-2.0/macos/PARITY_MANIFEST.json',
+          'https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/main/macos/PARITY_MANIFEST.json'
+        ]
+      : [
+          'https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/main/macos/PARITY_MANIFEST.json'
+        ];
+    let bestVersion = currentVersion;
+    for (const rawUrl of rawUrls) {
+      const rawRes = await fetch(rawUrl, { cache: 'no-store' });
+      if (!rawRes.ok) continue;
+      const manifest = (await rawRes.json()) as Record<string, unknown>;
+      const verRaw = String(
+        manifest.syncedAndroidVersionName ?? manifest.macosVersion ?? ''
+      )
+        .trim()
+        .replace(/^[vV]/, '');
+      if (!/^\d+\.\d+\.\d+/.test(verRaw)) continue;
+      if (!effectiveIncludeBeta && isPrereleaseVersion(verRaw)) continue;
+      if (compareSemver(verRaw, bestVersion) > 0) {
+        bestVersion = verRaw;
+      }
+    }
+    const newer = compareSemver(bestVersion, currentVersion) > 0;
+    if (newer) {
+      return {
+        hasUpdate: true,
+        latestVersion: bestVersion,
+        releaseUrl: `https://github.com/petrosvassiliou/thingsbook-android/releases/tag/v${bestVersion}`,
+        swWaiting
+      };
+    }
+  } catch {
+    // Offline: fall back to SW update state
   }
 
   return {

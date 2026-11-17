@@ -1625,7 +1625,8 @@ public actor FirebaseCloudSyncService {
         let projReviewBackfillKey = Self.projectReviewBackfillDefaultsKey(uid: uid)
         let needsProjReviewBackfill = !UserDefaults.standard.bool(forKey: projReviewBackfillKey)
 
-        let orphanFlags = (try? database.missingContainerFlags()) ?? (false, false, false)
+        let orphanFlags: (hasOrphanProject: Bool, hasOrphanArea: Bool, hasOrphanHeading: Bool) =
+            (try? database.missingContainerFlags()) ?? (hasOrphanProject: false, hasOrphanArea: false, hasOrphanHeading: false)
 
         func collectionSince(_ collection: String, forceZero: Bool = false) -> Int64 {
             if fullAll || forceZero { return 0 }
@@ -1657,13 +1658,13 @@ public actor FirebaseCloudSyncService {
         )
         let tmplMaps = tmplResult.docs
 
-        let tags = tagMaps.compactMap(Self.parseTag)
-        let areas = areaMaps.compactMap(Self.parseArea)
-        let projects = projMaps.compactMap(Self.parseProject)
-        let headings = headMaps.compactMap(Self.parseHeading)
+        let tags: [Tag] = tagMaps.compactMap(Self.parseTag)
+        let areas: [Area] = areaMaps.compactMap(Self.parseArea)
+        let projects: [Project] = projMaps.compactMap(Self.parseProject)
+        let headings: [Heading] = headMaps.compactMap(Self.parseHeading)
         var taskTagIds: [String: [String]] = [:]
         var omittedTimeblockTaskIds = Set<String>()
-        let tasks = taskMaps.compactMap { map -> TaskItem? in
+        let tasks: [TaskItem] = taskMaps.compactMap { map -> TaskItem? in
             guard let parsed = Self.parseTaskWithHints(map) else { return nil }
             taskTagIds[parsed.task.id] = parsed.tagIds
             if parsed.omittedTimeblock {
@@ -1671,9 +1672,9 @@ public actor FirebaseCloudSyncService {
             }
             return parsed.task
         }
-        let checklists = chkMaps.compactMap(Self.parseChecklist)
-        let attachments = attMaps.compactMap(Self.parseAttachment)
-        let projectTemplates = tmplMaps.compactMap(Self.parseProjectTemplate)
+        let checklists: [ChecklistItem] = chkMaps.compactMap(Self.parseChecklist)
+        let attachments: [RemoteAttachmentDelta] = attMaps.compactMap(Self.parseAttachment)
+        let projectTemplates: [ProjectTemplate] = tmplMaps.compactMap(Self.parseProjectTemplate)
 
         let now = Int64(Date().timeIntervalSince1970 * 1000.0)
         let maxAllowed = now + 60_000
@@ -1709,15 +1710,15 @@ public actor FirebaseCloudSyncService {
             appliedMax = try database.applyRemoteDeltas(batch)
         }
 
-        commitCollectionCursor("tags", maxRemoteUpdatedAt: tags.map(\.updatedAt).max())
-        commitCollectionCursor("areas", maxRemoteUpdatedAt: areas.map(\.updatedAt).max())
-        commitCollectionCursor("projects", maxRemoteUpdatedAt: projects.map(\.updatedAt).max())
-        commitCollectionCursor("headings", maxRemoteUpdatedAt: headings.map(\.updatedAt).max())
-        commitCollectionCursor("tasks", maxRemoteUpdatedAt: tasks.map(\.updatedAt).max())
-        commitCollectionCursor("checklist_items", maxRemoteUpdatedAt: checklists.map(\.updatedAt).max())
-        commitCollectionCursor("attachments", maxRemoteUpdatedAt: attachments.map(\.attachment.updatedAt).max())
+        commitCollectionCursor("tags", maxRemoteUpdatedAt: tags.map { $0.updatedAt }.max())
+        commitCollectionCursor("areas", maxRemoteUpdatedAt: areas.map { $0.updatedAt }.max())
+        commitCollectionCursor("projects", maxRemoteUpdatedAt: projects.map { $0.updatedAt }.max())
+        commitCollectionCursor("headings", maxRemoteUpdatedAt: headings.map { $0.updatedAt }.max())
+        commitCollectionCursor("tasks", maxRemoteUpdatedAt: tasks.map { $0.updatedAt }.max())
+        commitCollectionCursor("checklist_items", maxRemoteUpdatedAt: checklists.map { $0.updatedAt }.max())
+        commitCollectionCursor("attachments", maxRemoteUpdatedAt: attachments.map { $0.attachment.updatedAt }.max())
         if tmplResult.succeeded {
-            commitCollectionCursor("project_templates", maxRemoteUpdatedAt: projectTemplates.map(\.updatedAt).max())
+            commitCollectionCursor("project_templates", maxRemoteUpdatedAt: projectTemplates.map { $0.updatedAt }.max())
             if needsTmplBackfill {
                 UserDefaults.standard.set(true, forKey: tmplBackfillKey)
             }

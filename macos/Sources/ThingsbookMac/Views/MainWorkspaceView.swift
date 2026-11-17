@@ -10,9 +10,10 @@ public struct MainWorkspaceView: View {
     @ObservedObject var store: ThingsbookStore
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @State private var detailPaneWidth: CGFloat = 877
-    @State private var windowContentWidth: CGFloat = 1140
-    @State private var liveSidebarFrameWidth: CGFloat = 262
+    @State private var geoDetailWidth: CGFloat = 0
+    @State private var splitDetailWidth: CGFloat = 0
+    @State private var windowContentWidth: CGFloat = 0
+    @State private var liveSidebarFrameWidth: CGFloat = 0
     @State private var isMagicPlusMenuOpen = false
     @State private var isMagicPlusHovered = false
     @State private var isMagicPlusPressed = false
@@ -29,8 +30,22 @@ public struct MainWorkspaceView: View {
     }
 
     private var effectiveDetailWidth: Double {
-        MacToolbarLayoutMetrics.clampedInitialOrLiveDetailWidth(
-            rawDetailWidth: Double(detailPaneWidth),
+        let preferredRaw: CGFloat
+        if geoDetailWidth > 300, splitDetailWidth > 300 {
+            // Prefer GeometryReader unless it is momentarily reporting the unsplit full window width
+            if windowContentWidth > 400, abs(geoDetailWidth - windowContentWidth) <= 12, splitDetailWidth < windowContentWidth - 100 {
+                preferredRaw = splitDetailWidth
+            } else {
+                preferredRaw = geoDetailWidth
+            }
+        } else if geoDetailWidth > 300 {
+            preferredRaw = geoDetailWidth
+        } else {
+            preferredRaw = splitDetailWidth
+        }
+
+        return MacToolbarLayoutMetrics.clampedInitialOrLiveDetailWidth(
+            rawDetailWidth: Double(preferredRaw),
             windowContentWidth: Double(windowContentWidth),
             sidebarFrameWidth: Double(liveSidebarFrameWidth),
             isSidebarCollapsed: columnVisibility == .detailOnly
@@ -50,21 +65,6 @@ public struct MainWorkspaceView: View {
             return false
         default:
             return !store.isLocked
-        }
-    }
-
-    private func applyMeasuredDetailWidth(_ rawWidth: CGFloat) {
-        guard rawWidth > 200 else { return }
-        let clamped = CGFloat(
-            MacToolbarLayoutMetrics.clampedInitialOrLiveDetailWidth(
-                rawDetailWidth: Double(rawWidth),
-                windowContentWidth: Double(windowContentWidth),
-                sidebarFrameWidth: Double(liveSidebarFrameWidth),
-                isSidebarCollapsed: columnVisibility == .detailOnly
-            )
-        )
-        if abs(clamped - detailPaneWidth) >= 1.5 {
-            detailPaneWidth = clamped
         }
     }
 
@@ -96,17 +96,15 @@ public struct MainWorkspaceView: View {
                     .background(
                         MacWindowTitlebarConfigurator(
                             targetToolbarWidth: CGFloat(toolbarMetrics.totalBarWidth)
-                        ) { winW, sidebarW, splitDetailW in
-                            if winW > 200, abs(winW - windowContentWidth) >= 1.5 {
+                        ) { winW, sidebarW, measuredDetailW in
+                            if winW > 300, abs(winW - windowContentWidth) >= 1.5 {
                                 windowContentWidth = winW
                             }
                             if sidebarW >= 0, abs(sidebarW - liveSidebarFrameWidth) >= 1.5 {
                                 liveSidebarFrameWidth = sidebarW
                             }
-                            if splitDetailW > 200 {
-                                applyMeasuredDetailWidth(splitDetailW)
-                            } else {
-                                applyMeasuredDetailWidth(detailPaneWidth)
+                            if measuredDetailW > 300, abs(measuredDetailW - splitDetailWidth) >= 1.5 {
+                                splitDetailWidth = measuredDetailW
                             }
                         }
                     )
@@ -118,7 +116,9 @@ public struct MainWorkspaceView: View {
                                     value: geo.size.width
                                 )
                                 .onChange(of: geo.size.width, initial: true) { _, newWidth in
-                                    applyMeasuredDetailWidth(newWidth)
+                                    if newWidth > 300, abs(newWidth - geoDetailWidth) >= 1.5 {
+                                        geoDetailWidth = newWidth
+                                    }
                                 }
                         }
                     )
@@ -144,10 +144,9 @@ public struct MainWorkspaceView: View {
                 }
                 .coordinateSpace(name: MacMagicPlusCoordinateSpace.name)
                 .onPreferenceChange(DetailPaneWidthPreferenceKey.self) { newWidth in
-                    applyMeasuredDetailWidth(newWidth)
-                }
-                .onChange(of: columnVisibility) { _, _ in
-                    applyMeasuredDetailWidth(detailPaneWidth)
+                    if newWidth > 300, abs(newWidth - geoDetailWidth) >= 1.5 {
+                        geoDetailWidth = newWidth
+                    }
                 }
                 .toolbarBackground(.hidden, for: .windowToolbar)
                 .toolbar {
@@ -830,10 +829,10 @@ public struct MainWorkspaceView: View {
     private func unifiedDetailToolbar(metrics: MacToolbarLayoutMetrics) -> some View {
         HStack(spacing: 0) {
             quickFindToolbarButton(metrics: metrics)
-            Color.clear
-                .frame(width: CGFloat(metrics.centerGap), height: 1)
+            Spacer(minLength: 8)
             detailToolbarActionsBar(metrics: metrics)
         }
+        .frame(width: CGFloat(metrics.totalBarWidth), height: CGFloat(metrics.buttonHeight))
         .fixedSize(horizontal: true, vertical: false)
     }
 
@@ -1098,7 +1097,7 @@ public struct MainWorkspaceView: View {
 }
 
 private struct DetailPaneWidthPreferenceKey: PreferenceKey {
-    static let defaultValue: CGFloat = 880
+    static let defaultValue: CGFloat = 0
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         let next = nextValue()
@@ -1356,20 +1355,34 @@ private struct MacWindowTitlebarConfigurator: NSViewRepresentable {
                 }
             }
 
-            let winContentW = window.contentLayoutRect.width > 0
-                ? window.contentLayoutRect.width
+            let frameContentW = window.contentRect(forFrameRect: window.frame).width
+            let winContentW = frameContentW > 300
+                ? frameContentW
                 : (window.contentView?.bounds.width ?? 0)
 
             var sidebarW: CGFloat = 0
-            var detailW: CGFloat = 0
-            if let splitView = locateWorkspaceSplitView(in: window) {
-                let subviews = splitView.subviews
-                if subviews.count >= 2 {
-                    let first = subviews[0]
-                    let last = subviews[subviews.count - 1]
-                    let isCollapsed = splitView.isSubviewCollapsed(first) || first.isHidden || first.frame.width < 20
-                    sidebarW = isCollapsed ? 0 : first.frame.width
-                    detailW = last.frame.width
+            var detailW: CGFloat = bounds.width
+            if let splitView = locateAncestorSplitView() {
+                // Walk up from `self` (mounted inside the `detail:` column) to find the exact
+                // direct child of `splitView` hosting the detail pane — immune to `subviews` z-order!
+                var detailPane: NSView? = self
+                while let parent = detailPane?.superview, parent !== splitView {
+                    detailPane = parent
+                }
+                if let detailPane, detailPane.superview === splitView {
+                    if detailPane.frame.width > 300 {
+                        detailW = detailPane.frame.width
+                    }
+                    let otherPanes = splitView.arrangedSubviews.filter { $0 !== detailPane }
+                    sidebarW = otherPanes
+                        .filter {
+                            !splitView.isSubviewCollapsed($0) &&
+                            !$0.isHidden &&
+                            $0.frame.width >= 20 &&
+                            $0.frame.width <= 420
+                        }
+                        .map(\.frame.width)
+                        .reduce(0, +)
                 }
             }
 
@@ -1377,7 +1390,7 @@ private struct MacWindowTitlebarConfigurator: NSViewRepresentable {
                 abs(sidebarW - lastReportedSidebarW) >= 1.5 ||
                 abs(detailW - lastReportedDetailW) >= 1.5
 
-            if geomChanged && winContentW > 200 {
+            if geomChanged && winContentW > 300 {
                 lastReportedWinW = winContentW
                 lastReportedSidebarW = sidebarW
                 lastReportedDetailW = detailW
@@ -1391,10 +1404,16 @@ private struct MacWindowTitlebarConfigurator: NSViewRepresentable {
             if forceToolbarRelayout || geomChanged || widthDelta >= 1.0 {
                 lastInvalidatedToolbarWidth = targetToolbarWidth
                 invalidateToolbarLayout(in: window)
+                // Also re-invalidate on the next runloop turn after SwiftUI commits the updated
+                // `unifiedDetailToolbar` NSHostingView intrinsicContentSize!
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, let win = self.window else { return }
+                    self.invalidateToolbarLayout(in: win)
+                }
             }
         }
 
-        private func locateWorkspaceSplitView(in window: NSWindow) -> NSSplitView? {
+        private func locateAncestorSplitView() -> NSSplitView? {
             var ancestor: NSView? = superview
             while let current = ancestor {
                 if let sv = current as? NSSplitView, sv.isVertical {
@@ -1402,24 +1421,11 @@ private struct MacWindowTitlebarConfigurator: NSViewRepresentable {
                 }
                 ancestor = current.superview
             }
-            guard let root = window.contentView else { return nil }
-            return findVerticalSplitView(in: root, maxDepth: 6)
-        }
-
-        private func findVerticalSplitView(in view: NSView, maxDepth: Int) -> NSSplitView? {
-            if let sv = view as? NSSplitView, sv.isVertical {
-                return sv
-            }
-            guard maxDepth > 0 else { return nil }
-            for child in view.subviews {
-                if let found = findVerticalSplitView(in: child, maxDepth: maxDepth - 1) {
-                    return found
-                }
-            }
             return nil
         }
 
         private func invalidateToolbarLayout(in window: NSWindow) {
+            window.toolbar?.validateVisibleItems()
             guard let items = window.toolbar?.items else { return }
             for item in items {
                 guard let itemView = item.view else { continue }

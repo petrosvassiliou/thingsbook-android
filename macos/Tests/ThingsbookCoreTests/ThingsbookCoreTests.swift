@@ -190,7 +190,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.17"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.18"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -408,9 +408,9 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.17")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.17")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 61)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.18")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.18")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 62)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
         XCTAssertEqual(
             FirebaseCloudSyncService.deriveUidWakeTopic(uid: " user-abc-123 "),
@@ -449,6 +449,7 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.15", current: "2.0.0-beta.14"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.16", current: "2.0.0-beta.15"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.17", current: "2.0.0-beta.16"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.18", current: "2.0.0-beta.17"))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.9", current: "2.0.0-beta.10"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.1"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.99"))
@@ -1761,21 +1762,21 @@ final class ThingsbookCoreTests: XCTestCase {
 
     func testMacToolbarLayoutMetricsSpacingAndNoOverflowAcrossWindowWidths() {
         // 1. Default 1140pt window minus 262pt sidebar = 878pt detail pane:
-        //    unified single-item toolbar containing 208pt Search Box + 50pt finite centerGap + 564pt grouped action bar = 822pt
+        //    unified single-item toolbar containing 208pt Search Box + 110pt finite centerGap + 504pt grouped action bar = 822pt
         let defaultMetrics = MacToolbarLayoutMetrics.compute(detailWidth: 878.0, isSidebarCollapsed: false)
         XCTAssertEqual(defaultMetrics.usableWidth, 822.0)
         XCTAssertEqual(defaultMetrics.searchWidth, 208.0)
-        XCTAssertEqual(defaultMetrics.buttonWidth, 33.0)
+        XCTAssertEqual(defaultMetrics.buttonWidth, 32.0)
         XCTAssertEqual(defaultMetrics.buttonHeight, 30.0)
-        XCTAssertEqual(defaultMetrics.syncButtonWidth, 41.0)
-        XCTAssertEqual(defaultMetrics.geminiPillMinWidth, 88.0)
-        XCTAssertEqual(defaultMetrics.itemSpacing, 10.0)
-        XCTAssertEqual(defaultMetrics.groupDividerPadding, 13.0)
+        XCTAssertEqual(defaultMetrics.syncButtonWidth, 40.0)
+        XCTAssertEqual(defaultMetrics.geminiPillMinWidth, 86.0)
+        XCTAssertEqual(defaultMetrics.itemSpacing, 6.0)
+        XCTAssertEqual(defaultMetrics.groupDividerPadding, 9.0)
         XCTAssertEqual(defaultMetrics.trailingActionsPadding, 4.0)
         XCTAssertTrue(defaultMetrics.showSearchShortcutBadge)
-        XCTAssertEqual(defaultMetrics.estimatedActionsBarWidth, 564.0)
-        XCTAssertEqual(defaultMetrics.estimatedTotalControlsWidth, 772.0)
-        XCTAssertEqual(defaultMetrics.centerGap, 50.0)
+        XCTAssertEqual(defaultMetrics.estimatedActionsBarWidth, 504.0)
+        XCTAssertEqual(defaultMetrics.estimatedTotalControlsWidth, 712.0)
+        XCTAssertEqual(defaultMetrics.centerGap, 110.0)
         XCTAssertEqual(defaultMetrics.totalBarWidth, 822.0)
         XCTAssertLessThanOrEqual(defaultMetrics.totalBarWidth, defaultMetrics.usableWidth)
 
@@ -1802,21 +1803,30 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertFalse(minMaxSidebarMetrics.showSearchShortcutBadge)
         XCTAssertLessThanOrEqual(minMaxSidebarMetrics.totalBarWidth, minMaxSidebarMetrics.usableWidth)
 
-        // 4. Wide / fullscreen 1280pt detail pane
+        // 4. 1024pt detail pane inside a 1286pt window (reproduces Project view screenshot — full Schnellsuche ⌘F + right-aligned icons)
+        let projectDetailMetrics = MacToolbarLayoutMetrics.compute(detailWidth: 1024.0, isSidebarCollapsed: false)
+        XCTAssertEqual(projectDetailMetrics.usableWidth, 968.0)
+        XCTAssertEqual(projectDetailMetrics.searchWidth, 228.0)
+        XCTAssertTrue(projectDetailMetrics.showSearchShortcutBadge)
+        XCTAssertEqual(projectDetailMetrics.estimatedActionsBarWidth, 529.0)
+        XCTAssertEqual(projectDetailMetrics.centerGap, 211.0)
+        XCTAssertEqual(projectDetailMetrics.totalBarWidth, 968.0)
+
+        // 5. Wide / fullscreen 1280pt detail pane
         let wideMetrics = MacToolbarLayoutMetrics.compute(detailWidth: 1280.0, isSidebarCollapsed: false)
         XCTAssertEqual(wideMetrics.usableWidth, 1224.0)
-        XCTAssertEqual(wideMetrics.searchWidth, 252.0)
-        XCTAssertEqual(wideMetrics.buttonWidth, 37.0)
-        XCTAssertEqual(wideMetrics.itemSpacing, 15.0)
-        XCTAssertEqual(wideMetrics.groupDividerPadding, 18.0)
+        XCTAssertEqual(wideMetrics.searchWidth, 240.0)
+        XCTAssertEqual(wideMetrics.buttonWidth, 34.0)
+        XCTAssertEqual(wideMetrics.itemSpacing, 8.0)
+        XCTAssertEqual(wideMetrics.groupDividerPadding, 11.0)
         XCTAssertTrue(wideMetrics.showSearchShortcutBadge)
-        XCTAssertEqual(wideMetrics.estimatedActionsBarWidth, 669.0)
-        XCTAssertEqual(wideMetrics.estimatedTotalControlsWidth, 921.0)
-        XCTAssertEqual(wideMetrics.centerGap, 303.0)
+        XCTAssertEqual(wideMetrics.estimatedActionsBarWidth, 552.0)
+        XCTAssertEqual(wideMetrics.estimatedTotalControlsWidth, 792.0)
+        XCTAssertEqual(wideMetrics.centerGap, 432.0)
         XCTAssertEqual(wideMetrics.totalBarWidth, 1224.0)
         XCTAssertLessThanOrEqual(wideMetrics.totalBarWidth, wideMetrics.usableWidth)
 
-        // 5. Continuous sweep across all window widths and collapsed-sidebar states guarantees Search Box >= 126pt & zero NSToolbar overflow
+        // 6. Continuous sweep across all window widths and collapsed-sidebar states guarantees Search Box >= 126pt & zero NSToolbar overflow
         for collapsed in [false, true] {
             var width = 540.0
             while width <= 1600.0 {
@@ -2300,22 +2310,39 @@ final class ThingsbookCoreTests: XCTestCase {
     }
 
     func testBeta17ToolbarClampingMagicPlusDropAndCalendarGrid() throws {
-        // 1. Initial-launch toolbar misalignment guard: unsplit 1140pt GeometryReader width is clamped when sidebar is open
+        // 1. Initial-launch toolbar misalignment guard: unsplit full-window GeometryReader width is clamped when sidebar is open,
+        //    while already-split detail widths (and hostile z-order sidebar inputs) are preserved untouched!
         let clampedColdLaunch = MacToolbarLayoutMetrics.clampedInitialOrLiveDetailWidth(
             rawDetailWidth: 1140.0,
             windowContentWidth: 1140.0,
             sidebarFrameWidth: 0.0,
             isSidebarCollapsed: false
         )
-        XCTAssertEqual(clampedColdLaunch, 877.0, accuracy: 0.01)
+        XCTAssertEqual(clampedColdLaunch, 878.0, accuracy: 0.01)
 
-        let clampedLiveSplit = MacToolbarLayoutMetrics.clampedInitialOrLiveDetailWidth(
-            rawDetailWidth: 1140.0,
-            windowContentWidth: 1200.0,
-            sidebarFrameWidth: 270.0,
+        let clampedWideColdLaunch = MacToolbarLayoutMetrics.clampedInitialOrLiveDetailWidth(
+            rawDetailWidth: 1286.0,
+            windowContentWidth: 1286.0,
+            sidebarFrameWidth: 262.0,
             isSidebarCollapsed: false
         )
-        XCTAssertEqual(clampedLiveSplit, 929.0, accuracy: 0.01)
+        XCTAssertEqual(clampedWideColdLaunch, 1024.0, accuracy: 0.01)
+
+        let liveSplitPreserved = MacToolbarLayoutMetrics.clampedInitialOrLiveDetailWidth(
+            rawDetailWidth: 1024.0,
+            windowContentWidth: 1286.0,
+            sidebarFrameWidth: 262.0,
+            isSidebarCollapsed: false
+        )
+        XCTAssertEqual(liveSplitPreserved, 1024.0, accuracy: 0.01)
+
+        let zOrderSwappedSidebarImmune = MacToolbarLayoutMetrics.clampedInitialOrLiveDetailWidth(
+            rawDetailWidth: 1024.0,
+            windowContentWidth: 1286.0,
+            sidebarFrameWidth: 1024.0,
+            isSidebarCollapsed: false
+        )
+        XCTAssertEqual(zOrderSwappedSidebarImmune, 1024.0, accuracy: 0.01)
 
         let collapsedFullWidth = MacToolbarLayoutMetrics.clampedInitialOrLiveDetailWidth(
             rawDetailWidth: 1140.0,

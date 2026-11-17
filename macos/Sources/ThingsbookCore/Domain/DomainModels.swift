@@ -1741,18 +1741,18 @@ public struct MacToolbarLayoutMetrics: Equatable, Sendable {
             // Standard tier up to default 1140pt window / 878pt detail pane (562pt..822pt usable)
             let t = (usable - 562.0) / 260.0
             rawSearchW = lerp(144.0, 208.0, t)
-            rawBtnW = lerp(27.0, 33.0, t)
-            rawGeminiMinW = lerp(78.0, 88.0, t)
-            rawSpacing = lerp(3.0, 10.0, t)
-            rawDivPad = lerp(5.0, 13.0, t)
+            rawBtnW = lerp(27.0, 32.0, t)
+            rawGeminiMinW = lerp(78.0, 86.0, t)
+            rawSpacing = lerp(3.0, 6.0, t)
+            rawDivPad = lerp(5.0, 9.0, t)
         } else {
             // Wide & fullscreen tier (822pt..1050pt+ usable)
             let u = min(1.0, (usable - 822.0) / 228.0)
-            rawSearchW = lerp(208.0, 252.0, u)
-            rawBtnW = lerp(33.0, 37.0, u)
-            rawGeminiMinW = lerp(88.0, 93.0, u)
-            rawSpacing = lerp(10.0, 15.0, u)
-            rawDivPad = lerp(13.0, 18.0, u)
+            rawSearchW = lerp(208.0, 240.0, u)
+            rawBtnW = lerp(32.0, 34.0, u)
+            rawGeminiMinW = lerp(86.0, 90.0, u)
+            rawSpacing = lerp(6.0, 8.0, u)
+            rawDivPad = lerp(9.0, 11.0, u)
         }
 
         let roundRule: FloatingPointRoundingRule = usable < 590.0 ? .down : .toNearestOrAwayFromZero
@@ -2144,30 +2144,52 @@ public struct TooltipTimingCoordinator: Sendable, Equatable {
 
 public extension MacToolbarLayoutMetrics {
     /// Prevents initial-launch toolbar misalignment where SwiftUI's `GeometryReader` momentarily
-    /// reports the full unsplit window width (e.g. `1140pt`) before `NSSplitView` subtracts the
-    /// open sidebar (`~262pt`), which previously pushed the Quick Find search box into the sidebar.
+    /// reports the full unsplit window width (e.g. `1140pt` or `1286pt`) before `NSSplitView`
+    /// subtracts the open sidebar (`232pt..330pt`), without ever shrinking an already-split detail width.
     static func clampedInitialOrLiveDetailWidth(
         rawDetailWidth: Double,
         windowContentWidth: Double,
         sidebarFrameWidth: Double,
         isSidebarCollapsed: Bool,
         idealSidebarWidth: Double = 262.0,
-        minSidebarWidth: Double = 232.0
+        minSidebarWidth: Double = 232.0,
+        maxSidebarWidth: Double = 330.0
     ) -> Double {
-        let safeWindowW = windowContentWidth > 200.0 ? windowContentWidth : 1140.0
-        if isSidebarCollapsed {
-            let candidate = rawDetailWidth > 200.0 ? rawDetailWidth : safeWindowW
-            return max(420.0, min(candidate, safeWindowW))
+        let minDetailW = 550.0
+
+        let validSidebarW: Double
+        if sidebarFrameWidth >= (minSidebarWidth - 12.0) && sidebarFrameWidth <= (maxSidebarWidth + 40.0) {
+            validSidebarW = sidebarFrameWidth
+        } else {
+            validSidebarW = idealSidebarWidth
         }
 
-        let effectiveSidebarW = sidebarFrameWidth >= (minSidebarWidth - 12.0)
-            ? sidebarFrameWidth
-            : idealSidebarWidth
-        let maxAllowedDetailW = max(420.0, safeWindowW - effectiveSidebarW - 1.0)
-        if rawDetailWidth <= 200.0 {
-            return maxAllowedDetailW
+        guard rawDetailWidth.isFinite, rawDetailWidth > 300.0 else {
+            if windowContentWidth.isFinite, windowContentWidth > 400.0 {
+                return isSidebarCollapsed
+                    ? max(minDetailW, windowContentWidth)
+                    : max(minDetailW, windowContentWidth - validSidebarW)
+            }
+            return 878.0
         }
-        return max(420.0, min(rawDetailWidth, maxAllowedDetailW))
+
+        if isSidebarCollapsed {
+            return max(minDetailW, rawDetailWidth)
+        }
+
+        if windowContentWidth.isFinite, windowContentWidth > 400.0 {
+            // Only subtract the sidebar when `rawDetailWidth` equals the unsplit full window width!
+            if abs(rawDetailWidth - windowContentWidth) <= 12.0 {
+                return max(minDetailW, windowContentWidth - validSidebarW)
+            }
+            return max(minDetailW, rawDetailWidth)
+        }
+
+        // Before NSWindow attaches on frame 0, guard the default 1140pt unsplit launch pass
+        if abs(rawDetailWidth - 1140.0) <= 2.0 {
+            return max(minDetailW, 1140.0 - validSidebarW)
+        }
+        return max(minDetailW, rawDetailWidth)
     }
 }
 

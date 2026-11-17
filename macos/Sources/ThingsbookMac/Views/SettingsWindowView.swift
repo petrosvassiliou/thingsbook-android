@@ -37,59 +37,75 @@ public struct SettingsWindowView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            if showCloseButton {
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(store.tr("settings_title"))
-                            .font(.system(size: 16, weight: .bold))
-                        Text(store.tr("settings_subtitle"))
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                if showCloseButton {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(store.tr("settings_title"))
+                                .font(.system(size: 16, weight: .bold))
+                            Text(store.tr("settings_subtitle"))
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 18))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .thingsTooltip(store.tr("settings_close_tooltip"))
                     }
-                    Spacer()
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 18))
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .thingsTooltip(store.tr("settings_close_tooltip"))
+                    .padding(.horizontal, 20)
+                    .padding(.top, 14)
+                    .padding(.bottom, 6)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
-                .padding(.bottom, 8)
+
+                HStack(spacing: CGFloat(MacSettingsTabLayoutMetrics.interTabSpacing)) {
+                    ForEach(SettingsSectionTab.allCases) { tab in
+                        SettingsToolbarTabButton(
+                            title: tabTitle(for: tab),
+                            systemImage: tabSystemImage(for: tab),
+                            isSelected: store.settingsTab == tab
+                        ) {
+                            store.settingsTab = tab
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, CGFloat(MacSettingsTabLayoutMetrics.horizontalOuterPadding))
+                .padding(.top, showCloseButton ? 4 : 10)
+                .padding(.bottom, 10)
             }
+            .background(ThingsMacPalette.cardSurface)
 
-            TabView(selection: $store.settingsTab) {
-                generalTab
-                    .tabItem { Label(store.tr("macos_tab_general"), systemImage: "gearshape") }
-                    .tag(SettingsSectionTab.general)
+            Divider()
 
-                syncTab
-                    .tabItem { Label(store.tr("macos_tab_sync"), systemImage: "icloud") }
-                    .tag(SettingsSectionTab.sync)
-
-                calendarTab
-                    .tabItem { Label(store.tr("macos_tab_calendar"), systemImage: "calendar") }
-                    .tag(SettingsSectionTab.calendar)
-
-                notificationsTab
-                    .tabItem { Label(store.tr("macos_tab_notifications"), systemImage: "bell.badge") }
-                    .tag(SettingsSectionTab.notifications)
-
-                backupTab
-                    .tabItem { Label(store.tr("macos_tab_backup"), systemImage: "externaldrive.badge.timemachine") }
-                    .tag(SettingsSectionTab.backup)
-
-                aboutTab
-                    .tabItem { Label(store.tr("macos_tab_updates"), systemImage: "arrow.triangle.2.circlepath.circle") }
-                    .tag(SettingsSectionTab.about)
+            Group {
+                switch store.settingsTab {
+                case .general:
+                    generalTab
+                case .sync:
+                    syncTab
+                case .calendar:
+                    calendarTab
+                case .notifications:
+                    notificationsTab
+                case .backup:
+                    backupTab
+                case .about:
+                    aboutTab
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(16)
         }
-        .frame(width: 680, height: 540)
+        .frame(
+            width: CGFloat(MacSettingsTabLayoutMetrics.recommendedWindowWidth),
+            height: CGFloat(MacSettingsTabLayoutMetrics.recommendedWindowHeight)
+        )
         .background(ThingsMacPalette.canvasBackground)
         .onAppear {
             let active = FirebaseConfig.loadActive()
@@ -102,6 +118,28 @@ public struct SettingsWindowView: View {
             if store.preferences.calendarEventsEnabled {
                 store.availableCalendars = AppleCalendarService.shared.listCalendars()
             }
+        }
+    }
+
+    private func tabTitle(for tab: SettingsSectionTab) -> String {
+        switch tab {
+        case .general: return store.tr("macos_tab_general")
+        case .sync: return store.tr("macos_tab_sync")
+        case .calendar: return store.tr("macos_tab_calendar")
+        case .notifications: return store.tr("macos_tab_notifications")
+        case .backup: return store.tr("macos_tab_backup")
+        case .about: return store.tr("macos_tab_updates")
+        }
+    }
+
+    private func tabSystemImage(for tab: SettingsSectionTab) -> String {
+        switch tab {
+        case .general: return "gearshape"
+        case .sync: return "icloud"
+        case .calendar: return "calendar"
+        case .notifications: return "bell.badge"
+        case .backup: return "externaldrive.badge.timemachine"
+        case .about: return "arrow.triangle.2.circlepath.circle"
         }
     }
 
@@ -1214,5 +1252,67 @@ public struct SettingsWindowView: View {
             Spacer()
         }
         .padding(6)
+    }
+}
+
+private struct SettingsToolbarTabButton: View {
+    let title: String
+    let systemImage: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: systemImage)
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.system(size: 18, weight: isSelected ? .semibold : .regular))
+                    .frame(height: 22)
+                    .foregroundStyle(
+                        isSelected
+                            ? ThingsMacPalette.accentBlue
+                            : (isHovering ? Color.primary.opacity(0.85) : Color.secondary)
+                    )
+
+                Text(title)
+                    .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .foregroundStyle(
+                        isSelected
+                            ? ThingsMacPalette.accentBlue
+                            : (isHovering ? Color.primary : Color.secondary)
+                    )
+            }
+            .padding(.horizontal, CGFloat(MacSettingsTabLayoutMetrics.tabHorizontalPadding))
+            .padding(.vertical, 7)
+            .frame(minWidth: CGFloat(MacSettingsTabLayoutMetrics.minTabWidth))
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? ThingsMacPalette.accentBlue.opacity(0.13)
+                            : (isHovering ? Color.primary.opacity(0.055) : Color.clear)
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(
+                        isSelected
+                            ? ThingsMacPalette.accentBlue.opacity(0.28)
+                            : Color.clear,
+                        lineWidth: 1
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

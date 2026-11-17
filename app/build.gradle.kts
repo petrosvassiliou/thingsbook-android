@@ -17,8 +17,8 @@ android {
         applicationId = "com.culturedcode.things3"
         minSdk = 26
         targetSdk = 35
-        versionCode = 66
-        versionName = "2.0.0-beta.22"
+        versionCode = 67
+        versionName = "2.0.0-beta.23"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

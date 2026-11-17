@@ -190,7 +190,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.22"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.23"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -408,9 +408,9 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.22")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.22")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 66)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.23")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.23")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 67)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
         XCTAssertEqual(
             FirebaseCloudSyncService.deriveUidWakeTopic(uid: " user-abc-123 "),
@@ -454,6 +454,7 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.20", current: "2.0.0-beta.19"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.21", current: "2.0.0-beta.20"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.22", current: "2.0.0-beta.21"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.23", current: "2.0.0-beta.22"))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.9", current: "2.0.0-beta.10"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.1"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.99"))
@@ -2913,4 +2914,37 @@ final class ThingsbookCoreTests: XCTestCase {
             XCTAssertNil(obj["wakeOnly"], "Legacy tb_sync_* chunk must never emit wakeOnly")
         }
     }
+
+    // MARK: - 22. v2.0.0-beta.23 macOS Settings Icon+Label Toolbar Layout Metrics Across All 5 Languages
+
+    func testMacSettingsTabLayoutMetricsNoTruncationAcrossAllFiveLanguagesV200Beta23() {
+        let langs: [AppLanguage] = [.en, .de, .fr, .it, .es]
+        for lang in langs {
+            let titles = [
+                ThingsStrings.shared.text("macos_tab_general", lang: lang),
+                ThingsStrings.shared.text("macos_tab_sync", lang: lang),
+                ThingsStrings.shared.text("macos_tab_calendar", lang: lang),
+                ThingsStrings.shared.text("macos_tab_notifications", lang: lang),
+                ThingsStrings.shared.text("macos_tab_backup", lang: lang),
+                ThingsStrings.shared.text("macos_tab_updates", lang: lang)
+            ]
+            XCTAssertEqual(titles.count, 6)
+            for title in titles {
+                XCTAssertFalse(title.isEmpty)
+                XCTAssertGreaterThanOrEqual(
+                    MacSettingsTabLayoutMetrics.estimatedTabWidth(forTitle: title),
+                    MacSettingsTabLayoutMetrics.minTabWidth
+                )
+            }
+            let totalWidth = MacSettingsTabLayoutMetrics.totalTabBarWidth(forTitles: titles)
+            XCTAssertTrue(
+                MacSettingsTabLayoutMetrics.fitsWithoutTruncation(
+                    titles: titles,
+                    inWindowWidth: MacSettingsTabLayoutMetrics.recommendedWindowWidth
+                ),
+                "All 6 Settings tabs in [\(lang.rawValue)] (\(titles.joined(separator: " | "))) must fit without truncation inside \(MacSettingsTabLayoutMetrics.recommendedWindowWidth)pt (got \(totalWidth)pt)"
+            )
+        }
+    }
 }
+

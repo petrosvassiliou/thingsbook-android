@@ -125,6 +125,7 @@ public struct ThingsbookMacApp: App {
         Settings {
             SettingsWindowView(store: store, showCloseButton: false)
         }
+        .windowResizability(.contentSize)
 
         MenuBarExtra {
             if store.isLocked {

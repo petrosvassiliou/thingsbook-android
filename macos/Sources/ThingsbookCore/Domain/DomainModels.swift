@@ -2600,5 +2600,41 @@ public struct MacCalendarMonthGrid: Equatable, Sendable {
     }
 }
 
+// MARK: - macOS Settings Toolbar Tab Layout Metrics
+
+public enum MacSettingsTabLayoutMetrics {
+    public static let recommendedWindowWidth: Double = 760.0
+    public static let recommendedWindowHeight: Double = 560.0
+    public static let horizontalOuterPadding: Double = 16.0
+    public static let interTabSpacing: Double = 6.0
+    public static let tabHorizontalPadding: Double = 12.0
+    public static let minTabWidth: Double = 78.0
+    public static let estimatedPointsPerCharacter: Double = 6.9
+
+    /// Estimates the intrinsic untruncated width of a single macOS Settings icon+label tab item.
+    public static func estimatedTabWidth(forTitle title: String) -> Double {
+        let glyphCount = Double(title.count)
+        let textWidth = glyphCount * estimatedPointsPerCharacter
+        return max(minTabWidth, ceil(textWidth + tabHorizontalPadding * 2.0))
+    }
+
+    /// Computes the total horizontal width required to render all Settings tabs side-by-side without truncation.
+    public static func totalTabBarWidth(forTitles titles: [String]) -> Double {
+        guard !titles.isEmpty else { return 0.0 }
+        let sumWidths = titles.reduce(0.0) { $0 + estimatedTabWidth(forTitle: $1) }
+        let gaps = Double(max(0, titles.count - 1)) * interTabSpacing
+        return sumWidths + gaps + horizontalOuterPadding * 2.0
+    }
+
+    /// Verifies that all localized Settings tab titles fit inside `windowWidth` without truncation or clipping.
+    public static func fitsWithoutTruncation(
+        titles: [String],
+        inWindowWidth windowWidth: Double = recommendedWindowWidth
+    ) -> Bool {
+        guard windowWidth.isFinite, windowWidth > 0 else { return false }
+        return totalTabBarWidth(forTitles: titles) <= windowWidth
+    }
+}
+
 
 

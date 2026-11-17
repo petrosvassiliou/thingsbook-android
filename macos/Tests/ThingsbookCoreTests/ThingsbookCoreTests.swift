@@ -2667,7 +2667,7 @@ final class ThingsbookCoreTests: XCTestCase {
     func testCloudSyncV18ParityRecurringCialisDedupAndTagRemapV200Beta22() throws {
         let db = try ThingsSQLiteDatabase(path: ":memory:")
         let dailyRule = RecurrenceRule(mode: .fixedSchedule, interval: 1, unit: .days)
-        let baseNow: Int64 = 1_763_400_000_000
+        let baseNow = Int64(Date().timeIntervalSince1970 * 1000)
 
         // 1. Deterministic duplicate-tag reconciliation ("Gesundheit" created independently on two devices)
         //    Older (createdAt, id) wins without violating SQLite partial unique index idx_tags_title_active,
@@ -2789,7 +2789,7 @@ final class ThingsbookCoreTests: XCTestCase {
             recurrenceRule: dailyRule,
             sortOrder: 100.0,
             createdAt: survivingCialis.createdAt,
-            updatedAt: baseNow + 10_000
+            updatedAt: survivingCialis.updatedAt + 5_000
         )
         _ = try db.applyRemoteDeltas(
             RemoteDeltaBatch(
@@ -2805,7 +2805,7 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(afterV18Edit.durationMinutes, 15)
 
         var v20ExplicitClear = v18EditedCialis
-        v20ExplicitClear.updatedAt = baseNow + 20_000
+        v20ExplicitClear.updatedAt = afterV18Edit.updatedAt + 5_000
         _ = try db.applyRemoteDeltas(
             RemoteDeltaBatch(
                 tasks: [v20ExplicitClear],
@@ -2837,7 +2837,7 @@ final class ThingsbookCoreTests: XCTestCase {
         resurrectedByV18Rollover.status = .open
         resurrectedByV18Rollover.completedAt = nil
         resurrectedByV18Rollover.whenDate = baseNow + 86_400_000
-        resurrectedByV18Rollover.updatedAt = baseNow + 30_000
+        resurrectedByV18Rollover.updatedAt = afterV20Clear.updatedAt + 5_000
         _ = try db.applyRemoteDeltas(RemoteDeltaBatch(tasks: [resurrectedByV18Rollover]))
 
         snap = try db.loadWorkspaceSnapshot()

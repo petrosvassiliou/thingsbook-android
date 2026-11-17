@@ -624,6 +624,21 @@ fileprivate final class WeakTooltipAnchorEntry {
 }
 
 fileprivate final class ThingsTooltipBubbleNSView: NSView {
+    static let textFont: NSFont = .systemFont(ofSize: 11.5, weight: .medium)
+    static let horizontalPadding: CGFloat = 9.5
+    static let verticalPadding: CGFloat = 4.5
+    static let maxTextWidth: CGFloat = 300.0
+
+    var tooltipText: String = "" {
+        didSet {
+            if oldValue != tooltipText {
+                needsDisplay = true
+            }
+        }
+    }
+
+    override var isFlipped: Bool { true }
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
@@ -636,22 +651,94 @@ fileprivate final class ThingsTooltipBubbleNSView: NSView {
         nil
     }
 
+    static func measureBubbleSize(for text: String) -> NSSize {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return NSSize(width: 36.0, height: 23.0) }
+
+        let singleLineSize = (trimmed as NSString).size(withAttributes: [.font: textFont])
+        if ceil(singleLineSize.width) <= maxTextWidth {
+            let bubbleW = max(32.0, ceil(singleLineSize.width + horizontalPadding * 2.0))
+            let bubbleH = max(23.0, ceil(singleLineSize.height + verticalPadding * 2.0))
+            return NSSize(width: bubbleW, height: bubbleH)
+        }
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineBreakMode = .byWordWrapping
+        let wrappedRect = (trimmed as NSString).boundingRect(
+            with: NSSize(width: maxTextWidth, height: 160.0),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [
+                .font: textFont,
+                .paragraphStyle: paragraph
+            ]
+        )
+        let bubbleW = max(32.0, ceil(min(maxTextWidth, wrappedRect.width) + horizontalPadding * 2.0))
+        let bubbleH = max(23.0, ceil(wrappedRect.height + verticalPadding * 2.0))
+        return NSSize(width: bubbleW, height: bubbleH)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.375, dy: 0.375), xRadius: 6.0, yRadius: 6.0)
+        let textColor: NSColor
         if isDark {
             // Soft elevated slate matching Dark mode surface — never pitch black
             NSColor(srgbRed: 0.180, green: 0.196, blue: 0.239, alpha: 0.95).setFill()
             path.fill()
             NSColor.white.withAlphaComponent(0.11).setStroke()
+            textColor = NSColor(srgbRed: 0.855, green: 0.875, blue: 0.910, alpha: 1.0)
         } else {
             // Discreet warm-pearl surface with subtle hairline border
             NSColor(srgbRed: 0.969, green: 0.973, blue: 0.984, alpha: 0.95).setFill()
             path.fill()
             NSColor(srgbRed: 0.110, green: 0.118, blue: 0.141, alpha: 0.12).setStroke()
+            textColor = NSColor(srgbRed: 0.243, green: 0.267, blue: 0.314, alpha: 1.0)
         }
         path.lineWidth = 0.75
         path.stroke()
+
+        let trimmed = tooltipText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let singleAttrs: [NSAttributedString.Key: Any] = [
+            .font: Self.textFont,
+            .foregroundColor: textColor
+        ]
+        let singleLineSize = (trimmed as NSString).size(withAttributes: singleAttrs)
+        if ceil(singleLineSize.width) <= Self.maxTextWidth {
+            let drawOrigin = NSPoint(
+                x: (bounds.width - singleLineSize.width) / 2.0,
+                y: (bounds.height - singleLineSize.height) / 2.0
+            )
+            (trimmed as NSString).draw(at: drawOrigin, withAttributes: singleAttrs)
+        } else {
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+            paragraph.lineBreakMode = .byWordWrapping
+            let wrappedAttrs: [NSAttributedString.Key: Any] = [
+                .font: Self.textFont,
+                .foregroundColor: textColor,
+                .paragraphStyle: paragraph
+            ]
+            let availW = max(16.0, bounds.width - Self.horizontalPadding * 2.0)
+            let wrappedRect = (trimmed as NSString).boundingRect(
+                with: NSSize(width: availW, height: 160.0),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: wrappedAttrs
+            )
+            let drawRect = NSRect(
+                x: Self.horizontalPadding,
+                y: (bounds.height - wrappedRect.height) / 2.0,
+                width: availW,
+                height: ceil(wrappedRect.height) + 2.0
+            )
+            (trimmed as NSString).draw(
+                with: drawRect,
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: wrappedAttrs
+            )
+        }
     }
 }
 
@@ -667,7 +754,6 @@ public final class ThingsMacTooltipController {
 
     private var panel: NSPanel?
     private var bubbleView: ThingsTooltipBubbleNSView?
-    private var labelField: NSTextField?
 
     private init() {
         NotificationCenter.default.addObserver(
@@ -889,22 +975,9 @@ public final class ThingsMacTooltipController {
         p.collectionBehavior = [.transient, .ignoresCycle, .fullScreenAuxiliary]
 
         let bubble = ThingsTooltipBubbleNSView(frame: NSRect(x: 0, y: 0, width: 140, height: 24))
-        let tf = NSTextField(wrappingLabelWithString: "")
-        tf.font = .systemFont(ofSize: 11, weight: .regular)
-        tf.textColor = .secondaryLabelColor
-        tf.backgroundColor = .clear
-        tf.drawsBackground = false
-        tf.isBordered = false
-        tf.isEditable = false
-        tf.isSelectable = false
-        tf.maximumNumberOfLines = 3
-        tf.lineBreakMode = .byWordWrapping
-        bubble.addSubview(tf)
-
         p.contentView = bubble
         panel = p
         bubbleView = bubble
-        labelField = tf
     }
 
     private func presentPanel(
@@ -918,28 +991,13 @@ public final class ThingsMacTooltipController {
             return
         }
         ensurePanelCreated()
-        guard let panel, let bubbleView, let labelField else { return }
+        guard let panel, let bubbleView else { return }
 
         panel.appearance = anchorAppearance
-        let isDark = anchorAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        labelField.textColor = isDark
-            ? NSColor(srgbRed: 0.831, green: 0.851, blue: 0.886, alpha: 1.0)
-            : NSColor(srgbRed: 0.259, green: 0.282, blue: 0.329, alpha: 1.0)
 
-        let font = NSFont.systemFont(ofSize: 11, weight: .regular)
-        let maxTextWidth: CGFloat = 290
-        let measured = (text as NSString).boundingRect(
-            with: NSSize(width: maxTextWidth, height: 120),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: font]
-        )
-
-        let padH: CGFloat = 8.5
-        let padV: CGFloat = 4.0
-        let textW = ceil(min(maxTextWidth, max(16, measured.width + 2)))
-        let textH = ceil(max(14, measured.height + 1))
-        let bubbleW = textW + padH * 2
-        let bubbleH = textH + padV * 2
+        let bubbleSize = ThingsTooltipBubbleNSView.measureBubbleSize(for: text)
+        let bubbleW = bubbleSize.width
+        let bubbleH = bubbleSize.height
 
         let anchorCenter = NSPoint(x: anchorRect.midX, y: anchorRect.midY)
         let targetScreen = NSScreen.screens.first(where: { $0.frame.contains(anchorCenter) })
@@ -956,8 +1014,7 @@ public final class ThingsMacTooltipController {
         let maxX = max(minX, visibleFrame.maxX - bubbleW - 8)
         let originX = min(max(round(anchorRect.midX - bubbleW / 2.0), minX), maxX)
 
-        labelField.stringValue = text
-        labelField.frame = NSRect(x: padH, y: padV, width: textW, height: textH)
+        bubbleView.tooltipText = text
         bubbleView.frame = NSRect(x: 0, y: 0, width: bubbleW, height: bubbleH)
         bubbleView.needsDisplay = true
 

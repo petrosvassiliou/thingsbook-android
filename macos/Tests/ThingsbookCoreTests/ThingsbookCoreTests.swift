@@ -190,7 +190,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.19"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.20"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -408,9 +408,9 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.19")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.19")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 63)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.20")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.20")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 64)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
         XCTAssertEqual(
             FirebaseCloudSyncService.deriveUidWakeTopic(uid: " user-abc-123 "),
@@ -451,6 +451,7 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.17", current: "2.0.0-beta.16"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.18", current: "2.0.0-beta.17"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.19", current: "2.0.0-beta.18"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.20", current: "2.0.0-beta.19"))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.9", current: "2.0.0-beta.10"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.1"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.99"))
@@ -2623,5 +2624,39 @@ final class ThingsbookCoreTests: XCTestCase {
             upcomingOnly: true
         )
         XCTAssertEqual(tomorrowFiltered.map(\.id), ["ev-tomorrow"])
+    }
+
+    func testTopbarTooltipLocalizationKeysV200Beta20() {
+        let keys = [
+            "topbar_tooltip_hide_sidebar",
+            "topbar_tooltip_show_sidebar",
+            "topbar_tooltip_quick_find",
+            "topbar_tooltip_weekly_review",
+            "topbar_tooltip_templates",
+            "topbar_tooltip_quick_entry",
+            "topbar_tooltip_voice_input",
+            "topbar_tooltip_areas",
+            "topbar_tooltip_tags",
+            "topbar_tooltip_notifications",
+            "topbar_tooltip_language",
+            "topbar_tooltip_cloud_sync",
+            "topbar_tooltip_settings"
+        ]
+        for lang in [AppLanguage.en, .de, .fr, .it, .es] {
+            for key in keys {
+                let value = ThingsStrings.shared.text(key, lang: lang)
+                XCTAssertFalse(value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, "Blank \(key) in \(lang.rawValue)")
+                XCTAssertNotEqual(value, key, "Missing \(key) in \(lang.rawValue)")
+                XCTAssertFalse(value.contains("("), "Top-bar tooltip \(key) in \(lang.rawValue) must not contain shortcut clutter")
+                XCTAssertFalse(value.localizedCaseInsensitiveContains("Room"), "Top-bar tooltip \(key) must never expose Android Room DB text")
+            }
+        }
+        XCTAssertEqual(ThingsStrings.shared.text("topbar_tooltip_quick_entry", lang: .en), "Quick Entry")
+        XCTAssertEqual(ThingsStrings.shared.text("topbar_tooltip_quick_entry", lang: .de), "Schnelleingabe")
+        XCTAssertEqual(ThingsStrings.shared.text("topbar_tooltip_cloud_sync", lang: .en), "Cloud Sync")
+        XCTAssertEqual(ThingsStrings.shared.text("topbar_tooltip_cloud_sync", lang: .de), "Cloud-Sync")
+        XCTAssertEqual(ThingsStrings.shared.text("topbar_tooltip_templates", lang: .en), "Templates & Import")
+        XCTAssertEqual(ThingsStrings.shared.text("topbar_tooltip_areas", lang: .en), "Areas")
+        XCTAssertEqual(ThingsStrings.shared.text("topbar_tooltip_tags", lang: .en), "Tags")
     }
 }

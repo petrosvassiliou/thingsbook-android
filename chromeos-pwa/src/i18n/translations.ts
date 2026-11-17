@@ -337,6 +337,19 @@ export interface TranslationStrings {
   timelineUnscheduledDesc: string;
   timelineEmptyScheduled: string;
   actionFocusTimerMinutes: (mins: number) => string;
+  topbarTooltipHideSidebar: string;
+  topbarTooltipShowSidebar: string;
+  topbarTooltipQuickFind: string;
+  topbarTooltipWeeklyReview: string;
+  topbarTooltipTemplates: string;
+  topbarTooltipQuickEntry: string;
+  topbarTooltipVoiceInput: string;
+  topbarTooltipAreas: string;
+  topbarTooltipTags: string;
+  topbarTooltipNotifications: string;
+  topbarTooltipLanguage: string;
+  topbarTooltipCloudSync: string;
+  topbarTooltipSettings: string;
 }
 
 export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
@@ -694,7 +707,20 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     timelineUnscheduledDesc: 'Assign a time slot to place tasks onto your daily timeline.',
     timelineEmptyScheduled:
       'No calendar events or timeblocked tasks yet — pick a slot below to build your day.',
-    actionFocusTimerMinutes: (mins) => `Start Focus Timer (${mins}m)`
+    actionFocusTimerMinutes: (mins) => `Start Focus Timer (${mins}m)`,
+    topbarTooltipHideSidebar: 'Hide Sidebar',
+    topbarTooltipShowSidebar: 'Show Sidebar',
+    topbarTooltipQuickFind: 'Quick Find',
+    topbarTooltipWeeklyReview: 'Weekly Review',
+    topbarTooltipTemplates: 'Templates & Import',
+    topbarTooltipQuickEntry: 'Quick Entry',
+    topbarTooltipVoiceInput: 'Voice Input',
+    topbarTooltipAreas: 'Areas',
+    topbarTooltipTags: 'Tags',
+    topbarTooltipNotifications: 'Notifications',
+    topbarTooltipLanguage: 'Language',
+    topbarTooltipCloudSync: 'Cloud Sync',
+    topbarTooltipSettings: 'Settings'
   },
   de: {
     appName: 'Thingsbook',
@@ -1053,7 +1079,20 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     timelineUnscheduledDesc: 'Weise ein Zeitfenster zu, um Aufgaben auf der Tages-Zeitachse einzuplanen.',
     timelineEmptyScheduled:
       'Noch keine Termine oder Zeitblöcke — wähle unten ein Zeitfenster für deinen Tag.',
-    actionFocusTimerMinutes: (mins) => `Fokus-Timer starten (${mins}m)`
+    actionFocusTimerMinutes: (mins) => `Fokus-Timer starten (${mins}m)`,
+    topbarTooltipHideSidebar: 'Seitenleiste ausblenden',
+    topbarTooltipShowSidebar: 'Seitenleiste einblenden',
+    topbarTooltipQuickFind: 'Schnellsuche',
+    topbarTooltipWeeklyReview: 'Wochenrückblick',
+    topbarTooltipTemplates: 'Vorlagen & Import',
+    topbarTooltipQuickEntry: 'Schnelleingabe',
+    topbarTooltipVoiceInput: 'Spracheingabe',
+    topbarTooltipAreas: 'Bereiche',
+    topbarTooltipTags: 'Tags',
+    topbarTooltipNotifications: 'Benachrichtigungen',
+    topbarTooltipLanguage: 'Sprache',
+    topbarTooltipCloudSync: 'Cloud-Sync',
+    topbarTooltipSettings: 'Einstellungen'
   },
   fr: {
     appName: 'Thingsbook',
@@ -1410,7 +1449,20 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     timelineUnscheduledDesc: 'Attribuez un créneau pour placer vos tâches sur la chronologie du jour.',
     timelineEmptyScheduled:
       'Aucun événement ni créneau planifié — choisissez un horaire ci-dessous.',
-    actionFocusTimerMinutes: (mins) => `Démarrer le minuteur Focus (${mins}m)`
+    actionFocusTimerMinutes: (mins) => `Démarrer le minuteur Focus (${mins}m)`,
+    topbarTooltipHideSidebar: 'Masquer la barre latérale',
+    topbarTooltipShowSidebar: 'Afficher la barre latérale',
+    topbarTooltipQuickFind: 'Recherche rapide',
+    topbarTooltipWeeklyReview: 'Revue hebdomadaire',
+    topbarTooltipTemplates: 'Modèles et import',
+    topbarTooltipQuickEntry: 'Saisie rapide',
+    topbarTooltipVoiceInput: 'Dictée vocale',
+    topbarTooltipAreas: 'Domaines',
+    topbarTooltipTags: 'Tags',
+    topbarTooltipNotifications: 'Notifications',
+    topbarTooltipLanguage: 'Langue',
+    topbarTooltipCloudSync: 'Synchronisation Cloud',
+    topbarTooltipSettings: 'Paramètres'
   },
   it: {
     appName: 'Thingsbook',
@@ -1767,7 +1819,20 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     timelineUnscheduledDesc: 'Assegna una fascia oraria per inserire le attività nella timeline.',
     timelineEmptyScheduled:
       'Nessun evento o blocco orario pianificato — scegli uno slot qui sotto.',
-    actionFocusTimerMinutes: (mins) => `Avvia timer Focus (${mins}m)`
+    actionFocusTimerMinutes: (mins) => `Avvia timer Focus (${mins}m)`,
+    topbarTooltipHideSidebar: 'Nascondi barra laterale',
+    topbarTooltipShowSidebar: 'Mostra barra laterale',
+    topbarTooltipQuickFind: 'Ricerca rapida',
+    topbarTooltipWeeklyReview: 'Revisione settimanale',
+    topbarTooltipTemplates: 'Modelli e importazione',
+    topbarTooltipQuickEntry: 'Inserimento rapido',
+    topbarTooltipVoiceInput: 'Dettatura vocale',
+    topbarTooltipAreas: 'Aree',
+    topbarTooltipTags: 'Tag',
+    topbarTooltipNotifications: 'Notifiche',
+    topbarTooltipLanguage: 'Lingua',
+    topbarTooltipCloudSync: 'Sincronizzazione Cloud',
+    topbarTooltipSettings: 'Impostazioni'
   },
   es: {
     appName: 'Thingsbook',
@@ -2124,7 +2189,20 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     timelineUnscheduledDesc: 'Asigna una franja horaria para ubicar tareas en tu cronología diaria.',
     timelineEmptyScheduled:
       'Aún no hay eventos ni bloques horarios — elige una hora abajo para organizar tu día.',
-    actionFocusTimerMinutes: (mins) => `Iniciar temporizador Focus (${mins}m)`
+    actionFocusTimerMinutes: (mins) => `Iniciar temporizador Focus (${mins}m)`,
+    topbarTooltipHideSidebar: 'Ocultar barra lateral',
+    topbarTooltipShowSidebar: 'Mostrar barra lateral',
+    topbarTooltipQuickFind: 'Búsqueda rápida',
+    topbarTooltipWeeklyReview: 'Revisión semanal',
+    topbarTooltipTemplates: 'Plantillas e importación',
+    topbarTooltipQuickEntry: 'Entrada rápida',
+    topbarTooltipVoiceInput: 'Entrada por voz',
+    topbarTooltipAreas: 'Áreas',
+    topbarTooltipTags: 'Etiquetas',
+    topbarTooltipNotifications: 'Notificaciones',
+    topbarTooltipLanguage: 'Idioma',
+    topbarTooltipCloudSync: 'Sincronización Cloud',
+    topbarTooltipSettings: 'Ajustes'
   }
 };
 

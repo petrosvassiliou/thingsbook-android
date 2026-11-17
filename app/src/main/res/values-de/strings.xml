@@ -459,4 +459,17 @@
     <string name="search_filter_scope_tasks">Nur Aufgaben</string>
     <string name="search_filter_scope_projects">Nur Projekte</string>
     <string name="search_filter_reset">Filter zurücksetzen</string>
+    <string name="topbar_tooltip_hide_sidebar">Seitenleiste ausblenden</string>
+    <string name="topbar_tooltip_show_sidebar">Seitenleiste einblenden</string>
+    <string name="topbar_tooltip_quick_find">Schnellsuche</string>
+    <string name="topbar_tooltip_weekly_review">Wochenrückblick</string>
+    <string name="topbar_tooltip_templates">Vorlagen &amp; Import</string>
+    <string name="topbar_tooltip_quick_entry">Schnelleingabe</string>
+    <string name="topbar_tooltip_voice_input">Spracheingabe</string>
+    <string name="topbar_tooltip_areas">Bereiche</string>
+    <string name="topbar_tooltip_tags">Tags</string>
+    <string name="topbar_tooltip_notifications">Benachrichtigungen</string>
+    <string name="topbar_tooltip_language">Sprache</string>
+    <string name="topbar_tooltip_cloud_sync">Cloud-Sync</string>
+    <string name="topbar_tooltip_settings">Einstellungen</string>
 </resources>

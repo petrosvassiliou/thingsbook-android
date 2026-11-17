@@ -239,7 +239,11 @@ export const QuickShareModal: React.FC<{
           <div>
             <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Share2 size={18} style={{ color: 'var(--things-blue)' }} />
-              <span>{t.quickShareTitle}</span>
+              <span>
+                {draft.initialTitle || draft.initialNotes
+                  ? t.quickShareTitle
+                  : t.topbarTooltipQuickEntry}
+              </span>
             </h3>
             <div style={{ fontSize: 12.2, color: 'var(--text-secondary)', marginTop: 2 }}>
               {isListening ? `🎙️ ${t.voiceListeningHint}` : t.quickShareSubtitle}

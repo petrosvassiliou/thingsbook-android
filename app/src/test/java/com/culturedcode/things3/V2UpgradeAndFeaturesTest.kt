@@ -759,9 +759,9 @@ class V2UpgradeAndFeaturesTest {
     }
 
     @Test
-    fun `v2_0_0_beta_19 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
-        assertEquals(63, BuildConfig.VERSION_CODE)
-        assertEquals("2.0.0-beta.19", BuildConfig.VERSION_NAME)
+    fun `v2_0_0_beta_20 BuildConfig and all 5 localized strings_xml files verify project deletion prompt and topbar_tooltip keys`() {
+        assertEquals(64, BuildConfig.VERSION_CODE)
+        assertEquals("2.0.0-beta.20", BuildConfig.VERSION_NAME)
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -769,6 +769,21 @@ class V2UpgradeAndFeaturesTest {
         ).first { it.isDirectory }
 
         val folders = listOf("values", "values-de", "values-fr", "values-it", "values-es")
+        val requiredTopbarTooltipKeys = listOf(
+            "topbar_tooltip_hide_sidebar",
+            "topbar_tooltip_show_sidebar",
+            "topbar_tooltip_quick_find",
+            "topbar_tooltip_weekly_review",
+            "topbar_tooltip_templates",
+            "topbar_tooltip_quick_entry",
+            "topbar_tooltip_voice_input",
+            "topbar_tooltip_areas",
+            "topbar_tooltip_tags",
+            "topbar_tooltip_notifications",
+            "topbar_tooltip_language",
+            "topbar_tooltip_cloud_sync",
+            "topbar_tooltip_settings"
+        )
         var enMap: Map<String, String>? = null
 
         for (folder in folders) {
@@ -805,8 +820,21 @@ class V2UpgradeAndFeaturesTest {
             assertTrue(keepTasksBtn!!.isNotBlank())
             assertFalse(keepTasksBtn.contains("%"))
 
+            for (tooltipKey in requiredTopbarTooltipKeys) {
+                val tooltipVal = keysInFile[tooltipKey]
+                assertNotNull("Missing $tooltipKey in $folder/strings.xml", tooltipVal)
+                assertTrue("Blank $tooltipKey in $folder/strings.xml", tooltipVal!!.isNotBlank())
+                assertFalse("Top-bar tooltip $tooltipKey must not include shortcut clutter", tooltipVal.contains("("))
+                assertFalse("Top-bar tooltip $tooltipKey must not mention Room DB", tooltipVal.contains("Room", ignoreCase = true))
+            }
+
             if (folder == "values") {
                 enMap = keysInFile
+                assertEquals("Quick Entry", keysInFile["topbar_tooltip_quick_entry"])
+                assertEquals("Cloud Sync", keysInFile["topbar_tooltip_cloud_sync"])
+                assertEquals("Templates & Import", keysInFile["topbar_tooltip_templates"])
+                assertEquals("Areas", keysInFile["topbar_tooltip_areas"])
+                assertEquals("Tags", keysInFile["topbar_tooltip_tags"])
             } else {
                 val base = enMap!!
                 assertNotEquals(base["project_delete_prompt_title"], titleTemplate)

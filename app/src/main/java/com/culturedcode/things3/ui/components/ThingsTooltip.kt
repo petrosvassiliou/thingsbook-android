@@ -56,7 +56,9 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
@@ -468,6 +470,7 @@ private fun BoxScope.ThingsTooltipOverlayLayer(
             },
         content = {
             Box(
+                contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .shadow(
                         elevation = 2.dp,
@@ -483,15 +486,17 @@ private fun BoxScope.ThingsTooltipOverlayLayer(
                         color = bubbleStyle.borderColor,
                         shape = tooltipShape
                     )
-                    .padding(horizontal = 8.5.dp, vertical = 4.dp)
+                    .padding(horizontal = 9.5.dp, vertical = 4.5.dp)
             ) {
                 Text(
                     text = text,
+                    textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.labelSmall.copy(
-                        fontSize = 11.sp,
-                        lineHeight = 14.sp,
-                        fontWeight = FontWeight.Normal,
-                        letterSpacing = 0.1.sp
+                        fontSize = 11.5.sp,
+                        lineHeight = 14.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 0.08.sp,
+                        platformStyle = PlatformTextStyle(includeFontPadding = false)
                     ),
                     color = bubbleStyle.textColor,
                     maxLines = 2

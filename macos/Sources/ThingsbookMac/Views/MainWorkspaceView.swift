@@ -810,20 +810,6 @@ public struct MainWorkspaceView: View {
         }
     }
 
-    private var syncHelpText: String {
-        if store.preferences.localOnlyDbMode {
-            return store.tr("settings_local_mode_active")
-        }
-        if let err = store.syncSnapshot.errorMessage, !err.isEmpty {
-            return err
-        }
-        switch store.syncSnapshot.status {
-        case .synced: return store.tr("sync_status_synced")
-        case .syncing: return store.tr("sync_status_syncing")
-        case .offline: return store.tr("sync_status_offline")
-        }
-    }
-
     // MARK: - Adaptive Top Toolbar Controls
 
     private func unifiedDetailToolbar(metrics: MacToolbarLayoutMetrics) -> some View {
@@ -886,7 +872,7 @@ public struct MainWorkspaceView: View {
         .buttonStyle(.plain)
         .fixedSize(horizontal: true, vertical: false)
         .disabled(store.isLocked)
-        .thingsTooltip(store.tr("quick_find_title") + " (⌘F)")
+        .thingsTooltip(store.tr("topbar_tooltip_quick_find"))
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isQuickFindHovered = hovering
@@ -911,7 +897,7 @@ public struct MainWorkspaceView: View {
                     minWidth: CGFloat(metrics.geminiPillMinWidth),
                     height: btnH,
                     isDisabled: store.isLocked,
-                    helpText: store.tr("gemini_hub_title") + " (⌘G)"
+                    helpText: store.tr("gemini_hub_title")
                 ) {
                     guard !store.isLocked else { return }
                     store.geminiInitialTab = .brainDump
@@ -922,7 +908,7 @@ public struct MainWorkspaceView: View {
                     width: btnW,
                     height: btnH,
                     isDisabled: store.isLocked,
-                    helpText: store.tr("v2_weekly_review_title") + " (⇧⌘R)",
+                    helpText: store.tr("topbar_tooltip_weekly_review"),
                     action: {
                         guard !store.isLocked else { return }
                         store.isWeeklyReviewPresented = true
@@ -945,7 +931,7 @@ public struct MainWorkspaceView: View {
                     width: btnW,
                     height: btnH,
                     isDisabled: store.isLocked,
-                    helpText: store.tr("v2_templates_title")
+                    helpText: store.tr("topbar_tooltip_templates")
                 ) {
                     guard !store.isLocked else { return }
                     store.templatesInitialTab = .gallery
@@ -962,7 +948,7 @@ public struct MainWorkspaceView: View {
                     width: btnW,
                     height: btnH,
                     isDisabled: store.isLocked,
-                    helpText: store.tr("quick_share_title") + " (⇧⌘N)"
+                    helpText: store.tr("topbar_tooltip_quick_entry")
                 ) {
                     guard !store.isLocked else { return }
                     store.quickEntryPrefillTitle = ""
@@ -976,7 +962,7 @@ public struct MainWorkspaceView: View {
                     width: btnW,
                     height: btnH,
                     isDisabled: store.isLocked,
-                    helpText: store.tr("voice_capture_btn") + " (⌃⇧⌘V)"
+                    helpText: store.tr("topbar_tooltip_voice_input")
                 ) {
                     guard !store.isLocked else { return }
                     store.quickEntryPrefillTitle = ""
@@ -990,7 +976,7 @@ public struct MainWorkspaceView: View {
                     width: btnW,
                     height: btnH,
                     isDisabled: store.isLocked,
-                    helpText: store.tr("areas_manage_title")
+                    helpText: store.tr("topbar_tooltip_areas")
                 ) {
                     guard !store.isLocked else { return }
                     store.isAreaManagerPresented = true
@@ -1001,7 +987,7 @@ public struct MainWorkspaceView: View {
                     width: btnW,
                     height: btnH,
                     isDisabled: store.isLocked,
-                    helpText: store.tr("tags_manage_title")
+                    helpText: store.tr("topbar_tooltip_tags")
                 ) {
                     guard !store.isLocked else { return }
                     store.isTagManagerPresented = true
@@ -1018,7 +1004,7 @@ public struct MainWorkspaceView: View {
                     height: btnH,
                     isActive: store.preferences.dailyDigestEnabled,
                     isDisabled: store.isLocked,
-                    helpText: store.tr("notifications_title")
+                    helpText: store.tr("topbar_tooltip_notifications")
                 ) {
                     guard !store.isLocked else { return }
                     store.settingsTab = .notifications
@@ -1030,7 +1016,7 @@ public struct MainWorkspaceView: View {
                     height: btnH,
                     isActive: isLanguagePopoverOpen,
                     isDisabled: store.isLocked,
-                    helpText: store.tr("settings_language"),
+                    helpText: store.tr("topbar_tooltip_language"),
                     action: {
                         guard !store.isLocked else { return }
                         isLanguagePopoverOpen.toggle()
@@ -1052,7 +1038,7 @@ public struct MainWorkspaceView: View {
                     width: CGFloat(metrics.syncButtonWidth),
                     height: btnH,
                     isDisabled: store.isLocked,
-                    helpText: syncHelpText,
+                    helpText: store.tr("topbar_tooltip_cloud_sync"),
                     action: {
                         guard !store.isLocked else { return }
                         if !store.preferences.localOnlyDbMode && store.syncSnapshot.userEmailOrId != nil {
@@ -1076,7 +1062,7 @@ public struct MainWorkspaceView: View {
                     width: btnW,
                     height: btnH,
                     isDisabled: store.isLocked,
-                    helpText: store.tr("settings_title") + " (⌘,)"
+                    helpText: store.tr("topbar_tooltip_settings")
                 ) {
                     guard !store.isLocked else { return }
                     store.settingsTab = .general

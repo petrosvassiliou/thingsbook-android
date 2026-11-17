@@ -2092,7 +2092,7 @@ export const App: React.FC = () => {
                   setMobileDrawerOpen((v) => !v);
                 }
               }}
-              title={effectiveSidebarVisible ? t.sidebarHide : t.sidebarShow}
+              title={effectiveSidebarVisible ? t.topbarTooltipHideSidebar : t.topbarTooltipShowSidebar}
             >
               {effectiveSidebarVisible && isWideScreen ? (
                 <PanelLeftClose size={18} />
@@ -2118,7 +2118,7 @@ export const App: React.FC = () => {
             <button
               type="button"
               className={`topbar-pill ${quickFindOpen ? 'active' : ''}`}
-              title={`${t.quickFindTitle} (Ctrl+F)`}
+              title={t.topbarTooltipQuickFind}
               onClick={() => setQuickFindOpen((v) => !v)}
             >
               <Search size={14} />
@@ -2133,20 +2133,13 @@ export const App: React.FC = () => {
               type="button"
               className="topbar-pill"
               data-testid="topbar-weekly-review-btn"
-              title={`${t.weeklyReviewTitle} (Ctrl+Shift+R)`}
+              title={t.topbarTooltipWeeklyReview}
               onClick={() => setWeeklyReviewModal({ open: true, step: 1 })}
             >
               <ListChecks size={14} style={{ color: 'var(--things-blue)' }} />
               <span className="topbar-label-hide-sm">{t.weeklyReviewBtn}</span>
               {stalledProjects.length > 0 && (
-                <span
-                  className="v2-stalled-count-dot"
-                  title={
-                    stalledProjects.some((p) => p.status.reason === 'no_next_action')
-                      ? t.projectStalledBadge
-                      : t.projectRequiresReviewBadge
-                  }
-                >
+                <span className="v2-stalled-count-dot">
                   {stalledProjects.length}
                 </span>
               )}
@@ -2157,7 +2150,7 @@ export const App: React.FC = () => {
               type="button"
               className="icon-btn"
               data-testid="topbar-templates-btn"
-              title={t.templatesModalTitle}
+              title={t.topbarTooltipTemplates}
               onClick={() =>
                 setTemplatesModal({
                   open: true,
@@ -2174,7 +2167,7 @@ export const App: React.FC = () => {
               type="button"
               className="topbar-pill gemini-pill"
               onClick={() => setGeminiModalOpen(true)}
-              title={`${t.geminiHubTitle} (Ctrl+G)`}
+              title="Gemini"
             >
               <Sparkles size={14} />
               <span className="topbar-label-hide-sm">Gemini</span>
@@ -2185,7 +2178,7 @@ export const App: React.FC = () => {
               type="button"
               className="icon-btn"
               data-testid="topbar-voice-capture-btn"
-              title={t.voiceDictationLabel}
+              title={t.topbarTooltipVoiceInput}
               onClick={() =>
                 setQuickShareDraft({
                   initialTitle: '',
@@ -2197,12 +2190,12 @@ export const App: React.FC = () => {
               <Mic size={17} />
             </button>
 
-            {/* Quick Share / Save to Thingsbook Icon */}
+            {/* Quick Entry Icon */}
             <button
               type="button"
               className="icon-btn"
               data-testid="topbar-quick-share-btn"
-              title={t.quickShareTitle}
+              title={t.topbarTooltipQuickEntry}
               onClick={() => setQuickShareDraft({ initialTitle: '', initialNotes: '' })}
             >
               <Share2 size={17} />
@@ -2212,7 +2205,7 @@ export const App: React.FC = () => {
             <button
               type="button"
               className="icon-btn"
-              title={t.areasManageTitle}
+              title={t.topbarTooltipAreas}
               onClick={() => setAreaManagerOpen(true)}
             >
               <Package size={17} />
@@ -2222,7 +2215,7 @@ export const App: React.FC = () => {
             <button
               type="button"
               className="icon-btn"
-              title={t.tagsManageTitle}
+              title={t.topbarTooltipTags}
               onClick={() => setTagManagerOpen(true)}
             >
               <Tag size={17} />
@@ -2232,7 +2225,7 @@ export const App: React.FC = () => {
             <button
               type="button"
               className={`icon-btn ${prefs.dailyDigestEnabled ? 'active' : ''}`}
-              title={t.notificationsTitle}
+              title={t.topbarTooltipNotifications}
               onClick={() => setNotificationsModalOpen(true)}
             >
               <Bell size={17} />
@@ -2243,7 +2236,7 @@ export const App: React.FC = () => {
               <button
                 type="button"
                 className="icon-btn"
-                title={t.settingsLanguage}
+                title={t.topbarTooltipLanguage}
                 onClick={() => setLangDropdownOpen((v) => !v)}
               >
                 <Globe size={17} />
@@ -2288,13 +2281,7 @@ export const App: React.FC = () => {
             <button
               type="button"
               className="icon-btn sync-icon-btn"
-              title={
-                syncState.status === 'SYNCED'
-                  ? t.syncStatusSynced
-                  : syncState.status === 'SYNCING'
-                    ? t.syncStatusSyncing
-                    : t.syncStatusOffline
-              }
+              title={t.topbarTooltipCloudSync}
               onClick={() => setAuthModalOpen(true)}
             >
               <Cloud
@@ -2335,7 +2322,7 @@ export const App: React.FC = () => {
             <button
               type="button"
               className="icon-btn"
-              title={t.settingsTitle}
+              title={t.topbarTooltipSettings}
               onClick={() => setSettingsModalOpen(true)}
             >
               <Settings size={17.5} />

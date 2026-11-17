@@ -577,7 +577,12 @@ export const ThingsTooltipHost: React.FC = () => {
       setCoords(null);
       return;
     }
-    const bubbleRect = tooltipRef.current.getBoundingClientRect();
+    const el = tooltipRef.current;
+    // Reset fixed position to origin before measuring so a previous right-edge
+    // anchor coordinate never compresses natural width during warm handoff.
+    el.style.left = '0px';
+    el.style.top = '0px';
+    const bubbleRect = el.getBoundingClientRect();
     const pos = computeTooltipPosition(
       visibleTooltip.anchorRect,
       bubbleRect.width,
@@ -587,6 +592,8 @@ export const ThingsTooltipHost: React.FC = () => {
       8,
       8
     );
+    el.style.left = `${pos.left}px`;
+    el.style.top = `${pos.top}px`;
     setCoords({ left: pos.left, top: pos.top });
   }, [visibleTooltip]);
 

@@ -51,7 +51,7 @@ public struct QuickEntrySheetView: View {
             HStack {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(ThingsMacPalette.accentBlue)
-                Text(store.tr("quick_share_title"))
+                Text(store.tr("topbar_tooltip_quick_entry"))
                     .font(.system(size: 14.5, weight: .semibold))
                 Spacer()
                 if isMenuBarPopover {

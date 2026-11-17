@@ -459,4 +459,17 @@
     <string name="search_filter_scope_tasks">To-Dos only</string>
     <string name="search_filter_scope_projects">Projects only</string>
     <string name="search_filter_reset">Reset filters</string>
+    <string name="topbar_tooltip_hide_sidebar">Hide Sidebar</string>
+    <string name="topbar_tooltip_show_sidebar">Show Sidebar</string>
+    <string name="topbar_tooltip_quick_find">Quick Find</string>
+    <string name="topbar_tooltip_weekly_review">Weekly Review</string>
+    <string name="topbar_tooltip_templates">Templates &amp; Import</string>
+    <string name="topbar_tooltip_quick_entry">Quick Entry</string>
+    <string name="topbar_tooltip_voice_input">Voice Input</string>
+    <string name="topbar_tooltip_areas">Areas</string>
+    <string name="topbar_tooltip_tags">Tags</string>
+    <string name="topbar_tooltip_notifications">Notifications</string>
+    <string name="topbar_tooltip_language">Language</string>
+    <string name="topbar_tooltip_cloud_sync">Cloud Sync</string>
+    <string name="topbar_tooltip_settings">Settings</string>
 </resources>

@@ -3432,7 +3432,11 @@ private fun TopThingsbookBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(if (isWideScreen) 8.dp else 4.dp)
             ) {
-                val sidebarTooltip = if (isSidebarVisible) stringResource(R.string.sidebar_hide) else stringResource(R.string.sidebar_show)
+                val sidebarTooltip = if (isSidebarVisible) {
+                    stringResource(R.string.topbar_tooltip_hide_sidebar)
+                } else {
+                    stringResource(R.string.topbar_tooltip_show_sidebar)
+                }
                 ThingsHoverTooltip(
                     text = sidebarTooltip
                 ) {
@@ -3450,7 +3454,7 @@ private fun TopThingsbookBar(
                 }
 
                 if (showBrandSymbol) {
-                    ThingsHoverTooltip(text = "Thingsbook • ${stringResource(R.string.view_today)}") {
+                    ThingsHoverTooltip(text = stringResource(R.string.view_today)) {
                         ThingsbookBrandSymbol(
                             size = if (isWideScreen) 28.dp else 25.dp,
                             onClick = onSelectTodayView
@@ -3460,7 +3464,7 @@ private fun TopThingsbookBar(
 
                 // Quick Find Trigger (tooltip only when rendered as a compact icon on phones; wide screen shows visible label)
                 ThingsHoverTooltip(
-                    text = "${stringResource(R.string.quick_find_title)} (Ctrl+F)",
+                    text = stringResource(R.string.topbar_tooltip_quick_find),
                     enabled = !isWideScreen
                 ) {
                     Row(
@@ -3477,7 +3481,7 @@ private fun TopThingsbookBar(
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Search,
-                            contentDescription = stringResource(R.string.quick_find_title),
+                            contentDescription = stringResource(R.string.topbar_tooltip_quick_find),
                             tint = if (isQuickFindOpen) colors.thingsBlue else colors.secondaryText,
                             modifier = Modifier.size(16.dp)
                         )
@@ -3510,14 +3514,14 @@ private fun TopThingsbookBar(
                     horizontalArrangement = Arrangement.spacedBy(if (isWideScreen) 2.dp else 1.dp)
                 ) {
                     // Voice Quick Capture Button 🎙️
-                    ThingsHoverTooltip(text = stringResource(R.string.voice_capture_btn)) {
+                    ThingsHoverTooltip(text = stringResource(R.string.topbar_tooltip_voice_input)) {
                         IconButton(
                             onClick = onOpenVoiceCapture,
                             modifier = Modifier.size(iconButtonSize)
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.Mic,
-                                contentDescription = stringResource(R.string.voice_capture_btn),
+                                contentDescription = stringResource(R.string.topbar_tooltip_voice_input),
                                 tint = colors.thingsBlue,
                                 modifier = Modifier.size(iconGlyphSize)
                             )
@@ -3525,14 +3529,14 @@ private fun TopThingsbookBar(
                     }
 
                     // Guided GTD Weekly Review Button
-                    ThingsHoverTooltip(text = stringResource(R.string.v2_weekly_review_title)) {
+                    ThingsHoverTooltip(text = stringResource(R.string.topbar_tooltip_weekly_review)) {
                         IconButton(
                             onClick = onOpenWeeklyReview,
                             modifier = Modifier.size(iconButtonSize)
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.Checklist,
-                                contentDescription = stringResource(R.string.v2_weekly_review_title),
+                                contentDescription = stringResource(R.string.topbar_tooltip_weekly_review),
                                 tint = colors.thingsBlue,
                                 modifier = Modifier.size(iconGlyphSize)
                             )
@@ -3567,14 +3571,14 @@ private fun TopThingsbookBar(
                     }
 
                     // Areas Manager Button 📦 (Work, Home, max 8)
-                    ThingsHoverTooltip(text = stringResource(R.string.areas_manage_title)) {
+                    ThingsHoverTooltip(text = stringResource(R.string.topbar_tooltip_areas)) {
                         IconButton(
                             onClick = onOpenAreaManager,
                             modifier = Modifier.size(iconButtonSize)
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.Inventory2,
-                                contentDescription = stringResource(R.string.areas_manage_title),
+                                contentDescription = stringResource(R.string.topbar_tooltip_areas),
                                 tint = colors.anytimeTeal,
                                 modifier = Modifier.size(iconGlyphSize)
                             )
@@ -3582,14 +3586,14 @@ private fun TopThingsbookBar(
                     }
 
                     // Tag Management Button 🏷️
-                    ThingsHoverTooltip(text = stringResource(R.string.tags_manage_title)) {
+                    ThingsHoverTooltip(text = stringResource(R.string.topbar_tooltip_tags)) {
                         IconButton(
                             onClick = onOpenTagManager,
                             modifier = Modifier.size(iconButtonSize)
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.LocalOffer,
-                                contentDescription = stringResource(R.string.tags_manage_title),
+                                contentDescription = stringResource(R.string.topbar_tooltip_tags),
                                 tint = colors.secondaryText,
                                 modifier = Modifier.size(iconGlyphSize)
                             )
@@ -3597,14 +3601,14 @@ private fun TopThingsbookBar(
                     }
 
                     // Daily & Task Notifications Button 🔔
-                    ThingsHoverTooltip(text = stringResource(R.string.notifications_title)) {
+                    ThingsHoverTooltip(text = stringResource(R.string.topbar_tooltip_notifications)) {
                         IconButton(
                             onClick = onOpenNotificationSettings,
                             modifier = Modifier.size(iconButtonSize)
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.NotificationsActive,
-                                contentDescription = stringResource(R.string.notifications_title),
+                                contentDescription = stringResource(R.string.topbar_tooltip_notifications),
                                 tint = if (dailyDigestEnabled) colors.thingsBlue else colors.secondaryText,
                                 modifier = Modifier.size(iconGlyphSize)
                             )
@@ -3613,14 +3617,14 @@ private fun TopThingsbookBar(
 
                     // In-App Language Switcher (EN, DE, IT, FR, ES)
                     Box {
-                        ThingsHoverTooltip(text = stringResource(R.string.settings_language)) {
+                        ThingsHoverTooltip(text = stringResource(R.string.topbar_tooltip_language)) {
                             IconButton(
                                 onClick = { onToggleLanguageMenu(true) },
                                 modifier = Modifier.size(iconButtonSize)
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.Language,
-                                    contentDescription = stringResource(R.string.settings_language),
+                                    contentDescription = stringResource(R.string.topbar_tooltip_language),
                                     tint = colors.secondaryText,
                                     modifier = Modifier.size(iconGlyphSize)
                                 )
@@ -3659,7 +3663,7 @@ private fun TopThingsbookBar(
                     }
 
                     // Cloud Delta-Sync Status Indicator ☁️
-                    ThingsHoverTooltip(text = stringResource(R.string.sync_title)) {
+                    ThingsHoverTooltip(text = stringResource(R.string.topbar_tooltip_cloud_sync)) {
                         IconButton(
                             onClick = onManualSync,
                             modifier = Modifier.size(iconButtonSize)
@@ -3671,7 +3675,7 @@ private fun TopThingsbookBar(
                             }
                             Icon(
                                 imageVector = syncIcon,
-                                contentDescription = stringResource(R.string.sync_title),
+                                contentDescription = stringResource(R.string.topbar_tooltip_cloud_sync),
                                 tint = syncTint,
                                 modifier = Modifier.size(iconGlyphSize)
                             )
@@ -3680,14 +3684,14 @@ private fun TopThingsbookBar(
                 }
 
                 // Pinned Settings Button ⚙️ at the far top-right so it is always visible on phones and tablets
-                ThingsHoverTooltip(text = stringResource(R.string.settings_title)) {
+                ThingsHoverTooltip(text = stringResource(R.string.topbar_tooltip_settings)) {
                     IconButton(
                         onClick = onOpenSettings,
                         modifier = Modifier.size(iconButtonSize)
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Settings,
-                            contentDescription = stringResource(R.string.settings_title),
+                            contentDescription = stringResource(R.string.topbar_tooltip_settings),
                             tint = colors.primaryText,
                             modifier = Modifier.size(iconGlyphSize)
                         )

@@ -191,3 +191,45 @@ test('isTopBarIconTooltipAllowed allows strictly top-bar icon buttons and blocks
     false
   );
 });
+
+test('v2.0.0-beta.20 topbarTooltip* labels are concise, localized across all 5 languages, and free of IndexedDB/Room jargon or shortcut clutter', async () => {
+  const { TRANSLATIONS } = await import('../src/i18n/translations.ts');
+  const keys = [
+    'topbarTooltipHideSidebar',
+    'topbarTooltipShowSidebar',
+    'topbarTooltipQuickFind',
+    'topbarTooltipWeeklyReview',
+    'topbarTooltipTemplates',
+    'topbarTooltipQuickEntry',
+    'topbarTooltipVoiceInput',
+    'topbarTooltipAreas',
+    'topbarTooltipTags',
+    'topbarTooltipNotifications',
+    'topbarTooltipLanguage',
+    'topbarTooltipCloudSync',
+    'topbarTooltipSettings'
+  ] as const;
+
+  for (const lang of ['en', 'de', 'fr', 'it', 'es'] as const) {
+    const table = TRANSLATIONS[lang];
+    for (const key of keys) {
+      const value = table[key];
+      assert.equal(typeof value, 'string');
+      assert.ok(value.trim().length > 0, `Empty ${key} for ${lang}`);
+      assert.equal(value.includes('('), false, `Shortcut clutter in ${key} for ${lang}: ${value}`);
+      assert.equal(
+        /indexeddb|room db|save to thingsbook/i.test(value),
+        false,
+        `Misleading label in ${key} for ${lang}: ${value}`
+      );
+    }
+  }
+
+  assert.equal(TRANSLATIONS.en.topbarTooltipQuickEntry, 'Quick Entry');
+  assert.equal(TRANSLATIONS.de.topbarTooltipQuickEntry, 'Schnelleingabe');
+  assert.equal(TRANSLATIONS.en.topbarTooltipCloudSync, 'Cloud Sync');
+  assert.equal(TRANSLATIONS.de.topbarTooltipCloudSync, 'Cloud-Sync');
+  assert.equal(TRANSLATIONS.en.topbarTooltipTemplates, 'Templates & Import');
+  assert.equal(TRANSLATIONS.en.topbarTooltipAreas, 'Areas');
+  assert.equal(TRANSLATIONS.en.topbarTooltipTags, 'Tags');
+});

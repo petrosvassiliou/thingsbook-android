@@ -77,11 +77,14 @@ public final class ThingsbookStore: ObservableObject {
     @Published public var hasSampleTasks = false
     @Published public var hasNonSampleUserTasks = false
 
-    // MARK: - Selection & Filtering
+    // MARK: - Selection, Filtering & Magic Plus Drag-to-Insert
     @Published public var selectedFilterTagId: String? = nil
     @Published public var selectedTaskIds: Set<String> = []
     @Published public var expandedTaskId: String? = nil
     @Published public var collapsedHeadingIds: Set<String> = []
+    @Published public var magicPlusActiveDrop: MacMagicPlusResolvedDrop? = nil
+    @Published public var newlyCreatedHeadingId: String? = nil
+    public var registeredMagicPlusSlots: [MacMagicPlusSlotGeometry] = []
 
     // MARK: - Overlays, Sheets & Modals
     @Published public var isQuickFindPresented = false
@@ -461,7 +464,9 @@ public final class ThingsbookStore: ObservableObject {
 
     public func createNewTaskInCurrentContext(
         preferredHeadingId: String? = nil,
-        evening: Bool = false
+        evening: Bool = false,
+        explicitSortOrder: Double? = nil,
+        epochDayOverride: Int? = nil
     ) {
         let todayEpoch = DateEpochConverter.startOfDayMillis(for: Date())
         let tomorrowDate = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date())) ?? Date()
@@ -471,38 +476,64 @@ public final class ThingsbookStore: ObservableObject {
         var whenMillis: Int64? = nil
         var projId: String? = nil
         var areaId: String? = nil
+        var firstCurrentOrder: Double? = nil
 
         switch selectedDestination {
         case .smartView(let sv):
             switch sv {
             case .inbox:
                 sched = .inbox
+                firstCurrentOrder = inboxTasks.map(\.sortOrder).min()
             case .today:
                 sched = evening ? .thisEvening : .today
                 whenMillis = todayEpoch
+                firstCurrentOrder = (evening ? thisEveningTasks : todayDaytimeTasks).map(\.sortOrder).min()
             case .upcoming:
                 sched = .upcoming
-                whenMillis = tomorrowEpoch
+                if let epochDayOverride {
+                    let targetDate = DateEpochConverter.date(fromEpochDay: epochDayOverride)
+                    whenMillis = DateEpochConverter.startOfDayMillis(for: targetDate)
+                } else {
+                    whenMillis = tomorrowEpoch
+                }
+                firstCurrentOrder = upcomingTasks.map(\.sortOrder).min()
             case .anytime:
                 sched = .anytime
+                firstCurrentOrder = anytimeTasks.map(\.sortOrder).min()
             case .someday:
                 sched = .someday
+                firstCurrentOrder = somedayTasks.map(\.sortOrder).min()
             case .logbook, .trash:
                 sched = .inbox
+                firstCurrentOrder = inboxTasks.map(\.sortOrder).min()
                 selectedDestination = .smartView(.inbox)
             }
         case .project(let pid):
             sched = .anytime
             projId = pid
             areaId = project(byId: pid)?.areaId
+            firstCurrentOrder = tasksForProject(pid)
+                .filter { $0.headingId == preferredHeadingId }
+                .map(\.sortOrder)
+                .min()
         case .area(let aid):
             sched = .anytime
             areaId = aid
+            firstCurrentOrder = looseTasksForArea(aid).map(\.sortOrder).min()
         }
 
         var tagIds: [String] = []
         if let activeTag = selectedFilterTagId {
             tagIds.append(activeTag)
+        }
+
+        let targetSortOrder = explicitSortOrder ?? ThingsSQLiteDatabase.computeMidpointOrder(
+            prevOrder: nil,
+            nextOrder: firstCurrentOrder
+        )
+
+        if let headingId = preferredHeadingId {
+            collapsedHeadingIds.remove(headingId)
         }
 
         if let created = try? database.createTask(
@@ -513,12 +544,90 @@ public final class ThingsbookStore: ObservableObject {
             projectId: projId,
             headingId: preferredHeadingId,
             areaId: areaId,
-            tagIds: tagIds
+            tagIds: tagIds,
+            sortOrder: targetSortOrder
         ) {
             withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
                 selectedTaskIds = [created.id]
                 expandedTaskId = created.id
             }
+        }
+    }
+
+    public func createHeadingInProject(_ projectId: String, sortOrder: Double? = nil) {
+        if let created = try? database.createHeading(
+            projectId: projectId,
+            title: tr("entity_new_heading"),
+            sortOrder: sortOrder
+        ) {
+            collapsedHeadingIds.remove(created.id)
+            newlyCreatedHeadingId = created.id
+        }
+    }
+
+    public func updateMagicPlusDrag(locationInDetail: CGPoint) {
+        let isProjectView: Bool
+        if case .project = selectedDestination {
+            isProjectView = true
+        } else {
+            isProjectView = false
+        }
+        let resolved = MacMagicPlusDropResolver.resolve(
+            pointerX: Double(locationInDetail.x),
+            pointerY: Double(locationInDetail.y),
+            isProjectView: isProjectView,
+            slots: registeredMagicPlusSlots
+        )
+        if magicPlusActiveDrop != resolved {
+            if magicPlusActiveDrop?.indicatorSlotId != resolved.indicatorSlotId ||
+               magicPlusActiveDrop?.indicatorEdge != resolved.indicatorEdge ||
+               magicPlusActiveDrop?.mode != resolved.mode {
+                NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
+            }
+            magicPlusActiveDrop = resolved
+        }
+    }
+
+    public func cancelMagicPlusDrag() {
+        magicPlusActiveDrop = nil
+    }
+
+    public func commitMagicPlusDrop(locationInDetail: CGPoint) {
+        let isProjectView: Bool
+        var activeProjectId: String? = nil
+        if case .project(let pid) = selectedDestination {
+            isProjectView = true
+            activeProjectId = pid
+        } else {
+            isProjectView = false
+        }
+
+        let resolved = MacMagicPlusDropResolver.resolve(
+            pointerX: Double(locationInDetail.x),
+            pointerY: Double(locationInDetail.y),
+            isProjectView: isProjectView,
+            slots: registeredMagicPlusSlots
+        )
+        magicPlusActiveDrop = nil
+        NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
+
+        if resolved.mode == .heading, let pid = activeProjectId {
+            let headingOrder = ThingsSQLiteDatabase.computeMidpointOrder(
+                prevOrder: resolved.prevHeadingOrder,
+                nextOrder: resolved.nextHeadingOrder
+            )
+            createHeadingInProject(pid, sortOrder: headingOrder)
+        } else {
+            let taskOrder = ThingsSQLiteDatabase.computeMidpointOrder(
+                prevOrder: resolved.prevTaskOrder,
+                nextOrder: resolved.nextTaskOrder
+            )
+            createNewTaskInCurrentContext(
+                preferredHeadingId: resolved.headingId,
+                evening: resolved.evening,
+                explicitSortOrder: taskOrder,
+                epochDayOverride: resolved.epochDayOverride
+            )
         }
     }
 

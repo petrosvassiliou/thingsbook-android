@@ -1011,12 +1011,18 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         areaId: String? = nil,
         recurrenceRule: RecurrenceRule? = nil,
         tagIds: [String] = [],
-        checklistTitles: [String] = []
+        checklistTitles: [String] = [],
+        sortOrder: Double? = nil
     ) throws -> TaskItem {
         let created = try queue.sync { () -> TaskItem in
             let now = nowMillis()
             return try inTransactionLocked {
-                let maxOrder = try maxSortOrderLocked(table: "tasks")
+                let resolvedSortOrder: Double
+                if let explicitOrder = sortOrder, explicitOrder.isFinite {
+                    resolvedSortOrder = explicitOrder
+                } else {
+                    resolvedSortOrder = (try maxSortOrderLocked(table: "tasks")) + 1000.0
+                }
                 var resolvedAreaId = areaId
                 if resolvedAreaId == nil, let projectId, let proj = try fetchProjectByIdLocked(projectId) {
                     resolvedAreaId = proj.areaId
@@ -1055,7 +1061,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     headingId: headingId,
                     areaId: resolvedAreaId,
                     recurrenceRule: recurrenceRule,
-                    sortOrder: maxOrder + 1000.0,
+                    sortOrder: resolvedSortOrder,
                     checklistItems: items,
                     tags: tags,
                     createdAt: now,
@@ -2680,16 +2686,22 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     }
 
     @discardableResult
-    public func createHeading(projectId: String, title: String) throws -> Heading {
+    public func createHeading(projectId: String, title: String, sortOrder: Double? = nil) throws -> Heading {
         let heading = try queue.sync { () -> Heading in
             let now = nowMillis()
-            let existing = try fetchAllActiveHeadingsLocked().filter { $0.projectId == projectId }
-            let maxOrd = existing.map(\.sortOrder).max() ?? 0.0
+            let resolvedOrder: Double
+            if let explicitOrder = sortOrder, explicitOrder.isFinite {
+                resolvedOrder = explicitOrder
+            } else {
+                let existing = try fetchAllActiveHeadingsLocked().filter { $0.projectId == projectId }
+                let maxOrd = existing.map(\.sortOrder).max() ?? 0.0
+                resolvedOrder = maxOrd + 1000.0
+            }
             let h = Heading(
                 id: UUID().uuidString,
                 projectId: projectId,
                 title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                sortOrder: maxOrd + 1000.0,
+                sortOrder: resolvedOrder,
                 createdAt: now,
                 updatedAt: now
             )

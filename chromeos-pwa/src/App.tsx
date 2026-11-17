@@ -110,6 +110,7 @@ import {
 import { GeminiModal } from './components/GeminiModal';
 import { InlineQuickFind } from './components/InlineQuickFind';
 import { MagicPlusFab } from './components/MagicPlusFab';
+import type { MagicPlusResolvedDrop } from './domain/magicPlusDrop';
 import { extractDetectedLinksFromNotes } from './domain/powerUtils';
 import {
   DetectedNotesLinksRow,
@@ -1450,6 +1451,102 @@ export const App: React.FC = () => {
     setEditingHeadingTitle('');
   }, [activeNav, snapshot.headings]);
 
+  const handleMagicPlusDropInsert = useCallback(
+    async (drop: MagicPlusResolvedDrop) => {
+      if (drop.mode === 'heading') {
+        if (activeNav.kind !== 'project') return;
+        const sortOrder = computeMidpointSortOrder(
+          drop.prevHeadingOrder,
+          drop.nextHeadingOrder
+        );
+        const created = await localDb.upsertHeading({
+          projectId: activeNav.projectId,
+          title: '',
+          sortOrder
+        });
+        setEditingHeadingId(created.id);
+        setEditingHeadingTitle('');
+        return;
+      }
+
+      if (
+        activeNav.kind === 'smart' &&
+        (activeNav.view === 'LOGBOOK' || activeNav.view === 'TRASH')
+      ) {
+        return;
+      }
+
+      const todayEpoch = startOfDayEpoch();
+      const tomorrowEpoch = addDaysLocal(todayEpoch, 1);
+      let scheduleState: TaskRecord['scheduleState'] = 'INBOX';
+      let whenDate: number | null = null;
+      let projectId: string | null = null;
+      let headingId: string | null = null;
+      let areaId: string | null = null;
+
+      if (activeNav.kind === 'smart') {
+        if (activeNav.view === 'TODAY') {
+          scheduleState = drop.evening ? 'THIS_EVENING' : 'TODAY';
+          whenDate = todayEpoch;
+        } else if (activeNav.view === 'UPCOMING') {
+          scheduleState = 'UPCOMING';
+          let earliestUpcoming = tomorrowEpoch;
+          if (upcomingTasks.length > 0) {
+            const minTarget = upcomingTasks.reduce(
+              (m, tk) => Math.min(m, computeUpcomingTargetDate(tk)),
+              Infinity
+            );
+            if (Number.isFinite(minTarget)) {
+              earliestUpcoming = Math.max(tomorrowEpoch, minTarget);
+            }
+          }
+          whenDate = drop.whenDate ?? earliestUpcoming;
+        } else if (activeNav.view === 'ANYTIME') {
+          scheduleState = 'ANYTIME';
+        } else if (activeNav.view === 'SOMEDAY') {
+          scheduleState = 'SOMEDAY';
+        } else {
+          scheduleState = 'INBOX';
+        }
+      } else if (activeNav.kind === 'area') {
+        areaId = activeNav.areaId;
+        scheduleState = 'ANYTIME';
+      } else if (activeNav.kind === 'project') {
+        projectId = activeNav.projectId;
+        headingId = drop.headingId;
+        scheduleState = 'ANYTIME';
+        if (headingId) {
+          setCollapsedHeadingIds((prev) => {
+            if (!prev.has(headingId!)) return prev;
+            const next = new Set(prev);
+            next.delete(headingId!);
+            return next;
+          });
+        }
+      }
+
+      const sortOrder = computeMidpointSortOrder(
+        drop.prevTaskOrder,
+        drop.nextTaskOrder
+      );
+
+      const created = await localDb.upsertTask({
+        title: '',
+        scheduleState,
+        whenDate,
+        projectId,
+        headingId,
+        areaId,
+        tagIds: selectedFilterTagId ? [selectedFilterTagId] : [],
+        sortOrder
+      });
+
+      setSelectedTaskIds([]);
+      setExpandedTaskId(created.id);
+    },
+    [activeNav, upcomingTasks, selectedFilterTagId]
+  );
+
   // Global Keyboard Shortcuts + Ordered Escape Stack (Android v1.7.0 MainActivity + ThingsSmartViewScreen parity)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -2668,7 +2765,7 @@ export const App: React.FC = () => {
                       )}
                       {dayFiltered.length > 0 && renderGroupedDaytime()}
                       {eveFiltered.length > 0 && (
-                        <div className="group-section">
+                        <div className="group-section" data-magic-evening="true">
                           <div className="group-header">
                             <div className="group-header-title evening">
                               <Moon size={15} />
@@ -2698,7 +2795,11 @@ export const App: React.FC = () => {
                             ) ?? []
                           : [];
                         return (
-                          <div key={dayEpoch} className="group-section">
+                          <div
+                            key={dayEpoch}
+                            className="group-section"
+                            data-magic-when-date={dayEpoch}
+                          >
                             <div className="upcoming-day-header">
                               <span className="upcoming-day-num">{hdr.numPart}</span>
                               <span className="upcoming-day-sub">{hdr.subPart}</span>
@@ -3385,11 +3486,16 @@ export const App: React.FC = () => {
                     };
 
                     return (
-                      <div key={hd.id} className="group-section">
+                      <div
+                        key={hd.id}
+                        className="group-section"
+                        data-magic-heading-id={hd.id}
+                      >
                         <div
                           className={`project-heading-header ${
                             dragOverHeadingId === hd.id ? 'drag-over' : ''
                           }`}
+                          data-heading-id={hd.id}
                           onClick={(e) => e.stopPropagation()}
                           onDragOver={(e) => {
                             if (
@@ -3655,7 +3761,9 @@ export const App: React.FC = () => {
           open={magicFabOpen}
           activeNav={activeNav}
           currentViewTitle={currentViewTitle}
-          activeAreasCount={activeAreas.length}
+          tasks={snapshot.tasks}
+          headings={snapshot.headings}
+          scrollContainerRef={workspaceScrollRef}
           t={t}
           onToggleOpen={() => setMagicFabOpen((v) => !v)}
           onClose={() => setMagicFabOpen(false)}
@@ -3668,14 +3776,7 @@ export const App: React.FC = () => {
               defaultAreaId: defaultAreaIdForNewProject
             })
           }
-          onOpenTemplates={() =>
-            setTemplatesModal({
-              open: true,
-              tab: 'gallery',
-              areaId: defaultAreaIdForNewProject
-            })
-          }
-          onNewArea={() => setQuickCreateAreaOpen(true)}
+          onDropInsert={(drop) => void handleMagicPlusDropInsert(drop)}
         />
       </main>
 

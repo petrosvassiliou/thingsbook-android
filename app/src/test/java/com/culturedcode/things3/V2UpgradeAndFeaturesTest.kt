@@ -759,9 +759,9 @@ class V2UpgradeAndFeaturesTest {
     }
 
     @Test
-    fun `v2_0_0_beta_16 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
-        assertEquals(60, BuildConfig.VERSION_CODE)
-        assertEquals("2.0.0-beta.16", BuildConfig.VERSION_NAME)
+    fun `v2_0_0_beta_17 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
+        assertEquals(61, BuildConfig.VERSION_CODE)
+        assertEquals("2.0.0-beta.17", BuildConfig.VERSION_NAME)
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -1435,6 +1435,29 @@ class V2UpgradeAndFeaturesTest {
         assertEquals(
             MagicPlusDropMode.INSERT_TODO,
             resolveMagicPlusDropMode(allowHeadingDrop = false, dragOffsetX = -500f, leftEdgeThresholdPx = -360f)
+        )
+        // v2.0.0-beta.17: Wide tablet / Chromebook window-coordinate gutter resolution
+        assertEquals(
+            MagicPlusDropMode.INSERT_TODO,
+            resolveMagicPlusDropMode(
+                allowHeadingDrop = true,
+                dragOffsetX = -620f,
+                leftEdgeThresholdPx = -360f,
+                pointerWindowX = 680f,
+                listWindowLeftPx = 320f,
+                headingGutterWidthPx = 96f
+            )
+        )
+        assertEquals(
+            MagicPlusDropMode.INSERT_HEADING,
+            resolveMagicPlusDropMode(
+                allowHeadingDrop = true,
+                dragOffsetX = -860f,
+                leftEdgeThresholdPx = -360f,
+                pointerWindowX = 390f,
+                listWindowLeftPx = 320f,
+                headingGutterWidthPx = 96f
+            )
         )
     }
 }

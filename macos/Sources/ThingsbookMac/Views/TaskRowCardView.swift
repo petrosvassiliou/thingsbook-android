@@ -58,6 +58,14 @@ public struct TaskRowCardView: View {
         }
         .onAppear {
             syncDrafts()
+            if isExpanded {
+                isEditingNotes = latestTask.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                if latestTask.title.isEmpty {
+                    DispatchQueue.main.async {
+                        isTitleFocused = true
+                    }
+                }
+            }
         }
         .onDisappear {
             draftSaveTask?.cancel()

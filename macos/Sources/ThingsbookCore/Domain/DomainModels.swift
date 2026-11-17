@@ -2140,5 +2140,402 @@ public struct TooltipTimingCoordinator: Sendable, Equatable {
     }
 }
 
+// MARK: - macOS Initial Launch Split-View Width Clamping, Magic Plus Drop Resolver & Calendar Grid
+
+public extension MacToolbarLayoutMetrics {
+    /// Prevents initial-launch toolbar misalignment where SwiftUI's `GeometryReader` momentarily
+    /// reports the full unsplit window width (e.g. `1140pt`) before `NSSplitView` subtracts the
+    /// open sidebar (`~262pt`), which previously pushed the Quick Find search box into the sidebar.
+    static func clampedInitialOrLiveDetailWidth(
+        rawDetailWidth: Double,
+        windowContentWidth: Double,
+        sidebarFrameWidth: Double,
+        isSidebarCollapsed: Bool,
+        idealSidebarWidth: Double = 262.0,
+        minSidebarWidth: Double = 232.0
+    ) -> Double {
+        let safeWindowW = windowContentWidth > 200.0 ? windowContentWidth : 1140.0
+        if isSidebarCollapsed {
+            let candidate = rawDetailWidth > 200.0 ? rawDetailWidth : safeWindowW
+            return max(420.0, min(candidate, safeWindowW))
+        }
+
+        let effectiveSidebarW = sidebarFrameWidth >= (minSidebarWidth - 12.0)
+            ? sidebarFrameWidth
+            : idealSidebarWidth
+        let maxAllowedDetailW = max(420.0, safeWindowW - effectiveSidebarW - 1.0)
+        if rawDetailWidth <= 200.0 {
+            return maxAllowedDetailW
+        }
+        return max(420.0, min(rawDetailWidth, maxAllowedDetailW))
+    }
+}
+
+public enum MacMagicPlusDropMode: String, Equatable, Sendable {
+    case todo
+    case heading
+}
+
+public enum MacMagicPlusIndicatorEdge: String, Equatable, Sendable {
+    case before
+    case after
+    case inside
+}
+
+public struct MacMagicPlusSlotGeometry: Equatable, Sendable {
+    public enum Kind: Equatable, Sendable {
+        case task(
+            taskId: String,
+            headingId: String?,
+            prevOrder: Double?,
+            taskOrder: Double,
+            nextOrder: Double?,
+            epochDayOverride: Int?,
+            evening: Bool
+        )
+        case heading(
+            headingId: String,
+            prevHeadingOrder: Double?,
+            headingOrder: Double,
+            firstTaskOrder: Double?,
+            prevSectionId: String?,
+            prevSectionLastTaskOrder: Double?
+        )
+        case emptyContainer(
+            headingId: String?,
+            epochDayOverride: Int?,
+            evening: Bool
+        )
+    }
+
+    public let id: String
+    public let kind: Kind
+    public let minX: Double
+    public let maxX: Double
+    public let minY: Double
+    public let maxY: Double
+
+    public init(
+        id: String,
+        kind: Kind,
+        minX: Double,
+        maxX: Double,
+        minY: Double,
+        maxY: Double
+    ) {
+        self.id = id
+        self.kind = kind
+        self.minX = minX
+        self.maxX = maxX
+        self.minY = minY
+        self.maxY = maxY
+    }
+
+    public var midY: Double {
+        (minY + maxY) * 0.5
+    }
+}
+
+public struct MacMagicPlusResolvedDrop: Equatable, Sendable {
+    public let mode: MacMagicPlusDropMode
+    public let indicatorSlotId: String?
+    public let indicatorEdge: MacMagicPlusIndicatorEdge
+    public let headingId: String?
+    public let prevTaskOrder: Double?
+    public let nextTaskOrder: Double?
+    public let prevHeadingOrder: Double?
+    public let nextHeadingOrder: Double?
+    public let epochDayOverride: Int?
+    public let evening: Bool
+
+    public init(
+        mode: MacMagicPlusDropMode,
+        indicatorSlotId: String?,
+        indicatorEdge: MacMagicPlusIndicatorEdge,
+        headingId: String? = nil,
+        prevTaskOrder: Double? = nil,
+        nextTaskOrder: Double? = nil,
+        prevHeadingOrder: Double? = nil,
+        nextHeadingOrder: Double? = nil,
+        epochDayOverride: Int? = nil,
+        evening: Bool = false
+    ) {
+        self.mode = mode
+        self.indicatorSlotId = indicatorSlotId
+        self.indicatorEdge = indicatorEdge
+        self.headingId = headingId
+        self.prevTaskOrder = prevTaskOrder
+        self.nextTaskOrder = nextTaskOrder
+        self.prevHeadingOrder = prevHeadingOrder
+        self.nextHeadingOrder = nextHeadingOrder
+        self.epochDayOverride = epochDayOverride
+        self.evening = evening
+    }
+}
+
+public enum MacMagicPlusDropResolver {
+    public static let leftHeadingGutterWidth: Double = 84.0
+
+    public static func resolveMode(
+        isProjectView: Bool,
+        pointerX: Double,
+        listLeftX: Double
+    ) -> MacMagicPlusDropMode {
+        guard isProjectView, pointerX.isFinite, listLeftX.isFinite else {
+            return .todo
+        }
+        return pointerX <= (listLeftX + leftHeadingGutterWidth) ? .heading : .todo
+    }
+
+    public static func resolve(
+        pointerX: Double,
+        pointerY: Double,
+        isProjectView: Bool,
+        slots: [MacMagicPlusSlotGeometry],
+        fallbackListLeftX: Double = 40.0
+    ) -> MacMagicPlusResolvedDrop {
+        let sorted = slots.sorted {
+            if abs($0.minY - $1.minY) > 0.5 {
+                return $0.minY < $1.minY
+            }
+            return $0.id < $1.id
+        }
+        let inferredLeftX = sorted.map(\.minX).min() ?? fallbackListLeftX
+        let mode = resolveMode(
+            isProjectView: isProjectView,
+            pointerX: pointerX,
+            listLeftX: inferredLeftX
+        )
+
+        guard !sorted.isEmpty else {
+            return MacMagicPlusResolvedDrop(
+                mode: mode,
+                indicatorSlotId: nil,
+                indicatorEdge: .inside
+            )
+        }
+
+        if mode == .heading {
+            let headingSlots = sorted.compactMap { slot -> (MacMagicPlusSlotGeometry, Double?, Double)? in
+                if case let .heading(_, prevHO, curHO, _, _, _) = slot.kind {
+                    return (slot, prevHO, curHO)
+                }
+                return nil
+            }
+
+            for (hSlot, prevHO, curHO) in headingSlots {
+                if pointerY < hSlot.midY {
+                    return MacMagicPlusResolvedDrop(
+                        mode: .heading,
+                        indicatorSlotId: hSlot.id,
+                        indicatorEdge: .before,
+                        prevHeadingOrder: prevHO,
+                        nextHeadingOrder: curHO
+                    )
+                }
+            }
+
+            let lastHeadingOrder = headingSlots.last?.2
+            let anchorSlot = sorted.last!
+            let edge: MacMagicPlusIndicatorEdge
+            if case .emptyContainer = anchorSlot.kind {
+                edge = .inside
+            } else if pointerY < sorted.first!.midY, headingSlots.isEmpty {
+                return MacMagicPlusResolvedDrop(
+                    mode: .heading,
+                    indicatorSlotId: sorted.first!.id,
+                    indicatorEdge: .before,
+                    prevHeadingOrder: nil,
+                    nextHeadingOrder: nil
+                )
+            } else {
+                edge = .after
+            }
+            return MacMagicPlusResolvedDrop(
+                mode: .heading,
+                indicatorSlotId: anchorSlot.id,
+                indicatorEdge: edge,
+                prevHeadingOrder: lastHeadingOrder,
+                nextHeadingOrder: nil
+            )
+        }
+
+        for slot in sorted {
+            switch slot.kind {
+            case let .task(_, headingId, prevOrder, taskOrder, _, epochDay, evening):
+                if pointerY < slot.midY {
+                    return MacMagicPlusResolvedDrop(
+                        mode: .todo,
+                        indicatorSlotId: slot.id,
+                        indicatorEdge: .before,
+                        headingId: headingId,
+                        prevTaskOrder: prevOrder,
+                        nextTaskOrder: taskOrder,
+                        epochDayOverride: epochDay,
+                        evening: evening
+                    )
+                }
+
+            case let .heading(headingId, _, _, firstTaskOrder, prevSectionId, prevSectionLastTaskOrder):
+                let splitY = slot.minY + (slot.maxY - slot.minY) * 0.42
+                if pointerY < splitY {
+                    return MacMagicPlusResolvedDrop(
+                        mode: .todo,
+                        indicatorSlotId: slot.id,
+                        indicatorEdge: .before,
+                        headingId: prevSectionId,
+                        prevTaskOrder: prevSectionLastTaskOrder,
+                        nextTaskOrder: nil
+                    )
+                }
+                if pointerY <= slot.maxY {
+                    return MacMagicPlusResolvedDrop(
+                        mode: .todo,
+                        indicatorSlotId: slot.id,
+                        indicatorEdge: .after,
+                        headingId: headingId,
+                        prevTaskOrder: nil,
+                        nextTaskOrder: firstTaskOrder
+                    )
+                }
+
+            case let .emptyContainer(headingId, epochDay, evening):
+                if pointerY <= slot.maxY {
+                    return MacMagicPlusResolvedDrop(
+                        mode: .todo,
+                        indicatorSlotId: slot.id,
+                        indicatorEdge: .inside,
+                        headingId: headingId,
+                        prevTaskOrder: nil,
+                        nextTaskOrder: nil,
+                        epochDayOverride: epochDay,
+                        evening: evening
+                    )
+                }
+            }
+        }
+
+        let lastSlot = sorted.last!
+        switch lastSlot.kind {
+        case let .task(_, headingId, _, taskOrder, nextOrder, epochDay, evening):
+            return MacMagicPlusResolvedDrop(
+                mode: .todo,
+                indicatorSlotId: lastSlot.id,
+                indicatorEdge: .after,
+                headingId: headingId,
+                prevTaskOrder: taskOrder,
+                nextTaskOrder: nextOrder,
+                epochDayOverride: epochDay,
+                evening: evening
+            )
+        case let .heading(headingId, _, _, firstTaskOrder, _, _):
+            return MacMagicPlusResolvedDrop(
+                mode: .todo,
+                indicatorSlotId: lastSlot.id,
+                indicatorEdge: .after,
+                headingId: headingId,
+                prevTaskOrder: nil,
+                nextTaskOrder: firstTaskOrder
+            )
+        case let .emptyContainer(headingId, epochDay, evening):
+            return MacMagicPlusResolvedDrop(
+                mode: .todo,
+                indicatorSlotId: lastSlot.id,
+                indicatorEdge: .inside,
+                headingId: headingId,
+                prevTaskOrder: nil,
+                nextTaskOrder: nil,
+                epochDayOverride: epochDay,
+                evening: evening
+            )
+        }
+    }
+}
+
+public struct MacCalendarDayCell: Identifiable, Equatable, Sendable {
+    public let id: Int
+    public let date: Date
+    public let dayNumber: Int
+    public let isInDisplayedMonth: Bool
+    public let isToday: Bool
+    public let isSelected: Bool
+}
+
+public struct MacCalendarMonthGrid: Equatable, Sendable {
+    public let monthTitle: String
+    public let weekdaySymbols: [String]
+    public let days: [MacCalendarDayCell]
+
+    public static func build(
+        displayedMonth: Date,
+        selectedDate: Date?,
+        today: Date = Date(),
+        locale: Locale = .current
+    ) -> MacCalendarMonthGrid {
+        var cal = Calendar(identifier: .gregorian)
+        cal.locale = locale
+        if let langCode = locale.language.languageCode?.identifier.lowercased(),
+           ["de", "fr", "it", "es"].contains(langCode) {
+            cal.firstWeekday = 2
+        }
+
+        let df = DateFormatter()
+        df.calendar = cal
+        df.locale = locale
+        df.setLocalizedDateFormatFromTemplate("MMMM yyyy")
+        let rawTitle = df.string(from: displayedMonth)
+        let monthTitle = rawTitle.prefix(1).uppercased(with: locale) + rawTitle.dropFirst()
+
+        let rawSymbols = cal.veryShortStandaloneWeekdaySymbols
+        let firstIdx = max(0, min(rawSymbols.count - 1, cal.firstWeekday - 1))
+        let orderedWeekdays: [String]
+        if rawSymbols.count == 7 {
+            orderedWeekdays = Array(rawSymbols[firstIdx...]) + Array(rawSymbols[..<firstIdx])
+        } else {
+            orderedWeekdays = ["M", "T", "W", "T", "F", "S", "S"]
+        }
+
+        let monthComps = cal.dateComponents([.year, .month], from: displayedMonth)
+        let firstOfMonth = cal.date(from: monthComps) ?? cal.startOfDay(for: displayedMonth)
+        let firstWeekdayOfMonth = cal.component(.weekday, from: firstOfMonth)
+        let leadingOffset = (firstWeekdayOfMonth - cal.firstWeekday + 7) % 7
+        let startGridDate = cal.date(byAdding: .day, value: -leadingOffset, to: firstOfMonth) ?? firstOfMonth
+
+        let daysInMonth = cal.range(of: .day, in: .month, for: firstOfMonth)?.count ?? 30
+        let totalCells = (leadingOffset + daysInMonth) > 35 ? 42 : 35
+
+        let todaySod = cal.startOfDay(for: today)
+        let selectedSod = selectedDate.map { cal.startOfDay(for: $0) }
+        let targetMonth = cal.component(.month, from: firstOfMonth)
+        let targetYear = cal.component(.year, from: firstOfMonth)
+
+        var cells: [MacCalendarDayCell] = []
+        cells.reserveCapacity(totalCells)
+        for offset in 0..<totalCells {
+            let cellDate = cal.date(byAdding: .day, value: offset, to: startGridDate) ?? firstOfMonth
+            let sod = cal.startOfDay(for: cellDate)
+            let dayNum = cal.component(.day, from: sod)
+            let inMonth = cal.component(.month, from: sod) == targetMonth && cal.component(.year, from: sod) == targetYear
+            let epochDay = DateEpochConverter.epochDay(for: sod, calendar: cal)
+            cells.append(
+                MacCalendarDayCell(
+                    id: epochDay,
+                    date: sod,
+                    dayNumber: dayNum,
+                    isInDisplayedMonth: inMonth,
+                    isToday: sod == todaySod,
+                    isSelected: selectedSod == sod
+                )
+            )
+        }
+
+        return MacCalendarMonthGrid(
+            monthTitle: monthTitle,
+            weekdaySymbols: orderedWeekdays,
+            days: cells
+        )
+    }
+}
+
 
 

@@ -9,6 +9,7 @@ public struct SmartViewCanvas: View {
     @State private var renamingHeadingId: String? = nil
     @State private var renameHeadingText = ""
     @State private var showProjectLoggedItems = false
+    @FocusState private var isRenameHeadingFocused: Bool
 
     public init(store: ThingsbookStore) {
         self.store = store
@@ -51,6 +52,21 @@ public struct SmartViewCanvas: View {
             .frame(maxWidth: .infinity)
         }
         .background(ThingsMacPalette.canvasBackground)
+        .onPreferenceChange(MacMagicPlusSlotsPreferenceKey.self) { slots in
+            store.registeredMagicPlusSlots = slots
+        }
+        .onChange(of: store.selectedDestination) { _, _ in
+            store.registeredMagicPlusSlots = []
+        }
+        .onChange(of: store.newlyCreatedHeadingId, initial: true) { _, newId in
+            guard let headingId = newId else { return }
+            renamingHeadingId = headingId
+            renameHeadingText = ""
+            store.newlyCreatedHeadingId = nil
+            DispatchQueue.main.async {
+                isRenameHeadingFocused = true
+            }
+        }
     }
 
     // MARK: - Smart Views
@@ -241,7 +257,7 @@ public struct SmartViewCanvas: View {
                         Divider()
                             .opacity(0.65)
 
-                        reorderableTaskStack(evening)
+                        reorderableTaskStack(evening, evening: true)
                     }
                 }
             }
@@ -275,8 +291,23 @@ public struct SmartViewCanvas: View {
                         }
 
                         VStack(spacing: 3) {
-                            ForEach(dayTasks) { task in
+                            ForEach(Array(dayTasks.enumerated()), id: \.element.id) { idx, task in
                                 TaskRowCardView(store: store, task: task)
+                                    .magicPlusDropSlot(
+                                        id: "utask_\(task.id)",
+                                        kind: .task(
+                                            taskId: task.id,
+                                            headingId: nil,
+                                            prevOrder: idx > 0 ? dayTasks[idx - 1].sortOrder : nil,
+                                            taskOrder: task.sortOrder,
+                                            nextOrder: (idx + 1 < dayTasks.count) ? dayTasks[idx + 1].sortOrder : nil,
+                                            epochDayOverride: epochDay == Int.max ? nil : epochDay,
+                                            evening: false
+                                        ),
+                                        activeDrop: store.magicPlusActiveDrop,
+                                        newTodoLabel: store.tr("entity_new_todo"),
+                                        newHeadingLabel: store.tr("entity_new_heading")
+                                    )
                             }
                         }
                     }
@@ -574,8 +605,22 @@ public struct SmartViewCanvas: View {
                     reorderableTaskStack(unheaded, showSubtitle: false, targetHeadingId: .some(nil))
                 }
 
-                ForEach(headings) { heading in
-                    projectHeadingSection(project: project, heading: heading, tasks: openTasks.filter { $0.headingId == heading.id })
+                ForEach(Array(headings.enumerated()), id: \.element.id) { hIdx, heading in
+                    let sectionTasks = openTasks.filter { $0.headingId == heading.id }
+                    let prevHeadingOrder = hIdx > 0 ? headings[hIdx - 1].sortOrder : nil
+                    let prevSectionId: String? = hIdx > 0 ? headings[hIdx - 1].id : nil
+                    let prevSectionLastTaskOrder: Double? = hIdx > 0
+                        ? openTasks.filter { $0.headingId == headings[hIdx - 1].id }.last?.sortOrder
+                        : unheaded.last?.sortOrder
+
+                    projectHeadingSection(
+                        project: project,
+                        heading: heading,
+                        tasks: sectionTasks,
+                        prevHeadingOrder: prevHeadingOrder,
+                        prevSectionId: prevSectionId,
+                        prevSectionLastTaskOrder: prevSectionLastTaskOrder
+                    )
                 }
             }
 
@@ -611,29 +656,97 @@ public struct SmartViewCanvas: View {
         }
     }
 
-    private func projectHeadingSection(project: Project, heading: Heading, tasks: [TaskItem]) -> some View {
+    private func projectHeadingSection(
+        project: Project,
+        heading: Heading,
+        tasks: [TaskItem],
+        prevHeadingOrder: Double?,
+        prevSectionId: String?,
+        prevSectionLastTaskOrder: Double?
+    ) -> some View {
         let isCollapsed = store.collapsedHeadingIds.contains(heading.id)
         let isRenaming = renamingHeadingId == heading.id
 
         return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                if isRenaming {
-                    TextField(store.tr("entity_heading"), text: $renameHeadingText)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 260)
-                        .onSubmit {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    if isRenaming {
+                        TextField(store.tr("entity_new_heading"), text: $renameHeadingText)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 260)
+                            .focused($isRenameHeadingFocused)
+                            .onSubmit {
+                                commitHeadingRename(heading)
+                            }
+                        Button(store.tr("action_save")) {
                             commitHeadingRename(heading)
                         }
-                    Button(store.tr("action_save")) {
-                        commitHeadingRename(heading)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        Button(store.tr("action_cancel")) {
+                            renamingHeadingId = nil
+                        }
+                        .controlSize(.small)
+                    } else {
+                        Button {
+                            withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                                if isCollapsed {
+                                    store.collapsedHeadingIds.remove(heading.id)
+                                } else {
+                                    store.collapsedHeadingIds.insert(heading.id)
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(heading.title)
+                                    .font(.system(size: 15, weight: .bold))
+                                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                                if isCollapsed && !tasks.isEmpty {
+                                    Text("(\(tasks.count))")
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    Button(store.tr("action_cancel")) {
-                        renamingHeadingId = nil
+
+                    Spacer()
+
+                    Button {
+                        store.createNewTaskInCurrentContext(preferredHeadingId: heading.id)
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.secondary)
                     }
-                    .controlSize(.small)
-                } else {
+                    .buttonStyle(.plain)
+                    .thingsTooltip(store.tr("heading_add_task"))
+
+                    Button {
+                        renameHeadingText = heading.title
+                        renamingHeadingId = heading.id
+                        DispatchQueue.main.async {
+                            isRenameHeadingFocused = true
+                        }
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .thingsTooltip(store.tr("macos_rename_heading"))
+
+                    Button {
+                        try? store.database.deleteHeading(heading.id)
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(ThingsMacPalette.deadlineCrimson.opacity(0.85))
+                    }
+                    .buttonStyle(.plain)
+                    .thingsTooltip(store.tr("action_delete"))
+
                     Button {
                         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
                             if isCollapsed {
@@ -643,74 +756,33 @@ public struct SmartViewCanvas: View {
                             }
                         }
                     } label: {
-                        HStack(spacing: 6) {
-                            Text(heading.title)
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundStyle(ThingsMacPalette.accentBlue)
-                            if isCollapsed && !tasks.isEmpty {
-                                Text("(\(tasks.count))")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
+                        Image(systemName: isCollapsed ? "chevron.down" : "chevron.up")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .thingsTooltip(store.tr("action_collapse_heading"))
                 }
+                .padding(.top, 14)
 
-                Spacer()
-
-                Button {
-                    store.createNewTaskInCurrentContext(preferredHeadingId: heading.id)
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .thingsTooltip(store.tr("heading_add_task"))
-
-                Button {
-                    renameHeadingText = heading.title
-                    renamingHeadingId = heading.id
-                } label: {
-                    Image(systemName: "pencil")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .thingsTooltip(store.tr("macos_rename_heading"))
-
-                Button {
-                    try? store.database.deleteHeading(heading.id)
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(ThingsMacPalette.deadlineCrimson.opacity(0.85))
-                }
-                .buttonStyle(.plain)
-                .thingsTooltip(store.tr("action_delete"))
-
-                Button {
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                        if isCollapsed {
-                            store.collapsedHeadingIds.remove(heading.id)
-                        } else {
-                            store.collapsedHeadingIds.insert(heading.id)
-                        }
-                    }
-                } label: {
-                    Image(systemName: isCollapsed ? "chevron.down" : "chevron.up")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .thingsTooltip(store.tr("action_collapse_heading"))
+                Rectangle()
+                    .fill(ThingsMacPalette.accentBlue.opacity(0.28))
+                    .frame(height: 1)
             }
-            .padding(.top, 14)
-
-            Rectangle()
-                .fill(ThingsMacPalette.accentBlue.opacity(0.28))
-                .frame(height: 1)
+            .magicPlusDropSlot(
+                id: "heading_\(heading.id)",
+                kind: .heading(
+                    headingId: heading.id,
+                    prevHeadingOrder: prevHeadingOrder,
+                    headingOrder: heading.sortOrder,
+                    firstTaskOrder: tasks.first?.sortOrder,
+                    prevSectionId: prevSectionId,
+                    prevSectionLastTaskOrder: prevSectionLastTaskOrder
+                ),
+                activeDrop: store.magicPlusActiveDrop,
+                newTodoLabel: store.tr("entity_new_todo"),
+                newHeadingLabel: store.tr("entity_new_heading")
+            )
 
             if !isCollapsed {
                 reorderableTaskStack(tasks, showSubtitle: false, targetHeadingId: .some(heading.id))
@@ -1046,9 +1118,18 @@ public struct SmartViewCanvas: View {
     private func reorderableTaskStack(
         _ tasks: [TaskItem],
         showSubtitle: Bool = true,
-        targetHeadingId: String?? = nil
+        targetHeadingId: String?? = nil,
+        evening: Bool = false,
+        epochDayOverride: Int? = nil
     ) -> some View {
-        VStack(spacing: 3) {
+        let resolvedHeadingId: String? = {
+            if let explicit = targetHeadingId {
+                return explicit
+            }
+            return nil
+        }()
+
+        return VStack(spacing: 3) {
             ForEach(Array(tasks.enumerated()), id: \.element.id) { idx, task in
                 TaskRowCardView(store: store, task: task, showContextSubtitle: showSubtitle)
                     .draggable(task.id)
@@ -1059,6 +1140,21 @@ public struct SmartViewCanvas: View {
                         try? store.database.reorderTask(taskId: draggedId, prevOrder: prev, nextOrder: next, newHeadingId: targetHeadingId)
                         return true
                     }
+                    .magicPlusDropSlot(
+                        id: "task_\(task.id)",
+                        kind: .task(
+                            taskId: task.id,
+                            headingId: resolvedHeadingId ?? task.headingId,
+                            prevOrder: idx > 0 ? tasks[idx - 1].sortOrder : nil,
+                            taskOrder: task.sortOrder,
+                            nextOrder: (idx + 1 < tasks.count) ? tasks[idx + 1].sortOrder : nil,
+                            epochDayOverride: epochDayOverride,
+                            evening: evening
+                        ),
+                        activeDrop: store.magicPlusActiveDrop,
+                        newTodoLabel: store.tr("entity_new_todo"),
+                        newHeadingLabel: store.tr("entity_new_heading")
+                    )
             }
         }
     }
@@ -1080,6 +1176,7 @@ public struct SmartViewCanvas: View {
 
         return VStack(alignment: .leading, spacing: 16) {
             ForEach(sortedKeys, id: \.self) { groupName in
+                let groupTasks = grouped[groupName] ?? []
                 VStack(alignment: .leading, spacing: 5) {
                     Text(groupName)
                         .font(.system(size: 13.5, weight: .bold))
@@ -1087,8 +1184,23 @@ public struct SmartViewCanvas: View {
                     Rectangle()
                         .fill(ThingsMacPalette.accentBlue.opacity(0.22))
                         .frame(height: 1)
-                    ForEach(grouped[groupName] ?? []) { task in
+                    ForEach(Array(groupTasks.enumerated()), id: \.element.id) { idx, task in
                         TaskRowCardView(store: store, task: task, showContextSubtitle: false)
+                            .magicPlusDropSlot(
+                                id: "gtask_\(task.id)",
+                                kind: .task(
+                                    taskId: task.id,
+                                    headingId: task.headingId,
+                                    prevOrder: idx > 0 ? groupTasks[idx - 1].sortOrder : nil,
+                                    taskOrder: task.sortOrder,
+                                    nextOrder: (idx + 1 < groupTasks.count) ? groupTasks[idx + 1].sortOrder : nil,
+                                    epochDayOverride: nil,
+                                    evening: false
+                                ),
+                                activeDrop: store.magicPlusActiveDrop,
+                                newTodoLabel: store.tr("entity_new_todo"),
+                                newHeadingLabel: store.tr("entity_new_heading")
+                            )
                     }
                 }
             }
@@ -1279,6 +1391,13 @@ public struct SmartViewCanvas: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 80)
+        .magicPlusDropSlot(
+            id: "empty_canvas",
+            kind: .emptyContainer(headingId: nil, epochDayOverride: nil, evening: false),
+            activeDrop: store.magicPlusActiveDrop,
+            newTodoLabel: store.tr("entity_new_todo"),
+            newHeadingLabel: store.tr("entity_new_heading")
+        )
     }
 
     private func rawTasksForSmartView(_ view: SmartView) -> [TaskItem] {
@@ -1732,3 +1851,156 @@ private struct TodayDailyTimelineView: View {
         .background(Capsule().fill(ThingsMacPalette.somedayAmber.opacity(0.14)))
     }
 }
+
+// MARK: - Magic Plus Drag-to-Insert Slot Geometry & Drop Indicator
+
+private struct MacMagicPlusSlotsPreferenceKey: PreferenceKey {
+    static let defaultValue: [MacMagicPlusSlotGeometry] = []
+
+    static func reduce(value: inout [MacMagicPlusSlotGeometry], nextValue: () -> [MacMagicPlusSlotGeometry]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+private struct MacMagicPlusInsertionBar: View {
+    let mode: MacMagicPlusDropMode
+    let newTodoLabel: String
+    let newHeadingLabel: String
+
+    private var tint: Color {
+        mode == .heading ? ThingsMacPalette.anytimeTeal : ThingsMacPalette.accentBlue
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if mode == .heading {
+                Image(systemName: "text.insert")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(tint)
+                Text(newHeadingLabel)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(tint)
+                Rectangle()
+                    .fill(tint.opacity(0.55))
+                    .frame(height: 2)
+            } else {
+                Circle()
+                    .strokeBorder(tint, lineWidth: 2)
+                    .background(Circle().fill(ThingsMacPalette.cardSurface))
+                    .frame(width: 11, height: 11)
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(tint)
+                    .frame(height: 2.5)
+                Text(newTodoLabel)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(tint.opacity(0.08))
+        )
+        .allowsHitTesting(false)
+    }
+}
+
+private struct MacMagicPlusSlotModifier: ViewModifier {
+    let id: String
+    let kind: MacMagicPlusSlotGeometry.Kind
+    let activeDrop: MacMagicPlusResolvedDrop?
+    let newTodoLabel: String
+    let newHeadingLabel: String
+
+    private var isTargeted: Bool {
+        activeDrop?.indicatorSlotId == id
+    }
+
+    func body(content: Content) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if isTargeted, let drop = activeDrop, drop.indicatorEdge == .before {
+                MacMagicPlusInsertionBar(
+                    mode: drop.mode,
+                    newTodoLabel: newTodoLabel,
+                    newHeadingLabel: newHeadingLabel
+                )
+            }
+
+            content
+                .overlay {
+                    if isTargeted, let drop = activeDrop, drop.indicatorEdge == .inside {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(
+                                (drop.mode == .heading ? ThingsMacPalette.anytimeTeal : ThingsMacPalette.accentBlue).opacity(0.65),
+                                style: StrokeStyle(lineWidth: 1.8, dash: [6, 4])
+                            )
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill((drop.mode == .heading ? ThingsMacPalette.anytimeTeal : ThingsMacPalette.accentBlue).opacity(0.05))
+                            )
+                            .overlay(alignment: .top) {
+                                MacMagicPlusInsertionBar(
+                                    mode: drop.mode,
+                                    newTodoLabel: newTodoLabel,
+                                    newHeadingLabel: newHeadingLabel
+                                )
+                                .padding(12)
+                            }
+                            .allowsHitTesting(false)
+                    }
+                }
+                .background(
+                    GeometryReader { geo in
+                        let frame = geo.frame(in: .named(MacMagicPlusCoordinateSpace.name))
+                        Color.clear.preference(
+                            key: MacMagicPlusSlotsPreferenceKey.self,
+                            value: (frame.width > 4 && frame.height > 4)
+                                ? [
+                                    MacMagicPlusSlotGeometry(
+                                        id: id,
+                                        kind: kind,
+                                        minX: Double(frame.minX),
+                                        maxX: Double(frame.maxX),
+                                        minY: Double(frame.minY),
+                                        maxY: Double(frame.maxY)
+                                    )
+                                ]
+                                : []
+                        )
+                    }
+                )
+
+            if isTargeted, let drop = activeDrop, drop.indicatorEdge == .after {
+                MacMagicPlusInsertionBar(
+                    mode: drop.mode,
+                    newTodoLabel: newTodoLabel,
+                    newHeadingLabel: newHeadingLabel
+                )
+            }
+        }
+        .animation(.spring(response: 0.20, dampingFraction: 0.84), value: isTargeted)
+    }
+}
+
+private extension View {
+    func magicPlusDropSlot(
+        id: String,
+        kind: MacMagicPlusSlotGeometry.Kind,
+        activeDrop: MacMagicPlusResolvedDrop?,
+        newTodoLabel: String,
+        newHeadingLabel: String
+    ) -> some View {
+        modifier(
+            MacMagicPlusSlotModifier(
+                id: id,
+                kind: kind,
+                activeDrop: activeDrop,
+                newTodoLabel: newTodoLabel,
+                newHeadingLabel: newHeadingLabel
+            )
+        )
+    }
+}
+

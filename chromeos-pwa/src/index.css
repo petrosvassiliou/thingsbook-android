@@ -1581,6 +1581,9 @@ button {
   justify-content: center;
   box-shadow: var(--shadow-fab);
   z-index: 45;
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
   transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), background 0.15s ease, box-shadow 0.2s ease;
 }
 
@@ -1596,6 +1599,72 @@ button {
 .magic-fab-circle.open:hover {
   background: var(--things-blue-hover);
   transform: rotate(45deg) scale(1.05);
+}
+
+.magic-fab-circle.dragging {
+  cursor: grabbing;
+  z-index: 62;
+  background: var(--things-blue-hover);
+  box-shadow: 0 12px 28px rgba(0, 113, 227, 0.36);
+}
+
+.magic-fab-drag-badge {
+  position: absolute;
+  right: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-modal);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.magic-plus-drop-indicator {
+  position: fixed;
+  height: 0;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  z-index: 58;
+}
+
+.magic-plus-drop-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--things-blue);
+  box-shadow: 0 0 0 2px var(--bg-canvas);
+  flex-shrink: 0;
+}
+
+.magic-plus-drop-line {
+  flex: 1;
+  height: 2.5px;
+  border-radius: 999px;
+  background: var(--things-blue);
+}
+
+.magic-plus-drop-indicator.heading-mode .magic-plus-drop-line {
+  height: 3px;
+}
+
+.magic-plus-drop-pill {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--things-blue);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 113, 227, 0.25);
 }
 
 /* ==================== Common Buttons, Inputs & Modals ==================== */

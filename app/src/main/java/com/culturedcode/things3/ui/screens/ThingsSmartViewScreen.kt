@@ -1100,6 +1100,9 @@ private fun MagicPlusOverlaySection(
             null
         } else {
             object : MagicPlusPositionalDropHandler {
+                override val listLeftWindowX: Float?
+                    get() = projectDragController.activeListWindowLeft
+
                 private fun kindFor(mode: MagicPlusDropMode) =
                     if (mode == MagicPlusDropMode.INSERT_HEADING) ProjectDragKind.NEW_HEADING else ProjectDragKind.NEW_TODO
 

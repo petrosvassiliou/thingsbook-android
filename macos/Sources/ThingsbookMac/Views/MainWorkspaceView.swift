@@ -2,13 +2,23 @@ import SwiftUI
 import AppKit
 import ThingsbookCore
 
+public enum MacMagicPlusCoordinateSpace {
+    public static let name = "ThingsDetailSpace"
+}
+
 public struct MainWorkspaceView: View {
     @ObservedObject var store: ThingsbookStore
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @State private var detailPaneWidth: CGFloat = 618
+    @State private var detailPaneWidth: CGFloat = 877
+    @State private var windowContentWidth: CGFloat = 1140
+    @State private var liveSidebarFrameWidth: CGFloat = 262
     @State private var isMagicPlusMenuOpen = false
     @State private var isMagicPlusHovered = false
+    @State private var isMagicPlusPressed = false
+    @State private var isMagicPlusDragging = false
+    @State private var magicPlusDragOffset: CGSize = .zero
+    @GestureState private var isMagicPlusGestureActive = false
     @State private var isQuickFindHovered = false
     @State private var isLanguagePopoverOpen = false
     @State private var decryptPasswordInput = ""
@@ -18,11 +28,44 @@ public struct MainWorkspaceView: View {
         self.store = store
     }
 
-    private var toolbarMetrics: MacToolbarLayoutMetrics {
-        MacToolbarLayoutMetrics.compute(
-            detailWidth: Double(detailPaneWidth),
+    private var effectiveDetailWidth: Double {
+        MacToolbarLayoutMetrics.clampedInitialOrLiveDetailWidth(
+            rawDetailWidth: Double(detailPaneWidth),
+            windowContentWidth: Double(windowContentWidth),
+            sidebarFrameWidth: Double(liveSidebarFrameWidth),
             isSidebarCollapsed: columnVisibility == .detailOnly
         )
+    }
+
+    private var toolbarMetrics: MacToolbarLayoutMetrics {
+        MacToolbarLayoutMetrics.compute(
+            detailWidth: effectiveDetailWidth,
+            isSidebarCollapsed: columnVisibility == .detailOnly
+        )
+    }
+
+    private var canDragMagicPlus: Bool {
+        switch store.selectedDestination {
+        case .smartView(.logbook), .smartView(.trash):
+            return false
+        default:
+            return !store.isLocked
+        }
+    }
+
+    private func applyMeasuredDetailWidth(_ rawWidth: CGFloat) {
+        guard rawWidth > 200 else { return }
+        let clamped = CGFloat(
+            MacToolbarLayoutMetrics.clampedInitialOrLiveDetailWidth(
+                rawDetailWidth: Double(rawWidth),
+                windowContentWidth: Double(windowContentWidth),
+                sidebarFrameWidth: Double(liveSidebarFrameWidth),
+                isSidebarCollapsed: columnVisibility == .detailOnly
+            )
+        )
+        if abs(clamped - detailPaneWidth) >= 1.5 {
+            detailPaneWidth = clamped
+        }
     }
 
     public var body: some View {
@@ -50,7 +93,23 @@ public struct MainWorkspaceView: View {
                         ThingsMacPalette.canvasBackground
                             .ignoresSafeArea(.container, edges: .top)
                     )
-                    .background(MacWindowTitlebarConfigurator())
+                    .background(
+                        MacWindowTitlebarConfigurator(
+                            targetToolbarWidth: CGFloat(toolbarMetrics.totalBarWidth)
+                        ) { winW, sidebarW, splitDetailW in
+                            if winW > 200, abs(winW - windowContentWidth) >= 1.5 {
+                                windowContentWidth = winW
+                            }
+                            if sidebarW >= 0, abs(sidebarW - liveSidebarFrameWidth) >= 1.5 {
+                                liveSidebarFrameWidth = sidebarW
+                            }
+                            if splitDetailW > 200 {
+                                applyMeasuredDetailWidth(splitDetailW)
+                            } else {
+                                applyMeasuredDetailWidth(detailPaneWidth)
+                            }
+                        }
+                    )
                     .background(
                         GeometryReader { geo in
                             Color.clear
@@ -59,9 +118,7 @@ public struct MainWorkspaceView: View {
                                     value: geo.size.width
                                 )
                                 .onChange(of: geo.size.width, initial: true) { _, newWidth in
-                                    if newWidth > 200, abs(newWidth - detailPaneWidth) >= 2 {
-                                        detailPaneWidth = newWidth
-                                    }
+                                    applyMeasuredDetailWidth(newWidth)
                                 }
                         }
                     )
@@ -85,10 +142,12 @@ public struct MainWorkspaceView: View {
                     .padding(.horizontal, 28)
                     .padding(.bottom, 22)
                 }
+                .coordinateSpace(name: MacMagicPlusCoordinateSpace.name)
                 .onPreferenceChange(DetailPaneWidthPreferenceKey.self) { newWidth in
-                    if newWidth > 200, abs(newWidth - detailPaneWidth) >= 2 {
-                        detailPaneWidth = newWidth
-                    }
+                    applyMeasuredDetailWidth(newWidth)
+                }
+                .onChange(of: columnVisibility) { _, _ in
+                    applyMeasuredDetailWidth(detailPaneWidth)
                 }
                 .toolbarBackground(.hidden, for: .windowToolbar)
                 .toolbar {
@@ -275,53 +334,149 @@ public struct MainWorkspaceView: View {
     // MARK: - Magic Plus Button & Popover Menu
 
     private var magicPlusButton: some View {
-        Button {
-            if NSEvent.modifierFlags.contains(.option) {
-                store.createNewTaskInCurrentContext()
-            } else {
-                withAnimation(.spring(response: 0.24, dampingFraction: 0.76)) {
-                    isMagicPlusMenuOpen.toggle()
-                }
+        let activeMode = store.magicPlusActiveDrop?.mode ?? .todo
+        let isHeadingMode = isMagicPlusDragging && activeMode == .heading
+
+        return ZStack {
+            if isMagicPlusDragging {
+                Circle()
+                    .strokeBorder(
+                        ThingsMacPalette.accentBlue.opacity(0.28),
+                        style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])
+                    )
+                    .background(Circle().fill(ThingsMacPalette.accentBlue.opacity(0.06)))
+                    .frame(width: 46, height: 46)
             }
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 19, weight: .semibold))
-                .foregroundStyle(.white)
-                .rotationEffect(.degrees(isMagicPlusMenuOpen ? 45 : 0))
-                .frame(width: 46, height: 46)
-                .background(
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [ThingsMacPalette.inboxBlue, ThingsMacPalette.accentBlue],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+
+            ZStack(alignment: .top) {
+                if isMagicPlusDragging {
+                    HStack(spacing: 5) {
+                        Image(systemName: isHeadingMode ? "text.insert" : "checkmark.circle.fill")
+                            .font(.system(size: 10.5, weight: .bold))
+                        Text(store.tr(isHeadingMode ? "entity_new_heading" : "entity_new_todo"))
+                            .font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1)
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(isHeadingMode ? ThingsMacPalette.anytimeTeal : ThingsMacPalette.accentBlue)
+                            .shadow(color: Color.black.opacity(0.18), radius: 6, y: 2)
+                    )
+                    .offset(y: -32)
+                    .allowsHitTesting(false)
+                }
+
+                Image(systemName: isHeadingMode ? "text.insert" : "plus")
+                    .font(.system(size: isHeadingMode ? 16 : 19, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .rotationEffect(.degrees((isMagicPlusMenuOpen && !isMagicPlusDragging) ? 45 : 0))
+                    .frame(width: 46, height: 46)
+                    .background(
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: isHeadingMode
+                                        ? [ThingsMacPalette.anytimeTeal, ThingsMacPalette.accentBlue]
+                                        : [ThingsMacPalette.inboxBlue, ThingsMacPalette.accentBlue],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
                             )
-                        )
-                        .brightness(isMagicPlusHovered ? 0.06 : 0.0)
-                        .overlay(
-                            Circle()
-                                .strokeBorder(Color.white.opacity(isMagicPlusHovered ? 0.30 : 0.0), lineWidth: 1)
-                        )
-                        .shadow(
-                            color: ThingsMacPalette.accentBlue.opacity(isMagicPlusHovered ? 0.50 : 0.36),
-                            radius: isMagicPlusHovered ? 15 : 12,
-                            x: 0,
-                            y: isMagicPlusHovered ? 7 : 5
-                        )
-                )
-                .scaleEffect(isMagicPlusHovered ? 1.06 : 1.0)
-                .offset(y: (isMagicPlusHovered && !isMagicPlusMenuOpen) ? -1.5 : 0)
-                .animation(.spring(response: 0.22, dampingFraction: 0.72), value: isMagicPlusHovered)
-                .animation(.spring(response: 0.24, dampingFraction: 0.76), value: isMagicPlusMenuOpen)
+                            .brightness((isMagicPlusHovered || isMagicPlusDragging) ? 0.06 : 0.0)
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(
+                                        Color.white.opacity((isMagicPlusHovered || isMagicPlusDragging) ? 0.32 : 0.0),
+                                        lineWidth: 1
+                                    )
+                            )
+                            .shadow(
+                                color: (isHeadingMode ? ThingsMacPalette.anytimeTeal : ThingsMacPalette.accentBlue)
+                                    .opacity(isMagicPlusDragging ? 0.52 : (isMagicPlusHovered ? 0.50 : 0.36)),
+                                radius: isMagicPlusDragging ? 18 : (isMagicPlusHovered ? 15 : 12),
+                                x: 0,
+                                y: isMagicPlusDragging ? 9 : (isMagicPlusHovered ? 7 : 5)
+                            )
+                    )
+                    .scaleEffect(isMagicPlusDragging ? 1.10 : (isMagicPlusPressed ? 0.95 : (isMagicPlusHovered ? 1.06 : 1.0)))
+                    .offset(y: (isMagicPlusHovered && !isMagicPlusMenuOpen && !isMagicPlusDragging) ? -1.5 : 0)
+                    .animation(.spring(response: 0.22, dampingFraction: 0.72), value: isMagicPlusHovered)
+                    .animation(.spring(response: 0.20, dampingFraction: 0.78), value: isMagicPlusPressed)
+                    .animation(.spring(response: 0.24, dampingFraction: 0.76), value: isMagicPlusMenuOpen)
+                    .animation(.easeOut(duration: 0.14), value: isHeadingMode)
+            }
+            .offset(magicPlusDragOffset)
         }
-        .buttonStyle(.plain)
+        .frame(width: 46, height: 46)
+        .contentShape(Circle())
+        .zIndex(isMagicPlusDragging ? 50 : 1)
         .onHover { hovering in
             isMagicPlusHovered = hovering
-            if hovering {
-                NSCursor.pointingHand.set()
-            } else {
-                NSCursor.arrow.set()
+            if !isMagicPlusDragging {
+                if hovering {
+                    NSCursor.pointingHand.set()
+                } else {
+                    NSCursor.arrow.set()
+                }
+            }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .named(MacMagicPlusCoordinateSpace.name))
+                .updating($isMagicPlusGestureActive) { _, state, _ in
+                    state = true
+                }
+                .onChanged { value in
+                    if !isMagicPlusPressed {
+                        isMagicPlusPressed = true
+                    }
+                    let distance = hypot(value.translation.width, value.translation.height)
+                    if canDragMagicPlus && (isMagicPlusDragging || distance >= 6) {
+                        if !isMagicPlusDragging {
+                            isMagicPlusDragging = true
+                            isMagicPlusMenuOpen = false
+                            NSCursor.closedHand.set()
+                        }
+                        magicPlusDragOffset = value.translation
+                        store.updateMagicPlusDrag(locationInDetail: value.location)
+                    }
+                }
+                .onEnded { value in
+                    isMagicPlusPressed = false
+                    if isMagicPlusDragging {
+                        let dropLocation = value.location
+                        withAnimation(.spring(response: 0.26, dampingFraction: 0.78)) {
+                            isMagicPlusDragging = false
+                            magicPlusDragOffset = .zero
+                        }
+                        NSCursor.arrow.set()
+                        store.commitMagicPlusDrop(locationInDetail: dropLocation)
+                    } else {
+                        guard !store.isLocked else { return }
+                        if NSEvent.modifierFlags.contains(.option) {
+                            store.createNewTaskInCurrentContext()
+                        } else {
+                            withAnimation(.spring(response: 0.24, dampingFraction: 0.76)) {
+                                isMagicPlusMenuOpen.toggle()
+                            }
+                        }
+                    }
+                }
+        )
+        .onChange(of: isMagicPlusGestureActive) { _, active in
+            if !active && (isMagicPlusDragging || isMagicPlusPressed) {
+                isMagicPlusPressed = false
+                if isMagicPlusDragging {
+                    withAnimation(.spring(response: 0.24, dampingFraction: 0.80)) {
+                        isMagicPlusDragging = false
+                        magicPlusDragOffset = .zero
+                    }
+                    NSCursor.arrow.set()
+                    store.cancelMagicPlusDrag()
+                }
             }
         }
         .thingsTooltip(store.tr("magic_plus_fab_tooltip"))
@@ -338,20 +493,6 @@ public struct MainWorkspaceView: View {
                     store.createNewTaskInCurrentContext()
                 }
 
-                magicPlusItem(
-                    icon: "mic.fill",
-                    tint: ThingsMacPalette.geminiPurple,
-                    title: store.tr("shortcut_voice_capture_short"),
-                    subtitle: store.tr("voice_smart_parse_gemini"),
-                    shortcut: "⌃⇧⌘V"
-                ) {
-                    isMagicPlusMenuOpen = false
-                    store.quickEntryPrefillTitle = ""
-                    store.quickEntryPrefillNotes = ""
-                    store.quickEntryAutoStartVoice = true
-                    store.isQuickEntryPresented = true
-                }
-
                 if case .project(let projId) = store.selectedDestination {
                     magicPlusItem(
                         icon: "text.insert",
@@ -361,7 +502,7 @@ public struct MainWorkspaceView: View {
                         shortcut: nil
                     ) {
                         isMagicPlusMenuOpen = false
-                        _ = try? store.database.createHeading(projectId: projId, title: store.tr("entity_new_heading"))
+                        store.createHeadingInProject(projId)
                     }
                 }
 
@@ -373,39 +514,19 @@ public struct MainWorkspaceView: View {
                     shortcut: "⌥⌘N"
                 ) {
                     isMagicPlusMenuOpen = false
-                    if case .area(let aid) = store.selectedDestination {
+                    switch store.selectedDestination {
+                    case .area(let aid):
                         store.newProjectDefaultAreaId = aid
-                    } else {
+                    case .project(let pid):
+                        store.newProjectDefaultAreaId = store.project(byId: pid)?.areaId
+                    default:
                         store.newProjectDefaultAreaId = nil
                     }
                     store.isNewProjectSheetPresented = true
                 }
-
-                magicPlusItem(
-                    icon: "square.on.square",
-                    tint: ThingsMacPalette.anytimeTeal,
-                    title: store.tr("v2_templates_title"),
-                    subtitle: store.tr("v2_import_markdown_title"),
-                    shortcut: nil
-                ) {
-                    isMagicPlusMenuOpen = false
-                    store.templatesInitialTab = .gallery
-                    store.isTemplatesSheetPresented = true
-                }
-
-                magicPlusItem(
-                    icon: "cube",
-                    tint: ThingsMacPalette.areaGreen,
-                    title: store.tr("entity_new_area"),
-                    subtitle: store.tr("magic_plus_area_sub"),
-                    shortcut: "⌃⌘N"
-                ) {
-                    isMagicPlusMenuOpen = false
-                    store.isNewAreaSheetPresented = true
-                }
             }
             .padding(10)
-            .frame(width: 295)
+            .frame(width: 288)
         }
     }
 
@@ -1131,26 +1252,97 @@ extension MacToolbarIconButton where Label == ToolbarSymbolIcon {
 }
 
 private struct MacWindowTitlebarConfigurator: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        TitlebarSyncNSView()
+    let targetToolbarWidth: CGFloat
+    let onSplitGeometryUpdate: (CGFloat, CGFloat, CGFloat) -> Void
+
+    func makeNSView(context: Context) -> TitlebarSyncNSView {
+        let view = TitlebarSyncNSView()
+        view.targetToolbarWidth = targetToolbarWidth
+        view.onSplitGeometryUpdate = onSplitGeometryUpdate
+        return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        (nsView as? TitlebarSyncNSView)?.applyWindowStyle()
+    func updateNSView(_ nsView: TitlebarSyncNSView, context: Context) {
+        nsView.targetToolbarWidth = targetToolbarWidth
+        nsView.onSplitGeometryUpdate = onSplitGeometryUpdate
+        nsView.syncAll(forceToolbarRelayout: false)
     }
 
-    private final class TitlebarSyncNSView: NSView {
+    final class TitlebarSyncNSView: NSView {
+        var targetToolbarWidth: CGFloat = 0
+        var onSplitGeometryUpdate: ((CGFloat, CGFloat, CGFloat) -> Void)?
+
+        private var lastInvalidatedToolbarWidth: CGFloat = 0
+        private var lastReportedWinW: CGFloat = 0
+        private var lastReportedSidebarW: CGFloat = -1
+        private var lastReportedDetailW: CGFloat = 0
+        private var observers: [NSObjectProtocol] = []
+
+        deinit {
+            let tokens = observers
+            for token in tokens {
+                NotificationCenter.default.removeObserver(token)
+            }
+        }
+
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            if newWindow !== window {
+                removeObservers()
+            }
+            super.viewWillMove(toWindow: newWindow)
+        }
+
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            applyWindowStyle()
+            installObserversIfNeeded()
+            syncAll(forceToolbarRelayout: true)
+
+            // Deferred passes catch initial NSSplitViewController + NSToolbar attachment on cold launch
+            for delay in [0.0, 0.03, 0.12, 0.28] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    self?.syncAll(forceToolbarRelayout: true)
+                }
+            }
         }
 
         override func layout() {
             super.layout()
-            applyWindowStyle()
+            syncAll(forceToolbarRelayout: false)
         }
 
-        func applyWindowStyle() {
+        private func removeObservers() {
+            for token in observers {
+                NotificationCenter.default.removeObserver(token)
+            }
+            observers.removeAll()
+        }
+
+        private func installObserversIfNeeded() {
+            removeObservers()
+            guard let window else { return }
+            let nc = NotificationCenter.default
+
+            observers.append(
+                nc.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) { [weak self] _ in
+                    self?.syncAll(forceToolbarRelayout: true)
+                }
+            )
+            observers.append(
+                nc.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
+                    self?.syncAll(forceToolbarRelayout: true)
+                }
+            )
+            observers.append(
+                nc.addObserver(forName: NSSplitView.didResizeSubviewsNotification, object: nil, queue: .main) { [weak self] note in
+                    guard let self,
+                          let split = note.object as? NSSplitView,
+                          split.window === self.window else { return }
+                    self.syncAll(forceToolbarRelayout: true)
+                }
+            )
+        }
+
+        func syncAll(forceToolbarRelayout: Bool) {
             guard let window else { return }
             if !window.titlebarAppearsTransparent {
                 window.titlebarAppearsTransparent = true
@@ -1161,6 +1353,86 @@ private struct MacWindowTitlebarConfigurator: NSViewRepresentable {
             if let items = window.toolbar?.items {
                 for item in items where item.toolTip != nil {
                     item.toolTip = nil
+                }
+            }
+
+            let winContentW = window.contentLayoutRect.width > 0
+                ? window.contentLayoutRect.width
+                : (window.contentView?.bounds.width ?? 0)
+
+            var sidebarW: CGFloat = 0
+            var detailW: CGFloat = 0
+            if let splitView = locateWorkspaceSplitView(in: window) {
+                let subviews = splitView.subviews
+                if subviews.count >= 2 {
+                    let first = subviews[0]
+                    let last = subviews[subviews.count - 1]
+                    let isCollapsed = splitView.isSubviewCollapsed(first) || first.isHidden || first.frame.width < 20
+                    sidebarW = isCollapsed ? 0 : first.frame.width
+                    detailW = last.frame.width
+                }
+            }
+
+            let geomChanged = abs(winContentW - lastReportedWinW) >= 1.5 ||
+                abs(sidebarW - lastReportedSidebarW) >= 1.5 ||
+                abs(detailW - lastReportedDetailW) >= 1.5
+
+            if geomChanged && winContentW > 200 {
+                lastReportedWinW = winContentW
+                lastReportedSidebarW = sidebarW
+                lastReportedDetailW = detailW
+                let callback = onSplitGeometryUpdate
+                DispatchQueue.main.async {
+                    callback?(winContentW, sidebarW, detailW)
+                }
+            }
+
+            let widthDelta = abs(targetToolbarWidth - lastInvalidatedToolbarWidth)
+            if forceToolbarRelayout || geomChanged || widthDelta >= 1.0 {
+                lastInvalidatedToolbarWidth = targetToolbarWidth
+                invalidateToolbarLayout(in: window)
+            }
+        }
+
+        private func locateWorkspaceSplitView(in window: NSWindow) -> NSSplitView? {
+            var ancestor: NSView? = superview
+            while let current = ancestor {
+                if let sv = current as? NSSplitView, sv.isVertical {
+                    return sv
+                }
+                ancestor = current.superview
+            }
+            guard let root = window.contentView else { return nil }
+            return findVerticalSplitView(in: root, maxDepth: 6)
+        }
+
+        private func findVerticalSplitView(in view: NSView, maxDepth: Int) -> NSSplitView? {
+            if let sv = view as? NSSplitView, sv.isVertical {
+                return sv
+            }
+            guard maxDepth > 0 else { return nil }
+            for child in view.subviews {
+                if let found = findVerticalSplitView(in: child, maxDepth: maxDepth - 1) {
+                    return found
+                }
+            }
+            return nil
+        }
+
+        private func invalidateToolbarLayout(in window: NSWindow) {
+            guard let items = window.toolbar?.items else { return }
+            for item in items {
+                guard let itemView = item.view else { continue }
+                itemView.invalidateIntrinsicContentSize()
+                itemView.needsLayout = true
+                var parent = itemView.superview
+                var hops = 0
+                while let p = parent, hops < 4 {
+                    p.invalidateIntrinsicContentSize()
+                    p.needsLayout = true
+                    p.layoutSubtreeIfNeeded()
+                    parent = p.superview
+                    hops += 1
                 }
             }
         }

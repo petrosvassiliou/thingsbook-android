@@ -210,7 +210,9 @@ class ProjectDragDropController {
 
     // Geometry / content registered by the Project list (plain fields: only read while dragging)
     internal var listState: LazyListState? = null
+    internal var listWindowLeft: Float = 0f
     internal var listWindowTop: Float = 0f
+    internal var listWidth: Float = 0f
     internal var listHeight: Float = 0f
     internal var entries: Map<Any, ProjectListEntry> = emptyMap()
     internal var headings: List<Heading> = emptyList()
@@ -220,6 +222,9 @@ class ProjectDragDropController {
     /** True while a Project list is composed and registered as drop surface. */
     var isProjectListActive: Boolean = false
         internal set
+
+    val activeListWindowLeft: Float?
+        get() = if (isProjectListActive && listWidth > 0f) listWindowLeft else null
 
     fun start(kind: ProjectDragKind, pointerWindow: Offset, taskId: String? = null, taskTitle: String? = null) {
         val s = ProjectDragSession(kind, pointerWindow, taskId, taskTitle)
@@ -275,7 +280,10 @@ fun Modifier.projectDropSurface(
     onTaskDrop: (ProjectDragSession) -> Unit
 ): Modifier = this
     .onGloballyPositioned { coords ->
-        controller.listWindowTop = coords.localToWindowSafe(Offset.Zero).y
+        val winOrigin = coords.localToWindowSafe(Offset.Zero)
+        controller.listWindowLeft = winOrigin.x
+        controller.listWindowTop = winOrigin.y
+        controller.listWidth = coords.size.width.toFloat()
         controller.listHeight = coords.size.height.toFloat()
     }
     .pointerInput(controller) {

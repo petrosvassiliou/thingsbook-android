@@ -31,7 +31,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -42,7 +41,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Title
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -68,7 +66,6 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
@@ -80,7 +77,6 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.culturedcode.things3.R
@@ -122,9 +118,27 @@ fun computeMagicPlusDropSlot(
 fun resolveMagicPlusDropMode(
     allowHeadingDrop: Boolean,
     dragOffsetX: Float,
-    leftEdgeThresholdPx: Float
+    leftEdgeThresholdPx: Float,
+    pointerWindowX: Float = Float.NaN,
+    listWindowLeftPx: Float = Float.NaN,
+    headingGutterWidthPx: Float = Float.NaN
 ): MagicPlusDropMode {
-    return if (allowHeadingDrop && dragOffsetX.isFinite() && dragOffsetX <= leftEdgeThresholdPx) {
+    if (!allowHeadingDrop) {
+        return MagicPlusDropMode.INSERT_TODO
+    }
+    if (
+        pointerWindowX.isFinite() &&
+        listWindowLeftPx.isFinite() &&
+        headingGutterWidthPx.isFinite() &&
+        headingGutterWidthPx > 0f
+    ) {
+        return if (pointerWindowX <= listWindowLeftPx + headingGutterWidthPx) {
+            MagicPlusDropMode.INSERT_HEADING
+        } else {
+            MagicPlusDropMode.INSERT_TODO
+        }
+    }
+    return if (dragOffsetX.isFinite() && dragOffsetX <= leftEdgeThresholdPx) {
         MagicPlusDropMode.INSERT_HEADING
     } else {
         MagicPlusDropMode.INSERT_TODO
@@ -136,6 +150,9 @@ fun resolveMagicPlusDropMode(
  * coordinates so the list can resolve the exact drop position (incl. the heading section).
  */
 interface MagicPlusPositionalDropHandler {
+    val listLeftWindowX: Float?
+        get() = null
+
     fun onDragStart(windowCenter: Offset, mode: MagicPlusDropMode)
     fun onDragMove(windowCenter: Offset, mode: MagicPlusDropMode)
     fun onDragEnd(mode: MagicPlusDropMode)
@@ -235,26 +252,31 @@ fun MagicPlusBackdropScrim(
  * The iconic Things 3 "Magic Plus" Draggable Floating Action Button + Context-Aware Popover Menu:
  * - Clicking smoothly opens/closes a pure-GPU (`graphicsLayer`) popover menu without layout reflows,
  *   shadow-clipping pops, ripple flashes, or dark screen flashes.
- * - Dragging it across the list preserves 100% of the Things Magic Plus Drag & Drop behavior
- *   (`INSERT_TODO` row gap & `INSERT_HEADING` when dragged to the left inside a Project).
+ * - Dragging it across the list uses a stationary `pointerInput` anchor box while translating the
+ *   visual circle via `graphicsLayer`, avoiding coordinate-frame oscillation mid-drag.
  */
 @Composable
 fun MagicPlusFab(
     itemCount: Int,
     contextMode: MagicPlusContextMode,
-    canCreateArea: Boolean,
+    canCreateArea: Boolean = false,
     isMenuExpanded: Boolean,
     onMenuExpandedChange: (Boolean) -> Unit,
     onCreateTodo: () -> Unit,
     onCreateProject: () -> Unit,
     onCreateHeading: () -> Unit,
-    onCreateArea: () -> Unit,
+    onCreateArea: () -> Unit = {},
     onDragStateChanged: (MagicPlusDragState) -> Unit,
     onDropCreateTodoAt: (Int) -> Unit,
     onDropCreateHeadingAt: (Int) -> Unit,
     modifier: Modifier = Modifier,
     positionalDropHandler: MagicPlusPositionalDropHandler? = null
 ) {
+    @Suppress("UNUSED_PARAMETER")
+    val ignoredCanCreateArea = canCreateArea
+    @Suppress("UNUSED_PARAMETER")
+    val ignoredOnCreateArea = onCreateArea
+
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
     val density = LocalDensity.current
@@ -328,13 +350,13 @@ fun MagicPlusFab(
 
     val fabHoverBlue = if (colors.isDark) Color(0xFF58ADFF) else Color(0xFF1479EC)
     val fabBgColor by animateColorAsState(
-        targetValue = if (isFabHovered || isFabPressed) fabHoverBlue else colors.thingsBlue,
+        targetValue = if (isFabHovered || isFabPressed || isDragging) fabHoverBlue else colors.thingsBlue,
         animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing),
         label = "magicPlusBgColor"
     )
 
     val fabRingAlpha by animateFloatAsState(
-        targetValue = if (isFabHovered) 0.28f else 0f,
+        targetValue = if (isFabHovered || isDragging) 0.28f else 0f,
         animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing),
         label = "magicPlusRingAlpha"
     )
@@ -347,6 +369,7 @@ fun MagicPlusFab(
 
     val rowHeightPx by rememberUpdatedState(with(density) { 58.dp.toPx() }.coerceAtLeast(1f))
     val leftEdgeThresholdPx by rememberUpdatedState(with(density) { (-180).dp.toPx() })
+    val headingGutterWidthPx by rememberUpdatedState(with(density) { 96.dp.toPx() })
     val menuFloatOffsetPx = with(density) { 10.dp.toPx() }
 
     Box(
@@ -374,7 +397,6 @@ fun MagicPlusFab(
             ) {
                 MagicPlusContextMenuCard(
                     contextMode = contextMode,
-                    canCreateArea = canCreateArea,
                     onSelectTodo = {
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onMenuExpandedChange(false)
@@ -389,51 +411,16 @@ fun MagicPlusFab(
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onMenuExpandedChange(false)
                         onCreateProject()
-                    },
-                    onSelectArea = {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onMenuExpandedChange(false)
-                        onCreateArea()
                     }
                 )
             }
         }
 
-        // Draggable + Clickable Magic Plus Circle Button with unified zero-conflict gesture pipeline
+        // Stationary 58dp gesture anchor box; only the inner visual token translates during drag
         Box(
             modifier = Modifier
-                .offset {
-                    IntOffset(
-                        x = dragOffset.x.takeIf { it.isFinite() }?.roundToInt() ?: 0,
-                        y = dragOffset.y.takeIf { it.isFinite() }?.roundToInt() ?: 0
-                    )
-                }
-                .onGloballyPositioned { fabCoordsHolder[0] = it }
-                .graphicsLayer {
-                    val safeScale = if (fabScale.isFinite()) fabScale else 1f
-                    val safeLift = if (fabHoverLiftPx.isFinite()) fabHoverLiftPx else 0f
-                    scaleX = safeScale
-                    scaleY = safeScale
-                    translationY = safeLift
-                }
-                .shadow(
-                    elevation = when {
-                        isDragging -> 14.dp
-                        isFabHovered -> 12.dp
-                        else -> 8.dp
-                    },
-                    shape = CircleShape,
-                    ambientColor = colors.thingsBlue.copy(alpha = if (isFabHovered) 0.46f else 0.38f),
-                    spotColor = colors.thingsBlue.copy(alpha = if (isFabHovered) 0.58f else 0.48f)
-                )
                 .size(58.dp)
-                .clip(CircleShape)
-                .background(fabBgColor)
-                .border(
-                    width = 1.dp,
-                    color = Color.White.copy(alpha = if (fabRingAlpha.isFinite()) fabRingAlpha.coerceIn(0f, 1f) else 0f),
-                    shape = CircleShape
-                )
+                .onGloballyPositioned { fabCoordsHolder[0] = it }
                 .pointerHoverIcon(PointerIcon.Hand)
                 .hoverable(interactionSource = fabInteractionSource)
                 .semantics {
@@ -446,25 +433,31 @@ fun MagicPlusFab(
                     }
                 }
                 .pointerInput(Unit) {
-                    fun applyDragDelta(delta: Offset) {
-                        if (delta.x.isFinite() && delta.y.isFinite()) {
-                            dragOffset += delta
-                        }
+                    fun updateFromTotalOffset(totalOffset: Offset) {
+                        val safeX = if (totalOffset.x.isFinite()) totalOffset.x else 0f
+                        val safeY = if (totalOffset.y.isFinite()) totalOffset.y else 0f
+                        dragOffset = Offset(safeX, safeY)
 
                         val computedSlot = computeMagicPlusDropSlot(
                             itemCount = currentItemCount,
                             dragOffsetY = dragOffset.y,
                             rowHeightPx = rowHeightPx
                         )
+                        val positional = currentPositionalHandler
+                        val windowCenter = dragStartCenter + dragOffset
+                        val listLeftX = positional?.listLeftWindowX ?: Float.NaN
+
                         val mode = resolveMagicPlusDropMode(
                             allowHeadingDrop = currentAllowHeadingDrop,
                             dragOffsetX = dragOffset.x,
-                            leftEdgeThresholdPx = leftEdgeThresholdPx
+                            leftEdgeThresholdPx = leftEdgeThresholdPx,
+                            pointerWindowX = windowCenter.x,
+                            listWindowLeftPx = listLeftX,
+                            headingGutterWidthPx = headingGutterWidthPx
                         )
 
-                        val positional = currentPositionalHandler
                         if (positional != null) {
-                            positional.onDragMove(dragStartCenter + dragOffset, mode)
+                            positional.onDragMove(windowCenter, mode)
                             lastHapticSlot = computedSlot
                             if (mode != lastDropMode) {
                                 lastDropMode = mode
@@ -492,15 +485,16 @@ fun MagicPlusFab(
 
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
+                        val downOrigin = down.position
                         down.consume()
                         isFabPressed = true
                         var dragSessionStarted = false
 
                         try {
-                            var overSlop = Offset.Zero
+                            var initialOverSlop = Offset.Zero
                             val dragStart = awaitTouchSlopOrCancellation(down.id) { change, over ->
                                 change.consume()
-                                overSlop = over
+                                initialOverSlop = over
                             }
 
                             if (dragStart == null) {
@@ -533,21 +527,23 @@ fun MagicPlusFab(
                                 dragStartCenter = if (coords != null && coords.isAttached) {
                                     coords.localToWindow(
                                         Offset(coords.size.width / 2f, coords.size.height / 2f)
-                                    ) - dragOffset
+                                    )
                                 } else {
                                     Offset.Zero
                                 }
                                 currentPositionalHandler?.onDragStart(
-                                    dragStartCenter + dragOffset,
+                                    dragStartCenter,
                                     MagicPlusDropMode.INSERT_TODO
                                 )
 
-                                applyDragDelta(overSlop)
+                                val startOffset = (dragStart.position - downOrigin).let { raw ->
+                                    if (raw.getDistanceSquared() > 0.5f) raw else initialOverSlop
+                                }
+                                updateFromTotalOffset(startOffset)
 
                                 val completedCleanly = drag(dragStart.id) { change ->
-                                    val delta = change.positionChange()
                                     change.consume()
-                                    applyDragDelta(delta)
+                                    updateFromTotalOffset(change.position - downOrigin)
                                 }
 
                                 dragSessionStarted = false
@@ -588,16 +584,63 @@ fun MagicPlusFab(
                 },
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Outlined.Add,
-                contentDescription = null,
-                tint = Color.White,
+            if (isDragging) {
+                Box(
+                    modifier = Modifier
+                        .size(54.dp)
+                        .clip(CircleShape)
+                        .background(colors.thingsBlue.copy(alpha = 0.08f))
+                        .border(
+                            width = 1.5.dp,
+                            color = colors.thingsBlue.copy(alpha = 0.30f),
+                            shape = CircleShape
+                        )
+                )
+            }
+
+            Box(
                 modifier = Modifier
-                    .size(30.dp)
                     .graphicsLayer {
-                        rotationZ = if (iconRotation.isFinite()) iconRotation else 0f
+                        val safeScale = if (fabScale.isFinite()) fabScale else 1f
+                        val safeLift = if (fabHoverLiftPx.isFinite()) fabHoverLiftPx else 0f
+                        val dx = if (dragOffset.x.isFinite()) dragOffset.x else 0f
+                        val dy = if (dragOffset.y.isFinite()) dragOffset.y else 0f
+                        translationX = dx
+                        translationY = dy + safeLift
+                        scaleX = safeScale
+                        scaleY = safeScale
                     }
-            )
+                    .shadow(
+                        elevation = when {
+                            isDragging -> 14.dp
+                            isFabHovered -> 12.dp
+                            else -> 8.dp
+                        },
+                        shape = CircleShape,
+                        ambientColor = colors.thingsBlue.copy(alpha = if (isFabHovered || isDragging) 0.46f else 0.38f),
+                        spotColor = colors.thingsBlue.copy(alpha = if (isFabHovered || isDragging) 0.58f else 0.48f)
+                    )
+                    .size(58.dp)
+                    .clip(CircleShape)
+                    .background(fabBgColor)
+                    .border(
+                        width = 1.dp,
+                        color = Color.White.copy(alpha = if (fabRingAlpha.isFinite()) fabRingAlpha.coerceIn(0f, 1f) else 0f),
+                        shape = CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Add,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier
+                        .size(30.dp)
+                        .graphicsLayer {
+                            rotationZ = if (iconRotation.isFinite()) iconRotation else 0f
+                        }
+                )
+            }
         }
     }
 }
@@ -605,11 +648,9 @@ fun MagicPlusFab(
 @Composable
 private fun MagicPlusContextMenuCard(
     contextMode: MagicPlusContextMode,
-    canCreateArea: Boolean,
     onSelectTodo: () -> Unit,
     onSelectHeading: () -> Unit,
-    onSelectProject: () -> Unit,
-    onSelectArea: () -> Unit
+    onSelectProject: () -> Unit
 ) {
     val colors = ThingsTheme.colors
 
@@ -644,7 +685,7 @@ private fun MagicPlusContextMenuCard(
             modifier = Modifier.padding(8.dp),
             verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
-            // 1. Aufgabe (Always available)
+            // 1. To-Do (Always available)
             MagicPlusOptionRow(
                 icon = Icons.Outlined.CheckCircleOutline,
                 iconTint = colors.thingsBlue,
@@ -655,7 +696,7 @@ private fun MagicPlusContextMenuCard(
                 onClick = onSelectTodo
             )
 
-            // 2. Überschrift (Context-specific: inside a Project!)
+            // 2. Heading (Context-specific: inside a Project)
             if (contextMode == MagicPlusContextMode.PROJECT_DETAIL) {
                 MagicPlusOptionRow(
                     icon = Icons.Outlined.Title,
@@ -667,7 +708,7 @@ private fun MagicPlusContextMenuCard(
                 )
             }
 
-            // 3. Projekt (Available in all views; pre-assigns Area when in Area/Project context)
+            // 3. Project (Available in all views; pre-assigns Area when in Area/Project context)
             MagicPlusOptionRow(
                 icon = Icons.Outlined.Folder,
                 iconTint = colors.thingsBlue,
@@ -677,18 +718,6 @@ private fun MagicPlusContextMenuCard(
                 shortcutBadge = "Ctrl+Shift+N",
                 onClick = onSelectProject
             )
-
-            // 4. Bereich (Context-specific: available outside Project detail when < 8 Areas)
-            if (contextMode != MagicPlusContextMode.PROJECT_DETAIL && canCreateArea) {
-                MagicPlusOptionRow(
-                    icon = Icons.Outlined.Inventory2,
-                    iconTint = colors.anytimeTeal,
-                    iconBg = colors.anytimeTeal.copy(alpha = 0.14f),
-                    title = stringResource(R.string.entity_area),
-                    subtitle = stringResource(R.string.magic_plus_area_sub),
-                    onClick = onSelectArea
-                )
-            }
         }
     }
 }

@@ -41,6 +41,14 @@ public enum DateEpochConverter {
         Date(timeIntervalSince1970: TimeInterval(millis) / 1000.0)
     }
 
+    public static func date(fromEpochDay epochDay: Int, calendar: Calendar = .current) -> Date {
+        var utcCal = Calendar(identifier: .gregorian)
+        utcCal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let utcDate = Date(timeIntervalSince1970: TimeInterval(epochDay) * 86_400.0)
+        let comps = utcCal.dateComponents([.year, .month, .day], from: utcDate)
+        return calendar.date(from: DateComponents(year: comps.year, month: comps.month, day: comps.day)) ?? utcDate
+    }
+
     /// ISO-8601 weekday: 1 = Monday ... 7 = Sunday
     public static func isoWeekday(for date: Date, calendar: Calendar = .current) -> Int {
         let appleWeekday = calendar.component(.weekday, from: date) // 1 = Sun ... 7 = Sat

@@ -190,7 +190,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.16"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.17"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -408,9 +408,9 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.16")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.16")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 60)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.17")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.17")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 61)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
         XCTAssertEqual(
             FirebaseCloudSyncService.deriveUidWakeTopic(uid: " user-abc-123 "),
@@ -448,6 +448,7 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.14", current: "2.0.0-beta.13"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.15", current: "2.0.0-beta.14"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.16", current: "2.0.0-beta.15"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.17", current: "2.0.0-beta.16"))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.9", current: "2.0.0-beta.10"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.1"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.99"))
@@ -2297,5 +2298,153 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertTrue(dirtyTombstones[0].isDeleted)
         XCTAssertEqual(dirtyTombstones[0].title, "")
     }
+
+    func testBeta17ToolbarClampingMagicPlusDropAndCalendarGrid() throws {
+        // 1. Initial-launch toolbar misalignment guard: unsplit 1140pt GeometryReader width is clamped when sidebar is open
+        let clampedColdLaunch = MacToolbarLayoutMetrics.clampedInitialOrLiveDetailWidth(
+            rawDetailWidth: 1140.0,
+            windowContentWidth: 1140.0,
+            sidebarFrameWidth: 0.0,
+            isSidebarCollapsed: false
+        )
+        XCTAssertEqual(clampedColdLaunch, 877.0, accuracy: 0.01)
+
+        let clampedLiveSplit = MacToolbarLayoutMetrics.clampedInitialOrLiveDetailWidth(
+            rawDetailWidth: 1140.0,
+            windowContentWidth: 1200.0,
+            sidebarFrameWidth: 270.0,
+            isSidebarCollapsed: false
+        )
+        XCTAssertEqual(clampedLiveSplit, 929.0, accuracy: 0.01)
+
+        let collapsedFullWidth = MacToolbarLayoutMetrics.clampedInitialOrLiveDetailWidth(
+            rawDetailWidth: 1140.0,
+            windowContentWidth: 1140.0,
+            sidebarFrameWidth: 0.0,
+            isSidebarCollapsed: true
+        )
+        XCTAssertEqual(collapsedFullWidth, 1140.0, accuracy: 0.01)
+
+        // 2. MacMagicPlusDropResolver: To-Do midpoint, Heading gutter, Upcoming epochDayOverride & Evening
+        let projectSlots: [MacMagicPlusSlotGeometry] = [
+            MacMagicPlusSlotGeometry(
+                id: "task-1",
+                kind: .task(
+                    taskId: "t1",
+                    headingId: nil,
+                    prevOrder: nil,
+                    taskOrder: 1000.0,
+                    nextOrder: 2000.0,
+                    epochDayOverride: nil,
+                    evening: false
+                ),
+                minX: 40.0,
+                maxX: 680.0,
+                minY: 100.0,
+                maxY: 140.0
+            ),
+            MacMagicPlusSlotGeometry(
+                id: "task-2",
+                kind: .task(
+                    taskId: "t2",
+                    headingId: nil,
+                    prevOrder: 1000.0,
+                    taskOrder: 2000.0,
+                    nextOrder: nil,
+                    epochDayOverride: nil,
+                    evening: false
+                ),
+                minX: 40.0,
+                maxX: 680.0,
+                minY: 148.0,
+                maxY: 188.0
+            ),
+            MacMagicPlusSlotGeometry(
+                id: "heading-1",
+                kind: .heading(
+                    headingId: "h1",
+                    prevHeadingOrder: nil,
+                    headingOrder: 1000.0,
+                    firstTaskOrder: 500.0,
+                    prevSectionId: nil,
+                    prevSectionLastTaskOrder: 2000.0
+                ),
+                minX: 40.0,
+                maxX: 680.0,
+                minY: 210.0,
+                maxY: 246.0
+            )
+        ]
+
+        let midTaskDrop = MacMagicPlusDropResolver.resolve(
+            pointerX: 300.0,
+            pointerY: 155.0,
+            isProjectView: true,
+            slots: projectSlots
+        )
+        XCTAssertEqual(midTaskDrop.mode, .todo)
+        XCTAssertEqual(midTaskDrop.indicatorSlotId, "task-2")
+        XCTAssertEqual(midTaskDrop.indicatorEdge, .before)
+        XCTAssertEqual(midTaskDrop.prevTaskOrder, 1000.0)
+        XCTAssertEqual(midTaskDrop.nextTaskOrder, 2000.0)
+
+        let headingGutterDrop = MacMagicPlusDropResolver.resolve(
+            pointerX: 80.0,
+            pointerY: 195.0,
+            isProjectView: true,
+            slots: projectSlots
+        )
+        XCTAssertEqual(headingGutterDrop.mode, .heading)
+        XCTAssertEqual(headingGutterDrop.indicatorSlotId, "heading-1")
+        XCTAssertEqual(headingGutterDrop.indicatorEdge, .before)
+        XCTAssertNil(headingGutterDrop.prevHeadingOrder)
+        XCTAssertEqual(headingGutterDrop.nextHeadingOrder, 1000.0)
+
+        // Explicit sortOrder persistence in SQLite for both tasks and headings
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let proj = try db.createProject(title: "Roadmap")
+        let createdMidTask = try db.createTask(
+            title: "Dropped Task",
+            projectId: proj.id,
+            sortOrder: 1500.0
+        )
+        XCTAssertEqual(createdMidTask.sortOrder, 1500.0)
+        let createdMidHeading = try db.createHeading(
+            projectId: proj.id,
+            title: "Dropped Heading",
+            sortOrder: 750.0
+        )
+        XCTAssertEqual(createdMidHeading.sortOrder, 750.0)
+
+        // 3. MacCalendarMonthGrid + DateEpochConverter round-trip (German Monday-first vs US Sunday-first)
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        let march15 = cal.date(from: DateComponents(year: 2026, month: 3, day: 15))!
+        let march20 = cal.date(from: DateComponents(year: 2026, month: 3, day: 20))!
+
+        let epochDay = DateEpochConverter.epochDay(for: march20, calendar: cal)
+        let roundTripDate = DateEpochConverter.date(fromEpochDay: epochDay, calendar: cal)
+        XCTAssertEqual(cal.startOfDay(for: roundTripDate), cal.startOfDay(for: march20))
+
+        let deGrid = MacCalendarMonthGrid.build(
+            displayedMonth: march15,
+            selectedDate: march20,
+            today: march15,
+            locale: Locale(identifier: "de_DE")
+        )
+        XCTAssertTrue(deGrid.days.count == 35 || deGrid.days.count == 42)
+        XCTAssertEqual(deGrid.weekdaySymbols.count, 7)
+        XCTAssertEqual(deGrid.days.filter(\.isToday).map(\.dayNumber), [15])
+        XCTAssertEqual(deGrid.days.filter(\.isSelected).map(\.dayNumber), [20])
+
+        let usGrid = MacCalendarMonthGrid.build(
+            displayedMonth: march15,
+            selectedDate: nil,
+            today: march15,
+            locale: Locale(identifier: "en_US")
+        )
+        XCTAssertNotEqual(deGrid.days.first?.id, usGrid.days.first?.id, "de_DE Monday-first and en_US Sunday-first grids must align to their respective first weekday")
+    }
 }
+
 

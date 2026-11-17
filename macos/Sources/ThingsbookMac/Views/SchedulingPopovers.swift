@@ -1,5 +1,227 @@
 import SwiftUI
+import AppKit
 import ThingsbookCore
+
+// MARK: - Full-Width Things-for-Mac Month Calendar Grid
+
+private struct ThingsMacCalendarGridView: View {
+    @Binding var displayedMonth: Date
+    let selectedDate: Date?
+    let locale: Locale
+    var accentColor: Color = ThingsMacPalette.accentBlue
+    let onSelectDate: (Date) -> Void
+
+    @State private var hoveredDayId: Int? = nil
+    @State private var hoveredNavButton: String? = nil
+
+    private var grid: MacCalendarMonthGrid {
+        MacCalendarMonthGrid.build(
+            displayedMonth: displayedMonth,
+            selectedDate: selectedDate,
+            today: Date(),
+            locale: locale
+        )
+    }
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 3), count: 7)
+
+    var body: some View {
+        let currentGrid = grid
+
+        VStack(spacing: 8) {
+            // Month title + < ● > navigation
+            HStack(alignment: .center, spacing: 4) {
+                Text(currentGrid.monthTitle)
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Spacer()
+
+                calendarNavButton(id: "prev", systemImage: "chevron.left", size: 10.5) {
+                    shiftMonth(by: -1)
+                }
+                calendarNavButton(id: "today", systemImage: "circle.fill", size: 5.5) {
+                    withAnimation(.easeOut(duration: 0.14)) {
+                        displayedMonth = Date()
+                    }
+                }
+                calendarNavButton(id: "next", systemImage: "chevron.right", size: 10.5) {
+                    shiftMonth(by: 1)
+                }
+            }
+            .padding(.horizontal, 2)
+
+            // Weekday symbols row
+            LazyVGrid(columns: columns, spacing: 2) {
+                ForEach(Array(currentGrid.weekdaySymbols.enumerated()), id: \.offset) { _, symbol in
+                    Text(symbol)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 18)
+                }
+            }
+
+            // Day cells grid (7 equal columns spanning 100% width)
+            LazyVGrid(columns: columns, spacing: 3) {
+                ForEach(currentGrid.days) { cell in
+                    let isHovered = hoveredDayId == cell.id
+                    Button {
+                        if !cell.isInDisplayedMonth {
+                            displayedMonth = cell.date
+                        }
+                        onSelectDate(cell.date)
+                    } label: {
+                        Text("\(cell.dayNumber)")
+                            .font(.system(
+                                size: 12.5,
+                                weight: (cell.isSelected || cell.isToday) ? .semibold : .regular,
+                                design: .rounded
+                            ))
+                            .foregroundStyle(dayForeground(for: cell))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 31)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                                    .fill(dayBackground(for: cell, isHovered: isHovered))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                                    .strokeBorder(
+                                        (cell.isToday && !cell.isSelected)
+                                            ? accentColor.opacity(0.45)
+                                            : Color.clear,
+                                        lineWidth: 1.25
+                                    )
+                            )
+                            .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { hovering in
+                        hoveredDayId = hovering ? cell.id : (hoveredDayId == cell.id ? nil : hoveredDayId)
+                        if hovering {
+                            NSCursor.pointingHand.set()
+                        } else {
+                            NSCursor.arrow.set()
+                        }
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(ThingsMacPalette.subtleContainer)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.75)
+                )
+        )
+    }
+
+    private func calendarNavButton(
+        id: String,
+        systemImage: String,
+        size: CGFloat,
+        action: @escaping () -> Void
+    ) -> some View {
+        let isHovered = hoveredNavButton == id
+        return Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: size, weight: .bold))
+                .foregroundStyle(isHovered ? Color.primary : Color.secondary)
+                .frame(width: 24, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(isHovered ? Color.primary.opacity(0.08) : Color.clear)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            hoveredNavButton = hovering ? id : (hoveredNavButton == id ? nil : hoveredNavButton)
+            if hovering {
+                NSCursor.pointingHand.set()
+            } else {
+                NSCursor.arrow.set()
+            }
+        }
+    }
+
+    private func shiftMonth(by delta: Int) {
+        if let shifted = Calendar.current.date(byAdding: .month, value: delta, to: displayedMonth) {
+            withAnimation(.easeOut(duration: 0.14)) {
+                displayedMonth = shifted
+            }
+        }
+    }
+
+    private func dayForeground(for cell: MacCalendarDayCell) -> Color {
+        if cell.isSelected {
+            return .white
+        }
+        if cell.isToday {
+            return accentColor
+        }
+        if cell.isInDisplayedMonth {
+            return .primary
+        }
+        return Color.secondary.opacity(0.42)
+    }
+
+    private func dayBackground(for cell: MacCalendarDayCell, isHovered: Bool) -> Color {
+        if cell.isSelected {
+            return accentColor
+        }
+        if isHovered {
+            return Color.primary.opacity(0.08)
+        }
+        return .clear
+    }
+}
+
+private struct SchedulingHoverPillButton: View {
+    let title: String
+    var systemImage: String? = nil
+    var tint: Color = .secondary
+    var hoverTint: Color = .primary
+    var fillTint: Color = .primary
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4.5) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                Text(title)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(isHovered ? hoverTint : tint)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4.5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(fillTint.opacity(isHovered ? 0.13 : 0.065))
+            )
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+            if hovering {
+                NSCursor.pointingHand.set()
+            } else {
+                NSCursor.arrow.set()
+            }
+        }
+    }
+}
 
 // MARK: - When Scheduling Popover (with 5-Language Natural Date Parser + Reminder)
 
@@ -13,8 +235,11 @@ public struct WhenPopoverView: View {
 
     @State private var naturalInput = ""
     @State private var pickerDate: Date
+    @State private var displayedMonth: Date
+    @State private var hasExplicitDateSelection: Bool
     @State private var reminderEnabled: Bool
     @State private var reminderTimeDate: Date
+    @FocusState private var isSearchFocused: Bool
 
     public init(
         store: ThingsbookStore,
@@ -31,6 +256,8 @@ public struct WhenPopoverView: View {
 
         let initialDate = currentWhenMillis.map { DateEpochConverter.date(fromMillis: $0) } ?? Date()
         _pickerDate = State(initialValue: initialDate)
+        _displayedMonth = State(initialValue: initialDate)
+        _hasExplicitDateSelection = State(initialValue: currentWhenMillis != nil)
         _reminderEnabled = State(initialValue: currentReminderMillis != nil)
         if let rem = currentReminderMillis {
             _reminderTimeDate = State(initialValue: DateEpochConverter.date(fromMillis: rem))
@@ -51,139 +278,35 @@ public struct WhenPopoverView: View {
         return (comps.hour ?? 9, comps.minute ?? 0)
     }
 
+    private var canClearSelection: Bool {
+        currentWhenMillis != nil || currentReminderMillis != nil || (currentSchedule != .inbox && currentSchedule != .anytime)
+    }
+
+    private var highlightedCalendarDate: Date? {
+        if hasExplicitDateSelection || reminderEnabled {
+            return pickerDate
+        }
+        return nil
+    }
+
     public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(store.tr("action_when"))
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-
-            // Natural language input (EN, DE, FR, IT, ES)
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 12))
+            // Header + sleek Clear pill
+            HStack(alignment: .center) {
+                Text(store.tr("action_when"))
+                    .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(.secondary)
-                TextField(store.tr("when_natural_input_hint"), text: $naturalInput)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12.5))
-                    .onSubmit {
-                        if let parsed = parsedNatural {
-                            applyParsedNatural(parsed)
-                        }
-                    }
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(Color.primary.opacity(0.06))
-            )
-
-            if let parsed = parsedNatural {
-                Button {
-                    applyParsedNatural(parsed)
-                } label: {
-                    HStack {
-                        Image(systemName: "sparkles")
-                            .foregroundStyle(ThingsMacPalette.accentBlue)
-                        Text(parsed.formattedPreview)
-                            .font(.system(size: 12.5, weight: .medium))
-                        Spacer()
-                        Image(systemName: "return")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(ThingsMacPalette.accentBlue.opacity(0.12))
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-
-            // Quick Presets
-            VStack(spacing: 2) {
-                presetRow(
-                    icon: "star.fill",
-                    color: ThingsMacPalette.todayYellow,
-                    title: store.tr("view_today"),
-                    shortcut: "⌘T"
-                ) {
-                    applyPreset(.today)
-                }
-                presetRow(
-                    icon: "moon.stars.fill",
-                    color: ThingsMacPalette.eveningPurple,
-                    title: store.tr("view_this_evening"),
-                    shortcut: "⌘E"
-                ) {
-                    applyPreset(.thisEvening)
-                }
-                presetRow(
-                    icon: "sun.horizon.fill",
-                    color: ThingsMacPalette.upcomingRed,
-                    title: store.tr("date_tomorrow"),
-                    shortcut: nil
-                ) {
-                    applyPreset(.upcoming)
-                }
-                presetRow(
-                    icon: "square.stack.3d.up.fill",
-                    color: ThingsMacPalette.anytimeTeal,
-                    title: store.tr("view_anytime"),
-                    shortcut: nil
-                ) {
-                    applyPreset(.anytime)
-                }
-                presetRow(
-                    icon: "archivebox.fill",
-                    color: ThingsMacPalette.somedayAmber,
-                    title: store.tr("view_someday"),
-                    shortcut: "⌘O"
-                ) {
-                    applyPreset(.someday)
-                }
-            }
-
-            Divider()
-
-            DatePicker(
-                "",
-                selection: $pickerDate,
-                displayedComponents: [.date]
-            )
-            .environment(\.locale, store.preferences.language.locale)
-            .datePickerStyle(.graphical)
-            .labelsHidden()
-            .onChange(of: pickerDate) { _, newValue in
-                if !reminderEnabled {
-                    applyPickedDate(newValue)
-                }
-            }
-
-            Divider()
-
-            // Optional Reminder Time
-            HStack {
-                Toggle(isOn: $reminderEnabled) {
-                    Label(store.tr("when_task_reminder_title"), systemImage: "bell.fill")
-                        .font(.system(size: 12))
-                }
-                .toggleStyle(.checkbox)
 
                 Spacer()
 
-                if reminderEnabled {
-                    DatePicker("", selection: $reminderTimeDate, displayedComponents: [.hourAndMinute])
-                        .labelsHidden()
-                        .frame(width: 88)
-                }
-            }
-
-            HStack {
-                if currentWhenMillis != nil || currentReminderMillis != nil || currentSchedule != .inbox {
-                    Button(store.tr("action_clear")) {
+                if canClearSelection {
+                    SchedulingHoverPillButton(
+                        title: store.tr("action_clear"),
+                        systemImage: "xmark.circle.fill",
+                        tint: .secondary,
+                        hoverTint: ThingsMacPalette.upcomingRed,
+                        fillTint: .primary
+                    ) {
                         onApply(
                             ResolvedWhenSelection(
                                 scheduleState: .anytime,
@@ -193,51 +316,221 @@ public struct WhenPopoverView: View {
                         )
                         dismiss()
                     }
-                    .font(.system(size: 12))
                 }
+            }
 
-                Spacer()
+            // Natural language input (EN, DE, FR, IT, ES)
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(isSearchFocused ? ThingsMacPalette.accentBlue : .secondary)
+
+                TextField(store.tr("when_natural_input_hint"), text: $naturalInput)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .lineLimit(1)
+                    .focused($isSearchFocused)
+                    .onSubmit {
+                        if let parsed = parsedNatural {
+                            applyParsedNatural(parsed)
+                        }
+                    }
+
+                if !naturalInput.isEmpty {
+                    Button {
+                        naturalInput = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(ThingsMacPalette.subtleContainer)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(
+                                isSearchFocused
+                                    ? ThingsMacPalette.accentBlue.opacity(0.45)
+                                    : Color.primary.opacity(0.09),
+                                lineWidth: 1
+                            )
+                    )
+            )
+
+            if let parsed = parsedNatural {
+                Button {
+                    applyParsedNatural(parsed)
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(ThingsMacPalette.accentBlue)
+                        Text(parsed.formattedPreview)
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Spacer()
+                        Image(systemName: "return")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(ThingsMacPalette.accentBlue)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6.5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(ThingsMacPalette.accentBlue.opacity(0.12))
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Quick Presets
+            VStack(spacing: 2) {
+                WhenPresetRow(
+                    icon: "star.fill",
+                    color: ThingsMacPalette.todayYellow,
+                    title: store.tr("view_today"),
+                    shortcut: "⌘T",
+                    isActive: currentSchedule == .today
+                ) {
+                    applyPreset(.today)
+                }
+                WhenPresetRow(
+                    icon: "moon.stars.fill",
+                    color: ThingsMacPalette.eveningPurple,
+                    title: store.tr("view_this_evening"),
+                    shortcut: "⌘E",
+                    isActive: currentSchedule == .thisEvening
+                ) {
+                    applyPreset(.thisEvening)
+                }
+                WhenPresetRow(
+                    icon: "sun.horizon.fill",
+                    color: ThingsMacPalette.upcomingRed,
+                    title: store.tr("date_tomorrow"),
+                    shortcut: nil,
+                    isActive: false
+                ) {
+                    applyPreset(.upcoming)
+                }
+                WhenPresetRow(
+                    icon: "square.stack.3d.up.fill",
+                    color: ThingsMacPalette.anytimeTeal,
+                    title: store.tr("view_anytime"),
+                    shortcut: nil,
+                    isActive: currentSchedule == .anytime
+                ) {
+                    applyPreset(.anytime)
+                }
+                WhenPresetRow(
+                    icon: "archivebox.fill",
+                    color: ThingsMacPalette.somedayAmber,
+                    title: store.tr("view_someday"),
+                    shortcut: "⌘O",
+                    isActive: currentSchedule == .someday
+                ) {
+                    applyPreset(.someday)
+                }
+            }
+
+            // Full-Width Custom Month Calendar Grid
+            ThingsMacCalendarGridView(
+                displayedMonth: $displayedMonth,
+                selectedDate: highlightedCalendarDate,
+                locale: store.preferences.language.locale,
+                accentColor: ThingsMacPalette.accentBlue
+            ) { picked in
+                pickerDate = picked
+                hasExplicitDateSelection = true
+                if !reminderEnabled {
+                    applyPickedDate(picked)
+                }
+            }
+
+            // Clean Single-Line Reminder Card
+            VStack(alignment: .leading, spacing: 8) {
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        reminderEnabled.toggle()
+                        if reminderEnabled {
+                            hasExplicitDateSelection = true
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: reminderEnabled ? "bell.badge.fill" : "bell")
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundStyle(reminderEnabled ? ThingsMacPalette.accentBlue : .secondary)
+                            .frame(width: 18)
+
+                        Text(store.tr("when_task_reminder_title"))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+
+                        Spacer(minLength: 6)
+
+                        Image(systemName: reminderEnabled ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(reminderEnabled ? ThingsMacPalette.accentBlue : Color.secondary.opacity(0.45))
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
 
                 if reminderEnabled {
-                    Button(store.tr("when_apply_date_button")) {
-                        applyPickedDate(pickerDate)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                }
-            }
-        }
-        .padding(12)
-        .frame(width: 296)
-    }
+                    Divider()
+                        .opacity(0.6)
 
-    private func presetRow(
-        icon: String,
-        color: Color,
-        title: String,
-        shortcut: String?,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(color)
-                    .frame(width: 18)
-                Text(title)
-                    .font(.system(size: 13))
-                Spacer()
-                if let shortcut {
-                    Text(shortcut)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
+                    HStack(spacing: 8) {
+                        DatePicker("", selection: $reminderTimeDate, displayedComponents: [.hourAndMinute])
+                            .labelsHidden()
+                            .controlSize(.small)
+                            .fixedSize()
+
+                        Spacer()
+
+                        Button {
+                            applyPickedDate(pickerDate)
+                        } label: {
+                            Text(store.tr("when_apply_date_button"))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 5)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .fill(ThingsMacPalette.accentBlue)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8.5)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(ThingsMacPalette.subtleContainer)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .strokeBorder(
+                                reminderEnabled
+                                    ? ThingsMacPalette.accentBlue.opacity(0.28)
+                                    : Color.primary.opacity(0.06),
+                                lineWidth: 0.85
+                            )
+                    )
+            )
         }
-        .buttonStyle(.plain)
+        .padding(14)
+        .frame(width: 328)
     }
 
     private func applyPickedDate(_ dateVal: Date) {
@@ -293,6 +586,73 @@ public struct WhenPopoverView: View {
     }
 }
 
+private struct WhenPresetRow: View {
+    let icon: String
+    let color: Color
+    let title: String
+    let shortcut: String?
+    let isActive: Bool
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(color)
+                    .frame(width: 20, alignment: .center)
+
+                Text(title)
+                    .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Spacer()
+
+                if isActive {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10.5, weight: .bold))
+                        .foregroundStyle(ThingsMacPalette.accentBlue)
+                }
+
+                if let shortcut {
+                    Text(shortcut)
+                        .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5.5)
+                        .padding(.vertical, 1.5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4.5, style: .continuous)
+                                .fill(Color.primary.opacity(0.065))
+                        )
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5.5)
+            .background(
+                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                    .fill(
+                        isHovered
+                            ? ThingsMacPalette.accentBlue.opacity(0.09)
+                            : (isActive ? Color.primary.opacity(0.045) : Color.clear)
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+            if hovering {
+                NSCursor.pointingHand.set()
+            } else {
+                NSCursor.arrow.set()
+            }
+        }
+    }
+}
+
 // MARK: - Deadline Popover
 
 public struct DeadlinePopoverView: View {
@@ -301,64 +661,120 @@ public struct DeadlinePopoverView: View {
     let onSelectDeadline: (Int64?) -> Void
     @Environment(\.dismiss) private var dismiss
 
-    @State private var selectedDate: Date
+    @State private var displayedMonth: Date
 
     public init(store: ThingsbookStore, currentDeadlineMillis: Int64?, onSelectDeadline: @escaping (Int64?) -> Void) {
         self.store = store
         self.currentDeadlineMillis = currentDeadlineMillis
         self.onSelectDeadline = onSelectDeadline
-        _selectedDate = State(initialValue: currentDeadlineMillis.map { DateEpochConverter.date(fromMillis: $0) } ?? Date())
+        _displayedMonth = State(initialValue: currentDeadlineMillis.map { DateEpochConverter.date(fromMillis: $0) } ?? Date())
+    }
+
+    private var selectedDeadlineDate: Date? {
+        currentDeadlineMillis.map { DateEpochConverter.date(fromMillis: $0) }
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStack(alignment: .center) {
                 Label(store.tr("deadline_picker_title"), systemImage: "flag.fill")
-                    .font(.system(size: 12.5, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(ThingsMacPalette.deadlineCrimson)
+
                 Spacer()
+
                 if currentDeadlineMillis != nil {
-                    Button(store.tr("deadline_clear_button")) {
+                    SchedulingHoverPillButton(
+                        title: store.tr("deadline_clear_button"),
+                        systemImage: "xmark.circle.fill",
+                        tint: .secondary,
+                        hoverTint: ThingsMacPalette.deadlineCrimson,
+                        fillTint: .primary
+                    ) {
                         onSelectDeadline(nil)
                         dismiss()
                     }
-                    .font(.system(size: 11.5))
                 }
             }
 
             HStack(spacing: 6) {
-                Button(store.tr("view_today")) {
+                deadlineQuickChip(title: store.tr("view_today")) {
                     onSelectDeadline(DateEpochConverter.startOfDayMillis(for: Date()))
                     dismiss()
                 }
-                .controlSize(.small)
-
-                Button(store.tr("date_tomorrow")) {
+                deadlineQuickChip(title: store.tr("date_tomorrow")) {
                     let tmr = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
                     onSelectDeadline(DateEpochConverter.startOfDayMillis(for: tmr))
                     dismiss()
                 }
-                .controlSize(.small)
-
-                Button(store.tr("macos_deadline_plus_7d")) {
+                deadlineQuickChip(title: store.tr("macos_deadline_plus_7d")) {
                     let wk = Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date()
                     onSelectDeadline(DateEpochConverter.startOfDayMillis(for: wk))
                     dismiss()
                 }
-                .controlSize(.small)
             }
 
-            DatePicker("", selection: $selectedDate, displayedComponents: [.date])
-                .environment(\.locale, store.preferences.language.locale)
-                .datePickerStyle(.graphical)
-                .labelsHidden()
-                .onChange(of: selectedDate) { _, newValue in
-                    onSelectDeadline(DateEpochConverter.startOfDayMillis(for: newValue))
-                    dismiss()
-                }
+            ThingsMacCalendarGridView(
+                displayedMonth: $displayedMonth,
+                selectedDate: selectedDeadlineDate,
+                locale: store.preferences.language.locale,
+                accentColor: ThingsMacPalette.deadlineCrimson
+            ) { picked in
+                onSelectDeadline(DateEpochConverter.startOfDayMillis(for: picked))
+                dismiss()
+            }
         }
-        .padding(12)
-        .frame(width: 284)
+        .padding(14)
+        .frame(width: 320)
+    }
+
+    private func deadlineQuickChip(title: String, action: @escaping () -> Void) -> some View {
+        DeadlineQuickChipButton(title: title, action: action)
+    }
+}
+
+private struct DeadlineQuickChipButton: View {
+    let title: String
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(isHovered ? ThingsMacPalette.deadlineCrimson : .primary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 5.5)
+                .background(
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .fill(
+                            isHovered
+                                ? ThingsMacPalette.deadlineCrimson.opacity(0.12)
+                                : ThingsMacPalette.subtleContainer
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                                .strokeBorder(
+                                    isHovered
+                                        ? ThingsMacPalette.deadlineCrimson.opacity(0.32)
+                                        : Color.primary.opacity(0.08),
+                                    lineWidth: 0.8
+                                )
+                        )
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+            if hovering {
+                NSCursor.pointingHand.set()
+            } else {
+                NSCursor.arrow.set()
+            }
+        }
     }
 }
 

@@ -14,12 +14,13 @@ import {
   isEligibleReleasePayload,
   selectLatestEligibleRelease
 } from '../src/data/pwaUpdater.ts';
+import { resolveMagicPlusDrop } from '../src/domain/magicPlusDrop.ts';
 
-test('v2.0.0-beta.16 build metadata constants are bumped to 2.0.0-beta.16 (Build 60)', () => {
-  assert.equal(APP_VERSION, '2.0.0-beta.16');
-  assert.equal(APP_BUILD_CODE, 60);
-  assert.equal(versionFromUtils, '2.0.0-beta.16');
-  assert.equal(buildFromUtils, 60);
+test('v2.0.0-beta.17 build metadata constants are bumped to 2.0.0-beta.17 (Build 61)', () => {
+  assert.equal(APP_VERSION, '2.0.0-beta.17');
+  assert.equal(APP_BUILD_CODE, 61);
+  assert.equal(versionFromUtils, '2.0.0-beta.17');
+  assert.equal(buildFromUtils, 61);
   assert.equal(isPrereleaseVersion(APP_VERSION), true);
   assert.equal(isPrereleaseVersion('1.8.1'), false);
   assert.equal(isPrereleaseVersion('2.0.0'), false);
@@ -209,3 +210,125 @@ test('isEligibleReleasePayload and selectLatestEligibleRelease support includeBe
   assert.equal(selectLatestEligibleRelease(feedWithFinal, '2.0.0-beta.10', true)?.tag_name, 'v2.0.0');
   assert.equal(selectLatestEligibleRelease(feedWithFinal, '1.8.1', false)?.tag_name, 'v2.0.0');
 });
+
+test('v2.0.0-beta.17 resolveMagicPlusDrop resolves To-Do slots, Evening/Upcoming context, and Project Heading left gutter', () => {
+  const taskBoxes = [
+    {
+      taskId: 't1',
+      sortOrder: 1000,
+      headingId: null,
+      evening: false,
+      whenDate: null,
+      top: 120,
+      bottom: 164
+    },
+    {
+      taskId: 't2',
+      sortOrder: 2000,
+      headingId: null,
+      evening: false,
+      whenDate: null,
+      top: 170,
+      bottom: 214
+    },
+    {
+      taskId: 't3',
+      sortOrder: 500,
+      headingId: 'h1',
+      evening: false,
+      whenDate: null,
+      top: 280,
+      bottom: 324
+    }
+  ];
+  const headingBoxes = [
+    {
+      headingId: 'h1',
+      sortOrder: 1000,
+      top: 236,
+      bottom: 272,
+      sectionBottom: 332
+    },
+    {
+      headingId: 'h2',
+      sortOrder: 2000,
+      top: 348,
+      bottom: 384,
+      sectionBottom: 390
+    }
+  ];
+
+  // Between t1 and t2 in center of list -> To-Do midpoint
+  const midTodo = resolveMagicPlusDrop({
+    clientX: 420,
+    clientY: 168,
+    isProjectView: true,
+    containerLeft: 200,
+    containerWidth: 640,
+    containerTop: 80,
+    taskBoxes,
+    headingBoxes
+  });
+  assert.equal(midTodo.mode, 'todo');
+  assert.equal(midTodo.prevTaskOrder, 1000);
+  assert.equal(midTodo.nextTaskOrder, 2000);
+  assert.equal(midTodo.headingId, null);
+
+  // Inside empty heading h2 -> To-Do assigned to h2
+  const emptyHeadingTodo = resolveMagicPlusDrop({
+    clientX: 420,
+    clientY: 376,
+    isProjectView: true,
+    containerLeft: 200,
+    containerWidth: 640,
+    containerTop: 80,
+    taskBoxes,
+    headingBoxes
+  });
+  assert.equal(emptyHeadingTodo.mode, 'todo');
+  assert.equal(emptyHeadingTodo.headingId, 'h2');
+  assert.equal(emptyHeadingTodo.prevTaskOrder, null);
+  assert.equal(emptyHeadingTodo.nextTaskOrder, null);
+
+  // Left gutter inside Project (clientX <= containerLeft + 88) -> Heading between h1 and h2
+  const betweenHeadings = resolveMagicPlusDrop({
+    clientX: 240,
+    clientY: 340,
+    isProjectView: true,
+    containerLeft: 200,
+    containerWidth: 640,
+    containerTop: 80,
+    taskBoxes,
+    headingBoxes
+  });
+  assert.equal(betweenHeadings.mode, 'heading');
+  assert.equal(betweenHeadings.prevHeadingOrder, 1000);
+  assert.equal(betweenHeadings.nextHeadingOrder, 2000);
+
+  // Left gutter outside Project -> still To-Do (never Heading)
+  const nonProjectLeft = resolveMagicPlusDrop({
+    clientX: 220,
+    clientY: 130,
+    isProjectView: false,
+    containerLeft: 200,
+    containerWidth: 640,
+    containerTop: 80,
+    taskBoxes: [
+      {
+        taskId: 'eve1',
+        sortOrder: 3000,
+        headingId: null,
+        evening: true,
+        whenDate: null,
+        top: 120,
+        bottom: 164
+      }
+    ],
+    headingBoxes: []
+  });
+  assert.equal(nonProjectLeft.mode, 'todo');
+  assert.equal(nonProjectLeft.evening, true);
+  assert.equal(nonProjectLeft.prevTaskOrder, null);
+  assert.equal(nonProjectLeft.nextTaskOrder, 3000);
+});
+

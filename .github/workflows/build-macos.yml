@@ -160,8 +160,8 @@ jobs:
           retention-days: 90
 
   build-macos:
-    name: Parity Gate, Swift Tests & Universal DMG (macOS 15)
-    runs-on: macos-15
+    name: Parity Gate, Swift Tests & Universal DMG (macOS 15 Intel)
+    runs-on: macos-15-intel
     continue-on-error: true
     outputs:
       built: ${{ steps.mark_built.outputs.built }}
@@ -215,8 +215,8 @@ jobs:
           gh release edit "$TAG" --draft=false --prerelease
 
   build-macos-fallback:
-    name: Parity Gate, Swift Tests & Universal DMG (macOS 15 Intel Fallback)
-    runs-on: macos-15-intel
+    name: Parity Gate, Swift Tests & Universal DMG (macOS 15 Apple Silicon Fallback)
+    runs-on: macos-15
     needs:
       - build-macos
     if: always() && needs.build-macos.outputs.built != 'true'

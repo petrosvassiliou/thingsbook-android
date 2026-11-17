@@ -1581,13 +1581,13 @@ class V2UpgradeAndFeaturesTest {
 
         val plan = SyncRepository.planRecurringDeduplication(listOf(cialisNoAreaNewer, cialisPrivatOlder))
         assertEquals(listOf("cialis-privat"), plan.loserIds)
-        val enrichment = plan.winnerEnrichments["cialis-no-area"]
+        val enrichment = plan.winnerEnrichments.firstOrNull { it.winnerId == "cialis-no-area" }
         assertNotNull("Winner missing areaId must inherit Privat area from duplicate", enrichment)
         assertEquals("area-privat", enrichment!!.areaId)
         assertEquals("5mg", enrichment.notes)
         assertEquals(480, enrichment.scheduledStartMinutes)
         assertEquals(10, enrichment.durationMinutes)
-        assertEquals(setOf("tag-gesundheit", "tag-daily"), enrichment.mergedTagIds.toSet())
+        assertEquals(setOf("tag-gesundheit", "tag-daily"), enrichment.tagIds.orEmpty().toSet())
 
         // 2. Legacy tb_sync_* ntfy chunks never emit wakeOnly=true and split oversized payloads cleanly under MAX_NTFY_CHUNK_BYTES
         val manyTasks = (1..24).map { idx ->

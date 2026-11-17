@@ -2740,10 +2740,11 @@ final class ThingsbookCoreTests: XCTestCase {
             ]
         )
         XCTAssertEqual(plan.loserIds, ["cialis-privat"])
-        XCTAssertEqual(plan.winnerEnrichments["cialis-no-area"]?.areaId, "area-privat")
-        XCTAssertEqual(plan.winnerEnrichments["cialis-no-area"]?.notes, "5mg")
-        XCTAssertEqual(plan.winnerEnrichments["cialis-no-area"]?.scheduledStartMinutes, 480)
-        XCTAssertEqual(plan.winnerEnrichments["cialis-no-area"]?.durationMinutes, 15)
+        let enrichment = try XCTUnwrap(plan.winnerEnrichments.first(where: { $0.winnerId == "cialis-no-area" }))
+        XCTAssertEqual(enrichment.areaId, "area-privat")
+        XCTAssertEqual(enrichment.notes, "5mg")
+        XCTAssertEqual(enrichment.scheduledStartMinutes, 480)
+        XCTAssertEqual(enrichment.durationMinutes, 15)
 
         // Apply via applyRemoteDeltas with tagLoserNewer arriving FIRST and tagWinner arriving SECOND to exercise Case A & Case B
         _ = try db.applyRemoteDeltas(

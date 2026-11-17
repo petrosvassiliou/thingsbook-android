@@ -115,6 +115,8 @@ public final class ThingsbookStore: ObservableObject {
     @Published public var focusTimer: FocusTimerState? = nil
     @Published public var syncSnapshot = CloudSyncSnapshot()
     @Published public var calendarEvents: [CalendarEventItem] = []
+    @Published public private(set) var calendarNowMillis: Int64 = Int64(Date().timeIntervalSince1970 * 1000.0)
+    private var lastObservedEpochDay: Int = DateEpochConverter.epochDay(for: Date())
     @Published public var availableCalendars: [MacCalendarInfo] = []
     @Published public var isLocked = false
     @Published public var availableUpdate: ReleaseUpdateInfo? = nil
@@ -454,9 +456,14 @@ public final class ThingsbookStore: ObservableObject {
     public func todayTimelineCalendarEvents() -> [CalendarEventItem] {
         guard preferences.calendarEventsEnabled else { return [] }
         let todayEpochDay = DateEpochConverter.epochDay(for: Date())
-        return calendarEvents
-            .filter { todayEpochDay >= $0.startDateEpochDay && todayEpochDay <= $0.endDateInclusiveEpochDay }
-            .sorted { $0.startMillis < $1.startMillis }
+        let nowMs = max(calendarNowMillis, Int64(Date().timeIntervalSince1970 * 1000.0))
+        return CalendarEventItem.filterActiveOrUpcoming(
+            calendarEvents,
+            forEpochDay: todayEpochDay,
+            todayEpochDay: todayEpochDay,
+            nowMillis: nowMs,
+            upcomingOnly: false
+        ).sorted { $0.startMillis < $1.startMillis }
     }
 
 
@@ -1079,12 +1086,25 @@ public final class ThingsbookStore: ObservableObject {
             startDate: start,
             endDate: end
         )
+        self.calendarNowMillis = Int64(Date().timeIntervalSince1970 * 1000.0)
     }
 
-    /// Per Thingsbook Calendar Rules: only show calendar events on dates that have at least one scheduled task!
-    public func calendarEventsForEpochDay(_ epochDay: Int, hasScheduledTasksOnDay: Bool) -> [CalendarEventItem] {
+    /// Per Thingsbook Calendar Rules: only show non-past calendar events on dates that have at least one scheduled task!
+    public func calendarEventsForEpochDay(
+        _ epochDay: Int,
+        hasScheduledTasksOnDay: Bool,
+        upcomingOnly: Bool = false
+    ) -> [CalendarEventItem] {
         guard preferences.calendarEventsEnabled, hasScheduledTasksOnDay else { return [] }
-        return calendarEvents.filter { epochDay >= $0.startDateEpochDay && epochDay <= $0.endDateInclusiveEpochDay }
+        let todayEpochDay = DateEpochConverter.epochDay(for: Date())
+        let nowMs = max(calendarNowMillis, Int64(Date().timeIntervalSince1970 * 1000.0))
+        return CalendarEventItem.filterActiveOrUpcoming(
+            calendarEvents,
+            forEpochDay: epochDay,
+            todayEpochDay: todayEpochDay,
+            nowMillis: nowMs,
+            upcomingOnly: upcomingOnly
+        )
     }
 
     // MARK: - Backup Export / Import & CSV
@@ -1374,6 +1394,22 @@ public final class ThingsbookStore: ObservableObject {
         }
     }
 
+    private func tickCalendarClockAndRolloverIfNeeded(forceCalendarReload: Bool = false) async {
+        self.calendarNowMillis = Int64(Date().timeIntervalSince1970 * 1000.0)
+        let currentDay = DateEpochConverter.epochDay(for: Date())
+        let dayAdvanced = currentDay != self.lastObservedEpochDay
+        if dayAdvanced {
+            self.lastObservedEpochDay = currentDay
+        }
+        let rolledOver = (try? self.database.performMidnightRollover()) ?? 0
+        if dayAdvanced || rolledOver > 0 {
+            self.reloadSnapshot()
+        }
+        if (dayAdvanced || forceCalendarReload) && self.preferences.calendarEventsEnabled {
+            await self.refreshCalendarEvents()
+        }
+    }
+
     private func setupMidnightObserver() {
         NotificationCenter.default.addObserver(
             forName: .NSCalendarDayChanged,
@@ -1381,19 +1417,13 @@ public final class ThingsbookStore: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self else { return }
-                _ = try? self.database.performMidnightRollover()
-                self.reloadSnapshot()
-                await self.refreshCalendarEvents()
+                await self?.tickCalendarClockAndRolloverIfNeeded(forceCalendarReload: true)
             }
         }
 
-        midnightTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+        midnightTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self else { return }
-                if let count = try? self.database.performMidnightRollover(), count > 0 {
-                    self.reloadSnapshot()
-                }
+                await self?.tickCalendarClockAndRolloverIfNeeded(forceCalendarReload: false)
             }
         }
     }
@@ -1423,7 +1453,9 @@ public final class ThingsbookStore: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, !self.preferences.localOnlyDbMode else { return }
+                guard let self else { return }
+                await self.tickCalendarClockAndRolloverIfNeeded(forceCalendarReload: true)
+                guard !self.preferences.localOnlyDbMode else { return }
                 if await self.cloudSync.isAuthenticated {
                     await self.cloudSync.ensureLiveWakeStreamRunning(localOnlyMode: false)
                     await self.cloudSync.pushDirtyFast(localOnlyMode: false)
@@ -1438,7 +1470,9 @@ public final class ThingsbookStore: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, !self.preferences.localOnlyDbMode else { return }
+                guard let self else { return }
+                await self.tickCalendarClockAndRolloverIfNeeded(forceCalendarReload: true)
+                guard !self.preferences.localOnlyDbMode else { return }
                 if await self.cloudSync.isAuthenticated {
                     await self.cloudSync.stopLiveWakeStream()
                     await self.cloudSync.ensureLiveWakeStreamRunning(localOnlyMode: false)

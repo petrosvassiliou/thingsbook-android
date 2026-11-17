@@ -69,6 +69,13 @@ public final class AppleCalendarService: @unchecked Sendable {
         let events = eventStore.events(matching: predicate)
 
         return events.compactMap { ev -> CalendarEventItem? in
+            if ev.status == .canceled {
+                return nil
+            }
+            if let attendees = ev.attendees,
+               attendees.contains(where: { $0.isCurrentUser && $0.participantStatus == .declined }) {
+                return nil
+            }
             guard let evStart = ev.startDate,
                   let evEnd = ev.endDate,
                   let cal = ev.calendar else {

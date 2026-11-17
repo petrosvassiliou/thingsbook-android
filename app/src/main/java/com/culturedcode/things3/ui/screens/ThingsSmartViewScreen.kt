@@ -161,6 +161,7 @@ import androidx.compose.ui.unit.sp
 import com.culturedcode.things3.BuildConfig
 import com.culturedcode.things3.MainActivity
 import com.culturedcode.things3.R
+import com.culturedcode.things3.data.calendar.DeviceCalendarRepository
 import com.culturedcode.things3.data.repository.CloudSyncStatus
 import com.culturedcode.things3.data.repository.ThingsRepository
 import com.culturedcode.things3.domain.model.Area
@@ -1719,8 +1720,22 @@ private fun ThingsMainTaskLazyList(
     val isGeminiBusy by viewModel.isGeminiBusy.collectAsState()
     val geminiErrorMessage by viewModel.geminiErrorMessage.collectAsState()
     val calendarEventsEnabled by viewModel.calendarEventsEnabled.collectAsState()
-    val todayCalendarEvents by viewModel.todayCalendarEvents.collectAsState()
+    val rawTodayCalendarEvents by viewModel.todayCalendarEvents.collectAsState()
     val upcomingCalendarEventsByDate by viewModel.upcomingCalendarEventsByDate.collectAsState()
+    val todayCalendarEvents = remember(rawTodayCalendarEvents, currentEpochDay, calendarEventsEnabled) {
+        if (!calendarEventsEnabled || rawTodayCalendarEvents.isEmpty()) {
+            emptyList()
+        } else {
+            val todayDate = LocalDate.ofEpochDay(currentEpochDay)
+            DeviceCalendarRepository.filterActiveOrUpcomingEvents(
+                events = rawTodayCalendarEvents,
+                forDate = todayDate,
+                todayDate = todayDate,
+                nowMillis = System.currentTimeMillis(),
+                upcomingOnly = false
+            )
+        }
+    }
     val deletedTasks by viewModel.deletedTasks.collectAsState()
     val deletedProjects by viewModel.deletedProjects.collectAsState()
     val groupTodayByProjectOrArea by viewModel.groupTodayByProjectOrArea.collectAsState()
@@ -2217,7 +2232,13 @@ private fun ThingsMainTaskLazyList(
             var cumulativeTaskOffset = 0
             groupedUpcoming.entries.forEachIndexed { groupIdx, (targetDate, dayTasks) ->
                 val dayEvents = if (calendarEventsEnabled && dayTasks.isNotEmpty()) {
-                    upcomingCalendarEventsByDate[targetDate].orEmpty()
+                    DeviceCalendarRepository.filterActiveOrUpcomingEvents(
+                        events = upcomingCalendarEventsByDate[targetDate].orEmpty(),
+                        forDate = targetDate,
+                        todayDate = todayDate,
+                        nowMillis = System.currentTimeMillis(),
+                        upcomingOnly = true
+                    )
                 } else {
                     emptyList()
                 }
@@ -6082,7 +6103,9 @@ private fun computeUpcomingTargetDate(
         return@runCatching deadlineLocal
     }
 
-    whenLocal ?: deadlineLocal ?: todayDate.plusDays(1)
+    (whenLocal?.takeIf { !it.isBefore(todayDate) })
+        ?: (deadlineLocal?.takeIf { !it.isBefore(todayDate) })
+        ?: todayDate.plusDays(1)
 }.getOrElse {
     todayDate.plusDays(1)
 }

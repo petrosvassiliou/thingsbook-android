@@ -221,6 +221,11 @@ export function groupEventsByEpochDayInRange(
   return sortedResult;
 }
 
+export {
+  filterActiveOrUpcomingCalendarEvents,
+  isCalendarEventActiveOrUpcoming
+} from '../domain/types';
+
 export function formatCalendarEventTimeRange(startMillis: number, endMillis: number): string {
   const pad2 = (n: number) => String(n).padStart(2, '0');
   const s = new Date(startMillis);

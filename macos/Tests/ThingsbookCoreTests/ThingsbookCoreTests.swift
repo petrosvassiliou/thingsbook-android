@@ -190,7 +190,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.18"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.19"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -408,9 +408,9 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.18")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.18")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 62)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.19")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.19")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 63)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
         XCTAssertEqual(
             FirebaseCloudSyncService.deriveUidWakeTopic(uid: " user-abc-123 "),
@@ -450,6 +450,7 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.16", current: "2.0.0-beta.15"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.17", current: "2.0.0-beta.16"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.18", current: "2.0.0-beta.17"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.19", current: "2.0.0-beta.18"))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.9", current: "2.0.0-beta.10"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.1"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.99"))
@@ -2472,6 +2473,155 @@ final class ThingsbookCoreTests: XCTestCase {
         )
         XCTAssertNotEqual(deGrid.days.first?.id, usGrid.days.first?.id, "de_DE Monday-first and en_US Sunday-first grids must align to their respective first weekday")
     }
+
+    func testBeta19FilterActiveOrUpcomingCalendarEventsRemovesPastAppointments() {
+        let todayDay = 20_530
+        let yesterdayDay = todayDay - 1
+        let tomorrowDay = todayDay + 1
+        let nowMillis: Int64 = 1_773_855_000_000 // e.g., afternoon on todayDay
+
+        func makeEvent(
+            id: String,
+            title: String,
+            startMillis: Int64,
+            endMillis: Int64,
+            isAllDay: Bool = false,
+            startDay: Int,
+            endDay: Int
+        ) -> CalendarEventItem {
+            CalendarEventItem(
+                id: id,
+                eventIdentifier: id,
+                calendarId: "cal-1",
+                calendarDisplayName: "Work",
+                title: title,
+                startMillis: startMillis,
+                endMillis: endMillis,
+                isAllDay: isAllDay,
+                colorHex: 0x2E7CF6,
+                startDateEpochDay: startDay,
+                endDateInclusiveEpochDay: endDay
+            )
+        }
+
+        let yesterdayTimed = makeEvent(
+            id: "ev-yesterday",
+            title: "Yesterday Meeting",
+            startMillis: nowMillis - 86_400_000 - 3_600_000,
+            endMillis: nowMillis - 86_400_000,
+            startDay: yesterdayDay,
+            endDay: yesterdayDay
+        )
+        let endedMorningToday = makeEvent(
+            id: "ev-ended-today",
+            title: "Morning Standup",
+            startMillis: nowMillis - 14_400_000,
+            endMillis: nowMillis - 12_600_000,
+            startDay: todayDay,
+            endDay: todayDay
+        )
+        let endedExactBoundary = makeEvent(
+            id: "ev-ended-boundary",
+            title: "Ended Just Now",
+            startMillis: nowMillis - 1_800_000,
+            endMillis: nowMillis,
+            startDay: todayDay,
+            endDay: todayDay
+        )
+        let ongoingToday = makeEvent(
+            id: "ev-ongoing-today",
+            title: "Current Review",
+            startMillis: nowMillis - 900_000,
+            endMillis: nowMillis + 2_700_000,
+            startDay: todayDay,
+            endDay: todayDay
+        )
+        let futureEveningToday = makeEvent(
+            id: "ev-future-today",
+            title: "Evening Call",
+            startMillis: nowMillis + 7_200_000,
+            endMillis: nowMillis + 10_800_000,
+            startDay: todayDay,
+            endDay: todayDay
+        )
+        let allDayToday = makeEvent(
+            id: "ev-allday-today",
+            title: "All-Day Offsite",
+            startMillis: nowMillis - 36_000_000,
+            endMillis: nowMillis - 1_000, // Even if UTC midnight endMillis passed in local offset, isAllDay stays active for todayDay
+            isAllDay: true,
+            startDay: todayDay,
+            endDay: todayDay
+        )
+        let tomorrowTimed = makeEvent(
+            id: "ev-tomorrow",
+            title: "Tomorrow Planning",
+            startMillis: nowMillis + 86_400_000,
+            endMillis: nowMillis + 90_000_000,
+            startDay: tomorrowDay,
+            endDay: tomorrowDay
+        )
+
+        let allEvents = [
+            yesterdayTimed,
+            endedMorningToday,
+            endedExactBoundary,
+            ongoingToday,
+            futureEveningToday,
+            allDayToday,
+            tomorrowTimed
+        ]
+
+        // Today view (upcomingOnly: false) keeps only ongoing, future today, and today's all-day
+        let todayFiltered = CalendarEventItem.filterActiveOrUpcoming(
+            allEvents,
+            forEpochDay: todayDay,
+            todayEpochDay: todayDay,
+            nowMillis: nowMillis,
+            upcomingOnly: false
+        )
+        XCTAssertEqual(todayFiltered.map(\.id), ["ev-ongoing-today", "ev-future-today", "ev-allday-today"])
+
+        // Past day query always returns empty
+        XCTAssertEqual(
+            CalendarEventItem.filterActiveOrUpcoming(
+                allEvents,
+                forEpochDay: yesterdayDay,
+                todayEpochDay: todayDay,
+                nowMillis: nowMillis,
+                upcomingOnly: false
+            ),
+            []
+        )
+
+        // Planned / Upcoming view (upcomingOnly: true) strictly excludes yesterday and today, keeps tomorrow's future event
+        XCTAssertEqual(
+            CalendarEventItem.filterActiveOrUpcoming(
+                allEvents,
+                forEpochDay: yesterdayDay,
+                todayEpochDay: todayDay,
+                nowMillis: nowMillis,
+                upcomingOnly: true
+            ),
+            []
+        )
+        XCTAssertEqual(
+            CalendarEventItem.filterActiveOrUpcoming(
+                allEvents,
+                forEpochDay: todayDay,
+                todayEpochDay: todayDay,
+                nowMillis: nowMillis,
+                upcomingOnly: true
+            ),
+            []
+        )
+        let tomorrowFiltered = CalendarEventItem.filterActiveOrUpcoming(
+            allEvents,
+            forEpochDay: tomorrowDay,
+            todayEpochDay: todayDay,
+            nowMillis: nowMillis,
+            upcomingOnly: true
+        )
+        XCTAssertEqual(tomorrowFiltered.map(\.id), ["ev-tomorrow"])
+    }
 }
-
-

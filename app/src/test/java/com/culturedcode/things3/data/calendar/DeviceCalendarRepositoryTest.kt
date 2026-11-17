@@ -100,4 +100,134 @@ class DeviceCalendarRepositoryTest {
         assertTrue((normalized ushr 24) == 0xFF)
         assertEquals(0xFF2875D9.toInt(), normalized)
     }
+
+    @Test
+    fun `filterActiveOrUpcomingEvents removes past timed and past-day appointments from Today and Planned views while preserving ongoing, future, and today all-day events`() {
+        val zone = ZoneId.of("America/Los_Angeles")
+        val yesterday = LocalDate.of(2026, 11, 16)
+        val today = LocalDate.of(2026, 11, 17)
+        val tomorrow = LocalDate.of(2026, 11, 18)
+
+        // Current time: 2026-11-17 17:30 PST (01:30Z on 2026-11-18 — after 00:00Z UTC boundary!)
+        val nowMillis = today.atTime(17, 30).atZone(zone).toInstant().toEpochMilli()
+
+        val pastYesterday = CalendarEventItem(
+            id = "ev_yest",
+            eventId = 1L,
+            calendarId = "1",
+            calendarDisplayName = "Work",
+            title = "Yesterday Retro",
+            startMillis = yesterday.atTime(10, 0).atZone(zone).toInstant().toEpochMilli(),
+            endMillis = yesterday.atTime(11, 0).atZone(zone).toInstant().toEpochMilli(),
+            isAllDay = false,
+            colorArgb = 0xFF2875D9.toInt(),
+            startDateEpochDay = yesterday.toEpochDay(),
+            endDateInclusiveEpochDay = yesterday.toEpochDay()
+        )
+        val pastMorningToday = CalendarEventItem(
+            id = "ev_past_today",
+            eventId = 2L,
+            calendarId = "1",
+            calendarDisplayName = "Work",
+            title = "Morning Standup",
+            startMillis = today.atTime(9, 0).atZone(zone).toInstant().toEpochMilli(),
+            endMillis = today.atTime(10, 0).atZone(zone).toInstant().toEpochMilli(),
+            isAllDay = false,
+            colorArgb = 0xFF2875D9.toInt(),
+            startDateEpochDay = today.toEpochDay(),
+            endDateInclusiveEpochDay = today.toEpochDay()
+        )
+        val ongoingToday = CalendarEventItem(
+            id = "ev_ongoing_today",
+            eventId = 3L,
+            calendarId = "1",
+            calendarDisplayName = "Work",
+            title = "Evening Sync",
+            startMillis = today.atTime(17, 0).atZone(zone).toInstant().toEpochMilli(),
+            endMillis = today.atTime(18, 0).atZone(zone).toInstant().toEpochMilli(),
+            isAllDay = false,
+            colorArgb = 0xFF2875D9.toInt(),
+            startDateEpochDay = today.toEpochDay(),
+            endDateInclusiveEpochDay = today.toEpochDay()
+        )
+        val laterTonight = CalendarEventItem(
+            id = "ev_later_today",
+            eventId = 4L,
+            calendarId = "1",
+            calendarDisplayName = "Home",
+            title = "Dinner",
+            startMillis = today.atTime(19, 30).atZone(zone).toInstant().toEpochMilli(),
+            endMillis = today.atTime(21, 0).atZone(zone).toInstant().toEpochMilli(),
+            isAllDay = false,
+            colorArgb = 0xFF2875D9.toInt(),
+            startDateEpochDay = today.toEpochDay(),
+            endDateInclusiveEpochDay = today.toEpochDay()
+        )
+        // UTC all-day event on 2026-11-17 has endMillis = 2026-11-18T00:00Z = 16:00 PST (< 17:30 PST!), must still stay visible all day!
+        val allDayToday = CalendarEventItem(
+            id = "ev_allday_today",
+            eventId = 5L,
+            calendarId = "2",
+            calendarDisplayName = "Holidays",
+            title = "Company Offsite",
+            startMillis = today.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+            endMillis = tomorrow.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+            isAllDay = true,
+            colorArgb = 0xFF1E9E8E.toInt(),
+            startDateEpochDay = today.toEpochDay(),
+            endDateInclusiveEpochDay = today.toEpochDay()
+        )
+        val futureTomorrow = CalendarEventItem(
+            id = "ev_tomorrow",
+            eventId = 6L,
+            calendarId = "1",
+            calendarDisplayName = "Work",
+            title = "Architecture Review",
+            startMillis = tomorrow.atTime(11, 0).atZone(zone).toInstant().toEpochMilli(),
+            endMillis = tomorrow.atTime(12, 0).atZone(zone).toInstant().toEpochMilli(),
+            isAllDay = false,
+            colorArgb = 0xFF2875D9.toInt(),
+            startDateEpochDay = tomorrow.toEpochDay(),
+            endDateInclusiveEpochDay = tomorrow.toEpochDay()
+        )
+
+        val allEvents = listOf(pastYesterday, pastMorningToday, ongoingToday, laterTonight, allDayToday, futureTomorrow)
+
+        val activeToday = DeviceCalendarRepository.filterActiveOrUpcomingEvents(
+            events = allEvents,
+            forDate = today,
+            todayDate = today,
+            nowMillis = nowMillis,
+            upcomingOnly = false
+        )
+        assertEquals(listOf("Evening Sync", "Dinner", "Company Offsite"), activeToday.map { it.title })
+
+        // Planned / Upcoming must reject past days AND today, keeping strictly future active appointments
+        assertTrue(
+            DeviceCalendarRepository.filterActiveOrUpcomingEvents(
+                events = allEvents,
+                forDate = yesterday,
+                todayDate = today,
+                nowMillis = nowMillis,
+                upcomingOnly = true
+            ).isEmpty()
+        )
+        assertTrue(
+            DeviceCalendarRepository.filterActiveOrUpcomingEvents(
+                events = allEvents,
+                forDate = today,
+                todayDate = today,
+                nowMillis = nowMillis,
+                upcomingOnly = true
+            ).isEmpty()
+        )
+        val activeTomorrow = DeviceCalendarRepository.filterActiveOrUpcomingEvents(
+            events = allEvents,
+            forDate = tomorrow,
+            todayDate = today,
+            nowMillis = nowMillis,
+            upcomingOnly = true
+        )
+        assertEquals(listOf("Architecture Review"), activeTomorrow.map { it.title })
+    }
 }

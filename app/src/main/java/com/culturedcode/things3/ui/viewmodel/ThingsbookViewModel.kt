@@ -2745,8 +2745,69 @@ class ThingsbookViewModel @Inject constructor(
             )
         }.getOrDefault(emptyMap())
 
-        _todayCalendarEvents.value = eventsByDate[today].orEmpty()
-        _upcomingCalendarEventsByDate.value = eventsByDate.filterKeys { it.isAfter(today) }
+        val nowMillis = System.currentTimeMillis()
+        _todayCalendarEvents.value = DeviceCalendarRepository.filterActiveOrUpcomingEvents(
+            events = eventsByDate[today].orEmpty(),
+            forDate = today,
+            todayDate = today,
+            nowMillis = nowMillis,
+            upcomingOnly = false
+        )
+        _upcomingCalendarEventsByDate.value = eventsByDate.entries
+            .mapNotNull { (date, list) ->
+                if (!date.isAfter(today)) {
+                    null
+                } else {
+                    DeviceCalendarRepository.filterActiveOrUpcomingEvents(
+                        events = list,
+                        forDate = date,
+                        todayDate = today,
+                        nowMillis = nowMillis,
+                        upcomingOnly = true
+                    ).takeIf { it.isNotEmpty() }?.let { date to it }
+                }
+            }
+            .toMap()
+    }
+
+    private fun prunePastCalendarEventsInMemory() {
+        val currentToday = _todayCalendarEvents.value
+        val currentUpcoming = _upcomingCalendarEventsByDate.value
+        if (currentToday.isEmpty() && currentUpcoming.isEmpty()) return
+
+        val zone = ZoneId.systemDefault()
+        val today = LocalDate.now(zone)
+        val nowMillis = System.currentTimeMillis()
+
+        val prunedToday = DeviceCalendarRepository.filterActiveOrUpcomingEvents(
+            events = currentToday,
+            forDate = today,
+            todayDate = today,
+            nowMillis = nowMillis,
+            upcomingOnly = false
+        )
+        if (prunedToday != currentToday) {
+            _todayCalendarEvents.value = prunedToday
+        }
+
+        val prunedUpcoming = currentUpcoming.entries
+            .mapNotNull { (date, list) ->
+                if (!date.isAfter(today)) {
+                    null
+                } else {
+                    DeviceCalendarRepository.filterActiveOrUpcomingEvents(
+                        events = list,
+                        forDate = date,
+                        todayDate = today,
+                        nowMillis = nowMillis,
+                        upcomingOnly = true
+                    ).takeIf { it.isNotEmpty() }?.let { date to it }
+                }
+            }
+            .toMap()
+        if (prunedUpcoming != currentUpcoming) {
+            _upcomingCalendarEventsByDate.value = prunedUpcoming
+        }
     }
 
     // =========================================================================
@@ -3562,6 +3623,8 @@ class ThingsbookViewModel @Inject constructor(
                     if (_calendarEventsEnabled.value && deviceCalendarRepository.hasCalendarPermission()) {
                         refreshCalendarEventsOnly()
                     }
+                } else if (_calendarEventsEnabled.value) {
+                    prunePastCalendarEventsInMemory()
                 }
             }
         }

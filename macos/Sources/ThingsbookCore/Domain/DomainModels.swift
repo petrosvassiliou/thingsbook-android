@@ -1482,6 +1482,47 @@ public struct CalendarEventItem: Identifiable, Equatable, Hashable, Sendable {
         self.startDateEpochDay = startDateEpochDay
         self.endDateInclusiveEpochDay = endDateInclusiveEpochDay
     }
+
+    public func isActiveOrUpcoming(
+        forEpochDay: Int,
+        todayEpochDay: Int,
+        nowMillis: Int64,
+        upcomingOnly: Bool = false
+    ) -> Bool {
+        if upcomingOnly {
+            if forEpochDay <= todayEpochDay { return false }
+        } else {
+            if forEpochDay < todayEpochDay { return false }
+        }
+        if forEpochDay < startDateEpochDay || forEpochDay > endDateInclusiveEpochDay {
+            return false
+        }
+        if endDateInclusiveEpochDay < todayEpochDay {
+            return false
+        }
+        if !isAllDay && endMillis <= nowMillis {
+            return false
+        }
+        return true
+    }
+
+    public static func filterActiveOrUpcoming(
+        _ events: [CalendarEventItem],
+        forEpochDay: Int,
+        todayEpochDay: Int,
+        nowMillis: Int64,
+        upcomingOnly: Bool = false
+    ) -> [CalendarEventItem] {
+        guard !events.isEmpty else { return [] }
+        return events.filter {
+            $0.isActiveOrUpcoming(
+                forEpochDay: forEpochDay,
+                todayEpochDay: todayEpochDay,
+                nowMillis: nowMillis,
+                upcomingOnly: upcomingOnly
+            )
+        }
+    }
 }
 
 public struct DatabaseStatistics: Equatable, Sendable {

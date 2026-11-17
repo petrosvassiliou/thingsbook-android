@@ -1,5 +1,5 @@
-export const APP_VERSION = '2.0.0-beta.18';
-export const APP_BUILD_CODE = 62;
+export const APP_VERSION = '2.0.0-beta.19';
+export const APP_BUILD_CODE = 63;
 export const MAX_AREAS = 8;
 
 export type ScheduleState =
@@ -544,7 +544,10 @@ export function computeUpcomingTargetDate(
   if (deadlineMidnight != null && deadlineMidnight > todayMidnight) {
     return deadlineMidnight;
   }
-  return whenMidnight ?? deadlineMidnight ?? addDaysLocal(todayMidnight, 1);
+  const futureWhen = whenMidnight != null && whenMidnight >= todayMidnight ? whenMidnight : null;
+  const futureDeadline =
+    deadlineMidnight != null && deadlineMidnight >= todayMidnight ? deadlineMidnight : null;
+  return futureWhen ?? futureDeadline ?? addDaysLocal(todayMidnight, 1);
 }
 
 export function formatRecurrenceShort(rule: RecurrenceRule, lang: SupportedLang): string {
@@ -629,3 +632,72 @@ export function formatRecurrenceShort(rule: RecurrenceRule, lang: SupportedLang)
   }
   return base;
 }
+
+const CALENDAR_DAY_MS = 86_400_000;
+
+export function localEpochDayFromMillis(ms: number): number {
+  const d = new Date(ms);
+  return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / CALENDAR_DAY_MS);
+}
+
+export function resolveCalendarEventEpochDayRange(
+  beginMillis: number,
+  endMillis: number,
+  isAllDay: boolean
+): [number, number] {
+  if (isAllDay) {
+    const startDate = Math.floor(beginMillis / CALENDAR_DAY_MS);
+    const effectiveEndMillis =
+      endMillis > beginMillis ? endMillis : beginMillis + CALENDAR_DAY_MS;
+    const endExclusiveDate = Math.floor(effectiveEndMillis / CALENDAR_DAY_MS);
+    const inclusiveEnd = Math.max(startDate, endExclusiveDate - 1);
+    return [startDate, inclusiveEnd];
+  }
+  const startDate = localEpochDayFromMillis(beginMillis);
+  const inclusiveEndMillis = endMillis > beginMillis ? endMillis - 1 : beginMillis;
+  const endDate = localEpochDayFromMillis(inclusiveEndMillis);
+  return [startDate, Math.max(startDate, endDate)];
+}
+
+export function isCalendarEventActiveOrUpcoming(
+  ev: CalendarEventItem,
+  forEpochDay: number,
+  todayEpochDay: number,
+  nowMillis: number,
+  upcomingOnly: boolean = false
+): boolean {
+  if (upcomingOnly) {
+    if (forEpochDay <= todayEpochDay) return false;
+  } else {
+    if (forEpochDay < todayEpochDay) return false;
+  }
+  const [evStartDay, evEndDay] = resolveCalendarEventEpochDayRange(
+    ev.startMillis,
+    ev.endMillis,
+    ev.isAllDay
+  );
+  if (forEpochDay < evStartDay || forEpochDay > evEndDay) {
+    return false;
+  }
+  if (evEndDay < todayEpochDay) {
+    return false;
+  }
+  if (!ev.isAllDay && ev.endMillis <= nowMillis) {
+    return false;
+  }
+  return true;
+}
+
+export function filterActiveOrUpcomingCalendarEvents(
+  events: readonly CalendarEventItem[],
+  forEpochDay: number,
+  todayEpochDay: number,
+  nowMillis: number,
+  upcomingOnly: boolean = false
+): CalendarEventItem[] {
+  if (events.length === 0) return [];
+  return events.filter((ev) =>
+    isCalendarEventActiveOrUpcoming(ev, forEpochDay, todayEpochDay, nowMillis, upcomingOnly)
+  );
+}
+

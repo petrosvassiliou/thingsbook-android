@@ -272,9 +272,10 @@ public struct SmartViewCanvas: View {
         if filtered.isEmpty {
             emptyPlaceholder(icon: "calendar", text: store.tr("empty_view"))
         } else {
+            let todayEpochDay = DateEpochConverter.epochDay(for: Date())
             let grouped = Dictionary(grouping: filtered) { task -> Int in
                 guard let w = task.whenDate else { return Int.max }
-                return DateEpochConverter.epochDay(forMillis: w)
+                return max(todayEpochDay + 1, DateEpochConverter.epochDay(forMillis: w))
             }
             let sortedDays = grouped.keys.sorted()
 
@@ -285,7 +286,11 @@ public struct SmartViewCanvas: View {
                     VStack(alignment: .leading, spacing: 8) {
                         upcomingDayHeader(sampleMillis: sampleMillis)
 
-                        let events = store.calendarEventsForEpochDay(epochDay, hasScheduledTasksOnDay: !dayTasks.isEmpty)
+                        let events = store.calendarEventsForEpochDay(
+                            epochDay,
+                            hasScheduledTasksOnDay: !dayTasks.isEmpty,
+                            upcomingOnly: true
+                        )
                         if !events.isEmpty {
                             calendarEventsCard(events)
                         }

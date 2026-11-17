@@ -759,9 +759,9 @@ class V2UpgradeAndFeaturesTest {
     }
 
     @Test
-    fun `v2_0_0_beta_18 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
-        assertEquals(62, BuildConfig.VERSION_CODE)
-        assertEquals("2.0.0-beta.18", BuildConfig.VERSION_NAME)
+    fun `v2_0_0_beta_19 BuildConfig and all 5 localized strings_xml files verify project deletion prompt keys`() {
+        assertEquals(63, BuildConfig.VERSION_CODE)
+        assertEquals("2.0.0-beta.19", BuildConfig.VERSION_NAME)
 
         val resRoot = sequenceOf(
             File("src/main/res"),

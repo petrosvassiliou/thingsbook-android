@@ -67,6 +67,7 @@ import {
 import {
   clearLastCalendarError,
   connectGoogleCalendarPopup,
+  filterActiveOrUpcomingCalendarEvents,
   getLastCalendarError,
   hasCalendarAccess,
   importIcsCalendarText,
@@ -918,6 +919,21 @@ export const App: React.FC = () => {
     Map<number, CalendarEventItem[]>
   >(() => new Map());
   const [calendarRefreshTick, setCalendarRefreshTick] = useState(0);
+  const [calendarNowMs, setCalendarNowMs] = useState<number>(() => Date.now());
+
+  const activeTodayCalendarEvents = useMemo(() => {
+    if (!prefs.calendarEventsEnabled || todayCalendarEvents.length === 0) {
+      return [];
+    }
+    const todayEpochDay = localEpochDayFromMs(endOfToday);
+    return filterActiveOrUpcomingCalendarEvents(
+      todayCalendarEvents,
+      todayEpochDay,
+      todayEpochDay,
+      calendarNowMs,
+      false
+    );
+  }, [prefs.calendarEventsEnabled, todayCalendarEvents, endOfToday, calendarNowMs]);
 
   const maxUpcomingHorizonEpochDay = useMemo(() => {
     const todayEpochDay = localEpochDayFromMs(endOfToday);
@@ -933,15 +949,23 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (!prefs.calendarEventsEnabled) return;
-    const onFocusRefresh = () => setCalendarRefreshTick((n) => n + 1);
+    const onFocusRefresh = () => {
+      setCalendarNowMs(Date.now());
+      setCalendarRefreshTick((n) => n + 1);
+    };
     const onVisibilityRefresh = () => {
       if (document.visibilityState === 'visible') {
+        setCalendarNowMs(Date.now());
         setCalendarRefreshTick((n) => n + 1);
       }
     };
+    const nowInterval = window.setInterval(() => {
+      setCalendarNowMs(Date.now());
+    }, 30_000);
     window.addEventListener('focus', onFocusRefresh);
     document.addEventListener('visibilitychange', onVisibilityRefresh);
     return () => {
+      window.clearInterval(nowInterval);
       window.removeEventListener('focus', onFocusRefresh);
       document.removeEventListener('visibilitychange', onVisibilityRefresh);
     };
@@ -1008,11 +1032,30 @@ export const App: React.FC = () => {
       );
       if (cancelled) return;
 
-      setTodayCalendarEvents(eventsByDay.get(todayEpochDay) ?? []);
+      const nowMs = Date.now();
+      setCalendarNowMs(nowMs);
+      setTodayCalendarEvents(
+        filterActiveOrUpcomingCalendarEvents(
+          eventsByDay.get(todayEpochDay) ?? [],
+          todayEpochDay,
+          todayEpochDay,
+          nowMs,
+          false
+        )
+      );
       const upcomingMap = new Map<number, CalendarEventItem[]>();
       for (const [day, list] of eventsByDay.entries()) {
         if (day >= todayEpochDay + 1 && list.length > 0) {
-          upcomingMap.set(day, list);
+          const activeList = filterActiveOrUpcomingCalendarEvents(
+            list,
+            day,
+            todayEpochDay,
+            nowMs,
+            true
+          );
+          if (activeList.length > 0) {
+            upcomingMap.set(day, activeList);
+          }
         }
       }
       setUpcomingCalendarEventsByEpochDay(upcomingMap);
@@ -2640,7 +2683,7 @@ export const App: React.FC = () => {
                     return (
                       <TodayTimelineView
                         todayTasks={[...dayFiltered, ...eveFiltered]}
-                        calendarEvents={prefs.calendarEventsEnabled ? todayCalendarEvents : []}
+                        calendarEvents={activeTodayCalendarEvents}
                         areasMap={areasMap}
                         projectsMap={allNonDeletedProjectsMap}
                         t={t}
@@ -2760,8 +2803,8 @@ export const App: React.FC = () => {
 
                   return (
                     <>
-                      {prefs.calendarEventsEnabled && todayCalendarEvents.length > 0 && (
-                        <CalendarEventsBlock events={todayCalendarEvents} t={t} />
+                      {prefs.calendarEventsEnabled && activeTodayCalendarEvents.length > 0 && (
+                        <CalendarEventsBlock events={activeTodayCalendarEvents} t={t} />
                       )}
                       {dayFiltered.length > 0 && renderGroupedDaytime()}
                       {eveFiltered.length > 0 && (
@@ -2781,7 +2824,7 @@ export const App: React.FC = () => {
                   );
                 })()}
 
-                {/* UPCOMING View (Day-by-Day Groups — v1.6.22: only dates with tasks display calendar events) */}
+                {/* UPCOMING View (Day-by-Day Groups — v1.6.22+: only future dates with tasks display non-past calendar events) */}
                 {activeNav.view === 'UPCOMING' && (
                   <>
                     {upcomingGroups.length === 0 ? (
@@ -2789,10 +2832,16 @@ export const App: React.FC = () => {
                     ) : (
                       upcomingGroups.map(([dayEpoch, groupTasks]) => {
                         const hdr = formatUpcomingHeader(dayEpoch);
+                        const targetEpochDay = localEpochDayFromMs(dayEpoch);
+                        const todayEpochDay = localEpochDayFromMs(endOfToday);
                         const dayEvents = prefs.calendarEventsEnabled
-                          ? upcomingCalendarEventsByEpochDay.get(
-                              localEpochDayFromMs(dayEpoch)
-                            ) ?? []
+                          ? filterActiveOrUpcomingCalendarEvents(
+                              upcomingCalendarEventsByEpochDay.get(targetEpochDay) ?? [],
+                              targetEpochDay,
+                              todayEpochDay,
+                              calendarNowMs,
+                              true
+                            )
                           : [];
                         return (
                           <div

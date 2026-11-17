@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { APP_BUILD_CODE, APP_VERSION } from '../src/domain/types.ts';
+import {
+  APP_BUILD_CODE,
+  APP_VERSION,
+  filterActiveOrUpcomingCalendarEvents,
+  localEpochDayFromMillis,
+  type CalendarEventItem
+} from '../src/domain/types.ts';
 import {
   APP_BUILD_CODE as buildFromUtils,
   APP_VERSION as versionFromUtils,
@@ -16,11 +22,11 @@ import {
 } from '../src/data/pwaUpdater.ts';
 import { resolveMagicPlusDrop } from '../src/domain/magicPlusDrop.ts';
 
-test('v2.0.0-beta.18 build metadata constants are bumped to 2.0.0-beta.18 (Build 62)', () => {
-  assert.equal(APP_VERSION, '2.0.0-beta.18');
-  assert.equal(APP_BUILD_CODE, 62);
-  assert.equal(versionFromUtils, '2.0.0-beta.18');
-  assert.equal(buildFromUtils, 62);
+test('v2.0.0-beta.19 build metadata constants are bumped to 2.0.0-beta.19 (Build 63)', () => {
+  assert.equal(APP_VERSION, '2.0.0-beta.19');
+  assert.equal(APP_BUILD_CODE, 63);
+  assert.equal(versionFromUtils, '2.0.0-beta.19');
+  assert.equal(buildFromUtils, 63);
   assert.equal(isPrereleaseVersion(APP_VERSION), true);
   assert.equal(isPrereleaseVersion('1.8.1'), false);
   assert.equal(isPrereleaseVersion('2.0.0'), false);
@@ -332,3 +338,123 @@ test('v2.0.0-beta.17 resolveMagicPlusDrop resolves To-Do slots, Evening/Upcoming
   assert.equal(nonProjectLeft.nextTaskOrder, 3000);
 });
 
+test('v2.0.0-beta.19 filterActiveOrUpcomingCalendarEvents removes past timed and past-day appointments from Today and Planned views', () => {
+  const nowLocal = new Date(2026, 2, 18, 17, 30, 0, 0).getTime(); // Local 17:30 on 2026-03-18
+  const todayDay = localEpochDayFromMillis(nowLocal);
+  const yesterdayDay = todayDay - 1;
+  const tomorrowDay = todayDay + 1;
+
+  const makeEvent = (
+    eventId: string,
+    title: string,
+    startMillis: number,
+    endMillis: number,
+    isAllDay = false
+  ): CalendarEventItem => ({
+    eventId,
+    calendarId: 'cal-1',
+    calendarName: 'Work',
+    calendarColorCss: '#2e7cf6',
+    title,
+    startMillis,
+    endMillis,
+    isAllDay,
+    location: null,
+    htmlLink: null
+  });
+
+  const yesterdayTimed = makeEvent(
+    'ev-yesterday',
+    'Yesterday Sync',
+    new Date(2026, 2, 17, 10, 0).getTime(),
+    new Date(2026, 2, 17, 11, 0).getTime()
+  );
+  const endedMorningToday = makeEvent(
+    'ev-ended-today',
+    'Morning Standup',
+    new Date(2026, 2, 18, 9, 0).getTime(),
+    new Date(2026, 2, 18, 9, 30).getTime()
+  );
+  const endedExactBoundary = makeEvent(
+    'ev-ended-boundary',
+    'Ended Right Now',
+    new Date(2026, 2, 18, 16, 30).getTime(),
+    nowLocal
+  );
+  const ongoingToday = makeEvent(
+    'ev-ongoing-today',
+    'Design Review',
+    new Date(2026, 2, 18, 17, 0).getTime(),
+    new Date(2026, 2, 18, 18, 0).getTime()
+  );
+  const futureEveningToday = makeEvent(
+    'ev-future-today',
+    'Dinner',
+    new Date(2026, 2, 18, 19, 30).getTime(),
+    new Date(2026, 2, 18, 21, 0).getTime()
+  );
+  // UTC midnight-to-midnight all-day event on 2026-03-18 (even after 16:00 PST, must stay visible all day)
+  const utcAllDayToday = makeEvent(
+    'ev-allday-today',
+    'Company Offsite',
+    Date.UTC(2026, 2, 18, 0, 0, 0),
+    Date.UTC(2026, 2, 19, 0, 0, 0),
+    true
+  );
+  const tomorrowMorning = makeEvent(
+    'ev-tomorrow',
+    'Tomorrow Planning',
+    new Date(2026, 2, 19, 10, 0).getTime(),
+    new Date(2026, 2, 19, 11, 0).getTime()
+  );
+
+  const allEvents = [
+    yesterdayTimed,
+    endedMorningToday,
+    endedExactBoundary,
+    ongoingToday,
+    futureEveningToday,
+    utcAllDayToday,
+    tomorrowMorning
+  ];
+
+  // Today view (upcomingOnly = false): drops yesterday + ended today, keeps ongoing, future today, and today's all-day
+  const todayVisible = filterActiveOrUpcomingCalendarEvents(
+    allEvents,
+    todayDay,
+    todayDay,
+    nowLocal,
+    false
+  );
+  assert.deepEqual(
+    todayVisible.map((e) => e.eventId),
+    ['ev-ongoing-today', 'ev-future-today', 'ev-allday-today']
+  );
+
+  // Past day query always returns empty
+  assert.deepEqual(
+    filterActiveOrUpcomingCalendarEvents(allEvents, yesterdayDay, todayDay, nowLocal, false),
+    []
+  );
+
+  // Planned / Upcoming view (upcomingOnly = true): strictly rejects yesterday & today, keeps tomorrow's future event
+  assert.deepEqual(
+    filterActiveOrUpcomingCalendarEvents(allEvents, yesterdayDay, todayDay, nowLocal, true),
+    []
+  );
+  assert.deepEqual(
+    filterActiveOrUpcomingCalendarEvents(allEvents, todayDay, todayDay, nowLocal, true),
+    []
+  );
+  const tomorrowVisible = filterActiveOrUpcomingCalendarEvents(
+    allEvents,
+    tomorrowDay,
+    todayDay,
+    nowLocal,
+    true
+  );
+  assert.deepEqual(
+    tomorrowVisible.map((e) => e.eventId),
+    ['ev-tomorrow']
+  );
+});

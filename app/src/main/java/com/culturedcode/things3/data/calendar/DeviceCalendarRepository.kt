@@ -275,5 +275,50 @@ class DeviceCalendarRepository @Inject constructor(
 
             return byDate.mapValues { (_, list) -> list.sortedWith(comparator) }
         }
+
+        fun isEventActiveOrUpcoming(
+            event: CalendarEventItem,
+            forDate: LocalDate,
+            todayDate: LocalDate,
+            nowMillis: Long,
+            upcomingOnly: Boolean = false
+        ): Boolean {
+            val forEpoch = forDate.toEpochDay()
+            val todayEpoch = todayDate.toEpochDay()
+            if (upcomingOnly) {
+                if (forEpoch <= todayEpoch) return false
+            } else {
+                if (forEpoch < todayEpoch) return false
+            }
+            if (forEpoch < event.startDateEpochDay || forEpoch > event.endDateInclusiveEpochDay) {
+                return false
+            }
+            if (event.endDateInclusiveEpochDay < todayEpoch) {
+                return false
+            }
+            if (!event.isAllDay && event.endMillis <= nowMillis) {
+                return false
+            }
+            return true
+        }
+
+        fun filterActiveOrUpcomingEvents(
+            events: List<CalendarEventItem>,
+            forDate: LocalDate,
+            todayDate: LocalDate,
+            nowMillis: Long,
+            upcomingOnly: Boolean = false
+        ): List<CalendarEventItem> {
+            if (events.isEmpty()) return emptyList()
+            return events.filter { event ->
+                isEventActiveOrUpcoming(
+                    event = event,
+                    forDate = forDate,
+                    todayDate = todayDate,
+                    nowMillis = nowMillis,
+                    upcomingOnly = upcomingOnly
+                )
+            }
+        }
     }
 }

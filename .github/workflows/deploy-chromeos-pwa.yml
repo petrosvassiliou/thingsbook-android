@@ -5,6 +5,8 @@ on:
     branches:
       - main
       - 'beta*'
+    tags:
+      - 'v*'
     paths:
       - 'chromeos-pwa/**'
       - 'firebase.json'
@@ -12,11 +14,16 @@ on:
       - '.github/workflows/deploy-chromeos-pwa.yml'
   workflow_dispatch:
 
+concurrency:
+  group: chromeos-pwa-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
     env:
       FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_THINGSBOOK_PROD }}
+      FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -28,11 +35,12 @@ jobs:
           cache: npm
           cache-dependency-path: chromeos-pwa/package-lock.json
 
-      - name: Install dependencies, run QA tests & build ChromeOS PWA
+      - name: Install dependencies, run QA tests, lint & build ChromeOS PWA
         working-directory: chromeos-pwa
         run: |
           npm ci
           npm test
+          npm run lint
           npm run build
 
       - name: Upload ChromeOS PWA build artifact
@@ -42,7 +50,9 @@ jobs:
           path: chromeos-pwa/dist
 
       - name: Deploy Stable to Firebase Hosting Live Channel (thingsbook-prod)
-        if: env.FIREBASE_SERVICE_ACCOUNT != '' && github.ref == 'refs/heads/main'
+        if: >-
+          env.FIREBASE_SERVICE_ACCOUNT != '' &&
+          (github.ref == 'refs/heads/main' || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-')))
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
@@ -50,8 +60,19 @@ jobs:
           channelId: live
           projectId: thingsbook-prod
 
+      - name: Deploy Stable via FIREBASE_TOKEN Fallback
+        if: >-
+          env.FIREBASE_SERVICE_ACCOUNT == '' &&
+          env.FIREBASE_TOKEN != '' &&
+          (github.ref == 'refs/heads/main' || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-')))
+        run: |
+          npx --yes firebase-tools hosting:channel:deploy live --project thingsbook-prod --token "$FIREBASE_TOKEN"
+
       - name: Deploy Beta to Isolated Firebase Preview Channel (beta)
-        if: env.FIREBASE_SERVICE_ACCOUNT != '' && github.ref != 'refs/heads/main'
+        if: >-
+          env.FIREBASE_SERVICE_ACCOUNT != '' &&
+          github.ref != 'refs/heads/main' &&
+          (!startsWith(github.ref, 'refs/tags/v') || contains(github.ref, '-'))
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
@@ -59,3 +80,17 @@ jobs:
           channelId: beta
           expires: 30d
           projectId: thingsbook-prod
+
+      - name: Deploy Beta via FIREBASE_TOKEN Fallback
+        if: >-
+          env.FIREBASE_SERVICE_ACCOUNT == '' &&
+          env.FIREBASE_TOKEN != '' &&
+          github.ref != 'refs/heads/main' &&
+          (!startsWith(github.ref, 'refs/tags/v') || contains(github.ref, '-'))
+        run: |
+          npx --yes firebase-tools hosting:channel:deploy beta --expires 30d --project thingsbook-prod --token "$FIREBASE_TOKEN"
+
+      - name: Notice When Firebase Hosting Credentials Are Not Configured
+        if: env.FIREBASE_SERVICE_ACCOUNT == '' && env.FIREBASE_TOKEN == ''
+        run: |
+          echo "::warning::Neither FIREBASE_SERVICE_ACCOUNT_THINGSBOOK_PROD nor FIREBASE_TOKEN is set in GitHub Actions secrets; built ChromeOS PWA artifact uploaded without deploying to Firebase Hosting."

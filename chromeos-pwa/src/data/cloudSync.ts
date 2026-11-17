@@ -51,17 +51,22 @@ import {
   ATTACHMENT_BATCH_CHUNK_SIZE,
   COLLECTION_CURSOR_STORAGE_PREFIX,
   ENTITIES_RECONCILE_V2_21_STORAGE_PREFIX,
+  ENTITIES_RECONCILE_V2_22_STORAGE_PREFIX,
   FAST_SYNC_COALESCE_MS,
   METADATA_BATCH_CHUNK_SIZE,
   PROJECTS_REVIEW_BACKFILL_STORAGE_PREFIX,
   SYNC_COLLECTION_NAMES,
   attachmentToFirestoreMap,
+  buildLegacyCompatibleNtfyChunks,
   buildNtfyRelayOrWakePayload,
   chunkItems,
   clampRemoteCursorTimestamp,
   computeEffectivePullCursor,
   computeNextCollectionCursor,
   detectMissingReferencedEntityContainers,
+  formatInstantChannelSeed,
+  formatLegacySyncChannelFromHex,
+  formatOAuthChannelSeed,
   formatUidWakeChannelFromHex,
   formatUidWakeSeed,
   normalizeFirestoreDocWithId,
@@ -131,6 +136,7 @@ interface PersistedSyncMeta {
 }
 
 const SYNC_META_STORAGE_KEY = 'thingsbook_chromeos_sync_meta_v1';
+const LAST_SIGNED_IN_UID_KEY = 'thingsbook_last_signed_in_uid_v1';
 const LAST_SYNC_PREFIX = 'thingsbook_last_sync_ts_';
 const LAST_WALL_SYNC_PREFIX = 'thingsbook_last_wall_sync_ts_';
 
@@ -223,7 +229,7 @@ function areaFromFirestoreMap(map: Record<string, unknown>): AreaRecord | null {
 }
 
 function projectToFirestoreMap(project: ProjectRecord): Record<string, unknown> {
-  const map: Record<string, unknown> = {
+  return {
     id: project.id,
     areaId: project.areaId ?? null,
     title: project.title,
@@ -238,22 +244,22 @@ function projectToFirestoreMap(project: ProjectRecord): Record<string, unknown> 
     tagIds: project.tagIds || [],
     createdAt: Math.trunc(finiteNumber(project.createdAt)),
     updatedAt: Math.trunc(finiteNumber(project.updatedAt)),
-    isDeleted: Boolean(project.isDeleted)
+    isDeleted: Boolean(project.isDeleted),
+    purgedFromTrash: Boolean(project.purgedFromTrash)
   };
-  if (project.purgedFromTrash) {
-    map.purgedFromTrash = true;
-  }
-  return map;
 }
 
 function projectFromFirestoreMap(map: Record<string, unknown>): ProjectRecord | null {
   const id = nullableString(map.id);
   if (!id) return null;
+  const title = typeof map.title === 'string' ? map.title : '';
+  const notes = typeof map.notes === 'string' ? map.notes : '';
+  const isDeleted = Boolean(map.isDeleted);
   return {
     id,
     areaId: nullableString(map.areaId),
-    title: typeof map.title === 'string' ? map.title : '',
-    notes: typeof map.notes === 'string' ? map.notes : '',
+    title,
+    notes,
     status: normalizeProjectStatus(typeof map.status === 'string' ? map.status : 'ACTIVE'),
     scheduleState: normalizeScheduleState(
       typeof map.scheduleState === 'string' ? map.scheduleState : 'ANYTIME',
@@ -267,9 +273,9 @@ function projectFromFirestoreMap(map: Record<string, unknown>): ProjectRecord | 
     tagIds: stringList(map.tagIds),
     createdAt: Math.trunc(finiteNumber(map.createdAt)),
     updatedAt: Math.trunc(finiteNumber(map.updatedAt)),
-    isDeleted: Boolean(map.isDeleted),
+    isDeleted,
     isDirty: false,
-    purgedFromTrash: Boolean(map.purgedFromTrash)
+    purgedFromTrash: Boolean(map.purgedFromTrash || (isDeleted && !title && !notes))
   };
 }
 
@@ -304,7 +310,7 @@ function headingFromFirestoreMap(map: Record<string, unknown>): HeadingRecord | 
 }
 
 function taskToFirestoreMap(task: TaskRecord): Record<string, unknown> {
-  const map: Record<string, unknown> = {
+  return {
     id: task.id,
     title: task.title,
     notes: task.notes || '',
@@ -326,20 +332,23 @@ function taskToFirestoreMap(task: TaskRecord): Record<string, unknown> {
     tagIds: task.tagIds || [],
     createdAt: Math.trunc(finiteNumber(task.createdAt)),
     updatedAt: Math.trunc(finiteNumber(task.updatedAt)),
-    isDeleted: Boolean(task.isDeleted)
+    isDeleted: Boolean(task.isDeleted),
+    purgedFromTrash: Boolean(task.purgedFromTrash)
   };
-  if (task.purgedFromTrash) {
-    map.purgedFromTrash = true;
-  }
-  return map;
 }
 
-function taskFromFirestoreMap(map: Record<string, unknown>): TaskRecord | null {
+type RemoteTaskWithHints = TaskRecord & { omittedTimeblockFields?: boolean };
+
+function taskFromFirestoreMap(map: Record<string, unknown>): RemoteTaskWithHints | null {
   const id = nullableString(map.id);
   if (!id) return null;
   const title = typeof map.title === 'string' ? map.title : '';
   const notes = typeof map.notes === 'string' ? map.notes : '';
   const isDeleted = Boolean(map.isDeleted);
+  const omittedTimeblockFields = !Object.prototype.hasOwnProperty.call(
+    map,
+    'scheduledStartMinutes'
+  );
   return {
     id,
     title,
@@ -365,7 +374,8 @@ function taskFromFirestoreMap(map: Record<string, unknown>): TaskRecord | null {
     updatedAt: Math.trunc(finiteNumber(map.updatedAt)),
     isDeleted,
     isDirty: false,
-    purgedFromTrash: Boolean(map.purgedFromTrash || (isDeleted && !title && !notes))
+    purgedFromTrash: Boolean(map.purgedFromTrash || (isDeleted && !title && !notes)),
+    ...(omittedTimeblockFields ? { omittedTimeblockFields: true } : {})
   };
 }
 
@@ -465,6 +475,7 @@ class ThingsCloudSyncService {
   private liveEventSource: EventSource | null = null;
   private liveEventSourceReconnectTimer: number | null = null;
   private realtimeReconnectTimer: number | null = null;
+  private fallbackPollInterval: number | null = null;
   private authUnsub: AuthUnsubscribe | null = null;
   private boundAuthInstance: Auth | null = null;
   private listenersRegistered = false;
@@ -628,9 +639,10 @@ class ThingsCloudSyncService {
           persisted?.userId === user.uid && persisted.channelTopic
             ? persisted.channelTopic
             : lowerEmail
-              ? `tb_sync_${(await sha256Hex(`thingsbook-instant:${lowerEmail}`)).slice(0, 28)}`
-              : `tb_sync_${(await sha256Hex(user.uid)).slice(0, 28)}`;
+              ? formatLegacySyncChannelFromHex(await sha256Hex(formatInstantChannelSeed(lowerEmail)))
+              : formatLegacySyncChannelFromHex(await sha256Hex(formatOAuthChannelSeed(user.uid)));
 
+        localStorage.setItem(LAST_SIGNED_IN_UID_KEY, user.uid);
         this.savePersistedMeta({
           userId: user.uid,
           email: lowerEmail || user.uid,
@@ -670,7 +682,7 @@ class ThingsCloudSyncService {
       window.addEventListener('online', () => {
         const uid = this.state.userId;
         if (!this.isLocalOnly() && uid) {
-          this.triggerFastPush(0);
+          // Pull remote deltas FIRST before restamping & pushing offline edits
           void this.syncBidirectionalDeltas(false).finally(() => {
             if (!this.isLocalOnly() && this.state.userId === uid && navigator.onLine) {
               this.attachRealtimeListeners(uid);
@@ -694,7 +706,6 @@ class ThingsCloudSyncService {
             this.state.userId &&
             navigator.onLine
           ) {
-            this.triggerFastPush(0);
             this.triggerIncrementalPull(0);
           }
         });
@@ -766,7 +777,13 @@ class ThingsCloudSyncService {
 
   // ==================== Authentication ====================
 
-  private async prepareLocalDataBeforeLogin(mergeLocalTasks: boolean) {
+  private async prepareLocalDataBeforeLogin(uid: string, mergeLocalTasks: boolean) {
+    const previousSignedInUid = localStorage.getItem(LAST_SIGNED_IN_UID_KEY);
+    if (previousSignedInUid && previousSignedInUid !== uid) {
+      // Never leak cached records from a previously signed-in cloud account into a different UID.
+      await localDb.purgeAllLocalDataBeforeAccountPull();
+      return;
+    }
     if (mergeLocalTasks) {
       await localDb.purgeSampleDataLocally(true);
     } else {
@@ -780,7 +797,8 @@ class ThingsCloudSyncService {
     channelTopic: string,
     mergeLocalTasks: boolean
   ): Promise<void> {
-    await this.prepareLocalDataBeforeLogin(mergeLocalTasks);
+    await this.prepareLocalDataBeforeLogin(uid, mergeLocalTasks);
+    localStorage.setItem(LAST_SIGNED_IN_UID_KEY, uid);
     if (this.isLocalOnly()) {
       savePreferences({ ...loadPreferences(), localOnlyDbMode: false });
     }
@@ -1097,8 +1115,32 @@ class ThingsCloudSyncService {
     return formatUidWakeChannelFromHex(hex);
   }
 
+  private async deriveLegacySyncTopics(
+    userId: string,
+    emailOrId: string | null | undefined,
+    persistedChannelTopic: string | null | undefined
+  ): Promise<string[]> {
+    const topics = new Set<string>();
+    const persisted = (persistedChannelTopic || '').trim();
+    if (persisted.startsWith('tb_sync_')) {
+      topics.add(persisted);
+    }
+    const oauthHex = await sha256Hex(formatOAuthChannelSeed(userId));
+    topics.add(formatLegacySyncChannelFromHex(oauthHex));
+    const lowerEmail = (emailOrId || '').trim().toLowerCase();
+    if (lowerEmail.includes('@') && !lowerEmail.endsWith('@thingsbook.app')) {
+      const instantHex = await sha256Hex(formatInstantChannelSeed(lowerEmail));
+      topics.add(formatLegacySyncChannelFromHex(instantHex));
+    }
+    return Array.from(topics);
+  }
+
   private async runFastPushLoop(): Promise<void> {
     if (this.isLocalOnly() || !navigator.onLine) return;
+    if (this.isSyncingPromise) {
+      this.pendingFastPush = true;
+      return;
+    }
     if (this.isPushingPromise) {
       this.pendingFastPush = true;
       return this.isPushingPromise;
@@ -1108,18 +1150,35 @@ class ThingsCloudSyncService {
       try {
         while (true) {
           this.pendingFastPush = false;
+          if (this.isSyncingPromise) {
+            this.pendingFastPush = true;
+            break;
+          }
           const auth = getFirebaseAuthInstance();
           const userId = auth.currentUser?.uid || this.state.userId;
           if (!userId || this.isLocalOnly() || !navigator.onLine) break;
 
-          const relayPushMaps = await this.pushDirtyRecordsToFirestore(userId);
+          // If any dirty records were edited offline (>30s ago), pull remote deltas FIRST
+          // before restamping and committing them so LWW never overwrites newer remote edits.
+          if (await localDb.hasStaleOfflineDirtyEntities()) {
+            void this.syncBidirectionalDeltas(false);
+            break;
+          }
+
+          const relayPushMaps = await this.pushDirtyRecordsToFirestore(userId, false);
           if (relayPushMaps) {
+            this.recordWallSyncDisplay(userId, Date.now());
             this.emit({ status: 'SYNCED', errorMessage: null });
             const meta = this.loadPersistedMeta();
             const localDeviceId = meta?.deviceId || this.getOrCreateDeviceId();
+            const legacyTopics = await this.deriveLegacySyncTopics(
+              userId,
+              auth.currentUser?.email || meta?.email || this.state.userEmailOrId,
+              meta?.channelTopic
+            );
             void this.broadcastNtfyWakeAndDeltas(
               userId,
-              meta?.channelTopic ?? null,
+              legacyTopics,
               localDeviceId,
               relayPushMaps
             );
@@ -1162,6 +1221,9 @@ class ThingsCloudSyncService {
     this.isSyncingPromise = (async () => {
       let nextForceFull = forceFullPull;
       try {
+        if (this.isPushingPromise) {
+          await this.isPushingPromise.catch(() => undefined);
+        }
         while (true) {
           this.pendingResyncRequested = false;
           this.pendingForceFullPull = false;
@@ -1175,6 +1237,10 @@ class ThingsCloudSyncService {
         }
       } finally {
         this.isSyncingPromise = null;
+        if (this.pendingFastPush && !this.isLocalOnly() && navigator.onLine) {
+          this.pendingFastPush = false;
+          this.triggerFastPush(0);
+        }
       }
     })();
 
@@ -1195,26 +1261,35 @@ class ThingsCloudSyncService {
 
     try {
       const prevLowWatermark = forceFullPull ? 0 : this.getLastSyncTs(userId);
-
-      const relayPushMaps = await this.pushDirtyRecordsToFirestore(userId);
-      await this.pullDeltaRecordsFromFirestore(userId, forceFullPull);
-
       const meta = this.loadPersistedMeta();
       const localDeviceId = meta?.deviceId || this.getOrCreateDeviceId();
+      const legacyTopics = await this.deriveLegacySyncTopics(
+        userId,
+        auth.currentUser?.email || meta?.email || this.state.userEmailOrId,
+        meta?.channelTopic
+      );
+
+      // 1. Pull remote deltas FIRST so LWW compares true edit timestamps before restamping
+      //    any surviving offline dirty records, and so fresh logins merge cloud Areas/Tags/Tasks cleanly.
+      await this.pullDeltaRecordsFromFirestore(userId, forceFullPull);
+
+      if (forceFullPull && legacyTopics.length > 0) {
+        await Promise.all(
+          legacyTopics.map((topic) =>
+            this.pollNtfyHistoryInBackground(userId, topic, localDeviceId, prevLowWatermark)
+          )
+        );
+      }
+
+      // 2. Push surviving dirty records (restamping any stale >30s offline edits to pushNow
+      //    so online v1.8 and v2.x peers never skip them behind their 120s cursor window).
+      const relayPushMaps = await this.pushDirtyRecordsToFirestore(userId, true);
       if (relayPushMaps) {
         void this.broadcastNtfyWakeAndDeltas(
           userId,
-          meta?.channelTopic ?? null,
+          legacyTopics,
           localDeviceId,
           relayPushMaps
-        );
-      }
-      if (forceFullPull && meta?.channelTopic) {
-        void this.pollNtfyHistoryInBackground(
-          userId,
-          meta.channelTopic,
-          localDeviceId,
-          prevLowWatermark
         );
       }
 
@@ -1226,7 +1301,10 @@ class ThingsCloudSyncService {
     }
   }
 
-  private async pushDirtyRecordsToFirestore(userId: string): Promise<{
+  private async pushDirtyRecordsToFirestore(
+    userId: string,
+    restampStaleOffline = false
+  ): Promise<{
     tags: Record<string, unknown>[];
     areas: Record<string, unknown>[];
     projects: Record<string, unknown>[];
@@ -1236,7 +1314,10 @@ class ThingsCloudSyncService {
     attachments: Record<string, unknown>[];
     projectTemplates: Record<string, unknown>[];
   } | null> {
-    const dirty = await localDb.getDirtyEntities();
+    const pushNow = Date.now();
+    const dirty = await localDb.getDirtyEntities(
+      restampStaleOffline ? { restampStaleOfflineAt: pushNow } : undefined
+    );
     const metadataOps: Array<{ col: string; id: string; data: Record<string, unknown> }> = [];
 
     const tagMaps = dirty.tags.map(tagToFirestoreMap);
@@ -1325,27 +1406,25 @@ class ThingsCloudSyncService {
       }
     }
 
-    const maxOf = <T extends { updatedAt: number }>(arr: T[]) =>
-      arr.reduce((m, x) => Math.max(m, x.updatedAt), 0);
+    const toSpec = <T extends { id: string; updatedAt: number }>(arr: T[]) => {
+      const updatedAtById: Record<string, number> = {};
+      let maxUpdatedAt = 0;
+      for (const x of arr) {
+        updatedAtById[x.id] = x.updatedAt;
+        if (x.updatedAt > maxUpdatedAt) maxUpdatedAt = x.updatedAt;
+      }
+      return { ids: arr.map((x) => x.id), maxUpdatedAt, updatedAtById };
+    };
 
     await localDb.markSynced({
-      tags: { ids: dirty.tags.map((x) => x.id), maxUpdatedAt: maxOf(dirty.tags) },
-      areas: { ids: dirty.areas.map((x) => x.id), maxUpdatedAt: maxOf(dirty.areas) },
-      projects: { ids: dirty.projects.map((x) => x.id), maxUpdatedAt: maxOf(dirty.projects) },
-      headings: { ids: dirty.headings.map((x) => x.id), maxUpdatedAt: maxOf(dirty.headings) },
-      tasks: { ids: dirty.tasks.map((x) => x.id), maxUpdatedAt: maxOf(dirty.tasks) },
-      checklistItems: {
-        ids: dirty.checklistItems.map((x) => x.id),
-        maxUpdatedAt: maxOf(dirty.checklistItems)
-      },
-      attachments: {
-        ids: dirty.attachments.map((x) => x.id),
-        maxUpdatedAt: maxOf(dirty.attachments)
-      },
-      projectTemplates: {
-        ids: dirty.projectTemplates.map((x) => x.id),
-        maxUpdatedAt: maxOf(dirty.projectTemplates)
-      }
+      tags: toSpec(dirty.tags),
+      areas: toSpec(dirty.areas),
+      projects: toSpec(dirty.projects),
+      headings: toSpec(dirty.headings),
+      tasks: toSpec(dirty.tasks),
+      checklistItems: toSpec(dirty.checklistItems),
+      attachments: toSpec(dirty.attachments),
+      projectTemplates: toSpec(dirty.projectTemplates)
     });
 
     return {
@@ -1370,43 +1449,44 @@ class ThingsCloudSyncService {
     const projReviewBackfillKey = `${PROJECTS_REVIEW_BACKFILL_STORAGE_PREFIX}${userId}`;
     const needsProjectsReviewBackfill = localStorage.getItem(projReviewBackfillKey) !== '1';
     const reconcileV221Key = `${ENTITIES_RECONCILE_V2_21_STORAGE_PREFIX}${userId}`;
-    const needsReconcileV221 = localStorage.getItem(reconcileV221Key) !== '1';
+    const reconcileV222Key = `${ENTITIES_RECONCILE_V2_22_STORAGE_PREFIX}${userId}`;
+    const needsReconcileV222 = localStorage.getItem(reconcileV222Key) !== '1';
     const orphanCheck = detectMissingReferencedEntityContainers(localDb.getSnapshot());
 
     const prevCursors: Record<SyncCollectionName, number> = {
-      tags: forceFullPull || needsReconcileV221 ? 0 : this.getCollectionCursor(userId, 'tags'),
+      tags: forceFullPull || needsReconcileV222 ? 0 : this.getCollectionCursor(userId, 'tags'),
       areas:
         forceFullPull ||
-        needsReconcileV221 ||
+        needsReconcileV222 ||
         orphanCheck.hasOrphanAreaRef ||
         orphanCheck.hasOrphanProjectRef
           ? 0
           : this.getCollectionCursor(userId, 'areas'),
       projects:
         forceFullPull ||
-        needsReconcileV221 ||
+        needsReconcileV222 ||
         needsProjectsReviewBackfill ||
         orphanCheck.hasOrphanProjectRef
           ? 0
           : this.getCollectionCursor(userId, 'projects'),
       headings:
         forceFullPull ||
-        needsReconcileV221 ||
+        needsReconcileV222 ||
         orphanCheck.hasOrphanHeadingRef ||
         orphanCheck.hasOrphanProjectRef
           ? 0
           : this.getCollectionCursor(userId, 'headings'),
-      tasks: forceFullPull || needsReconcileV221 ? 0 : this.getCollectionCursor(userId, 'tasks'),
+      tasks: forceFullPull || needsReconcileV222 ? 0 : this.getCollectionCursor(userId, 'tasks'),
       checklist_items:
-        forceFullPull || needsReconcileV221
+        forceFullPull || needsReconcileV222
           ? 0
           : this.getCollectionCursor(userId, 'checklist_items'),
       attachments:
-        forceFullPull || needsAttachmentBackfill
+        forceFullPull || needsAttachmentBackfill || needsReconcileV222
           ? 0
           : this.getCollectionCursor(userId, 'attachments'),
       project_templates:
-        forceFullPull || needsReconcileV221
+        forceFullPull || needsReconcileV222
           ? 0
           : this.getCollectionCursor(userId, 'project_templates')
     };
@@ -1449,7 +1529,9 @@ class ThingsCloudSyncService {
     const headings = rawHeadings
       .map(headingFromFirestoreMap)
       .filter((x): x is HeadingRecord => x !== null);
-    const tasks = rawTasks.map(taskFromFirestoreMap).filter((x): x is TaskRecord => x !== null);
+    const tasks = rawTasks
+      .map(taskFromFirestoreMap)
+      .filter((x): x is RemoteTaskWithHints => x !== null);
     const checklistItems = rawChecklists
       .map(checklistFromFirestoreMap)
       .filter((x): x is ChecklistItemRecord => x !== null);
@@ -1536,8 +1618,9 @@ class ThingsCloudSyncService {
     if (needsProjectsReviewBackfill) {
       localStorage.setItem(projReviewBackfillKey, '1');
     }
-    if (needsReconcileV221 && rawTemplates !== null) {
+    if (needsReconcileV222 && rawTemplates !== null) {
       localStorage.setItem(reconcileV221Key, '1');
+      localStorage.setItem(reconcileV222Key, '1');
     }
 
     const lowWatermark = Math.min(
@@ -1605,7 +1688,9 @@ class ThingsCloudSyncService {
             });
           } else if (colName === 'tasks') {
             await localDb.applyRemoteDeltas({
-              tasks: docs.map(taskFromFirestoreMap).filter((x): x is TaskRecord => x !== null)
+              tasks: docs
+                .map(taskFromFirestoreMap)
+                .filter((x): x is RemoteTaskWithHints => x !== null)
             });
           } else if (colName === 'checklist_items') {
             await localDb.applyRemoteDeltas({
@@ -1661,13 +1746,36 @@ class ThingsCloudSyncService {
     this.firestoreUnsubs.push(pulseUnsub);
 
     void this.attachLiveWakeEventSource(userId, localDeviceId);
+
+    if (typeof window !== 'undefined' && this.fallbackPollInterval == null) {
+      this.fallbackPollInterval = window.setInterval(() => {
+        if (
+          !this.isLocalOnly() &&
+          this.state.userId === userId &&
+          navigator.onLine &&
+          typeof document !== 'undefined' &&
+          document.visibilityState === 'visible'
+        ) {
+          this.triggerIncrementalPull(0);
+        }
+      }, 20_000);
+    }
   }
 
   private async attachLiveWakeEventSource(userId: string, localDeviceId: string) {
     if (typeof window === 'undefined' || typeof EventSource === 'undefined') return;
     if (this.isLocalOnly() || this.state.userId !== userId) return;
 
-    const uidWakeTopic = await this.deriveUidWakeTopic(userId);
+    const meta = this.loadPersistedMeta();
+    const auth = getFirebaseAuthInstance();
+    const [uidWakeTopic, legacyTopics] = await Promise.all([
+      this.deriveUidWakeTopic(userId),
+      this.deriveLegacySyncTopics(
+        userId,
+        auth.currentUser?.email || meta?.email || this.state.userEmailOrId,
+        meta?.channelTopic
+      )
+    ]);
     if (this.isLocalOnly() || this.state.userId !== userId) return;
 
     if (this.liveEventSource) {
@@ -1679,8 +1787,11 @@ class ThingsCloudSyncService {
       this.liveEventSource = null;
     }
 
+    const allStreamTopics = Array.from(new Set([uidWakeTopic, ...legacyTopics]));
+    const streamPath = allStreamTopics.map(encodeURIComponent).join(',');
+
     try {
-      const es = new EventSource(`https://ntfy.sh/${encodeURIComponent(uidWakeTopic)}/sse`);
+      const es = new EventSource(`https://ntfy.sh/${streamPath}/sse`);
       this.liveEventSource = es;
       es.onmessage = (ev) => {
         if (this.isLocalOnly() || this.state.userId !== userId) return;
@@ -1766,7 +1877,7 @@ class ThingsCloudSyncService {
       tasks: Array.isArray(batch.tasks)
         ? batch.tasks
             .map(taskFromFirestoreMap)
-            .filter((x: TaskRecord | null): x is TaskRecord => x !== null)
+            .filter((x: RemoteTaskWithHints | null): x is RemoteTaskWithHints => x !== null)
         : undefined,
       checklistItems: Array.isArray(batch.checklistItems)
         ? batch.checklistItems
@@ -1787,6 +1898,10 @@ class ThingsCloudSyncService {
   }
 
   private detachRealtimeListeners() {
+    if (this.fallbackPollInterval != null && typeof window !== 'undefined') {
+      window.clearInterval(this.fallbackPollInterval);
+      this.fallbackPollInterval = null;
+    }
     if (this.realtimeReconnectTimer != null && typeof window !== 'undefined') {
       window.clearTimeout(this.realtimeReconnectTimer);
       this.realtimeReconnectTimer = null;
@@ -1815,7 +1930,7 @@ class ThingsCloudSyncService {
 
   private async broadcastNtfyWakeAndDeltas(
     userId: string,
-    legacyChannelTopic: string | null,
+    legacyTopics: readonly string[],
     localDeviceId: string,
     pushedDirtyMaps: {
       tags: Record<string, unknown>[];
@@ -1828,10 +1943,11 @@ class ThingsCloudSyncService {
       projectTemplates: Record<string, unknown>[];
     }
   ): Promise<void> {
-    const payload = buildNtfyRelayOrWakePayload({
+    const batchTimestamp = Date.now();
+    const relayInput = {
       userId,
       deviceId: localDeviceId,
-      batchTimestamp: Date.now(),
+      batchTimestamp,
       tags: pushedDirtyMaps.tags,
       areas: pushedDirtyMaps.areas,
       projects: pushedDirtyMaps.projects,
@@ -1840,25 +1956,42 @@ class ThingsCloudSyncService {
       checklistItems: pushedDirtyMaps.checklistItems,
       attachments: pushedDirtyMaps.attachments,
       projectTemplates: pushedDirtyMaps.projectTemplates
-    });
-    if (payload === null) return;
+    };
 
+    const uidPayload = buildNtfyRelayOrWakePayload(relayInput);
+    const legacyChunks = buildLegacyCompatibleNtfyChunks(relayInput);
     const uidWakeTopic = await this.deriveUidWakeTopic(userId);
-    const topics = new Set<string>([uidWakeTopic]);
-    if (legacyChannelTopic && legacyChannelTopic.trim().length > 0) {
-      topics.add(legacyChannelTopic.trim());
-    }
 
-    await Promise.all(
-      Array.from(topics).map((topic) =>
-        fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
+    const postRequests: Promise<unknown>[] = [];
+    if (uidPayload !== null) {
+      postRequests.push(
+        fetch(`https://ntfy.sh/${encodeURIComponent(uidWakeTopic)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: payload,
+          body: uidPayload,
           signal: AbortSignal.timeout(2500)
         }).catch(() => undefined)
-      )
-    );
+      );
+    }
+
+    for (const topic of legacyTopics) {
+      const cleanTopic = topic.trim();
+      if (!cleanTopic || cleanTopic === uidWakeTopic) continue;
+      for (const chunkBody of legacyChunks) {
+        postRequests.push(
+          fetch(`https://ntfy.sh/${encodeURIComponent(cleanTopic)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: chunkBody,
+            signal: AbortSignal.timeout(2500)
+          }).catch(() => undefined)
+        );
+      }
+    }
+
+    if (postRequests.length > 0) {
+      await Promise.all(postRequests);
+    }
   }
 
   private async pollNtfyHistoryInBackground(

@@ -190,7 +190,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.21"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.22"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -408,9 +408,9 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.21")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.21")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 65)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.22")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.22")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 66)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
         XCTAssertEqual(
             FirebaseCloudSyncService.deriveUidWakeTopic(uid: " user-abc-123 "),
@@ -453,6 +453,7 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.19", current: "2.0.0-beta.18"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.20", current: "2.0.0-beta.19"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.21", current: "2.0.0-beta.20"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.22", current: "2.0.0-beta.21"))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.9", current: "2.0.0-beta.10"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.1"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.99"))
@@ -2659,5 +2660,256 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(ThingsStrings.shared.text("topbar_tooltip_templates", lang: .en), "Templates & Import")
         XCTAssertEqual(ThingsStrings.shared.text("topbar_tooltip_areas", lang: .en), "Areas")
         XCTAssertEqual(ThingsStrings.shared.text("topbar_tooltip_tags", lang: .en), "Tags")
+    }
+
+    // MARK: - 21. v2.0.0-beta.22 Cross-Platform Sync Overhaul (Cialis Area-Split Dedup, v1.8 Guards, Tag Remap & Ntfy Chunks)
+
+    func testCloudSyncV18ParityRecurringCialisDedupAndTagRemapV200Beta22() throws {
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let dailyRule = RecurrenceRule(mode: .fixedSchedule, interval: 1, unit: .days)
+        let baseNow: Int64 = 1_763_400_000_000
+
+        // 1. Deterministic duplicate-tag reconciliation ("Gesundheit" created independently on two devices)
+        //    Older (createdAt, id) wins without violating SQLite partial unique index idx_tags_title_active,
+        //    and task/project references remap cleanly to the winning tag ID.
+        let tagWinner = Tag(
+            id: "tag-gesundheit-older",
+            title: "Gesundheit",
+            sortOrder: 100.0,
+            createdAt: baseNow - 500_000,
+            updatedAt: baseNow - 400_000
+        )
+        let tagLoserNewer = Tag(
+            id: "tag-gesundheit-newer",
+            title: "Gesundheit",
+            sortOrder: 200.0,
+            createdAt: baseNow - 100_000,
+            updatedAt: baseNow - 50_000
+        )
+        let areaPrivat = Area(
+            id: "area-privat",
+            title: "Privat",
+            sortOrder: 100.0,
+            createdAt: baseNow - 600_000,
+            updatedAt: baseNow - 600_000
+        )
+        let projWithLoserTag = Project(
+            id: "proj-health",
+            areaId: areaPrivat.id,
+            title: "Vorsorge",
+            tagIds: [tagLoserNewer.id],
+            createdAt: baseNow - 300_000,
+            updatedAt: baseNow - 300_000
+        )
+
+        // Exact reproduction of screenshot 22828: two open daily "Cialis" tasks (one areaId = nil, one areaId = "area-privat")
+        let cialisNoAreaNewer = TaskItem(
+            id: "cialis-no-area",
+            title: "Cialis",
+            notes: "",
+            status: .open,
+            scheduleState: .today,
+            whenDate: baseNow + 86_400_000,
+            areaId: nil,
+            recurrenceRule: dailyRule,
+            sortOrder: 100.0,
+            createdAt: baseNow - 80_000,
+            updatedAt: baseNow - 20_000
+        )
+        let cialisPrivatOlder = TaskItem(
+            id: "cialis-privat",
+            title: "Cialis",
+            notes: "5mg",
+            status: .open,
+            scheduleState: .today,
+            whenDate: baseNow,
+            scheduledStartMinutes: 480,
+            durationMinutes: 15,
+            areaId: areaPrivat.id,
+            recurrenceRule: dailyRule,
+            sortOrder: 200.0,
+            createdAt: baseNow - 180_000,
+            updatedAt: baseNow - 120_000
+        )
+
+        let plan = ThingsSQLiteDatabase.planRecurringDeduplication(
+            [cialisNoAreaNewer, cialisPrivatOlder],
+            overrideTagIdsByTaskId: [
+                cialisNoAreaNewer.id: [tagLoserNewer.id],
+                cialisPrivatOlder.id: [tagWinner.id]
+            ]
+        )
+        XCTAssertEqual(plan.loserIds, ["cialis-privat"])
+        XCTAssertEqual(plan.winnerEnrichments["cialis-no-area"]?.areaId, "area-privat")
+        XCTAssertEqual(plan.winnerEnrichments["cialis-no-area"]?.notes, "5mg")
+        XCTAssertEqual(plan.winnerEnrichments["cialis-no-area"]?.scheduledStartMinutes, 480)
+        XCTAssertEqual(plan.winnerEnrichments["cialis-no-area"]?.durationMinutes, 15)
+
+        // Apply via applyRemoteDeltas with tagLoserNewer arriving FIRST and tagWinner arriving SECOND to exercise Case A & Case B
+        _ = try db.applyRemoteDeltas(
+            RemoteDeltaBatch(
+                tags: [tagLoserNewer, tagWinner],
+                areas: [areaPrivat],
+                projects: [projWithLoserTag],
+                tasks: [cialisNoAreaNewer, cialisPrivatOlder],
+                taskTagIdsByTaskId: [
+                    cialisNoAreaNewer.id: [tagLoserNewer.id],
+                    cialisPrivatOlder.id: [tagWinner.id]
+                ]
+            )
+        )
+
+        var snap = try db.loadWorkspaceSnapshot()
+        XCTAssertEqual(snap.tags.map(\.id), ["tag-gesundheit-older"], "Older same-title Tag must win deterministically")
+        XCTAssertEqual(snap.projects.first(where: { $0.id == "proj-health" })?.tagIds, ["tag-gesundheit-older"])
+
+        let openCialis = snap.allOpenTasks.filter { $0.title == "Cialis" }
+        XCTAssertEqual(openCialis.count, 1, "Duplicate Cialis recurring task must be eliminated")
+        let survivingCialis = try XCTUnwrap(openCialis.first)
+        XCTAssertEqual(survivingCialis.id, "cialis-no-area")
+        XCTAssertEqual(survivingCialis.areaId, "area-privat", "Surviving Cialis must inherit Privat Area")
+        XCTAssertEqual(survivingCialis.notes, "5mg")
+        XCTAssertEqual(survivingCialis.scheduledStartMinutes, 480)
+        XCTAssertEqual(survivingCialis.durationMinutes, 15)
+        XCTAssertEqual(survivingCialis.tags.map(\.id), ["tag-gesundheit-older"])
+        XCTAssertFalse(snap.trashedTasks.contains { $0.id == "cialis-privat" }, "Purged duplicate loser must not appear in Trash")
+
+        // 2. v1.8 omitted timeblock fields preserve local v2.0 timeblock, while explicit v2.0 null clears it
+        let v18EditedCialis = TaskItem(
+            id: survivingCialis.id,
+            title: "Cialis",
+            notes: "5mg täglich",
+            status: .open,
+            scheduleState: .today,
+            whenDate: survivingCialis.whenDate,
+            scheduledStartMinutes: nil,
+            durationMinutes: nil,
+            areaId: "area-privat",
+            recurrenceRule: dailyRule,
+            sortOrder: 100.0,
+            createdAt: survivingCialis.createdAt,
+            updatedAt: baseNow + 10_000
+        )
+        _ = try db.applyRemoteDeltas(
+            RemoteDeltaBatch(
+                tasks: [v18EditedCialis],
+                taskTagIdsByTaskId: [survivingCialis.id: ["tag-gesundheit-older"]],
+                taskOmittedTimeblockTaskIds: [survivingCialis.id]
+            )
+        )
+        snap = try db.loadWorkspaceSnapshot()
+        let afterV18Edit = try XCTUnwrap(snap.allOpenTasks.first(where: { $0.id == survivingCialis.id }))
+        XCTAssertEqual(afterV18Edit.notes, "5mg täglich")
+        XCTAssertEqual(afterV18Edit.scheduledStartMinutes, 480, "v1.8 payload omitting timeblock fields must not wipe v2.0 timeblock")
+        XCTAssertEqual(afterV18Edit.durationMinutes, 15)
+
+        var v20ExplicitClear = v18EditedCialis
+        v20ExplicitClear.updatedAt = baseNow + 20_000
+        _ = try db.applyRemoteDeltas(
+            RemoteDeltaBatch(
+                tasks: [v20ExplicitClear],
+                taskTagIdsByTaskId: [survivingCialis.id: ["tag-gesundheit-older"]],
+                taskOmittedTimeblockTaskIds: []
+            )
+        )
+        snap = try db.loadWorkspaceSnapshot()
+        let afterV20Clear = try XCTUnwrap(snap.allOpenTasks.first(where: { $0.id == survivingCialis.id }))
+        XCTAssertNil(afterV20Clear.scheduledStartMinutes, "Explicit v2.0 null timeblock must clear scheduledStartMinutes")
+        XCTAssertNil(afterV20Clear.durationMinutes)
+
+        // 3. v1.8 startup rollover resurrection guard: locally COMPLETED recurring parent stays COMPLETED when OPEN sibling exists
+        let completedParent = TaskItem(
+            id: "cialis-completed-yesterday",
+            title: "Cialis",
+            status: .completed,
+            scheduleState: .today,
+            whenDate: baseNow - 86_400_000,
+            completedAt: baseNow - 70_000_000,
+            areaId: "area-privat",
+            recurrenceRule: dailyRule,
+            createdAt: baseNow - 200_000_000,
+            updatedAt: baseNow - 70_000_000
+        )
+        _ = try db.applyRemoteDeltas(RemoteDeltaBatch(tasks: [completedParent]))
+
+        var resurrectedByV18Rollover = completedParent
+        resurrectedByV18Rollover.status = .open
+        resurrectedByV18Rollover.completedAt = nil
+        resurrectedByV18Rollover.whenDate = baseNow + 86_400_000
+        resurrectedByV18Rollover.updatedAt = baseNow + 30_000
+        _ = try db.applyRemoteDeltas(RemoteDeltaBatch(tasks: [resurrectedByV18Rollover]))
+
+        snap = try db.loadWorkspaceSnapshot()
+        XCTAssertEqual(snap.allOpenTasks.filter { $0.title == "Cialis" }.map(\.id), [survivingCialis.id])
+        XCTAssertTrue(snap.logbookTasks.contains { $0.id == "cialis-completed-yesterday" && $0.status == .completed })
+
+        // 4. parseTaskWithHints (NSNull vs omitted), purgedFromTrash, makeEntityUpdateWrite updateMask, and buildLegacyCompatibleNtfyChunks
+        let parsedOmitted = try XCTUnwrap(
+            FirebaseCloudSyncService.parseTaskWithHints([
+                "id": "t-v18",
+                "title": "Legacy Task",
+                "status": "OPEN",
+                "scheduleState": "TODAY",
+                "updatedAt": Int64(1_000)
+            ])
+        )
+        XCTAssertTrue(parsedOmitted.omittedTimeblock)
+
+        let parsedExplicitNull = try XCTUnwrap(
+            FirebaseCloudSyncService.parseTaskWithHints([
+                "id": "t-v20",
+                "title": "Modern Task",
+                "status": "OPEN",
+                "scheduleState": "TODAY",
+                "scheduledStartMinutes": NSNull(),
+                "durationMinutes": NSNull(),
+                "updatedAt": Int64(2_000)
+            ])
+        )
+        XCTAssertFalse(parsedExplicitNull.omittedTimeblock)
+        XCTAssertNil(parsedExplicitNull.task.scheduledStartMinutes)
+
+        let parsedPurgedProj = try XCTUnwrap(
+            FirebaseCloudSyncService.parseProject([
+                "id": "p-purged",
+                "title": "Old Title",
+                "notes": "Old Notes",
+                "isDeleted": true,
+                "purgedFromTrash": true,
+                "updatedAt": Int64(3_000)
+            ])
+        )
+        XCTAssertTrue(parsedPurgedProj.isDeleted)
+        XCTAssertEqual(parsedPurgedProj.title, "")
+        XCTAssertEqual(parsedPurgedProj.notes, "")
+
+        let entityWrite = FirebaseCloudSyncService.makeEntityUpdateWrite(
+            path: "projects/thingsbook-prod/databases/(default)/documents/users/u1/tasks/t1",
+            fields: ["title": ["stringValue": "Hello"], "updatedAt": ["integerValue": "100"]]
+        )
+        let maskPaths = (entityWrite["updateMask"] as? [String: Any])?["fieldPaths"] as? [String]
+        XCTAssertEqual(maskPaths, ["title", "updatedAt"])
+
+        let manyWireTasks: [[String: Any]] = (1...24).map { idx in
+            [
+                "id": "chunk-t-\(idx)",
+                "title": "Sync Task #\(idx) " + String(repeating: "z", count: 120),
+                "status": "OPEN",
+                "scheduleState": "TODAY",
+                "updatedAt": Int64(1_795_000_000_000 + idx)
+            ]
+        }
+        let ntfyChunks = FirebaseCloudSyncService.buildLegacyCompatibleNtfyChunks(
+            uid: "u1",
+            deviceId: "mac-1",
+            batchTimestamp: 1_795_000_999_000,
+            collections: [(key: "tasks", items: manyWireTasks)]
+        )
+        XCTAssertFalse(ntfyChunks.isEmpty)
+        for chunkData in ntfyChunks {
+            XCTAssertLessThanOrEqual(chunkData.count, 3800)
+            let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: chunkData) as? [String: Any])
+            XCTAssertNil(obj["wakeOnly"], "Legacy tb_sync_* chunk must never emit wakeOnly")
+        }
     }
 }

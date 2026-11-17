@@ -13,8 +13,12 @@ import com.culturedcode.things3.domain.model.RecurrenceRule
 import com.culturedcode.things3.domain.model.ScheduleState
 import com.culturedcode.things3.domain.model.TaskStatus
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.util.Locale
 
 private val firestoreJson = Json {
@@ -46,7 +50,33 @@ data class CloudDeltaBatchPayload(
     val checklistItems: List<ChecklistItemFirestoreDto> = emptyList(),
     val attachments: List<AttachmentFirestoreDto> = emptyList(),
     val projectTemplates: List<ProjectTemplateFirestoreDto> = emptyList()
-)
+) {
+    companion object {
+        fun decodeWithHints(rawJson: String, codec: Json = firestoreJson): CloudDeltaBatchPayload {
+            val base = codec.decodeFromString<CloudDeltaBatchPayload>(rawJson)
+            if (base.tasks.isEmpty()) return base
+            val omittedIds = runCatching {
+                val root = codec.parseToJsonElement(rawJson).jsonObject
+                val arr = root["tasks"]?.jsonArray ?: return@runCatching emptySet<String>()
+                buildSet {
+                    for (el in arr) {
+                        val obj = el.jsonObject
+                        if (!obj.containsKey("scheduledStartMinutes")) {
+                            val tid = obj["id"]?.jsonPrimitive?.content?.trim().orEmpty()
+                            if (tid.isNotEmpty()) add(tid)
+                        }
+                    }
+                }
+            }.getOrDefault(emptySet())
+            if (omittedIds.isEmpty()) return base
+            return base.copy(
+                tasks = base.tasks.map { dto ->
+                    if (dto.id in omittedIds) dto.copy(omittedTimeblockFields = true) else dto
+                }
+            )
+        }
+    }
+}
 
 @Serializable
 data class AreaFirestoreDto(
@@ -123,26 +153,30 @@ data class ProjectFirestoreDto(
     val tagIds: List<String> = emptyList(),
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L,
-    val isDeleted: Boolean = false
+    val isDeleted: Boolean = false,
+    val purgedFromTrash: Boolean = false
 ) {
-    fun toEntity(): ProjectEntity = ProjectEntity(
-        id = id,
-        areaId = areaId?.takeIf { it.isNotBlank() },
-        title = title,
-        notes = notes,
-        status = runCatching { ProjectStatus.valueOf(status.trim().uppercase(Locale.ROOT)) }.getOrDefault(ProjectStatus.ACTIVE),
-        scheduleState = runCatching { ScheduleState.valueOf(scheduleState.trim().uppercase(Locale.ROOT)) }.getOrDefault(ScheduleState.ANYTIME),
-        whenDate = whenDate,
-        deadline = deadline,
-        completedAt = completedAt,
-        lastReviewedAt = lastReviewedAt,
-        sortOrder = sortOrder.finiteOrZero(),
-        tagIdsJson = firestoreJson.encodeToString(tagIds),
-        createdAt = createdAt,
-        updatedAt = updatedAt,
-        isDeleted = isDeleted,
-        isDirty = false
-    )
+    fun toEntity(): ProjectEntity {
+        val isPurgedTombstone = isDeleted && (purgedFromTrash || (title.isEmpty() && notes.isEmpty()))
+        return ProjectEntity(
+            id = id,
+            areaId = if (isPurgedTombstone) null else areaId?.takeIf { it.isNotBlank() },
+            title = if (isPurgedTombstone) "" else title,
+            notes = if (isPurgedTombstone) "" else notes,
+            status = runCatching { ProjectStatus.valueOf(status.trim().uppercase(Locale.ROOT)) }.getOrDefault(ProjectStatus.ACTIVE),
+            scheduleState = runCatching { ScheduleState.valueOf(scheduleState.trim().uppercase(Locale.ROOT)) }.getOrDefault(ScheduleState.ANYTIME),
+            whenDate = whenDate,
+            deadline = deadline,
+            completedAt = completedAt,
+            lastReviewedAt = lastReviewedAt,
+            sortOrder = sortOrder.finiteOrZero(),
+            tagIdsJson = firestoreJson.encodeToString(if (isPurgedTombstone) emptyList() else tagIds),
+            createdAt = createdAt,
+            updatedAt = updatedAt,
+            isDeleted = isDeleted,
+            isDirty = false
+        )
+    }
 
     fun toFirestoreMap(): Map<String, Any?> = mapOf(
         "id" to id,
@@ -159,7 +193,8 @@ data class ProjectFirestoreDto(
         "tagIds" to tagIds,
         "createdAt" to createdAt,
         "updatedAt" to updatedAt,
-        "isDeleted" to isDeleted
+        "isDeleted" to isDeleted,
+        "purgedFromTrash" to (purgedFromTrash || (isDeleted && title.isEmpty() && notes.isEmpty()))
     )
 
     companion object {
@@ -178,18 +213,23 @@ data class ProjectFirestoreDto(
             tagIds = runCatching { firestoreJson.decodeFromString<List<String>>(entity.tagIdsJson) }.getOrDefault(emptyList()),
             createdAt = entity.createdAt,
             updatedAt = entity.updatedAt,
-            isDeleted = entity.isDeleted
+            isDeleted = entity.isDeleted,
+            purgedFromTrash = entity.isDeleted && entity.title.isEmpty() && entity.notes.isEmpty()
         )
 
         fun fromFirestoreMap(map: Map<String, Any?>?): ProjectFirestoreDto? {
             if (map == null) return null
             val id = (map["id"] as? String)?.trim() ?: return null
             if (id.isEmpty()) return null
+            val title = map["title"] as? String ?: ""
+            val notes = map["notes"] as? String ?: ""
+            val isDeleted = map["isDeleted"] as? Boolean ?: false
+            val purged = (map["purgedFromTrash"] as? Boolean == true) || (isDeleted && title.isEmpty() && notes.isEmpty())
             return ProjectFirestoreDto(
                 id = id,
                 areaId = (map["areaId"] as? String)?.takeIf { it.isNotBlank() },
-                title = map["title"] as? String ?: "",
-                notes = map["notes"] as? String ?: "",
+                title = title,
+                notes = notes,
                 status = map["status"] as? String ?: ProjectStatus.ACTIVE.name,
                 scheduleState = map["scheduleState"] as? String ?: ScheduleState.ANYTIME.name,
                 whenDate = (map["whenDate"] as? Number)?.toLong(),
@@ -200,7 +240,8 @@ data class ProjectFirestoreDto(
                 tagIds = (map["tagIds"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
                 createdAt = (map["createdAt"] as? Number)?.toLong() ?: 0L,
                 updatedAt = (map["updatedAt"] as? Number)?.toLong() ?: 0L,
-                isDeleted = map["isDeleted"] as? Boolean ?: false
+                isDeleted = isDeleted,
+                purgedFromTrash = purged
             )
         }
     }
@@ -292,33 +333,39 @@ data class TaskFirestoreDto(
     val tagIds: List<String> = emptyList(),
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L,
-    val isDeleted: Boolean = false
+    val isDeleted: Boolean = false,
+    val purgedFromTrash: Boolean = false,
+    @Transient
+    val omittedTimeblockFields: Boolean = false
 ) {
-    fun toEntity(): TaskEntity = TaskEntity(
-        id = id,
-        title = title,
-        notes = notes,
-        status = runCatching { TaskStatus.valueOf(status.trim().uppercase(Locale.ROOT)) }.getOrDefault(TaskStatus.OPEN),
-        scheduleState = runCatching { ScheduleState.valueOf(scheduleState.trim().uppercase(Locale.ROOT)) }.getOrDefault(ScheduleState.INBOX),
-        whenDate = whenDate,
-        deadline = deadline,
-        reminderTime = reminderTime,
-        scheduledStartMinutes = scheduledStartMinutes?.takeIf { it in 0..1439 },
-        durationMinutes = durationMinutes?.takeIf { it in 1..1440 },
-        completedAt = completedAt,
-        projectId = projectId?.takeIf { it.isNotBlank() },
-        headingId = headingId?.takeIf { it.isNotBlank() },
-        areaId = areaId?.takeIf { it.isNotBlank() },
-        recurrenceRuleJson = recurrenceRule?.takeIf {
-            it.isNotBlank() && runCatching { firestoreJson.decodeFromString<RecurrenceRule>(it) }.isSuccess
-        },
-        sortOrder = sortOrder.finiteOrZero(),
-        tagIdsJson = firestoreJson.encodeToString(tagIds),
-        createdAt = createdAt,
-        updatedAt = updatedAt,
-        isDeleted = isDeleted,
-        isDirty = false
-    )
+    fun toEntity(): TaskEntity {
+        val isPurgedTombstone = isDeleted && (purgedFromTrash || (title.isEmpty() && notes.isEmpty()))
+        return TaskEntity(
+            id = id,
+            title = if (isPurgedTombstone) "" else title,
+            notes = if (isPurgedTombstone) "" else notes,
+            status = runCatching { TaskStatus.valueOf(status.trim().uppercase(Locale.ROOT)) }.getOrDefault(TaskStatus.OPEN),
+            scheduleState = runCatching { ScheduleState.valueOf(scheduleState.trim().uppercase(Locale.ROOT)) }.getOrDefault(ScheduleState.INBOX),
+            whenDate = whenDate,
+            deadline = deadline,
+            reminderTime = if (isPurgedTombstone) null else reminderTime,
+            scheduledStartMinutes = if (isPurgedTombstone) null else scheduledStartMinutes?.takeIf { it in 0..1439 },
+            durationMinutes = if (isPurgedTombstone) null else durationMinutes?.takeIf { it in 1..1440 },
+            completedAt = completedAt,
+            projectId = if (isPurgedTombstone) null else projectId?.takeIf { it.isNotBlank() },
+            headingId = if (isPurgedTombstone) null else headingId?.takeIf { it.isNotBlank() },
+            areaId = if (isPurgedTombstone) null else areaId?.takeIf { it.isNotBlank() },
+            recurrenceRuleJson = if (isPurgedTombstone) null else recurrenceRule?.takeIf {
+                it.isNotBlank() && runCatching { firestoreJson.decodeFromString<RecurrenceRule>(it) }.isSuccess
+            },
+            sortOrder = sortOrder.finiteOrZero(),
+            tagIdsJson = firestoreJson.encodeToString(if (isPurgedTombstone) emptyList() else tagIds),
+            createdAt = createdAt,
+            updatedAt = updatedAt,
+            isDeleted = isDeleted,
+            isDirty = false
+        )
+    }
 
     fun toFirestoreMap(): Map<String, Any?> = mapOf(
         "id" to id,
@@ -340,7 +387,8 @@ data class TaskFirestoreDto(
         "tagIds" to tagIds,
         "createdAt" to createdAt,
         "updatedAt" to updatedAt,
-        "isDeleted" to isDeleted
+        "isDeleted" to isDeleted,
+        "purgedFromTrash" to (purgedFromTrash || (isDeleted && title.isEmpty() && notes.isEmpty()))
     )
 
     companion object {
@@ -364,17 +412,23 @@ data class TaskFirestoreDto(
             tagIds = runCatching { firestoreJson.decodeFromString<List<String>>(entity.tagIdsJson) }.getOrDefault(emptyList()),
             createdAt = entity.createdAt,
             updatedAt = entity.updatedAt,
-            isDeleted = entity.isDeleted
+            isDeleted = entity.isDeleted,
+            purgedFromTrash = entity.isDeleted && entity.title.isEmpty() && entity.notes.isEmpty()
         )
 
         fun fromFirestoreMap(map: Map<String, Any?>?): TaskFirestoreDto? {
             if (map == null) return null
             val id = (map["id"] as? String)?.trim() ?: return null
             if (id.isEmpty()) return null
+            val title = map["title"] as? String ?: ""
+            val notes = map["notes"] as? String ?: ""
+            val isDeleted = map["isDeleted"] as? Boolean ?: false
+            val purged = (map["purgedFromTrash"] as? Boolean == true) || (isDeleted && title.isEmpty() && notes.isEmpty())
+            val omittedTimeblock = !map.containsKey("scheduledStartMinutes")
             return TaskFirestoreDto(
                 id = id,
-                title = map["title"] as? String ?: "",
-                notes = map["notes"] as? String ?: "",
+                title = title,
+                notes = notes,
                 status = map["status"] as? String ?: TaskStatus.OPEN.name,
                 scheduleState = map["scheduleState"] as? String ?: ScheduleState.INBOX.name,
                 whenDate = (map["whenDate"] as? Number)?.toLong(),
@@ -391,7 +445,9 @@ data class TaskFirestoreDto(
                 tagIds = (map["tagIds"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
                 createdAt = (map["createdAt"] as? Number)?.toLong() ?: 0L,
                 updatedAt = (map["updatedAt"] as? Number)?.toLong() ?: 0L,
-                isDeleted = map["isDeleted"] as? Boolean ?: false
+                isDeleted = isDeleted,
+                purgedFromTrash = purged,
+                omittedTimeblockFields = omittedTimeblock
             )
         }
     }

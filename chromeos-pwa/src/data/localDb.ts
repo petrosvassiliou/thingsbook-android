@@ -41,14 +41,19 @@ import {
 } from './backupCodec.ts';
 import { parseCsvTaskImport, serializeEntitiesToCsv } from './csvCodec.ts';
 import {
+  OFFLINE_COMMIT_RESTAMP_THRESHOLD_MS,
   buildRecurringSeriesKey,
+  canonicalizeRecurrenceRuleKey,
+  clampRemoteCursorTimestamp,
   deriveRecurringChecklistItemId,
   deriveRecurringNextTaskId,
   formatLocalYyyyMmDd,
   mergeMonotonicReviewTimestamp,
-  selectRecurringDuplicateLoserIds
+  normalizeRecurringTitleKey,
+  planRecurringDeduplication
 } from './syncUtils.ts';
 import {
+  SAMPLE_AREA_IDS,
   SAMPLE_CHECKLIST_IDS,
   SAMPLE_HEADING_IDS,
   SAMPLE_PROJECT_IDS,
@@ -416,9 +421,37 @@ export class ThingsLocalDb {
     now = Date.now()
   ): Promise<number> {
     const allTasks = (await db.getAll('tasks')) as TaskRecord[];
-    const loserIds = selectRecurringDuplicateLoserIds(allTasks);
-    if (loserIds.length === 0) return 0;
-    return this.silentlyPurgeTasksByIdsUnlocked(db, loserIds, now);
+    const plan = planRecurringDeduplication(allTasks);
+    if (plan.winnerEnrichments.length > 0) {
+      const tx = db.transaction('tasks', 'readwrite');
+      for (const enrich of plan.winnerEnrichments) {
+        const winner = (await tx.store.get(enrich.winnerId)) as TaskRecord | undefined;
+        if (!winner || winner.isDeleted || winner.status !== 'OPEN') continue;
+        await tx.store.put({
+          ...winner,
+          areaId: enrich.areaId !== undefined ? enrich.areaId : winner.areaId,
+          headingId: enrich.headingId !== undefined ? enrich.headingId : winner.headingId,
+          notes: enrich.notes !== undefined ? enrich.notes : winner.notes,
+          tagIds: enrich.tagIds !== undefined ? enrich.tagIds : winner.tagIds,
+          scheduledStartMinutes:
+            enrich.scheduledStartMinutes !== undefined
+              ? enrich.scheduledStartMinutes
+              : winner.scheduledStartMinutes,
+          durationMinutes:
+            enrich.durationMinutes !== undefined ? enrich.durationMinutes : winner.durationMinutes,
+          deadline: enrich.deadline !== undefined ? enrich.deadline : winner.deadline,
+          reminderTime: enrich.reminderTime !== undefined ? enrich.reminderTime : winner.reminderTime,
+          updatedAt: Math.max(now, winner.updatedAt + 1, enrich.minUpdatedAt),
+          isDirty: true
+        });
+      }
+      await tx.done;
+    }
+    const purged =
+      plan.loserIds.length > 0
+        ? await this.silentlyPurgeTasksByIdsUnlocked(db, plan.loserIds, now)
+        : 0;
+    return purged + plan.winnerEnrichments.length;
   }
 
   /**
@@ -957,34 +990,73 @@ export class ThingsLocalDb {
       purgedFromTrash: false
     };
 
+    const allTasks = (await db.getAll('tasks')) as TaskRecord[];
+    const otherOpenRecurring = allTasks.filter(
+      (t) =>
+        t.id !== completedTask.id &&
+        t.id !== newTaskId &&
+        !t.isDeleted &&
+        t.status === 'OPEN' &&
+        t.recurrenceRule != null
+    );
+    const dedupCheck = planRecurringDeduplication([nextTask, ...otherOpenRecurring]);
     const seriesKey = buildRecurringSeriesKey(nextTask);
-    if (seriesKey) {
-      const allTasks = (await db.getAll('tasks')) as TaskRecord[];
-      const openSiblings = allTasks.filter(
-        (t) => t.id !== completedTask.id && buildRecurringSeriesKey(t) === seriesKey
-      );
-      if (openSiblings.length > 0) {
-        const primary = openSiblings[0];
-        if (openSiblings.length > 1) {
-          await this.silentlyPurgeTasksByIdsUnlocked(
-            db,
-            openSiblings.slice(1).map((t) => t.id),
-            now
-          );
-        }
-        if ((primary.whenDate ?? 0) < nextWhen) {
-          await db.put('tasks', {
-            ...primary,
-            whenDate: nextWhen,
-            scheduleState: nextSchedule,
-            deadline: nextDeadline,
-            reminderTime: nextReminder,
-            updatedAt: Math.max(now, primary.updatedAt + 1),
+    const openSiblings = otherOpenRecurring.filter(
+      (t) =>
+        (seriesKey !== null && buildRecurringSeriesKey(t) === seriesKey) ||
+        dedupCheck.loserIds.includes(t.id) ||
+        (dedupCheck.loserIds.includes(nextTask.id) &&
+          normalizeRecurringTitleKey(t.title) === normalizeRecurringTitleKey(nextTask.title) &&
+          canonicalizeRecurrenceRuleKey(t.recurrenceRule) ===
+            canonicalizeRecurrenceRuleKey(nextTask.recurrenceRule))
+    );
+
+    if (openSiblings.length > 0) {
+      const primary = openSiblings[0];
+      if (openSiblings.length > 1) {
+        await this.silentlyPurgeTasksByIdsUnlocked(
+          db,
+          openSiblings.slice(1).map((t) => t.id),
+          now
+        );
+      }
+      const nextArea = primary.projectId ? null : (primary.areaId || nextTask.areaId || null);
+      const nextStartMin = primary.scheduledStartMinutes ?? nextTask.scheduledStartMinutes ?? null;
+      const nextDurMin = primary.durationMinutes ?? nextTask.durationMinutes ?? null;
+      const needsTaskUpdate =
+        (primary.whenDate ?? 0) < nextWhen ||
+        primary.areaId !== nextArea ||
+        primary.scheduledStartMinutes !== nextStartMin ||
+        primary.durationMinutes !== nextDurMin;
+
+      if (needsTaskUpdate) {
+        await db.put('tasks', {
+          ...primary,
+          areaId: nextArea,
+          whenDate: (primary.whenDate ?? 0) < nextWhen ? nextWhen : primary.whenDate,
+          scheduleState: (primary.whenDate ?? 0) < nextWhen ? nextSchedule : primary.scheduleState,
+          deadline: (primary.whenDate ?? 0) < nextWhen ? nextDeadline : primary.deadline,
+          reminderTime:
+            (primary.whenDate ?? 0) < nextWhen ? nextReminder : primary.reminderTime,
+          scheduledStartMinutes: nextStartMin,
+          durationMinutes: nextDurMin,
+          updatedAt: Math.max(now, primary.updatedAt + 1),
+          isDirty: true
+        });
+      }
+
+      const allChk = (await db.getAll('checklist_items')) as ChecklistItemRecord[];
+      for (const chk of allChk) {
+        if (chk.taskId === primary.id && !chk.isDeleted && chk.isCompleted) {
+          await db.put('checklist_items', {
+            ...chk,
+            isCompleted: false,
+            updatedAt: Math.max(now, chk.updatedAt + 1),
             isDirty: true
           });
         }
-        return primary.id;
       }
+      return primary.id;
     }
 
     await db.put('tasks', nextTask);
@@ -2519,11 +2591,19 @@ export class ThingsLocalDb {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
       const now = Date.now();
-      const id = params.id || crypto.randomUUID();
+      const trimmedTitle = params.title.trim();
       const tx = db.transaction('areas', 'readwrite');
-      const existing = (await tx.store.get(id)) as AreaRecord | undefined;
+      const allAreas = (await tx.store.getAll()) as AreaRecord[];
+      const sameTitleActive = !params.id
+        ? allAreas.find(
+            (a) => !a.isDeleted && a.title.trim().toLowerCase() === trimmedTitle.toLowerCase()
+          )
+        : undefined;
+      const id = params.id || sameTitleActive?.id || crypto.randomUUID();
+      const existing =
+        sameTitleActive ?? ((await tx.store.get(id)) as AreaRecord | undefined);
       if (!existing) {
-        const activeCount = ((await tx.store.getAll()) as AreaRecord[]).filter((a) => !a.isDeleted).length;
+        const activeCount = allAreas.filter((a) => !a.isDeleted).length;
         if (activeCount >= MAX_AREAS) {
           await tx.done;
           return null;
@@ -2531,7 +2611,7 @@ export class ThingsLocalDb {
       }
       const record: AreaRecord = {
         id,
-        title: params.title.trim(),
+        title: trimmedTitle,
         sortOrder: params.sortOrder ?? existing?.sortOrder ?? (now % 100000),
         tagIds: params.tagIds ?? existing?.tagIds ?? [],
         createdAt: existing?.createdAt ?? now,
@@ -2612,12 +2692,19 @@ export class ThingsLocalDb {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
       const now = Date.now();
-      const id = params.id || crypto.randomUUID();
+      const trimmedTitle = params.title.trim();
       const tx = db.transaction('tags', 'readwrite');
-      const existing = (await tx.store.get(id)) as TagRecord | undefined;
+      const allTags = (await tx.store.getAll()) as TagRecord[];
+      const sameTitleActive = !params.id
+        ? allTags.find(
+            (tg) => !tg.isDeleted && tg.title.trim().toLowerCase() === trimmedTitle.toLowerCase()
+          )
+        : undefined;
+      const id = params.id || sameTitleActive?.id || crypto.randomUUID();
+      const existing = sameTitleActive ?? ((await tx.store.get(id)) as TagRecord | undefined);
       const record: TagRecord = {
         id,
-        title: params.title.trim(),
+        title: trimmedTitle,
         shortcut: params.shortcut !== undefined ? params.shortcut : (existing?.shortcut ?? null),
         parentTagId: params.parentTagId !== undefined ? params.parentTagId : (existing?.parentTagId ?? null),
         sortOrder: existing?.sortOrder ?? (now % 100000),
@@ -2807,15 +2894,32 @@ export class ThingsLocalDb {
       const remainingProjects = ((await tx.objectStore('projects').getAll()) as ProjectRecord[]).filter(
         (p) => !p.isDeleted
       );
+      const remainingTemplates = (
+        (await tx.objectStore('projectTemplates').getAll()) as ProjectTemplate[]
+      ).filter((tpl) => !tpl.isDeleted);
+
+      const deletedSampleTagIds = new Set<string>();
       for (const tagId of SAMPLE_TAG_IDS) {
         const usedByTask = remainingTasks.some((t) => t.tagIds.includes(tagId));
         const usedByProj = remainingProjects.some((p) => p.tagIds.includes(tagId));
         if (!usedByTask && !usedByProj) {
           await tx.objectStore('tags').delete(tagId);
+          deletedSampleTagIds.add(tagId);
         }
       }
 
       if (markRemainingDirtyForMerge) {
+        // Delete untouched sample Areas before merging into a cloud account unless referenced
+        // by a user task, project, or template, so cloud Areas are never polluted by sample data.
+        for (const areaId of SAMPLE_AREA_IDS) {
+          const usedByTask = remainingTasks.some((t) => t.areaId === areaId);
+          const usedByProj = remainingProjects.some((p) => p.areaId === areaId);
+          const usedByTpl = remainingTemplates.some((tpl) => tpl.defaultAreaId === areaId);
+          if (!usedByTask && !usedByProj && !usedByTpl) {
+            await tx.objectStore('areas').delete(areaId);
+          }
+        }
+
         const stores = [
           'areas',
           'projects',
@@ -2830,7 +2934,17 @@ export class ThingsLocalDb {
           const all = await tx.objectStore(sName).getAll();
           for (const rec of all) {
             if (!rec.isDeleted) {
-              await tx.objectStore(sName).put({ ...rec, isDirty: true });
+              const cleanedTags =
+                Array.isArray((rec as { tagIds?: unknown }).tagIds) && deletedSampleTagIds.size > 0
+                  ? ((rec as { tagIds: string[] }).tagIds || []).filter(
+                      (tid) => !deletedSampleTagIds.has(tid)
+                    )
+                  : undefined;
+              await tx.objectStore(sName).put({
+                ...rec,
+                ...(cleanedTags !== undefined ? { tagIds: cleanedTags } : {}),
+                isDirty: true
+              });
             }
           }
         }
@@ -2872,7 +2986,58 @@ export class ThingsLocalDb {
 
   // ==================== Cloud Sync Helpers ====================
 
-  async getDirtyEntities() {
+  async hasStaleOfflineDirtyEntities(
+    now = Date.now(),
+    staleThresholdMs = OFFLINE_COMMIT_RESTAMP_THRESHOLD_MS
+  ): Promise<boolean> {
+    const dirty = await this.getDirtyEntities();
+    const cutoff = now - staleThresholdMs;
+    return (
+      dirty.areas.some((x) => x.updatedAt < cutoff) ||
+      dirty.projects.some((x) => x.updatedAt < cutoff) ||
+      dirty.headings.some((x) => x.updatedAt < cutoff) ||
+      dirty.tasks.some((x) => x.updatedAt < cutoff) ||
+      dirty.checklistItems.some((x) => x.updatedAt < cutoff) ||
+      dirty.tags.some((x) => x.updatedAt < cutoff) ||
+      dirty.attachments.some((x) => x.updatedAt < cutoff) ||
+      dirty.projectTemplates.some((x) => x.updatedAt < cutoff)
+    );
+  }
+
+  async getDirtyEntities(options?: { restampStaleOfflineAt?: number }) {
+    if (options?.restampStaleOfflineAt != null) {
+      const pushNow = Math.trunc(options.restampStaleOfflineAt);
+      const cutoff = pushNow - OFFLINE_COMMIT_RESTAMP_THRESHOLD_MS;
+      await this.enqueueWrite(async () => {
+        const db = await this.getDb();
+        const stores = [
+          'areas',
+          'projects',
+          'headings',
+          'tasks',
+          'checklist_items',
+          'tags',
+          'attachments',
+          'projectTemplates'
+        ] as const;
+        const tx = db.transaction(stores, 'readwrite');
+        for (const sName of stores) {
+          const store = tx.objectStore(sName);
+          const all = (await store.getAll()) as Array<{
+            id: string;
+            updatedAt: number;
+            isDirty: boolean;
+          }>;
+          for (const item of all) {
+            if (item.isDirty && item.updatedAt < cutoff) {
+              await store.put({ ...item, updatedAt: pushNow });
+            }
+          }
+        }
+        await tx.done;
+      });
+    }
+
     const db = await this.getDb();
     const [
       areas,
@@ -2906,14 +3071,22 @@ export class ThingsLocalDb {
   }
 
   async markSynced(idsByStore: {
-    areas?: { ids: string[]; maxUpdatedAt?: number };
-    projects?: { ids: string[]; maxUpdatedAt?: number };
-    headings?: { ids: string[]; maxUpdatedAt?: number };
-    tasks?: { ids: string[]; maxUpdatedAt?: number };
-    checklistItems?: { ids: string[]; maxUpdatedAt?: number };
-    tags?: { ids: string[]; maxUpdatedAt?: number };
-    attachments?: { ids: string[]; maxUpdatedAt?: number };
-    projectTemplates?: { ids: string[]; maxUpdatedAt?: number };
+    areas?: { ids: string[]; maxUpdatedAt?: number; updatedAtById?: Record<string, number> };
+    projects?: { ids: string[]; maxUpdatedAt?: number; updatedAtById?: Record<string, number> };
+    headings?: { ids: string[]; maxUpdatedAt?: number; updatedAtById?: Record<string, number> };
+    tasks?: { ids: string[]; maxUpdatedAt?: number; updatedAtById?: Record<string, number> };
+    checklistItems?: {
+      ids: string[];
+      maxUpdatedAt?: number;
+      updatedAtById?: Record<string, number>;
+    };
+    tags?: { ids: string[]; maxUpdatedAt?: number; updatedAtById?: Record<string, number> };
+    attachments?: { ids: string[]; maxUpdatedAt?: number; updatedAtById?: Record<string, number> };
+    projectTemplates?: {
+      ids: string[];
+      maxUpdatedAt?: number;
+      updatedAtById?: Record<string, number>;
+    };
   }): Promise<void> {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
@@ -2930,7 +3103,13 @@ export class ThingsLocalDb {
         ],
         'readwrite'
       );
-      const map: Array<[string, { ids: string[]; maxUpdatedAt?: number } | undefined]> = [
+      const map: Array<
+        [
+          string,
+          | { ids: string[]; maxUpdatedAt?: number; updatedAtById?: Record<string, number> }
+          | undefined
+        ]
+      > = [
         ['areas', idsByStore.areas],
         ['projects', idsByStore.projects],
         ['headings', idsByStore.headings],
@@ -2942,11 +3121,12 @@ export class ThingsLocalDb {
       ];
       for (const [storeName, spec] of map) {
         if (!spec || spec.ids.length === 0) continue;
-        const maxTs = spec.maxUpdatedAt ?? Number.MAX_SAFE_INTEGER;
+        const fallbackMaxTs = spec.maxUpdatedAt ?? Number.MAX_SAFE_INTEGER;
         const store = tx.objectStore(storeName);
         for (const id of spec.ids) {
+          const itemCeiling = spec.updatedAtById?.[id] ?? fallbackMaxTs;
           const cur = (await store.get(id)) as { updatedAt: number; isDirty: boolean } | undefined;
-          if (cur && cur.isDirty && cur.updatedAt <= maxTs) {
+          if (cur && cur.isDirty && cur.updatedAt <= itemCeiling) {
             await store.put({ ...cur, isDirty: false });
           }
         }
@@ -2960,14 +3140,16 @@ export class ThingsLocalDb {
     areas?: AreaRecord[];
     projects?: ProjectRecord[];
     headings?: HeadingRecord[];
-    tasks?: TaskRecord[];
+    tasks?: Array<TaskRecord & { omittedTimeblockFields?: boolean }>;
     checklistItems?: ChecklistItemRecord[];
     attachments?: AttachmentRecord[];
     projectTemplates?: ProjectTemplate[];
   }): Promise<number> {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
+      const applyNow = Date.now();
       let maxUpdatedAt = 0;
+      let needsSyncPushBack = false;
       const tx = db.transaction(
         [
           'tags',
@@ -2982,7 +3164,7 @@ export class ThingsLocalDb {
         'readwrite'
       );
 
-      const nowCeiling = Date.now() + 120_000;
+      const nowCeiling = applyNow + 120_000;
       const shouldRemoteWin = (
         local: { updatedAt: number; isDirty: boolean } | undefined,
         remoteUpdatedAt: number
@@ -2993,6 +3175,8 @@ export class ThingsLocalDb {
         return remoteUpdatedAt >= local.updatedAt;
       };
 
+      const clampUpdatedAt = (ts: number): number => clampRemoteCursorTimestamp(ts, applyNow);
+
       const applyList = async <T extends { id: string; updatedAt: number; isDirty: boolean }>(
         storeName: string,
         items: T[] | undefined,
@@ -3002,23 +3186,26 @@ export class ThingsLocalDb {
         const store = tx.objectStore(storeName);
         for (const remote of items) {
           if (!remote.id) continue;
+          const clampedTs = clampUpdatedAt(remote.updatedAt);
           const local = (await store.get(remote.id)) as T | undefined;
           if (shouldRemoteWin(local, remote.updatedAt)) {
             const merged = mergeFn ? mergeFn(local, remote) : remote;
-            await store.put({ ...merged, isDirty: false });
+            await store.put({ ...merged, updatedAt: clampedTs, isDirty: false });
           }
-          if (remote.updatedAt > maxUpdatedAt) {
-            maxUpdatedAt = remote.updatedAt;
+          if (clampedTs > maxUpdatedAt) {
+            maxUpdatedAt = clampedTs;
           }
         }
       };
 
       await applyList('tags', batch.tags);
       await applyList('areas', batch.areas);
+
       if (batch.projects && batch.projects.length > 0) {
         const projStore = tx.objectStore('projects');
         for (const remote of batch.projects) {
           if (!remote.id) continue;
+          const clampedTs = clampUpdatedAt(remote.updatedAt);
           const local = (await projStore.get(remote.id)) as ProjectRecord | undefined;
           const mergedLastReviewed: number | null = remote.isDeleted
             ? (remote.lastReviewedAt ?? null)
@@ -3026,6 +3213,7 @@ export class ThingsLocalDb {
           if (shouldRemoteWin(local, remote.updatedAt)) {
             await projStore.put({
               ...remote,
+              updatedAt: clampedTs,
               lastReviewedAt: mergedLastReviewed,
               purgedFromTrash: Boolean(
                 remote.purgedFromTrash || (remote.isDeleted && local?.purgedFromTrash)
@@ -3046,18 +3234,100 @@ export class ThingsLocalDb {
               lastReviewedAt: mergedLastReviewed
             });
           }
-          if (remote.updatedAt > maxUpdatedAt) {
-            maxUpdatedAt = remote.updatedAt;
+          if (clampedTs > maxUpdatedAt) {
+            maxUpdatedAt = clampedTs;
           }
         }
       }
+
       await applyList('headings', batch.headings);
-      await applyList('tasks', batch.tasks, (local, remote) => ({
-        ...remote,
-        purgedFromTrash: Boolean(
-          remote.purgedFromTrash || (remote.isDeleted && local?.purgedFromTrash)
-        )
-      }));
+
+      if (batch.tasks && batch.tasks.length > 0) {
+        const taskStore = tx.objectStore('tasks');
+        const existingAllTasks = (await taskStore.getAll()) as TaskRecord[];
+        const openSeriesTaskIds = new Map<string, Set<string>>();
+        const registerOpenSeries = (tk: Pick<TaskRecord, 'id' | 'title' | 'status' | 'isDeleted' | 'projectId' | 'recurrenceRule'>) => {
+          if (tk.isDeleted || tk.status !== 'OPEN') return;
+          const normTitle = normalizeRecurringTitleKey(tk.title);
+          const ruleKey = canonicalizeRecurrenceRuleKey(tk.recurrenceRule);
+          if (!normTitle || !ruleKey) return;
+          const key = `${normTitle}\u001F${ruleKey}\u001F${(tk.projectId || '').trim()}`;
+          const set = openSeriesTaskIds.get(key);
+          if (set) set.add(tk.id);
+          else openSeriesTaskIds.set(key, new Set([tk.id]));
+        };
+        for (const tk of existingAllTasks) registerOpenSeries(tk);
+        for (const tk of batch.tasks) registerOpenSeries(tk);
+
+        for (const remoteWithHint of batch.tasks) {
+          if (!remoteWithHint.id) continue;
+          const { omittedTimeblockFields, ...remote } = remoteWithHint;
+          const clampedTs = clampUpdatedAt(remote.updatedAt);
+          const local = (await taskStore.get(remote.id)) as TaskRecord | undefined;
+
+          // Guard against v1.8 startup rollover resurrecting an already-COMPLETED recurring parent
+          // when the next OPEN occurrence in the same series already exists.
+          if (
+            local &&
+            !local.isDeleted &&
+            local.status === 'COMPLETED' &&
+            local.recurrenceRule != null &&
+            !remote.isDeleted &&
+            remote.status === 'OPEN'
+          ) {
+            const normTitle = normalizeRecurringTitleKey(local.title || remote.title);
+            const ruleKey =
+              canonicalizeRecurrenceRuleKey(local.recurrenceRule) ??
+              canonicalizeRecurrenceRuleKey(remote.recurrenceRule);
+            if (normTitle && ruleKey) {
+              const sKey = `${normTitle}\u001F${ruleKey}\u001F${(local.projectId || remote.projectId || '').trim()}`;
+              const openIds = openSeriesTaskIds.get(sKey);
+              const hasOtherOpenOccurrence = openIds
+                ? Array.from(openIds).some((oid) => oid !== remote.id)
+                : false;
+              if (hasOtherOpenOccurrence) {
+                await taskStore.put({
+                  ...local,
+                  updatedAt: Math.max(applyNow, clampedTs + 1, local.updatedAt + 1),
+                  isDirty: true
+                });
+                needsSyncPushBack = true;
+                if (clampedTs > maxUpdatedAt) maxUpdatedAt = clampedTs;
+                continue;
+              }
+            }
+          }
+
+          if (shouldRemoteWin(local, remote.updatedAt)) {
+            const keepLocalTimeblock =
+              Boolean(omittedTimeblockFields) &&
+              !remote.isDeleted &&
+              local !== undefined &&
+              (remote.scheduleState === 'TODAY' ||
+                remote.scheduleState === 'THIS_EVENING' ||
+                remote.scheduleState === 'UPCOMING');
+
+            await taskStore.put({
+              ...remote,
+              updatedAt: clampedTs,
+              scheduledStartMinutes: keepLocalTimeblock
+                ? (local?.scheduledStartMinutes ?? null)
+                : (remote.scheduledStartMinutes ?? null),
+              durationMinutes: keepLocalTimeblock
+                ? (local?.durationMinutes ?? null)
+                : (remote.durationMinutes ?? null),
+              purgedFromTrash: Boolean(
+                remote.purgedFromTrash || (remote.isDeleted && local?.purgedFromTrash)
+              ),
+              isDirty: false
+            });
+          }
+          if (clampedTs > maxUpdatedAt) {
+            maxUpdatedAt = clampedTs;
+          }
+        }
+      }
+
       await applyList('checklist_items', batch.checklistItems);
       await applyList('attachments', batch.attachments, (local, remote) => {
         if (!remote.isDeleted && !remote.dataBase64 && local?.dataBase64) {
@@ -3067,17 +3337,96 @@ export class ThingsLocalDb {
       });
       await applyList('projectTemplates', batch.projectTemplates);
 
+      // Reconcile same-title active Tags across devices with full reference remapping
+      if ((batch.tags?.length ?? 0) > 0) {
+        const tagStore = tx.objectStore('tags');
+        const allTags = (await tagStore.getAll()) as TagRecord[];
+        const byNormTitle = new Map<string, TagRecord[]>();
+        for (const tg of allTags) {
+          if (tg.isDeleted) continue;
+          const norm = tg.title.trim().toLowerCase();
+          if (!norm) continue;
+          const list = byNormTitle.get(norm);
+          if (list) list.push(tg);
+          else byNormTitle.set(norm, [tg]);
+        }
+
+        const remapTagId = new Map<string, string>();
+        for (const group of byNormTitle.values()) {
+          if (group.length < 2) continue;
+          group.sort((a, b) => {
+            const ac = a.createdAt > 0 ? a.createdAt : Number.MAX_SAFE_INTEGER;
+            const bc = b.createdAt > 0 ? b.createdAt : Number.MAX_SAFE_INTEGER;
+            if (ac !== bc) return ac - bc;
+            return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+          });
+          const winner = group[0];
+          for (let i = 1; i < group.length; i++) {
+            const loser = group[i];
+            remapTagId.set(loser.id, winner.id);
+            await tagStore.put({
+              ...loser,
+              isDeleted: true,
+              updatedAt: Math.max(applyNow, loser.updatedAt + 1),
+              isDirty: true
+            });
+            needsSyncPushBack = true;
+          }
+        }
+
+        if (remapTagId.size > 0) {
+          const remapArray = (ids: string[] | undefined): { next: string[]; changed: boolean } => {
+            const src = ids || [];
+            let changed = false;
+            const out: string[] = [];
+            for (const rawId of src) {
+              const mapped = remapTagId.get(rawId) ?? rawId;
+              if (mapped !== rawId) changed = true;
+              if (!out.includes(mapped)) out.push(mapped);
+              else if (src.length !== out.length) changed = true;
+            }
+            return { next: out, changed };
+          };
+
+          for (const storeName of ['tasks', 'projects', 'areas', 'projectTemplates'] as const) {
+            const st = tx.objectStore(storeName);
+            const rows = (await st.getAll()) as Array<{
+              id: string;
+              tagIds?: string[];
+              updatedAt: number;
+              isDeleted: boolean;
+            }>;
+            for (const row of rows) {
+              if (row.isDeleted) continue;
+              const { next, changed } = remapArray(row.tagIds);
+              if (changed) {
+                await st.put({
+                  ...row,
+                  tagIds: next,
+                  updatedAt: Math.max(applyNow, row.updatedAt + 1),
+                  isDirty: true
+                });
+                needsSyncPushBack = true;
+              }
+            }
+          }
+        }
+      }
+
       await tx.done;
 
       if ((batch.tasks?.length ?? 0) > 0) {
         await this.rolloverDueTasksUnlocked(db);
         const deduped = await this.deduplicateOpenRecurringTasksUnlocked(db);
         if (deduped > 0) {
-          this.triggerSync();
+          needsSyncPushBack = true;
         }
       }
 
       await this.refreshSnapshot();
+      if (needsSyncPushBack) {
+        this.triggerSync();
+      }
       return maxUpdatedAt;
     });
   }

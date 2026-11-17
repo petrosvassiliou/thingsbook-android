@@ -214,8 +214,12 @@ export const QuickShareModal: React.FC<{
     }
   ];
 
+  const submittedRef = useRef(false);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittedRef.current) return;
+    submittedRef.current = true;
     const resolvedTitle = title.trim() || t.entityNewTodo;
     onSave({
       title: resolvedTitle,

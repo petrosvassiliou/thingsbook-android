@@ -17,7 +17,9 @@ export const FAST_SYNC_COALESCE_MS = 50;
 export const ATTACHMENT_BACKFILL_STORAGE_PREFIX = 'thingsbook_att_backfill_v1_';
 export const PROJECTS_REVIEW_BACKFILL_STORAGE_PREFIX = 'thingsbook_proj_review_backfill_v1_';
 export const ENTITIES_RECONCILE_V2_21_STORAGE_PREFIX = 'thingsbook_v2_reconcile_b21_';
+export const ENTITIES_RECONCILE_V2_22_STORAGE_PREFIX = 'thingsbook_v2_reconcile_b22_';
 export const COLLECTION_CURSOR_STORAGE_PREFIX = 'thingsbook_col_sync_ts_v2_';
+export const OFFLINE_COMMIT_RESTAMP_THRESHOLD_MS = 30_000;
 
 export const SYNC_COLLECTION_NAMES = [
   'tags',
@@ -38,6 +40,18 @@ export function formatUidWakeSeed(userId: string): string {
 
 export function formatUidWakeChannelFromHex(sha256HexDigest: string): string {
   return `tb_uid_${sha256HexDigest.trim().toLowerCase().slice(0, 28)}`;
+}
+
+export function formatOAuthChannelSeed(userId: string): string {
+  return `thingsbook-oauth:${userId.trim()}`;
+}
+
+export function formatInstantChannelSeed(email: string): string {
+  return `thingsbook-instant:${email.trim().toLowerCase()}`;
+}
+
+export function formatLegacySyncChannelFromHex(sha256HexDigest: string): string {
+  return `tb_sync_${sha256HexDigest.trim().toLowerCase().slice(0, 28)}`;
 }
 
 export function formatDeterministicUuidFromSha256Hex(sha256HexDigest: string): string {
@@ -101,7 +115,33 @@ export type RecurringDedupCandidate = Pick<
   | 'tagIds'
   | 'scheduledStartMinutes'
   | 'durationMinutes'
->;
+> & {
+  deadline?: number | null;
+  reminderTime?: number | null;
+  updatedAt?: number;
+};
+
+export interface RecurringWinnerEnrichment {
+  winnerId: string;
+  areaId?: string | null;
+  headingId?: string | null;
+  notes?: string;
+  tagIds?: string[];
+  scheduledStartMinutes?: number | null;
+  durationMinutes?: number | null;
+  deadline?: number | null;
+  reminderTime?: number | null;
+  minUpdatedAt: number;
+}
+
+export interface RecurringDeduplicationPlan {
+  loserIds: string[];
+  winnerEnrichments: RecurringWinnerEnrichment[];
+}
+
+export function normalizeRecurringTitleKey(title: string | null | undefined): string {
+  return (title || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
 
 export function canonicalizeRecurrenceRuleKey(rule: RecurrenceRule | null | undefined): string | null {
   if (!rule) return null;
@@ -116,6 +156,11 @@ export function canonicalizeRecurrenceRuleKey(rule: RecurrenceRule | null | unde
   return `${rule.mode}|${rule.unit}|${interval}|${validDays}|${dom}|${endMs}`;
 }
 
+/**
+ * Series identity key resilient to v1.8 <-> v2.x field differences (e.g. stripped timeblocks,
+ * edited notes, or tag order differences). Tasks in the same project or area with the same
+ * normalized title and recurrence rule share a single recurring series key.
+ */
 export function buildRecurringSeriesKey(
   task: Pick<
     RecurringDedupCandidate,
@@ -133,27 +178,19 @@ export function buildRecurringSeriesKey(
   >
 ): string | null {
   if (task.isDeleted || task.status !== 'OPEN') return null;
-  const normTitle = (task.title || '').trim();
+  const normTitle = normalizeRecurringTitleKey(task.title);
   if (!normTitle) return null;
   const ruleKey = canonicalizeRecurrenceRuleKey(task.recurrenceRule);
   if (!ruleKey) return null;
-  const normNotes = (task.notes || '').trim();
   const proj = (task.projectId || '').trim();
-  const head = (task.headingId || '').trim();
   const area = (task.areaId || '').trim();
-  const normContainer = proj ? `P:${proj}|H:${head}` : `A:${area}`;
-  const normTags = Array.from(
-    new Set((task.tagIds || []).map((t) => t.trim()).filter(Boolean))
-  )
-    .sort()
-    .join(',');
-  const normTimeblock = `${task.scheduledStartMinutes ?? ''}:${task.durationMinutes ?? ''}`;
-  return `${normTitle}\u001F${normNotes}\u001F${normContainer}\u001F${ruleKey}\u001F${normTags}\u001F${normTimeblock}`;
+  const normContainer = proj ? `P:${proj}` : `A:${area}`;
+  return `${normTitle}\u001F${normContainer}\u001F${ruleKey}`;
 }
 
 export function compareRecurringTaskPriority(
-  a: Pick<RecurringDedupCandidate, 'id' | 'whenDate' | 'createdAt'>,
-  b: Pick<RecurringDedupCandidate, 'id' | 'whenDate' | 'createdAt'>
+  a: Pick<RecurringDedupCandidate, 'id' | 'whenDate' | 'createdAt' | 'areaId' | 'scheduledStartMinutes'>,
+  b: Pick<RecurringDedupCandidate, 'id' | 'whenDate' | 'createdAt' | 'areaId' | 'scheduledStartMinutes'>
 ): number {
   const aWhen = a.whenDate != null && Number.isFinite(a.whenDate) ? Math.trunc(a.whenDate) : -1;
   const bWhen = b.whenDate != null && Number.isFinite(b.whenDate) ? Math.trunc(b.whenDate) : -1;
@@ -167,33 +204,165 @@ export function compareRecurringTaskPriority(
   if (aCreated !== bCreated) {
     return aCreated < bCreated ? -1 : 1;
   }
+  const aHasArea = Boolean((a.areaId || '').trim());
+  const bHasArea = Boolean((b.areaId || '').trim());
+  if (aHasArea !== bHasArea) {
+    return aHasArea ? -1 : 1;
+  }
+  const aHasTb = a.scheduledStartMinutes != null;
+  const bHasTb = b.scheduledStartMinutes != null;
+  if (aHasTb !== bHasTb) {
+    return aHasTb ? -1 : 1;
+  }
   if (a.id === b.id) return 0;
   return a.id < b.id ? -1 : 1;
+}
+
+/**
+ * Groups open recurring tasks across both exact containers AND standalone/Area splits where one
+ * copy lost `areaId` (`areaId == null`) while a sibling in the same `(title, rule)` series has
+ * `areaId != null` (e.g. v1.8 <-> v2.x sync or area detachment), returning both loser IDs to
+ * tombstone and any richer metadata (`areaId`, `headingId`, `notes`, `tagIds`, timeblocks) to
+ * preserve on the winning task.
+ */
+export function planRecurringDeduplication(
+  tasks: readonly RecurringDedupCandidate[]
+): RecurringDeduplicationPlan {
+  const baseBuckets = new Map<string, RecurringDedupCandidate[]>();
+  for (const t of tasks) {
+    if (t.isDeleted || t.status !== 'OPEN') continue;
+    const normTitle = normalizeRecurringTitleKey(t.title);
+    if (!normTitle) continue;
+    const ruleKey = canonicalizeRecurrenceRuleKey(t.recurrenceRule);
+    if (!ruleKey) continue;
+    const proj = (t.projectId || '').trim();
+    const baseKey = `${normTitle}\u001F${ruleKey}\u001F${proj}`;
+    const bucket = baseBuckets.get(baseKey);
+    if (bucket) {
+      bucket.push(t);
+    } else {
+      baseBuckets.set(baseKey, [t]);
+    }
+  }
+
+  const finalGroups: RecurringDedupCandidate[][] = [];
+  for (const bucket of baseBuckets.values()) {
+    if (bucket.length < 2) continue;
+    const proj = (bucket[0].projectId || '').trim();
+    if (proj) {
+      finalGroups.push(bucket);
+      continue;
+    }
+    const distinctExplicitAreas = Array.from(
+      new Set(bucket.map((t) => (t.areaId || '').trim()).filter(Boolean))
+    );
+    if (distinctExplicitAreas.length <= 1) {
+      // Either all share the same explicit area, all have null area, or some have the single
+      // explicit area (e.g. "Privat") while duplicates have areaId=null -> merge into one series!
+      finalGroups.push(bucket);
+    } else {
+      // Multiple distinct explicit areas (e.g. "Work" vs "Home"): group per explicit area,
+      // and deduplicate any null-area duplicates among themselves without cross-area merging.
+      const byArea = new Map<string, RecurringDedupCandidate[]>();
+      for (const t of bucket) {
+        const areaKey = (t.areaId || '').trim();
+        const sub = byArea.get(areaKey);
+        if (sub) sub.push(t);
+        else byArea.set(areaKey, [t]);
+      }
+      for (const sub of byArea.values()) {
+        if (sub.length >= 2) finalGroups.push(sub);
+      }
+    }
+  }
+
+  const loserIds: string[] = [];
+  const winnerEnrichments: RecurringWinnerEnrichment[] = [];
+
+  for (const group of finalGroups) {
+    if (group.length < 2) continue;
+    const sorted = [...group].sort(compareRecurringTaskPriority);
+    const winner = sorted[0];
+    const losers = sorted.slice(1);
+    for (const l of losers) {
+      loserIds.push(l.id);
+    }
+
+    const patch: RecurringWinnerEnrichment = {
+      winnerId: winner.id,
+      minUpdatedAt: group.reduce((m, x) => Math.max(m, x.updatedAt ?? 0), 0) + 1
+    };
+    let changed = false;
+
+    const winProj = (winner.projectId || '').trim();
+    const winArea = (winner.areaId || '').trim();
+    if (!winProj && !winArea) {
+      const donorArea = losers.map((l) => (l.areaId || '').trim()).find(Boolean);
+      if (donorArea) {
+        patch.areaId = donorArea;
+        changed = true;
+      }
+    }
+    const winHead = (winner.headingId || '').trim();
+    if (winProj && !winHead) {
+      const donorHead = losers.map((l) => (l.headingId || '').trim()).find(Boolean);
+      if (donorHead) {
+        patch.headingId = donorHead;
+        changed = true;
+      }
+    }
+    if (!(winner.notes || '').trim()) {
+      const donorNotes = losers.map((l) => (l.notes || '').trim()).find(Boolean);
+      if (donorNotes) {
+        patch.notes = donorNotes;
+        changed = true;
+      }
+    }
+    const winTags = Array.from(new Set((winner.tagIds || []).map((t) => t.trim()).filter(Boolean)));
+    const unionTags = Array.from(
+      new Set(
+        group.flatMap((t) => (t.tagIds || []).map((id) => id.trim()).filter(Boolean))
+      )
+    );
+    if (unionTags.length > winTags.length) {
+      patch.tagIds = unionTags;
+      changed = true;
+    }
+    if (winner.scheduledStartMinutes == null) {
+      const donorTb = losers.find((l) => l.scheduledStartMinutes != null);
+      if (donorTb && donorTb.scheduledStartMinutes != null) {
+        patch.scheduledStartMinutes = donorTb.scheduledStartMinutes;
+        patch.durationMinutes = winner.durationMinutes ?? donorTb.durationMinutes ?? null;
+        changed = true;
+      }
+    }
+    if (winner.deadline == null) {
+      const donorDl = losers.find((l) => l.deadline != null)?.deadline;
+      if (donorDl != null) {
+        patch.deadline = donorDl;
+        changed = true;
+      }
+    }
+    if (winner.reminderTime == null) {
+      const donorRem = losers.find((l) => l.reminderTime != null)?.reminderTime;
+      if (donorRem != null) {
+        patch.reminderTime = donorRem;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      winnerEnrichments.push(patch);
+    }
+  }
+
+  return { loserIds, winnerEnrichments };
 }
 
 export function selectRecurringDuplicateLoserIds(
   tasks: readonly RecurringDedupCandidate[]
 ): string[] {
-  const groups = new Map<string, RecurringDedupCandidate[]>();
-  for (const t of tasks) {
-    const key = buildRecurringSeriesKey(t);
-    if (!key) continue;
-    const arr = groups.get(key);
-    if (arr) {
-      arr.push(t);
-    } else {
-      groups.set(key, [t]);
-    }
-  }
-  const losers: string[] = [];
-  for (const group of groups.values()) {
-    if (group.length < 2) continue;
-    const sorted = [...group].sort(compareRecurringTaskPriority);
-    for (let i = 1; i < sorted.length; i++) {
-      losers.push(sorted[i].id);
-    }
-  }
-  return losers;
+  return planRecurringDeduplication(tasks).loserIds;
 }
 
 function finiteNumber(v: unknown, fallback = 0): number {
@@ -488,3 +657,60 @@ export function buildNtfyRelayOrWakePayload(
   });
   return new TextEncoder().encode(wakeJson).byteLength < maxBytes ? wakeJson : null;
 }
+
+/**
+ * Builds up to `maxChunks` bounded inline payloads (`< maxBytes`) for legacy `tb_sync_*` channels
+ * WITHOUT ever emitting a `wakeOnly: true` stub (since v1.8 Android ignores `wakeOnly` and would
+ * advance its `lastSyncTimestamp` cursor without applying records).
+ */
+export function buildLegacyCompatibleNtfyChunks(
+  input: NtfyRelayBatchInput,
+  maxBytes: number = MAX_NTFY_PAYLOAD_BYTES,
+  maxChunks = 3
+): string[] {
+  const single = buildBoundedNtfyRelayPayload(input, maxBytes);
+  if (single !== null) return [single];
+
+  const out: string[] = [];
+  const appendFieldChunks = (
+    field:
+      | 'tags'
+      | 'areas'
+      | 'projects'
+      | 'headings'
+      | 'tasks'
+      | 'checklistItems'
+      | 'attachments'
+      | 'projectTemplates',
+    items: Record<string, unknown>[] | undefined
+  ) => {
+    if (!items || items.length === 0 || out.length >= maxChunks) return;
+    const candidate = buildBoundedNtfyRelayPayload(
+      {
+        userId: input.userId,
+        deviceId: input.deviceId,
+        batchTimestamp: input.batchTimestamp,
+        [field]: items
+      },
+      maxBytes
+    );
+    if (candidate !== null) {
+      out.push(candidate);
+    } else if (items.length > 1) {
+      const mid = Math.floor(items.length / 2);
+      appendFieldChunks(field, items.slice(0, mid));
+      appendFieldChunks(field, items.slice(mid));
+    }
+  };
+
+  appendFieldChunks('tags', input.tags);
+  appendFieldChunks('areas', input.areas);
+  appendFieldChunks('projects', input.projects);
+  appendFieldChunks('headings', input.headings);
+  appendFieldChunks('tasks', input.tasks);
+  appendFieldChunks('checklistItems', input.checklistItems);
+  appendFieldChunks('attachments', input.attachments);
+  appendFieldChunks('projectTemplates', input.projectTemplates);
+  return out.slice(0, maxChunks);
+}
+

@@ -68,6 +68,7 @@ public struct RemoteDeltaBatch: Sendable {
     public var headings: [Heading]
     public var tasks: [TaskItem]
     public var taskTagIdsByTaskId: [String: [String]]
+    public var taskOmittedTimeblockTaskIds: Set<String>
     public var checklistItems: [ChecklistItem]
     public var attachments: [RemoteAttachmentDelta]
     public var projectTemplates: [ProjectTemplate]
@@ -79,6 +80,7 @@ public struct RemoteDeltaBatch: Sendable {
         headings: [Heading] = [],
         tasks: [TaskItem] = [],
         taskTagIdsByTaskId: [String: [String]] = [:],
+        taskOmittedTimeblockTaskIds: Set<String> = [],
         checklistItems: [ChecklistItem] = [],
         attachments: [RemoteAttachmentDelta] = [],
         projectTemplates: [ProjectTemplate] = []
@@ -89,6 +91,7 @@ public struct RemoteDeltaBatch: Sendable {
         self.headings = headings
         self.tasks = tasks
         self.taskTagIdsByTaskId = taskTagIdsByTaskId
+        self.taskOmittedTimeblockTaskIds = taskOmittedTimeblockTaskIds
         self.checklistItems = checklistItems
         self.attachments = attachments
         self.projectTemplates = projectTemplates
@@ -979,18 +982,33 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
     private func deduplicateOpenRecurringTasksLocked(nowMillis: Int64) throws -> Int {
         let (openRecurring, rawTagIdsByTask) = try fetchOpenRecurringTasksWithRawTagIdsLocked()
-        let loserIds = Self.selectRecurringDuplicateLoserIds(
+        let plan = Self.planRecurringDeduplication(
             openRecurring,
             overrideTagIdsByTaskId: rawTagIdsByTask
         )
-        guard !loserIds.isEmpty else { return 0 }
+        guard !plan.loserIds.isEmpty || !plan.winnerEnrichments.isEmpty else { return 0 }
         let openById = Dictionary(uniqueKeysWithValues: openRecurring.map { ($0.id, $0) })
-        for loserId in loserIds {
+
+        for patch in plan.winnerEnrichments {
+            guard var winner = openById[patch.winnerId] else { continue }
+            if let donorArea = patch.areaId { winner.areaId = donorArea }
+            if let donorHeading = patch.headingId { winner.headingId = donorHeading }
+            if let donorNotes = patch.notes { winner.notes = donorNotes }
+            if let donorStart = patch.scheduledStartMinutes { winner.scheduledStartMinutes = donorStart }
+            if let donorDuration = patch.durationMinutes { winner.durationMinutes = donorDuration }
+            if let donorDeadline = patch.deadline { winner.deadline = donorDeadline }
+            if let donorReminder = patch.reminderTime { winner.reminderTime = donorReminder }
+            winner.updatedAt = max(nowMillis, patch.minUpdatedAt)
+            let mergedTags = patch.tagIds ?? (rawTagIdsByTask[winner.id] ?? winner.tagIds)
+            try upsertTaskLocked(winner, tagIds: mergedTags, isDirty: true)
+        }
+
+        for loserId in plan.loserIds {
             let prevUpdatedAt = openById[loserId]?.updatedAt ?? 0
             let tombstoneAt = max(nowMillis, prevUpdatedAt + 1)
             try purgeTaskToTombstoneLocked(taskId: loserId, now: tombstoneAt)
         }
-        return loserIds.count
+        return plan.loserIds.count + plan.winnerEnrichments.count
     }
 
     // MARK: - Task Mutations
@@ -1282,12 +1300,11 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             updatedAt: nextUpdatedAt
         )
 
-        if let seriesKey = Self.buildRecurringSeriesKey(spawned, overrideTagIds: rawTagIds) {
+        if Self.buildRecurringSeriesKey(spawned, overrideTagIds: rawTagIds) != nil {
             let (openRecurring, rawTagsByTask) = try fetchOpenRecurringTasksWithRawTagIdsLocked()
-            let openSiblings = openRecurring.filter {
-                $0.id != completedTask.id &&
-                    Self.buildRecurringSeriesKey($0, overrideTagIds: rawTagsByTask[$0.id]) == seriesKey
-            }
+            let openSiblings = openRecurring
+                .filter { $0.id != completedTask.id && Self.areSameRecurringSeries(spawned, $0) }
+                .sorted(by: Self.compareRecurringTaskPriority)
             if !openSiblings.isEmpty {
                 var primary = openSiblings[0]
                 if openSiblings.count > 1 {
@@ -1298,17 +1315,62 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         )
                     }
                 }
-                if (primary.whenDate ?? 0) < nextWhenEpoch {
+                let primaryTags = rawTagsByTask[primary.id] ?? primary.tagIds
+                var mergedTags = primaryTags
+                for tId in rawTagIds where !mergedTags.contains(tId) {
+                    mergedTags.append(tId)
+                }
+                let needsAdvance = (primary.whenDate ?? 0) < nextWhenEpoch
+                var needsEnrich = mergedTags.count != primaryTags.count
+                if (primary.projectId ?? "").isEmpty && (primary.areaId ?? "").isEmpty, let sArea = spawned.areaId, !sArea.isEmpty {
+                    primary.areaId = sArea
+                    needsEnrich = true
+                }
+                if !(primary.projectId ?? "").isEmpty && (primary.headingId ?? "").isEmpty, let sHead = spawned.headingId, !sHead.isEmpty {
+                    primary.headingId = sHead
+                    needsEnrich = true
+                }
+                if primary.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !spawned.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    primary.notes = spawned.notes
+                    needsEnrich = true
+                }
+                if primary.scheduledStartMinutes == nil, let sStart = spawned.scheduledStartMinutes {
+                    primary.scheduledStartMinutes = sStart
+                    needsEnrich = true
+                }
+                if primary.durationMinutes == nil, let sDur = spawned.durationMinutes {
+                    primary.durationMinutes = sDur
+                    needsEnrich = true
+                }
+                if needsAdvance {
                     primary.whenDate = nextWhenEpoch
                     primary.scheduleState = nextSchedule
                     primary.deadline = nextDeadline
                     primary.reminderTime = nextReminder
+                } else {
+                    if primary.deadline == nil, let sDead = nextDeadline {
+                        primary.deadline = sDead
+                        needsEnrich = true
+                    }
+                    if primary.reminderTime == nil, let sRem = nextReminder {
+                        primary.reminderTime = sRem
+                        needsEnrich = true
+                    }
+                }
+                if needsAdvance || needsEnrich {
                     primary.updatedAt = max(nowMillis, primary.updatedAt + 1)
                     try upsertTaskLocked(
                         primary,
-                        tagIds: rawTagsByTask[primary.id] ?? primary.tagIds,
+                        tagIds: mergedTags,
                         isDirty: true
                     )
+                }
+                let escapedPrimaryId = primary.id.replacingOccurrences(of: "'", with: "''")
+                let existingPrimaryChecklists = (try? fetchChecklistsWhereLocked("task_id = '\(escapedPrimaryId)' AND is_deleted = 0 AND is_completed = 1")) ?? []
+                for var completedChk in existingPrimaryChecklists {
+                    completedChk.isCompleted = false
+                    completedChk.updatedAt = max(nowMillis, completedChk.updatedAt + 1)
+                    try upsertChecklistItemLocked(completedChk, isDirty: true)
                 }
                 return primary.id
             }
@@ -1784,7 +1846,17 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     @discardableResult
     public func createArea(title: String, tagIds: [String] = []) throws -> Area {
         let area = try queue.sync { () -> Area in
+            let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
             let activeAreas = try fetchActiveAreasLocked()
+            if var existing = activeAreas.first(where: { $0.title.caseInsensitiveCompare(cleanTitle) == .orderedSame }) {
+                let mergedTags = Array(Set(existing.tagIds + tagIds))
+                if mergedTags.count != existing.tagIds.count {
+                    existing.tagIds = mergedTags
+                    existing.updatedAt = nowMillis()
+                    try upsertAreaLocked(existing, isDirty: true)
+                }
+                return existing
+            }
             if activeAreas.count >= Self.maxAreas {
                 throw ThingsDatabaseError.maxAreasReached(Self.maxAreas)
             }
@@ -1792,7 +1864,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             let maxOrder = activeAreas.map(\.sortOrder).max() ?? 0.0
             let newArea = Area(
                 id: UUID().uuidString,
-                title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                title: cleanTitle,
                 sortOrder: maxOrder + 1000.0,
                 tagIds: tagIds,
                 createdAt: now,
@@ -3478,12 +3550,101 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         }
     }
 
+    private static let syncTableNames: [String] = [
+        "tags",
+        "areas",
+        "projects",
+        "headings",
+        "tasks",
+        "checklist_items",
+        "attachments",
+        "project_templates"
+    ]
+
     private func clearDirtyIfUnchangedLocked(table: String, id: String, maxUpdatedAt: Int64) throws {
         let stmt = try prepareLocked("UPDATE \(table) SET is_dirty = 0 WHERE id = ? AND updated_at <= ?;")
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, 1, id)
         bindInt64(stmt, 2, maxUpdatedAt)
         _ = sqlite3_step(stmt)
+    }
+
+    public func hasStaleOfflineDirtyRecords(olderThanMillis: Int64 = 30_000) throws -> Bool {
+        try queue.sync {
+            let cutoff = nowMillis() - max(1_000, olderThanMillis)
+            for table in Self.syncTableNames {
+                let stmt = try prepareLocked("SELECT 1 FROM \(table) WHERE is_dirty = 1 AND updated_at < ? LIMIT 1;")
+                defer { sqlite3_finalize(stmt) }
+                bindInt64(stmt, 1, cutoff)
+                if sqlite3_step(stmt) == SQLITE_ROW {
+                    return true
+                }
+            }
+            return false
+        }
+    }
+
+    @discardableResult
+    public func restampStaleOfflineDirtyRecords(
+        olderThanMillis: Int64 = 30_000,
+        restampTimestamp: Int64? = nil
+    ) throws -> Int {
+        try queue.sync {
+            let pushNow = restampTimestamp ?? nowMillis()
+            let cutoff = pushNow - max(1_000, olderThanMillis)
+            var updatedRows = 0
+            try inTransactionLocked {
+                for table in Self.syncTableNames {
+                    let stmt = try prepareLocked("UPDATE \(table) SET updated_at = ? WHERE is_dirty = 1 AND updated_at < ?;")
+                    defer { sqlite3_finalize(stmt) }
+                    bindInt64(stmt, 1, pushNow)
+                    bindInt64(stmt, 2, cutoff)
+                    if sqlite3_step(stmt) == SQLITE_DONE {
+                        updatedRows += Int(sqlite3_changes(db))
+                    }
+                }
+            }
+            return updatedRows
+        }
+    }
+
+    public func missingContainerFlags() throws -> (hasOrphanProject: Bool, hasOrphanArea: Bool, hasOrphanHeading: Bool) {
+        try queue.sync {
+            func exists(_ sql: String) -> Bool {
+                guard let stmt = try? prepareLocked(sql) else { return false }
+                defer { sqlite3_finalize(stmt) }
+                return sqlite3_step(stmt) == SQLITE_ROW
+            }
+            let orphanProject = exists("""
+                SELECT 1 FROM tasks
+                WHERE is_deleted = 0 AND project_id IS NOT NULL AND project_id != ''
+                  AND project_id NOT IN (SELECT id FROM projects)
+                LIMIT 1;
+            """) || exists("""
+                SELECT 1 FROM headings
+                WHERE is_deleted = 0 AND project_id != ''
+                  AND project_id NOT IN (SELECT id FROM projects)
+                LIMIT 1;
+            """)
+            let orphanArea = exists("""
+                SELECT 1 FROM projects
+                WHERE is_deleted = 0 AND area_id IS NOT NULL AND area_id != ''
+                  AND area_id NOT IN (SELECT id FROM areas)
+                LIMIT 1;
+            """) || exists("""
+                SELECT 1 FROM tasks
+                WHERE is_deleted = 0 AND area_id IS NOT NULL AND area_id != ''
+                  AND area_id NOT IN (SELECT id FROM areas)
+                LIMIT 1;
+            """)
+            let orphanHeading = exists("""
+                SELECT 1 FROM tasks
+                WHERE is_deleted = 0 AND heading_id IS NOT NULL AND heading_id != ''
+                  AND heading_id NOT IN (SELECT id FROM headings)
+                LIMIT 1;
+            """)
+            return (orphanProject, orphanArea, orphanHeading)
+        }
     }
 
     @discardableResult
@@ -3499,29 +3660,53 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             defer { try? execLocked("PRAGMA foreign_keys = ON;") }
 
             try inTransactionLocked {
+                let batchNow = self.nowMillis()
+                let maxAllowed = batchNow + 60_000
+                var tagRemap: [String: String] = [:]
+
                 let orderedTags = Self.sortParentFirst(deltas.tags, idOf: \.id, parentIdOf: \.parentTagId)
                 for remote in orderedTags {
                     maxTimestamp = max(maxTimestamp, remote.updatedAt)
                     if shouldApplyRemoteLocked(table: "tags", id: remote.id, remoteUpdatedAt: remote.updatedAt) {
-                        try upsertTagLocked(remote, isDirty: false)
-                        if remote.isDeleted {
-                            try cleanDeletedTagReferencesLocked(tagId: remote.id, now: remote.updatedAt, markParentsDirty: false)
+                        var toSave = remote
+                        toSave.updatedAt = min(remote.updatedAt, maxAllowed)
+                        if let pid = toSave.parentTagId {
+                            let mappedPid = Self.resolveRemappedTagId(pid, using: tagRemap)
+                            toSave.parentTagId = (mappedPid == toSave.id) ? nil : mappedPid
+                        }
+                        let mergedCollision = try upsertTagLocked(toSave, isDirty: false, tagRemap: &tagRemap)
+                        if mergedCollision {
+                            didDeduplicate = true
+                        }
+                        if toSave.isDeleted && tagRemap[toSave.id] == nil {
+                            try cleanDeletedTagReferencesLocked(tagId: toSave.id, now: toSave.updatedAt, markParentsDirty: false)
                         }
                         appliedCount += 1
                     }
                 }
+
                 for remote in deltas.areas {
                     maxTimestamp = max(maxTimestamp, remote.updatedAt)
                     if shouldApplyRemoteLocked(table: "areas", id: remote.id, remoteUpdatedAt: remote.updatedAt) {
-                        try upsertAreaLocked(remote, isDirty: false)
+                        var toSave = remote
+                        toSave.updatedAt = min(remote.updatedAt, maxAllowed)
+                        let remappedTags = Self.remapTagIdList(toSave.tagIds, using: tagRemap)
+                        toSave.tagIds = remappedTags.ids
+                        let markDirty = remappedTags.didRemap && !toSave.isDeleted
+                        if markDirty {
+                            toSave.updatedAt = max(batchNow, toSave.updatedAt + 1)
+                            didDeduplicate = true
+                        }
+                        try upsertAreaLocked(toSave, isDirty: markDirty)
                         appliedCount += 1
-                        if remote.isDeleted {
-                            appliedCount += try detachLocalChildrenForDeletedAreaLocked(areaId: remote.id)
+                        if toSave.isDeleted {
+                            appliedCount += try detachLocalChildrenForDeletedAreaLocked(areaId: toSave.id)
                         }
                     } else if remote.isDeleted {
                         appliedCount += try detachLocalChildrenForDeletedAreaLocked(areaId: remote.id)
                     }
                 }
+
                 for remote in deltas.projects {
                     maxTimestamp = max(maxTimestamp, remote.updatedAt)
                     let existingLocal = try? fetchProjectByIdLocked(remote.id)
@@ -3530,11 +3715,19 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         : Self.mergeMonotonicReviewTimestamp(existingLocal?.lastReviewedAt, remote.lastReviewedAt)
                     if shouldApplyRemoteLocked(table: "projects", id: remote.id, remoteUpdatedAt: remote.updatedAt) {
                         var toSave = remote
+                        toSave.updatedAt = min(remote.updatedAt, maxAllowed)
                         toSave.lastReviewedAt = mergedLastReviewed
-                        try upsertProjectLocked(toSave, isDirty: false)
+                        let remappedTags = Self.remapTagIdList(toSave.tagIds, using: tagRemap)
+                        toSave.tagIds = remappedTags.ids
+                        let markDirty = remappedTags.didRemap && !toSave.isDeleted
+                        if markDirty {
+                            toSave.updatedAt = max(batchNow, toSave.updatedAt + 1)
+                            didDeduplicate = true
+                        }
+                        try upsertProjectLocked(toSave, isDirty: markDirty)
                         appliedCount += 1
-                        if remote.isDeleted {
-                            appliedCount += try detachLocalChildrenForDeletedProjectLocked(projectId: remote.id)
+                        if toSave.isDeleted {
+                            appliedCount += try detachLocalChildrenForDeletedProjectLocked(projectId: toSave.id)
                         }
                     } else if remote.isDeleted {
                         appliedCount += try detachLocalChildrenForDeletedProjectLocked(projectId: remote.id)
@@ -3551,48 +3744,127 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         }
                     }
                 }
+
                 for remote in deltas.headings {
                     maxTimestamp = max(maxTimestamp, remote.updatedAt)
                     if shouldApplyRemoteLocked(table: "headings", id: remote.id, remoteUpdatedAt: remote.updatedAt) {
-                        try upsertHeadingLocked(remote, isDirty: false)
+                        var toSave = remote
+                        toSave.updatedAt = min(remote.updatedAt, maxAllowed)
+                        try upsertHeadingLocked(toSave, isDirty: false)
                         appliedCount += 1
-                        if remote.isDeleted {
-                            appliedCount += try detachLocalChildrenForDeletedHeadingLocked(headingId: remote.id)
+                        if toSave.isDeleted {
+                            appliedCount += try detachLocalChildrenForDeletedHeadingLocked(headingId: toSave.id)
                         }
                     } else if remote.isDeleted {
                         appliedCount += try detachLocalChildrenForDeletedHeadingLocked(headingId: remote.id)
                     }
                 }
-                for remote in deltas.tasks {
-                    maxTimestamp = max(maxTimestamp, remote.updatedAt)
-                    if shouldApplyRemoteLocked(table: "tasks", id: remote.id, remoteUpdatedAt: remote.updatedAt) {
-                        let tagIds = deltas.taskTagIdsByTaskId[remote.id] ?? remote.tagIds
-                        try upsertTaskLocked(remote, tagIds: tagIds, isDirty: false)
-                        appliedCount += 1
+
+                if !deltas.tasks.isEmpty {
+                    let (localOpenRecurring, _) = (try? fetchOpenRecurringTasksWithRawTagIdsLocked()) ?? ([], [:])
+                    let allRawTaskTagIds = (try? fetchAllTaskTagIdsLocked()) ?? [:]
+
+                    for remote in deltas.tasks {
+                        maxTimestamp = max(maxTimestamp, remote.updatedAt)
+                        let clampedRemote = min(remote.updatedAt, maxAllowed)
+                        let existingLocal = try? fetchTaskByIdLocked(remote.id)
+
+                        // Guard against v1.8 startup rollover bumping updatedAt on a recurring parent that was
+                        // already COMPLETED on v2.x (which spawned a separate OPEN occurrence in the series).
+                        if let existingLocal,
+                           !existingLocal.isDeleted,
+                           existingLocal.status == .completed,
+                           existingLocal.recurrenceRule != nil,
+                           !remote.isDeleted,
+                           remote.status == .open {
+                            let hasLocalOpenSibling = localOpenRecurring.contains {
+                                $0.id != remote.id && Self.areSameRecurringSeries(remote, $0)
+                            }
+                            let hasBatchOpenSibling = deltas.tasks.contains {
+                                $0.id != remote.id && !$0.isDeleted && $0.status == .open && Self.areSameRecurringSeries(remote, $0)
+                            }
+                            if hasLocalOpenSibling || hasBatchOpenSibling {
+                                if clampedRemote >= existingLocal.updatedAt {
+                                    var healed = existingLocal
+                                    healed.updatedAt = max(batchNow, clampedRemote + 1, existingLocal.updatedAt + 1)
+                                    let existingTags = Self.remapTagIdList(
+                                        allRawTaskTagIds[healed.id] ?? healed.tagIds,
+                                        using: tagRemap
+                                    ).ids
+                                    try upsertTaskLocked(healed, tagIds: existingTags, isDirty: true)
+                                    appliedCount += 1
+                                    didDeduplicate = true
+                                }
+                                continue
+                            }
+                        }
+
+                        if shouldApplyRemoteLocked(table: "tasks", id: remote.id, remoteUpdatedAt: remote.updatedAt) {
+                            var toSave = remote
+                            toSave.updatedAt = clampedRemote
+                            if let existingLocal,
+                               !toSave.isDeleted,
+                               deltas.taskOmittedTimeblockTaskIds.contains(remote.id),
+                               (toSave.scheduleState == .today || toSave.scheduleState == .thisEvening || toSave.scheduleState == .upcoming) {
+                                if toSave.scheduledStartMinutes == nil {
+                                    toSave.scheduledStartMinutes = existingLocal.scheduledStartMinutes
+                                }
+                                if toSave.durationMinutes == nil {
+                                    toSave.durationMinutes = existingLocal.durationMinutes
+                                }
+                            }
+                            let rawTags = deltas.taskTagIdsByTaskId[remote.id] ?? remote.tagIds
+                            let remappedTags = Self.remapTagIdList(rawTags, using: tagRemap)
+                            let markDirty = remappedTags.didRemap && !toSave.isDeleted
+                            if markDirty {
+                                toSave.updatedAt = max(batchNow, toSave.updatedAt + 1)
+                                didDeduplicate = true
+                            }
+                            try upsertTaskLocked(toSave, tagIds: remappedTags.ids, isDirty: markDirty)
+                            appliedCount += 1
+                        }
                     }
                 }
+
                 for remote in deltas.projectTemplates {
                     maxTimestamp = max(maxTimestamp, remote.updatedAt)
                     if shouldApplyRemoteLocked(table: "project_templates", id: remote.id, remoteUpdatedAt: remote.updatedAt) {
-                        try upsertProjectTemplateLocked(remote, isDirty: false)
+                        var toSave = remote
+                        toSave.updatedAt = min(remote.updatedAt, maxAllowed)
+                        let remappedTags = Self.remapTagIdList(toSave.tagIds, using: tagRemap)
+                        toSave.tagIds = remappedTags.ids
+                        let markDirty = remappedTags.didRemap && !toSave.isDeleted
+                        if markDirty {
+                            toSave.updatedAt = max(batchNow, toSave.updatedAt + 1)
+                            didDeduplicate = true
+                        }
+                        try upsertProjectTemplateLocked(toSave, isDirty: markDirty)
                         appliedCount += 1
                     }
                 }
+
                 // Also detach any newly-arrived tasks/templates referencing containers tombstoned locally or in this batch
                 appliedCount += try detachChildrenOfDeletedContainersLocked()
 
                 for remote in deltas.checklistItems {
                     maxTimestamp = max(maxTimestamp, remote.updatedAt)
                     if shouldApplyRemoteLocked(table: "checklist_items", id: remote.id, remoteUpdatedAt: remote.updatedAt) {
-                        try upsertChecklistItemLocked(remote, isDirty: false)
+                        var toSave = remote
+                        toSave.updatedAt = min(remote.updatedAt, maxAllowed)
+                        try upsertChecklistItemLocked(toSave, isDirty: false)
                         appliedCount += 1
                     }
                 }
+
                 for remoteDelta in deltas.attachments {
                     var att = remoteDelta.attachment
                     maxTimestamp = max(maxTimestamp, att.updatedAt)
-                    if shouldApplyRemoteLocked(table: "attachments", id: att.id, remoteUpdatedAt: att.updatedAt) {
-                        let existingPath = (try? fetchAttachmentsWhereLocked("id = '\(att.id.replacingOccurrences(of: "'", with: "''"))'").first?.localRelativePath) ?? ""
+                    let existingPath = (try? fetchAttachmentsWhereLocked("id = '\(att.id.replacingOccurrences(of: "'", with: "''"))'").first?.localRelativePath) ?? ""
+                    let localBytesMissing = !att.isDeleted
+                        && !remoteDelta.dataBase64.isEmpty
+                        && (existingPath.isEmpty || !FileManager.default.fileExists(atPath: baseSupportDirURL.appendingPathComponent(existingPath).path))
+                    if shouldApplyRemoteLocked(table: "attachments", id: att.id, remoteUpdatedAt: att.updatedAt) || localBytesMissing {
+                        att.updatedAt = min(att.updatedAt, maxAllowed)
                         if att.isDeleted {
                             deleteAttachmentFileLocked(relativePath: existingPath)
                             att.localRelativePath = ""
@@ -3609,6 +3881,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         appliedCount += 1
                     }
                 }
+
                 if !deltas.tasks.isEmpty {
                     let deduped = try deduplicateOpenRecurringTasksLocked(nowMillis: self.nowMillis())
                     if deduped > 0 {
@@ -3670,6 +3943,61 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         return formatDeterministicUuidFromSha256Hex(sha256LowerHex(seed))
     }
 
+    public struct RecurringWinnerEnrichment: Sendable, Equatable {
+        public let winnerId: String
+        public var areaId: String?
+        public var headingId: String?
+        public var notes: String?
+        public var tagIds: [String]?
+        public var scheduledStartMinutes: Int?
+        public var durationMinutes: Int?
+        public var deadline: Int64?
+        public var reminderTime: Int64?
+        public let minUpdatedAt: Int64
+
+        public init(
+            winnerId: String,
+            areaId: String? = nil,
+            headingId: String? = nil,
+            notes: String? = nil,
+            tagIds: [String]? = nil,
+            scheduledStartMinutes: Int? = nil,
+            durationMinutes: Int? = nil,
+            deadline: Int64? = nil,
+            reminderTime: Int64? = nil,
+            minUpdatedAt: Int64
+        ) {
+            self.winnerId = winnerId
+            self.areaId = areaId
+            self.headingId = headingId
+            self.notes = notes
+            self.tagIds = tagIds
+            self.scheduledStartMinutes = scheduledStartMinutes
+            self.durationMinutes = durationMinutes
+            self.deadline = deadline
+            self.reminderTime = reminderTime
+            self.minUpdatedAt = minUpdatedAt
+        }
+    }
+
+    public struct RecurringDeduplicationPlan: Sendable, Equatable {
+        public let loserIds: [String]
+        public let winnerEnrichments: [RecurringWinnerEnrichment]
+
+        public init(loserIds: [String], winnerEnrichments: [RecurringWinnerEnrichment]) {
+            self.loserIds = loserIds
+            self.winnerEnrichments = winnerEnrichments
+        }
+    }
+
+    public static func normalizeRecurringTitleKey(_ title: String) -> String {
+        title
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+            .lowercased()
+    }
+
     public static func canonicalizeRecurrenceRuleKey(_ rule: RecurrenceRule?) -> String? {
         guard let rule else { return nil }
         let interval = min(3650, max(1, rule.interval))
@@ -3682,29 +4010,38 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         return "\(rule.mode.rawValue)|\(rule.unit.rawValue)|\(interval)|\(validDays)|\(dom)|\(endMs)"
     }
 
+    public static func areSameRecurringSeries(_ a: TaskItem, _ b: TaskItem) -> Bool {
+        let titleA = normalizeRecurringTitleKey(a.title)
+        let titleB = normalizeRecurringTitleKey(b.title)
+        guard !titleA.isEmpty && titleA == titleB else { return false }
+        guard let ruleA = canonicalizeRecurrenceRuleKey(a.recurrenceRule),
+              let ruleB = canonicalizeRecurrenceRuleKey(b.recurrenceRule),
+              ruleA == ruleB else {
+            return false
+        }
+        let projA = (a.projectId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let projB = (b.projectId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if projA != projB { return false }
+        if !projA.isEmpty { return true }
+        let areaA = (a.areaId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let areaB = (b.areaId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if areaA.isEmpty || areaB.isEmpty { return true }
+        return areaA == areaB
+    }
+
     public static func buildRecurringSeriesKey(
         _ task: TaskItem,
         overrideTagIds: [String]? = nil
     ) -> String? {
+        let _ = overrideTagIds
         guard !task.isDeleted && task.status == .open else { return nil }
-        let normTitle = task.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normTitle = normalizeRecurringTitleKey(task.title)
         guard !normTitle.isEmpty else { return nil }
         guard let ruleKey = canonicalizeRecurrenceRuleKey(task.recurrenceRule) else { return nil }
-        let normNotes = task.notes.trimmingCharacters(in: .whitespacesAndNewlines)
         let proj = (task.projectId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let head = (task.headingId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let area = (task.areaId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let normContainer = !proj.isEmpty ? "P:\(proj)|H:\(head)" : "A:\(area)"
-        let sourceTags = overrideTagIds ?? task.tagIds
-        let normTags = Array(
-            Set(sourceTags.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
-        )
-            .sorted()
-            .joined(separator: ",")
-        let startPart = task.scheduledStartMinutes.map(String.init) ?? ""
-        let durPart = task.durationMinutes.map(String.init) ?? ""
-        let normTimeblock = "\(startPart):\(durPart)"
-        return "\(normTitle)\u{001F}\(normNotes)\u{001F}\(normContainer)\u{001F}\(ruleKey)\u{001F}\(normTags)\u{001F}\(normTimeblock)"
+        let normContainer = !proj.isEmpty ? "P:\(proj)" : "A:\(area)"
+        return "\(normTitle)\u{001F}\(normContainer)\u{001F}\(ruleKey)"
     }
 
     public static func compareRecurringTaskPriority(_ a: TaskItem, _ b: TaskItem) -> Bool {
@@ -3718,36 +4055,187 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         if aCreated != bCreated {
             return aCreated < bCreated
         }
+        let aHasArea = !(a.areaId ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let bHasArea = !(b.areaId ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if aHasArea != bHasArea {
+            return aHasArea
+        }
+        let aHasTb = a.scheduledStartMinutes != nil
+        let bHasTb = b.scheduledStartMinutes != nil
+        if aHasTb != bHasTb {
+            return aHasTb
+        }
         return a.id < b.id
+    }
+
+    public static func planRecurringDeduplication(
+        _ tasks: [TaskItem],
+        overrideTagIdsByTaskId: [String: [String]] = [:]
+    ) -> RecurringDeduplicationPlan {
+        var orderedBaseKeys: [String] = []
+        var baseBuckets: [String: [TaskItem]] = [:]
+
+        for task in tasks {
+            guard !task.isDeleted && task.status == .open else { continue }
+            let normTitle = normalizeRecurringTitleKey(task.title)
+            guard !normTitle.isEmpty else { continue }
+            guard let ruleKey = canonicalizeRecurrenceRuleKey(task.recurrenceRule) else { continue }
+            let proj = (task.projectId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let baseKey = "\(normTitle)\u{001F}\(ruleKey)\u{001F}\(proj)"
+            if baseBuckets[baseKey] == nil {
+                orderedBaseKeys.append(baseKey)
+                baseBuckets[baseKey] = [task]
+            } else {
+                baseBuckets[baseKey]?.append(task)
+            }
+        }
+
+        var finalGroups: [[TaskItem]] = []
+        for baseKey in orderedBaseKeys {
+            guard let bucket = baseBuckets[baseKey], bucket.count >= 2 else { continue }
+            let proj = (bucket[0].projectId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !proj.isEmpty {
+                finalGroups.append(bucket)
+                continue
+            }
+            let distinctExplicitAreas = Set(
+                bucket.map { ($0.areaId ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            )
+            if distinctExplicitAreas.count <= 1 {
+                finalGroups.append(bucket)
+            } else {
+                var orderedAreaKeys: [String] = []
+                var byArea: [String: [TaskItem]] = [:]
+                for item in bucket {
+                    let areaKey = (item.areaId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    if byArea[areaKey] == nil {
+                        orderedAreaKeys.append(areaKey)
+                        byArea[areaKey] = [item]
+                    } else {
+                        byArea[areaKey]?.append(item)
+                    }
+                }
+                for areaKey in orderedAreaKeys {
+                    if let sub = byArea[areaKey], sub.count >= 2 {
+                        finalGroups.append(sub)
+                    }
+                }
+            }
+        }
+
+        var loserIds: [String] = []
+        var winnerEnrichments: [RecurringWinnerEnrichment] = []
+
+        for group in finalGroups where group.count >= 2 {
+            let sorted = group.sorted(by: compareRecurringTaskPriority)
+            let winner = sorted[0]
+            let losers = Array(sorted.dropFirst())
+            for loser in losers {
+                loserIds.append(loser.id)
+            }
+
+            let maxUpdated = group.map(\.updatedAt).max() ?? 0
+            var patch = RecurringWinnerEnrichment(
+                winnerId: winner.id,
+                minUpdatedAt: maxUpdated + 1
+            )
+            var changed = false
+
+            let winProj = (winner.projectId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let winArea = (winner.areaId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if winProj.isEmpty && winArea.isEmpty {
+                if let donorArea = losers.lazy
+                    .map({ ($0.areaId ?? "").trimmingCharacters(in: .whitespacesAndNewlines) })
+                    .first(where: { !$0.isEmpty }) {
+                    patch.areaId = donorArea
+                    changed = true
+                }
+            }
+            let winHead = (winner.headingId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !winProj.isEmpty && winHead.isEmpty {
+                if let donorHead = losers.lazy
+                    .map({ ($0.headingId ?? "").trimmingCharacters(in: .whitespacesAndNewlines) })
+                    .first(where: { !$0.isEmpty }) {
+                    patch.headingId = donorHead
+                    changed = true
+                }
+            }
+            if winner.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if let donorNotes = losers.lazy
+                    .map({ $0.notes.trimmingCharacters(in: .whitespacesAndNewlines) })
+                    .first(where: { !$0.isEmpty }) {
+                    patch.notes = donorNotes
+                    changed = true
+                }
+            }
+
+            func normalizedTags(for t: TaskItem) -> [String] {
+                let src = overrideTagIdsByTaskId[t.id] ?? t.tagIds
+                var seen = Set<String>()
+                var out: [String] = []
+                for raw in src {
+                    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty && seen.insert(trimmed).inserted {
+                        out.append(trimmed)
+                    }
+                }
+                return out
+            }
+
+            let winTags = normalizedTags(for: winner)
+            var unionSeen = Set(winTags)
+            var unionTags = winTags
+            for item in losers {
+                for tId in normalizedTags(for: item) where unionSeen.insert(tId).inserted {
+                    unionTags.append(tId)
+                }
+            }
+            if unionTags.count > winTags.count {
+                patch.tagIds = unionTags
+                changed = true
+            }
+
+            if winner.scheduledStartMinutes == nil {
+                if let donorTb = losers.first(where: { $0.scheduledStartMinutes != nil }),
+                   let startMins = donorTb.scheduledStartMinutes {
+                    patch.scheduledStartMinutes = startMins
+                    patch.durationMinutes = winner.durationMinutes ?? donorTb.durationMinutes
+                    changed = true
+                }
+            }
+            if winner.deadline == nil {
+                if let donorDl = losers.compactMap(\.deadline).first {
+                    patch.deadline = donorDl
+                    changed = true
+                }
+            }
+            if winner.reminderTime == nil {
+                if let donorRem = losers.compactMap(\.reminderTime).first {
+                    patch.reminderTime = donorRem
+                    changed = true
+                }
+            }
+
+            if changed {
+                winnerEnrichments.append(patch)
+            }
+        }
+
+        return RecurringDeduplicationPlan(
+            loserIds: loserIds,
+            winnerEnrichments: winnerEnrichments
+        )
     }
 
     public static func selectRecurringDuplicateLoserIds(
         _ tasks: [TaskItem],
         overrideTagIdsByTaskId: [String: [String]] = [:]
     ) -> [String] {
-        var orderedKeys: [String] = []
-        var groups: [String: [TaskItem]] = [:]
-        for task in tasks {
-            guard let key = buildRecurringSeriesKey(
-                task,
-                overrideTagIds: overrideTagIdsByTaskId[task.id]
-            ) else { continue }
-            if groups[key] == nil {
-                orderedKeys.append(key)
-                groups[key] = [task]
-            } else {
-                groups[key]?.append(task)
-            }
-        }
-        var losers: [String] = []
-        for key in orderedKeys {
-            guard let group = groups[key], group.count >= 2 else { continue }
-            let sorted = group.sorted(by: compareRecurringTaskPriority)
-            for loser in sorted.dropFirst() {
-                losers.append(loser.id)
-            }
-        }
-        return losers
+        planRecurringDeduplication(
+            tasks,
+            overrideTagIdsByTaskId: overrideTagIdsByTaskId
+        ).loserIds
     }
 
     private static func sortParentFirst<T>(
@@ -3849,6 +4337,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     }
 
     private func shouldApplyRemoteLocked(table: String, id: String, remoteUpdatedAt: Int64) -> Bool {
+        let clampedRemote = min(remoteUpdatedAt, nowMillis() + 60_000)
         guard let stmt = try? prepareLocked("SELECT updated_at, is_dirty FROM \(table) WHERE id = ?;") else { return true }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, 1, id)
@@ -3856,9 +4345,9 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             let localUpdated = sqlite3_column_int64(stmt, 0)
             let localIsDirty = sqlite3_column_int(stmt, 1) != 0
             if localIsDirty {
-                return remoteUpdatedAt > localUpdated
+                return clampedRemote > localUpdated
             }
-            return remoteUpdatedAt > localUpdated
+            return clampedRemote > localUpdated
         }
         return true
     }
@@ -3874,28 +4363,145 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         return 0.0
     }
 
-    private func upsertTagLocked(_ tag: Tag, isDirty: Bool) throws {
-        // Only resolve collisions among active (is_deleted = 0) tags; preserve soft-deleted tombstones!
-        if !tag.isDeleted {
-            let conflictStmt = try prepareLocked("SELECT id FROM tags WHERE title = ? AND id != ? AND is_deleted = 0;")
-            defer { sqlite3_finalize(conflictStmt) }
-            bindText(conflictStmt, 1, tag.title)
-            bindText(conflictStmt, 2, tag.id)
-            var conflictingIds: [String] = []
-            while sqlite3_step(conflictStmt) == SQLITE_ROW {
-                if let oldId = colString(conflictStmt, 0) {
-                    conflictingIds.append(oldId)
-                }
+    private static func compareDeterministicTagPriority(_ a: Tag, _ b: Tag) -> Bool {
+        let aCreated = a.createdAt > 0 ? a.createdAt : Int64.max
+        let bCreated = b.createdAt > 0 ? b.createdAt : Int64.max
+        if aCreated != bCreated {
+            return aCreated < bCreated
+        }
+        return a.id < b.id
+    }
+
+    private static func resolveRemappedTagId(_ id: String, using remap: [String: String]) -> String {
+        guard !remap.isEmpty else { return id }
+        var cur = id
+        var hops = 0
+        while let next = remap[cur], next != cur, hops < 8 {
+            cur = next
+            hops += 1
+        }
+        return cur
+    }
+
+    private static func remapTagIdList(
+        _ tagIds: [String],
+        using remap: [String: String]
+    ) -> (ids: [String], didRemap: Bool) {
+        guard !remap.isEmpty && !tagIds.isEmpty else { return (tagIds, false) }
+        var didRemap = false
+        var seen = Set<String>()
+        var out: [String] = []
+        for raw in tagIds {
+            let mapped = resolveRemappedTagId(raw, using: remap)
+            if mapped != raw {
+                didRemap = true
             }
-            for oldId in conflictingIds {
-                let markDeletedStmt = try prepareLocked("UPDATE tags SET is_deleted = 1, updated_at = ?, is_dirty = 1 WHERE id = ?;")
-                defer { sqlite3_finalize(markDeletedStmt) }
-                bindInt64(markDeletedStmt, 1, tag.updatedAt)
-                bindText(markDeletedStmt, 2, oldId)
-                _ = sqlite3_step(markDeletedStmt)
+            if seen.insert(mapped).inserted {
+                out.append(mapped)
             }
         }
+        return (out, didRemap)
+    }
 
+    private func remapTagReferencesLocked(
+        from loserId: String,
+        to winnerId: String,
+        now: Int64,
+        markAffectedDirty: Bool
+    ) throws {
+        guard loserId != winnerId else { return }
+
+        let insTaskTags = try prepareLocked("""
+            INSERT OR IGNORE INTO task_tags (task_id, tag_id)
+            SELECT task_id, ? FROM task_tags WHERE tag_id = ?;
+        """)
+        defer { sqlite3_finalize(insTaskTags) }
+        bindText(insTaskTags, 1, winnerId)
+        bindText(insTaskTags, 2, loserId)
+        _ = sqlite3_step(insTaskTags)
+
+        let delTaskTags = try prepareLocked("DELETE FROM task_tags WHERE tag_id = ?;")
+        defer { sqlite3_finalize(delTaskTags) }
+        bindText(delTaskTags, 1, loserId)
+        _ = sqlite3_step(delTaskTags)
+
+        let insProjTags = try prepareLocked("""
+            INSERT OR IGNORE INTO project_tags (project_id, tag_id)
+            SELECT project_id, ? FROM project_tags WHERE tag_id = ?;
+        """)
+        defer { sqlite3_finalize(insProjTags) }
+        bindText(insProjTags, 1, winnerId)
+        bindText(insProjTags, 2, loserId)
+        _ = sqlite3_step(insProjTags)
+
+        let delProjTags = try prepareLocked("DELETE FROM project_tags WHERE tag_id = ?;")
+        defer { sqlite3_finalize(delProjTags) }
+        bindText(delProjTags, 1, loserId)
+        _ = sqlite3_step(delProjTags)
+
+        if markAffectedDirty {
+            let childStmt = try prepareLocked("""
+                UPDATE tags SET parent_tag_id = ?, updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END, is_dirty = 1
+                WHERE parent_tag_id = ? AND id != ? AND is_deleted = 0;
+            """)
+            defer { sqlite3_finalize(childStmt) }
+            bindText(childStmt, 1, winnerId)
+            bindInt64(childStmt, 2, now)
+            bindInt64(childStmt, 3, now)
+            bindText(childStmt, 4, loserId)
+            bindText(childStmt, 5, winnerId)
+            _ = sqlite3_step(childStmt)
+        } else {
+            let childStmt = try prepareLocked("UPDATE tags SET parent_tag_id = ? WHERE parent_tag_id = ? AND id != ?;")
+            defer { sqlite3_finalize(childStmt) }
+            bindText(childStmt, 1, winnerId)
+            bindText(childStmt, 2, loserId)
+            bindText(childStmt, 3, winnerId)
+            _ = sqlite3_step(childStmt)
+        }
+
+        for table in ["tasks", "projects", "areas", "project_templates"] {
+            let selectStmt = try prepareLocked("SELECT id, tag_ids_json, updated_at FROM \(table) WHERE tag_ids_json LIKE ?;")
+            defer { sqlite3_finalize(selectStmt) }
+            bindText(selectStmt, 1, "%\(loserId)%")
+
+            var updates: [(id: String, json: String, nextUpdated: Int64)] = []
+            while sqlite3_step(selectStmt) == SQLITE_ROW {
+                guard let rowId = colString(selectStmt, 0) else { continue }
+                let existing = decodeStringArray(colString(selectStmt, 1))
+                let prevUpdated = sqlite3_column_int64(selectStmt, 2)
+                guard existing.contains(loserId) else { continue }
+                var seen = Set<String>()
+                var replaced: [String] = []
+                for tId in existing {
+                    let mapped = (tId == loserId) ? winnerId : tId
+                    if seen.insert(mapped).inserted {
+                        replaced.append(mapped)
+                    }
+                }
+                updates.append((rowId, encodeStringArray(replaced), max(now, prevUpdated + 1)))
+            }
+
+            for item in updates {
+                if markAffectedDirty {
+                    let upd = try prepareLocked("UPDATE \(table) SET tag_ids_json = ?, updated_at = ?, is_dirty = 1 WHERE id = ?;")
+                    defer { sqlite3_finalize(upd) }
+                    bindText(upd, 1, item.json)
+                    bindInt64(upd, 2, item.nextUpdated)
+                    bindText(upd, 3, item.id)
+                    _ = sqlite3_step(upd)
+                } else {
+                    let upd = try prepareLocked("UPDATE \(table) SET tag_ids_json = ? WHERE id = ?;")
+                    defer { sqlite3_finalize(upd) }
+                    bindText(upd, 1, item.json)
+                    bindText(upd, 2, item.id)
+                    _ = sqlite3_step(upd)
+                }
+            }
+        }
+    }
+
+    private func writeTagRowLocked(_ tag: Tag, isDirty: Bool) throws {
         let stmt = try prepareLocked("""
             INSERT INTO tags (id, title, parent_tag_id, shortcut, sort_order, created_at, updated_at, is_deleted, is_dirty)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -3921,6 +4527,121 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         if sqlite3_step(stmt) != SQLITE_DONE {
             throw ThingsDatabaseError.sqlError(currentErrorMessageLocked())
         }
+    }
+
+    @discardableResult
+    private func upsertTagLocked(
+        _ tag: Tag,
+        isDirty: Bool,
+        tagRemap: inout [String: String]
+    ) throws -> Bool {
+        if tag.isDeleted {
+            try writeTagRowLocked(tag, isDirty: isDirty)
+            return false
+        }
+
+        // Deterministically resolve same-title collisions among active (is_deleted = 0) tags while preserving soft-deleted tombstones!
+        let conflictStmt = try prepareLocked("""
+            SELECT id, title, parent_tag_id, shortcut, sort_order, created_at, updated_at, is_deleted
+            FROM tags
+            WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) AND id != ? AND is_deleted = 0;
+        """)
+        defer { sqlite3_finalize(conflictStmt) }
+        bindText(conflictStmt, 1, tag.title)
+        bindText(conflictStmt, 2, tag.id)
+
+        var conflicts: [Tag] = []
+        while sqlite3_step(conflictStmt) == SQLITE_ROW {
+            conflicts.append(
+                Tag(
+                    id: colString(conflictStmt, 0) ?? "",
+                    title: colString(conflictStmt, 1) ?? "",
+                    parentTagId: colString(conflictStmt, 2),
+                    shortcut: colString(conflictStmt, 3),
+                    sortOrder: sqlite3_column_double(conflictStmt, 4),
+                    createdAt: sqlite3_column_int64(conflictStmt, 5),
+                    updatedAt: sqlite3_column_int64(conflictStmt, 6),
+                    isDeleted: colBool(conflictStmt, 7)
+                )
+            )
+        }
+
+        guard !conflicts.isEmpty else {
+            try writeTagRowLocked(tag, isDirty: isDirty)
+            return false
+        }
+
+        let now = max(nowMillis(), tag.updatedAt)
+        let candidates = ([tag] + conflicts).sorted(by: Self.compareDeterministicTagPriority)
+        var winner = candidates[0]
+        let losers = Array(candidates.dropFirst())
+        let maxCandidateUpdated = candidates.map(\.updatedAt).max() ?? now
+
+        var winnerEnriched = false
+        for donor in losers {
+            if (winner.shortcut ?? "").isEmpty, let s = donor.shortcut, !s.isEmpty {
+                winner.shortcut = s
+                winnerEnriched = true
+            }
+            if (winner.parentTagId ?? "").isEmpty, let p = donor.parentTagId, !p.isEmpty, p != winner.id {
+                winner.parentTagId = p
+                winnerEnriched = true
+            }
+        }
+
+        if winner.id == tag.id {
+            // Incoming tag wins: tombstone existing conflicts FIRST to satisfy idx_tags_title_active, then write winner, then remap references.
+            for loser in conflicts {
+                let tombstoneAt = max(now, maxCandidateUpdated + 1, loser.updatedAt + 1)
+                let markDeletedStmt = try prepareLocked("UPDATE tags SET is_deleted = 1, updated_at = ?, is_dirty = 1 WHERE id = ?;")
+                defer { sqlite3_finalize(markDeletedStmt) }
+                bindInt64(markDeletedStmt, 1, tombstoneAt)
+                bindText(markDeletedStmt, 2, loser.id)
+                _ = sqlite3_step(markDeletedStmt)
+            }
+            if winnerEnriched {
+                winner.updatedAt = max(now, maxCandidateUpdated + 1)
+            }
+            try writeTagRowLocked(winner, isDirty: isDirty || winnerEnriched)
+            for loser in conflicts {
+                let tombstoneAt = max(now, maxCandidateUpdated + 1, loser.updatedAt + 1)
+                tagRemap[loser.id] = winner.id
+                try remapTagReferencesLocked(from: loser.id, to: winner.id, now: tombstoneAt, markAffectedDirty: true)
+            }
+        } else {
+            // Existing local tag wins: tombstone any extra conflicts, enrich existing winner if needed, write incoming tag directly as tombstone, and remap references!
+            for extraLoser in conflicts where extraLoser.id != winner.id {
+                let tombstoneAt = max(now, maxCandidateUpdated + 1, extraLoser.updatedAt + 1)
+                let markDeletedStmt = try prepareLocked("UPDATE tags SET is_deleted = 1, updated_at = ?, is_dirty = 1 WHERE id = ?;")
+                defer { sqlite3_finalize(markDeletedStmt) }
+                bindInt64(markDeletedStmt, 1, tombstoneAt)
+                bindText(markDeletedStmt, 2, extraLoser.id)
+                _ = sqlite3_step(markDeletedStmt)
+                tagRemap[extraLoser.id] = winner.id
+                try remapTagReferencesLocked(from: extraLoser.id, to: winner.id, now: tombstoneAt, markAffectedDirty: true)
+            }
+            if winnerEnriched {
+                winner.updatedAt = max(now, maxCandidateUpdated + 1)
+                try writeTagRowLocked(winner, isDirty: true)
+            }
+            var incomingTombstone = tag
+            incomingTombstone.isDeleted = true
+            incomingTombstone.updatedAt = max(now, maxCandidateUpdated + 1, tag.updatedAt + 1)
+            try writeTagRowLocked(incomingTombstone, isDirty: true)
+            tagRemap[tag.id] = winner.id
+            try remapTagReferencesLocked(
+                from: tag.id,
+                to: winner.id,
+                now: incomingTombstone.updatedAt,
+                markAffectedDirty: true
+            )
+        }
+        return true
+    }
+
+    private func upsertTagLocked(_ tag: Tag, isDirty: Bool) throws {
+        var dummyRemap: [String: String] = [:]
+        _ = try upsertTagLocked(tag, isDirty: isDirty, tagRemap: &dummyRemap)
     }
 
     private func upsertAreaLocked(_ area: Area, isDirty: Bool) throws {

@@ -22,11 +22,11 @@ import {
 } from '../src/data/pwaUpdater.ts';
 import { resolveMagicPlusDrop } from '../src/domain/magicPlusDrop.ts';
 
-test('v2.0.0-beta.21 build metadata constants are bumped to 2.0.0-beta.21 (Build 65)', () => {
-  assert.equal(APP_VERSION, '2.0.0-beta.21');
-  assert.equal(APP_BUILD_CODE, 65);
-  assert.equal(versionFromUtils, '2.0.0-beta.21');
-  assert.equal(buildFromUtils, 65);
+test('v2.0.0-beta.22 build metadata constants are bumped to 2.0.0-beta.22 (Build 66)', () => {
+  assert.equal(APP_VERSION, '2.0.0-beta.22');
+  assert.equal(APP_BUILD_CODE, 66);
+  assert.equal(versionFromUtils, '2.0.0-beta.22');
+  assert.equal(buildFromUtils, 66);
   assert.equal(isPrereleaseVersion(APP_VERSION), true);
   assert.equal(isPrereleaseVersion('1.8.1'), false);
   assert.equal(isPrereleaseVersion('2.0.0'), false);

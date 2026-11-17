@@ -759,9 +759,9 @@ class V2UpgradeAndFeaturesTest {
     }
 
     @Test
-    fun `v2_0_0_beta_21 BuildConfig and all 5 localized strings_xml files verify project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(65, BuildConfig.VERSION_CODE)
-        assertEquals("2.0.0-beta.21", BuildConfig.VERSION_NAME)
+    fun `v2_0_0_beta_22 BuildConfig and all 5 localized strings_xml files verify project deletion prompt and topbar_tooltip keys`() {
+        assertEquals(66, BuildConfig.VERSION_CODE)
+        assertEquals("2.0.0-beta.22", BuildConfig.VERSION_NAME)
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -1532,6 +1532,113 @@ class V2UpgradeAndFeaturesTest {
             "Single-collection listeners must never advance saveLastSyncTimestamp",
             attachBody.contains("saveLastSyncTimestamp(")
         )
+    }
+
+    @Test
+    fun `v2_0_0_beta_22 Cialis area-split recurring dedup enrichment legacy ntfy chunking and v1_8 timeblock preservation`() {
+        val jsonCodec = Json {
+            ignoreUnknownKeys = true
+            encodeDefaults = true
+        }
+        val dailyRuleJson = jsonCodec.encodeToString(
+            RecurrenceRule(
+                mode = RecurrenceMode.FIXED_SCHEDULE,
+                interval = 1,
+                unit = RecurrenceUnit.DAYS
+            )
+        )
+
+        // 1. Exact reproduction of screenshot 22828: two open daily "Cialis" tasks (one areaId=null, one areaId="area-privat")
+        val cialisNoAreaNewer = TaskEntity(
+            id = "cialis-no-area",
+            title = "Cialis",
+            notes = "",
+            status = TaskStatus.OPEN,
+            scheduleState = ScheduleState.TODAY,
+            whenDate = 1_763_424_000_000L,
+            projectId = null,
+            headingId = null,
+            areaId = null,
+            recurrenceRuleJson = dailyRuleJson,
+            sortOrder = 100.0,
+            tagIdsJson = """["tag-gesundheit"]""",
+            createdAt = 1_763_300_000_000L,
+            updatedAt = 1_763_300_500_000L,
+            isDeleted = false,
+            isDirty = false
+        )
+        val cialisPrivatOlder = cialisNoAreaNewer.copy(
+            id = "cialis-privat",
+            notes = "5mg",
+            whenDate = 1_763_337_600_000L,
+            areaId = "area-privat",
+            scheduledStartMinutes = 480,
+            durationMinutes = 10,
+            tagIdsJson = """["tag-gesundheit","tag-daily"]""",
+            createdAt = 1_763_200_000_000L,
+            updatedAt = 1_763_200_000_000L
+        )
+
+        val plan = SyncRepository.planRecurringDeduplication(listOf(cialisNoAreaNewer, cialisPrivatOlder))
+        assertEquals(listOf("cialis-privat"), plan.loserIds)
+        val enrichment = plan.winnerEnrichments["cialis-no-area"]
+        assertNotNull("Winner missing areaId must inherit Privat area from duplicate", enrichment)
+        assertEquals("area-privat", enrichment!!.areaId)
+        assertEquals("5mg", enrichment.notes)
+        assertEquals(480, enrichment.scheduledStartMinutes)
+        assertEquals(10, enrichment.durationMinutes)
+        assertEquals(setOf("tag-gesundheit", "tag-daily"), enrichment.mergedTagIds.toSet())
+
+        // 2. Legacy tb_sync_* ntfy chunks never emit wakeOnly=true and split oversized payloads cleanly under MAX_NTFY_CHUNK_BYTES
+        val manyTasks = (1..24).map { idx ->
+            TaskFirestoreDto(
+                id = "task-chunk-$idx",
+                title = "Cross-Platform Sync Item #$idx " + "x".repeat(120),
+                notes = "Detailed sync body #$idx",
+                status = "OPEN",
+                scheduleState = "TODAY",
+                updatedAt = 1_795_000_000_000L + idx
+            )
+        }
+        val oversizedBatch = CloudDeltaBatchPayload(
+            userId = "user-abc-123",
+            deviceId = "dev-android",
+            batchTimestamp = 1_795_000_999_000L,
+            wakeOnly = true,
+            tasks = manyTasks
+        )
+        val legacyChunks = SyncRepository.buildLegacyCompatibleNtfyChunks(oversizedBatch, jsonCodec, maxChunks = 6)
+        assertTrue(legacyChunks.isNotEmpty())
+        for (chunk in legacyChunks) {
+            assertTrue(chunk.toByteArray(StandardCharsets.UTF_8).size < SyncRepository.MAX_NTFY_CHUNK_BYTES)
+            val parsedChunk = jsonCodec.decodeFromString<CloudDeltaBatchPayload>(chunk)
+            assertFalse("Legacy tb_sync_* chunk must never carry wakeOnly=true", parsedChunk.wakeOnly)
+            assertTrue(parsedChunk.tasks.isNotEmpty())
+        }
+
+        // 3. v1.8 omitted timeblock fields vs v2.x explicit null timeblock fields + purgedFromTrash tombstone parity
+        val mixedWireJson = """
+            {
+              "userId": "u1",
+              "deviceId": "d1",
+              "batchTimestamp": 1795001000000,
+              "tasks": [
+                {"id": "v18-omitted", "title": "Edited on v1.8", "status": "OPEN", "scheduleState": "TODAY", "updatedAt": 1795001000000},
+                {"id": "v20-cleared", "title": "Cleared on v2.0", "status": "OPEN", "scheduleState": "TODAY", "scheduledStartMinutes": null, "durationMinutes": null, "updatedAt": 1795001000000},
+                {"id": "v20-purged", "title": "Should Be Scrubbed", "notes": "Secret", "status": "OPEN", "scheduleState": "INBOX", "isDeleted": true, "purgedFromTrash": true, "updatedAt": 1795001000000}
+              ]
+            }
+        """.trimIndent()
+        val decodedHints = CloudDeltaBatchPayload.decodeWithHints(mixedWireJson, jsonCodec)
+        val v18Dto = decodedHints.tasks.first { it.id == "v18-omitted" }
+        val v20ClearedDto = decodedHints.tasks.first { it.id == "v20-cleared" }
+        val v20PurgedEntity = decodedHints.tasks.first { it.id == "v20-purged" }.toEntity()
+
+        assertTrue(v18Dto.omittedTimeblockFields)
+        assertFalse(v20ClearedDto.omittedTimeblockFields)
+        assertTrue(v20PurgedEntity.isDeleted)
+        assertEquals("", v20PurgedEntity.title)
+        assertEquals("", v20PurgedEntity.notes)
     }
 }
 

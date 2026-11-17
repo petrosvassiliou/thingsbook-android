@@ -114,6 +114,19 @@ public actor FirebaseCloudSyncService {
     private var lastFullFallbackPullMillis: Int64 = 0
 
     public static let maxInlineAttachmentBytes = 700_000
+    public static let maxNtfyPayloadBytes = 3_800
+    public static let offlineRestampThresholdMillis: Int64 = 30_000
+    public static let syncCollectionNames: [String] = [
+        "tags",
+        "areas",
+        "projects",
+        "headings",
+        "tasks",
+        "checklist_items",
+        "attachments",
+        "project_templates"
+    ]
+
     public static func attachmentBackfillDefaultsKey(uid: String) -> String {
         "thingsbook.sync.attBackfillV1.\(uid)"
     }
@@ -123,10 +136,52 @@ public actor FirebaseCloudSyncService {
     public static func projectReviewBackfillDefaultsKey(uid: String) -> String {
         "thingsbook.sync.projReviewBackfillV1.\(uid)"
     }
+    public static func reconcileV222DefaultsKey(uid: String) -> String {
+        "thingsbook.sync.reconcileV222.\(uid)"
+    }
+    public static func collectionCursorDefaultsKey(uid: String, collection: String) -> String {
+        "thingsbook_macos_col_sync_ts_v2_\(uid)_\(collection)"
+    }
     public static func deriveUidWakeTopic(uid: String) -> String {
         let trimmed = uid.trimmingCharacters(in: .whitespacesAndNewlines)
         let digest = sha256Hex("thingsbook-uid-v2:\(trimmed)")
         return "tb_uid_" + String(digest.prefix(28))
+    }
+    public static func deriveOAuthChannelTopic(uid: String) -> String {
+        let trimmed = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let digest = sha256Hex("thingsbook-oauth:\(trimmed)")
+        return "tb_sync_" + String(digest.prefix(28))
+    }
+    public static func deriveInstantChannelTopic(email: String) -> String {
+        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let digest = sha256Hex("thingsbook-instant:\(trimmed)")
+        return "tb_sync_" + String(digest.prefix(28))
+    }
+    public static func deriveLegacySyncTopics(
+        uid: String,
+        email: String?,
+        primaryTopic: String?
+    ) -> [String] {
+        var topics: [String] = []
+        func appendUnique(_ candidate: String?) {
+            guard let raw = candidate?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  raw.hasPrefix("tb_sync_"),
+                  !topics.contains(raw) else { return }
+            topics.append(raw)
+        }
+        appendUnique(primaryTopic)
+        let cleanUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanUid.isEmpty {
+            appendUnique(deriveOAuthChannelTopic(uid: cleanUid))
+        }
+        if let cleanEmail = email?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+           cleanEmail.contains("@") {
+            appendUnique(deriveInstantChannelTopic(email: cleanEmail))
+        }
+        if !cleanUid.isEmpty {
+            appendUnique("tb_sync_" + String(sha256Hex(cleanUid).prefix(28)))
+        }
+        return topics
     }
 
     private static let keychainAccount = "firebase_auth_session_v1"
@@ -179,8 +234,8 @@ public actor FirebaseCloudSyncService {
         )
         if !localOnlyMode {
             ensureLiveWakeStreamRunning(localOnlyMode: false)
-            // Reconcile full cloud state on launch so upgrades (v1.7 -> v1.8) and offline edits never miss records
-            await syncBidirectionalDeltas(forceFullPull: true, localOnlyMode: false)
+            // Reconcile full cloud state on launch so upgrades (v1.8 <-> v2.x) and offline edits never miss records
+            await syncBidirectionalDeltas(forceFullPull: true, pullBeforePush: true, localOnlyMode: false)
         }
     }
 
@@ -284,7 +339,7 @@ public actor FirebaseCloudSyncService {
                     )
                 }
             }
-            let topic = "tb_sync_" + String(Self.sha256Hex("thingsbook-instant:\(email)").prefix(28))
+            let topic = Self.deriveInstantChannelTopic(email: email)
             try await finalizeLogin(authRes: authRes, email: email, topic: topic, mergeLocalTasks: mergeLocalTasks, localOnlyMode: localOnlyMode)
             return email
         } catch {
@@ -360,9 +415,7 @@ public actor FirebaseCloudSyncService {
 
             let resolvedEmail = (idpRes.email ?? callbackParams["email"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             let displayEmail = resolvedEmail.isEmpty ? idpRes.localId : resolvedEmail
-            let topic = !resolvedEmail.isEmpty
-                ? "tb_sync_" + String(Self.sha256Hex("thingsbook-instant:\(resolvedEmail)").prefix(28))
-                : "tb_sync_" + String(Self.sha256Hex(idpRes.localId).prefix(28))
+            let topic = Self.deriveOAuthChannelTopic(uid: idpRes.localId)
 
             try await finalizeLogin(
                 authRes: idpRes,
@@ -437,6 +490,7 @@ public actor FirebaseCloudSyncService {
         self.authSession = newSession
         persistAuthSession(newSession)
         saveLastSyncCursor(uid: authRes.localId, timestamp: 0)
+        resetCollectionSyncCursors(uid: authRes.localId)
         saveLastWallSyncTimestamp(uid: authRes.localId, timestamp: 0)
 
         updateSnapshot(
@@ -451,7 +505,7 @@ public actor FirebaseCloudSyncService {
 
         if !localOnlyMode {
             ensureLiveWakeStreamRunning(localOnlyMode: false)
-            // Pull remote changes BEFORE pushing local dirty records on login (matching Android)
+            // Pull remote changes BEFORE pushing local dirty records on login (matching Android & ChromeOS)
             await syncBidirectionalDeltas(forceFullPull: true, pullBeforePush: true, localOnlyMode: false)
         }
     }
@@ -477,6 +531,7 @@ public actor FirebaseCloudSyncService {
             await broadcastDirtyBatchToNtfyTopics(
                 dirty: dirty,
                 uid: current.uid,
+                email: current.email,
                 channelTopic: current.channelTopic,
                 deviceId: current.deviceId
             )
@@ -485,7 +540,7 @@ public actor FirebaseCloudSyncService {
         }
     }
 
-    // MARK: - Sub-300ms Fast Outbound Push & Live Wake Stream
+    // MARK: - Sub-200ms Fast Outbound Push & Live Multi-Topic Wake Stream
 
     public func pushDirtyFast(localOnlyMode: Bool) async {
         if localOnlyMode {
@@ -493,16 +548,30 @@ public actor FirebaseCloudSyncService {
             updateSnapshot(patchStatus: .offline, error: nil)
             return
         }
-        guard authSession != nil else { return }
+        guard let initialSession = authSession else { return }
         ensureLiveWakeStreamRunning(localOnlyMode: false)
+
+        // If a full sync is already running, or we haven't completed an initial pull yet, or local dirty
+        // records were queued offline (>30s old), run pull-before-push + restamping so offline edits never
+        // lose to newer peer timestamps or overwrite newer cloud changes!
+        let hasStaleOfflineEdits = (try? database.hasStaleOfflineDirtyRecords(olderThanMillis: Self.offlineRestampThresholdMillis)) ?? false
+        if isSyncing || loadLastSyncCursor(uid: initialSession.uid) <= 0 || hasStaleOfflineEdits {
+            await syncBidirectionalDeltas(forceFullPull: false, pullBeforePush: true, localOnlyMode: false)
+            return
+        }
 
         pendingFastPush = true
         guard !isPushingFast else { return }
         isPushingFast = true
+        defer { isPushingFast = false }
 
         while pendingFastPush {
             pendingFastPush = false
             guard !localOnlyMode, let current = authSession else { break }
+            if isSyncing {
+                await syncBidirectionalDeltas(forceFullPull: false, pullBeforePush: true, localOnlyMode: false)
+                break
+            }
             do {
                 let dirty = try database.fetchDirtyBatch()
                 let hasAny = !dirty.tags.isEmpty || !dirty.areas.isEmpty || !dirty.projects.isEmpty
@@ -533,32 +602,31 @@ public actor FirebaseCloudSyncService {
                 )
 
                 let uidCopy = current.uid
+                let emailCopy = current.email
                 let topicCopy = current.channelTopic
                 let deviceCopy = current.deviceId
                 Task {
                     await self.broadcastDirtyBatchToNtfyTopics(
                         dirty: dirty,
                         uid: uidCopy,
+                        email: emailCopy,
                         channelTopic: topicCopy,
                         deviceId: deviceCopy
                     )
                 }
             } catch {
-                // Fall back to secondary relay if primary Firestore is temporarily unreachable
-                if let current = authSession {
-                    if let dirty = try? database.fetchDirtyBatch() {
-                        await broadcastDirtyBatchToNtfyTopics(
-                            dirty: dirty,
-                            uid: current.uid,
-                            channelTopic: current.channelTopic,
-                            deviceId: current.deviceId
-                        )
-                    }
+                // Fall back to secondary relay if primary Firestore is temporarily unreachable; dirty flags stay set
+                if let current = authSession, let dirty = try? database.fetchDirtyBatch() {
+                    await broadcastDirtyBatchToNtfyTopics(
+                        dirty: dirty,
+                        uid: current.uid,
+                        email: current.email,
+                        channelTopic: current.channelTopic,
+                        deviceId: current.deviceId
+                    )
                 }
             }
         }
-
-        isPushingFast = false
     }
 
     public func ensureLiveWakeStreamRunning(localOnlyMode: Bool) {
@@ -575,7 +643,20 @@ public actor FirebaseCloudSyncService {
         }
         stopLiveWakeStream()
         let targetUid = current.uid
+        var allTopics: [String] = []
         let uidWakeTopic = Self.deriveUidWakeTopic(uid: targetUid)
+        if !uidWakeTopic.isEmpty {
+            allTopics.append(uidWakeTopic)
+        }
+        for legacyTopic in Self.deriveLegacySyncTopics(
+            uid: targetUid,
+            email: current.email,
+            primaryTopic: current.channelTopic
+        ) where !allTopics.contains(legacyTopic) {
+            allTopics.append(legacyTopic)
+        }
+        let joinedTopics = allTopics.joined(separator: ",")
+        guard !joinedTopics.isEmpty else { return }
         liveWakeStreamUid = targetUid
 
         liveWakeStreamTask = Task { [weak self] in
@@ -584,8 +665,7 @@ public actor FirebaseCloudSyncService {
                 let activeSession = await self.currentAuthSessionForUid(targetUid)
                 guard let activeSession else { break }
 
-                if let encoded = uidWakeTopic.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-                   let url = URL(string: "https://ntfy.sh/\(encoded)/json?since=none") {
+                if let url = URL(string: "https://ntfy.sh/\(joinedTopics)/json?since=none") {
                     var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 90)
                     req.setValue("application/x-ndjson", forHTTPHeaderField: "Accept")
                     do {
@@ -606,7 +686,7 @@ public actor FirebaseCloudSyncService {
                 }
 
                 if Task.isCancelled { break }
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
             }
         }
     }
@@ -647,17 +727,21 @@ public actor FirebaseCloudSyncService {
         let projects = (batch["projects"] as? [[String: Any]] ?? []).compactMap(Self.parseProject)
         let headings = (batch["headings"] as? [[String: Any]] ?? []).compactMap(Self.parseHeading)
         var taskTags: [String: [String]] = [:]
+        var omittedTimeblockTaskIds = Set<String>()
         let tasks = (batch["tasks"] as? [[String: Any]] ?? []).compactMap { m -> TaskItem? in
-            guard let (t, tids) = Self.parseTask(m) else { return nil }
-            taskTags[t.id] = tids
-            return t
+            guard let parsed = Self.parseTaskWithHints(m) else { return nil }
+            taskTags[parsed.task.id] = parsed.tagIds
+            if parsed.omittedTimeblock {
+                omittedTimeblockTaskIds.insert(parsed.task.id)
+            }
+            return parsed.task
         }
         let checklists = (batch["checklistItems"] as? [[String: Any]] ?? []).compactMap(Self.parseChecklist)
         let attachments = (batch["attachments"] as? [[String: Any]] ?? []).compactMap(Self.parseAttachment)
         let projectTemplates = (batch["projectTemplates"] as? [[String: Any]] ?? []).compactMap(Self.parseProjectTemplate)
 
         let hasAttachments = !attachments.isEmpty
-        if let batchMax = try? database.applyRemoteDeltas(
+        if (try? database.applyRemoteDeltas(
             RemoteDeltaBatch(
                 tags: tags,
                 areas: areas,
@@ -665,16 +749,14 @@ public actor FirebaseCloudSyncService {
                 headings: headings,
                 tasks: tasks,
                 taskTagIdsByTaskId: taskTags,
+                taskOmittedTimeblockTaskIds: omittedTimeblockTaskIds,
                 checklistItems: checklists,
                 attachments: attachments,
                 projectTemplates: projectTemplates
             )
-        ) {
+        )) != nil {
+            // Do NOT advance Firestore pull cursor on partial ntfy wake messages; only update wall clock!
             let now = Int64(Date().timeIntervalSince1970 * 1000.0)
-            let cursor = loadLastSyncCursor(uid: expectedUid)
-            if batchMax > cursor {
-                saveLastSyncCursor(uid: expectedUid, timestamp: min(batchMax, now + 60_000))
-            }
             saveLastWallSyncTimestamp(uid: expectedUid, timestamp: now)
             if let current = authSession, current.uid == expectedUid {
                 updateSnapshot(
@@ -695,45 +777,75 @@ public actor FirebaseCloudSyncService {
         }
     }
 
-    public func pullIncrementalDeltasOnly(localOnlyMode: Bool) async {
-        guard !localOnlyMode, let current = authSession else { return }
+    @discardableResult
+    public func pullIncrementalDeltasOnly(localOnlyMode: Bool) async -> Bool {
+        guard !localOnlyMode, authSession != nil else { return false }
         guard !isSyncing else {
             pendingResyncRequested = true
-            return
+            return false
         }
         isSyncing = true
-        defer { isSyncing = false }
+        var succeeded = false
+        var needsFullFollowUp = false
+        var followUpForceFull = false
 
-        do {
-            let validToken = try await validIdToken()
-            let config = FirebaseConfig.loadActive()
-            let cursor = loadLastSyncCursor(uid: current.uid)
-            let safeQuerySince = max(0, cursor - Self.clockSkewOverlapMillis)
-            let firestoreMax = try await pullDeltasFromFirestore(
-                uid: current.uid,
-                idToken: validToken,
-                projectId: config.projectId,
-                sinceTimestamp: safeQuerySince
-            )
-            _ = try? database.performMidnightRollover()
-            let now = Int64(Date().timeIntervalSince1970 * 1000.0)
-            if firestoreMax > cursor {
-                saveLastSyncCursor(uid: current.uid, timestamp: min(firestoreMax, now + 60_000))
-            }
-            saveLastWallSyncTimestamp(uid: current.uid, timestamp: now)
-            lastFullFallbackPullMillis = now
-            updateSnapshot(
-                CloudSyncSnapshot(
-                    status: .synced,
-                    userEmailOrId: current.email,
-                    userId: current.uid,
-                    lastSyncedAt: now,
-                    errorMessage: nil
+        while true {
+            pendingResyncRequested = false
+            guard !localOnlyMode, let current = authSession else { break }
+
+            do {
+                let validToken = try await validIdToken()
+                let config = FirebaseConfig.loadActive()
+                let cursor = loadLastSyncCursor(uid: current.uid)
+                let safeQuerySince = max(0, cursor - Self.clockSkewOverlapMillis)
+                let firestoreMax = try await pullDeltasFromFirestore(
+                    uid: current.uid,
+                    idToken: validToken,
+                    projectId: config.projectId,
+                    sinceTimestamp: safeQuerySince
                 )
-            )
-        } catch {
-            // Leave existing cursor intact on transient network hiccup
+                _ = try? database.performMidnightRollover()
+                let now = Int64(Date().timeIntervalSince1970 * 1000.0)
+                if firestoreMax > cursor {
+                    saveLastSyncCursor(uid: current.uid, timestamp: min(firestoreMax, now + 60_000))
+                } else if cursor == 0 {
+                    saveLastSyncCursor(uid: current.uid, timestamp: now)
+                }
+                saveLastWallSyncTimestamp(uid: current.uid, timestamp: now)
+                lastFullFallbackPullMillis = now
+                succeeded = true
+                updateSnapshot(
+                    CloudSyncSnapshot(
+                        status: .synced,
+                        userEmailOrId: current.email,
+                        userId: current.uid,
+                        lastSyncedAt: now,
+                        errorMessage: nil
+                    )
+                )
+            } catch {
+                // Leave existing cursor intact on transient network hiccup
+                break
+            }
+
+            if pendingForceFullPull || pendingPullBeforePush {
+                needsFullFollowUp = true
+                followUpForceFull = pendingForceFullPull
+                pendingForceFullPull = false
+                pendingPullBeforePush = false
+                break
+            }
+            if pendingResyncRequested {
+                continue
+            }
+            break
         }
+
+        isSyncing = false
+        if needsFullFollowUp && !localOnlyMode {
+            await syncBidirectionalDeltas(forceFullPull: followUpForceFull, pullBeforePush: true, localOnlyMode: false)
+        }
+        return succeeded
     }
 
     /// Lightweight single-document check on `/users/{uid}/sync_meta/pulse` so active macOS windows
@@ -747,8 +859,8 @@ public actor FirebaseCloudSyncService {
         guard let current = authSession else { return }
         ensureLiveWakeStreamRunning(localOnlyMode: false)
 
-        // Flush any local dirty records first if present
-        if !isPushingFast {
+        // Flush any local dirty records if present (pushDirtyFast automatically pulls first if offline/stale)
+        if !isPushingFast && !isSyncing {
             if let dirty = try? database.fetchDirtyBatch() {
                 let hasDirty = !dirty.tags.isEmpty || !dirty.areas.isEmpty || !dirty.projects.isEmpty
                     || !dirty.headings.isEmpty || !dirty.tasks.isEmpty || !dirty.checklistItems.isEmpty
@@ -782,9 +894,13 @@ public actor FirebaseCloudSyncService {
                     let sender = fields["senderDeviceId"].flatMap(Self.unwrapFirestoreValue) as? String
                     let pulseAt = Self.asInt64(fields["pulseAt"].flatMap(Self.unwrapFirestoreValue)) ?? 0
                     if pulseAt > 0 && pulseAt != lastObservedRemotePulseAt {
-                        lastObservedRemotePulseAt = pulseAt
-                        if sender != current.deviceId {
-                            await pullIncrementalDeltasOnly(localOnlyMode: false)
+                        if sender == current.deviceId {
+                            lastObservedRemotePulseAt = pulseAt
+                        } else {
+                            let ok = await pullIncrementalDeltasOnly(localOnlyMode: false)
+                            if ok {
+                                lastObservedRemotePulseAt = pulseAt
+                            }
                             return
                         }
                     }
@@ -794,9 +910,11 @@ public actor FirebaseCloudSyncService {
             // Ignore transient pulse read errors
         }
 
-        if nowMillis - lastFullFallbackPullMillis >= 45_000 {
-            lastFullFallbackPullMillis = nowMillis
-            await pullIncrementalDeltasOnly(localOnlyMode: false)
+        if nowMillis - lastFullFallbackPullMillis >= 20_000 {
+            let ok = await pullIncrementalDeltasOnly(localOnlyMode: false)
+            if ok {
+                lastFullFallbackPullMillis = nowMillis
+            }
         }
     }
 
@@ -804,9 +922,10 @@ public actor FirebaseCloudSyncService {
 
     public func syncBidirectionalDeltas(
         forceFullPull: Bool = false,
-        pullBeforePush: Bool = false,
+        pullBeforePush: Bool = true,
         localOnlyMode: Bool
     ) async {
+        let _ = pullBeforePush
         if localOnlyMode {
             stopLiveWakeStream()
             updateSnapshot(patchStatus: .offline, error: nil)
@@ -820,15 +939,13 @@ public actor FirebaseCloudSyncService {
             if forceFullPull {
                 pendingForceFullPull = true
             }
-            if pullBeforePush {
-                pendingPullBeforePush = true
-            }
+            pendingPullBeforePush = true
             return
         }
 
         isSyncing = true
+        defer { isSyncing = false }
         var runForceFull = forceFullPull
-        var runPullFirst = pullBeforePush
 
         while true {
             pendingResyncRequested = false
@@ -846,92 +963,108 @@ public actor FirebaseCloudSyncService {
 
                 var firestoreMax: Int64 = 0
                 var ntfyMax: Int64 = 0
+                var firestorePullSucceeded = false
+                var pullError: Error?
 
-                if runPullFirst {
-                    // 1. Pull remote deltas FIRST on sign-in so newer cloud records reconcile before local dirty push
+                // 1. ALWAYS pull remote deltas FIRST so newer cloud records reconcile before local dirty push
+                do {
                     firestoreMax = try await pullDeltasFromFirestore(
                         uid: current.uid,
                         idToken: validToken,
                         projectId: config.projectId,
-                        sinceTimestamp: safeQuerySince
+                        sinceTimestamp: safeQuerySince,
+                        forceFullPull: runForceFull
                     )
-                    if !current.channelTopic.isEmpty && cursor == 0 {
-                        ntfyMax = (try? await pollSecondaryNtfyRelay(
-                            uid: current.uid,
-                            topic: current.channelTopic,
-                            deviceId: current.deviceId,
-                            sinceTimestamp: safeQuerySince,
-                            fetchAllHistory: runForceFull
-                        )) ?? 0
-                    }
-
-                    // 2. Push remaining local dirty records to primary Firestore FIRST, then async ntfy wake
-                    let dirty = try database.fetchDirtyBatch()
-                    try await pushDirtyBatchToFirestore(
-                        dirty: dirty,
-                        uid: current.uid,
-                        deviceId: current.deviceId,
-                        idToken: validToken,
-                        projectId: config.projectId
-                    )
-                    let uidCopy = current.uid
-                    let topicCopy = current.channelTopic
-                    let deviceCopy = current.deviceId
-                    Task {
-                        await self.broadcastDirtyBatchToNtfyTopics(
-                            dirty: dirty,
-                            uid: uidCopy,
-                            channelTopic: topicCopy,
-                            deviceId: deviceCopy
-                        )
-                    }
-                } else {
-                    // 1. Push local dirty batch to primary Firestore FIRST, then async ntfy wake
-                    let dirty = try database.fetchDirtyBatch()
-                    try await pushDirtyBatchToFirestore(
-                        dirty: dirty,
-                        uid: current.uid,
-                        deviceId: current.deviceId,
-                        idToken: validToken,
-                        projectId: config.projectId
-                    )
-                    let uidCopy = current.uid
-                    let topicCopy = current.channelTopic
-                    let deviceCopy = current.deviceId
-                    Task {
-                        await self.broadcastDirtyBatchToNtfyTopics(
-                            dirty: dirty,
-                            uid: uidCopy,
-                            channelTopic: topicCopy,
-                            deviceId: deviceCopy
-                        )
-                    }
-
-                    // 2. Pull remote deltas from primary Firestore in parallel across 8 collections
-                    firestoreMax = try await pullDeltasFromFirestore(
-                        uid: current.uid,
-                        idToken: validToken,
-                        projectId: config.projectId,
-                        sinceTimestamp: safeQuerySince
-                    )
+                    firestorePullSucceeded = true
+                } catch {
+                    pullError = error
                 }
 
-                // Promote any due UPCOMING tasks pulled from remote into TODAY cleanly
+                // Poll legacy secondary ntfy channels on fresh sign-in / full pull or when Firestore pull failed
+                if cursor == 0 || !firestorePullSucceeded {
+                    let legacyTopics = Self.deriveLegacySyncTopics(
+                        uid: current.uid,
+                        email: current.email,
+                        primaryTopic: current.channelTopic
+                    )
+                    for legacyTopic in legacyTopics {
+                        let relayedMax = (try? await pollSecondaryNtfyRelay(
+                            uid: current.uid,
+                            topic: legacyTopic,
+                            deviceId: current.deviceId,
+                            sinceTimestamp: safeQuerySince,
+                            fetchAllHistory: runForceFull || cursor == 0
+                        )) ?? 0
+                        ntfyMax = max(ntfyMax, relayedMax)
+                    }
+                }
+
+                // 2. Refresh stale offline dirty timestamps (>30s old) on surviving local edits so reconnect pushes win cleanly
+                if firestorePullSucceeded {
+                    _ = try? database.restampStaleOfflineDirtyRecords(olderThanMillis: Self.offlineRestampThresholdMillis)
+                }
+
+                // 3. Push remaining local dirty records to primary Firestore, then broadcast instant ntfy wake
+                let dirty = try database.fetchDirtyBatch()
+                let hasDirty = !dirty.tags.isEmpty || !dirty.areas.isEmpty || !dirty.projects.isEmpty
+                    || !dirty.headings.isEmpty || !dirty.tasks.isEmpty || !dirty.checklistItems.isEmpty
+                    || !dirty.attachments.isEmpty || !dirty.projectTemplates.isEmpty
+
+                if hasDirty {
+                    do {
+                        try await pushDirtyBatchToFirestore(
+                            dirty: dirty,
+                            uid: current.uid,
+                            deviceId: current.deviceId,
+                            idToken: validToken,
+                            projectId: config.projectId
+                        )
+                        let uidCopy = current.uid
+                        let emailCopy = current.email
+                        let topicCopy = current.channelTopic
+                        let deviceCopy = current.deviceId
+                        Task {
+                            await self.broadcastDirtyBatchToNtfyTopics(
+                                dirty: dirty,
+                                uid: uidCopy,
+                                email: emailCopy,
+                                channelTopic: topicCopy,
+                                deviceId: deviceCopy
+                            )
+                        }
+                    } catch {
+                        // Broadcast over secondary relay while keeping local dirty flags intact
+                        await broadcastDirtyBatchToNtfyTopics(
+                            dirty: dirty,
+                            uid: current.uid,
+                            email: current.email,
+                            channelTopic: current.channelTopic,
+                            deviceId: current.deviceId
+                        )
+                        if !firestorePullSucceeded {
+                            throw error
+                        }
+                    }
+                } else if let pullError, ntfyMax == 0 {
+                    throw pullError
+                }
+
+                // 4. Promote any due UPCOMING tasks pulled from remote into TODAY cleanly
                 _ = try? database.performMidnightRollover()
 
                 let now = Int64(Date().timeIntervalSince1970 * 1000.0)
-                lastFullFallbackPullMillis = now
-                let observedMax = max(firestoreMax, ntfyMax)
-                let nextCursor: Int64
-                if observedMax > cursor {
-                    nextCursor = observedMax
-                } else if cursor == 0 {
-                    nextCursor = now
-                } else {
-                    nextCursor = cursor
+                if firestorePullSucceeded {
+                    lastFullFallbackPullMillis = now
+                    let nextCursor: Int64
+                    if firestoreMax > cursor {
+                        nextCursor = min(firestoreMax, now + 60_000)
+                    } else if cursor == 0 {
+                        nextCursor = now
+                    } else {
+                        nextCursor = cursor
+                    }
+                    saveLastSyncCursor(uid: current.uid, timestamp: nextCursor)
                 }
-
-                saveLastSyncCursor(uid: current.uid, timestamp: nextCursor)
                 saveLastWallSyncTimestamp(uid: current.uid, timestamp: now)
                 updateSnapshot(
                     CloudSyncSnapshot(
@@ -949,13 +1082,10 @@ public actor FirebaseCloudSyncService {
 
             if pendingResyncRequested && !localOnlyMode {
                 runForceFull = pendingForceFullPull
-                runPullFirst = pendingPullBeforePush
                 continue
             }
             break
         }
-
-        isSyncing = false
     }
 
     private func pushDirtyBatchToFirestore(
@@ -969,7 +1099,7 @@ public actor FirebaseCloudSyncService {
         let baseDocPrefix = "projects/\(projectId)/databases/(default)/documents/users/\(uid)"
 
         for tag in dirty.tags {
-            writes.append(Self.makeUpdateWrite(path: "\(baseDocPrefix)/tags/\(tag.id)", fields: [
+            writes.append(Self.makeEntityUpdateWrite(path: "\(baseDocPrefix)/tags/\(tag.id)", fields: [
                 "id": Self.fsString(tag.id),
                 "title": Self.fsString(tag.title),
                 "parentTagId": Self.fsNullableString(tag.parentTagId),
@@ -982,7 +1112,7 @@ public actor FirebaseCloudSyncService {
         }
 
         for area in dirty.areas {
-            writes.append(Self.makeUpdateWrite(path: "\(baseDocPrefix)/areas/\(area.id)", fields: [
+            writes.append(Self.makeEntityUpdateWrite(path: "\(baseDocPrefix)/areas/\(area.id)", fields: [
                 "id": Self.fsString(area.id),
                 "title": Self.fsString(area.title),
                 "sortOrder": Self.fsDouble(area.sortOrder),
@@ -994,7 +1124,8 @@ public actor FirebaseCloudSyncService {
         }
 
         for proj in dirty.projects {
-            writes.append(Self.makeUpdateWrite(path: "\(baseDocPrefix)/projects/\(proj.id)", fields: [
+            let isPurged = proj.isDeleted && proj.title.isEmpty && proj.notes.isEmpty
+            writes.append(Self.makeEntityUpdateWrite(path: "\(baseDocPrefix)/projects/\(proj.id)", fields: [
                 "id": Self.fsString(proj.id),
                 "areaId": Self.fsNullableString(proj.areaId),
                 "title": Self.fsString(proj.title),
@@ -1009,12 +1140,13 @@ public actor FirebaseCloudSyncService {
                 "tagIds": Self.fsStringArray(proj.tagIds),
                 "createdAt": Self.fsInt(proj.createdAt),
                 "updatedAt": Self.fsInt(proj.updatedAt),
-                "isDeleted": Self.fsBool(proj.isDeleted)
+                "isDeleted": Self.fsBool(proj.isDeleted),
+                "purgedFromTrash": Self.fsBool(isPurged)
             ]))
         }
 
         for head in dirty.headings {
-            writes.append(Self.makeUpdateWrite(path: "\(baseDocPrefix)/headings/\(head.id)", fields: [
+            writes.append(Self.makeEntityUpdateWrite(path: "\(baseDocPrefix)/headings/\(head.id)", fields: [
                 "id": Self.fsString(head.id),
                 "projectId": Self.fsString(head.projectId),
                 "title": Self.fsString(head.title),
@@ -1032,7 +1164,8 @@ public actor FirebaseCloudSyncService {
                 guard let d = try? jsonEncoder.encode($0) else { return nil }
                 return String(data: d, encoding: .utf8)
             }
-            writes.append(Self.makeUpdateWrite(path: "\(baseDocPrefix)/tasks/\(task.id)", fields: [
+            let isPurged = task.isDeleted && task.title.isEmpty && task.notes.isEmpty
+            writes.append(Self.makeEntityUpdateWrite(path: "\(baseDocPrefix)/tasks/\(task.id)", fields: [
                 "id": Self.fsString(task.id),
                 "title": Self.fsString(task.title),
                 "notes": Self.fsString(task.notes),
@@ -1052,12 +1185,13 @@ public actor FirebaseCloudSyncService {
                 "tagIds": Self.fsStringArray(task.tagIds),
                 "createdAt": Self.fsInt(task.createdAt),
                 "updatedAt": Self.fsInt(task.updatedAt),
-                "isDeleted": Self.fsBool(task.isDeleted)
+                "isDeleted": Self.fsBool(task.isDeleted),
+                "purgedFromTrash": Self.fsBool(isPurged)
             ]))
         }
 
         for chk in dirty.checklistItems {
-            writes.append(Self.makeUpdateWrite(path: "\(baseDocPrefix)/checklist_items/\(chk.id)", fields: [
+            writes.append(Self.makeEntityUpdateWrite(path: "\(baseDocPrefix)/checklist_items/\(chk.id)", fields: [
                 "id": Self.fsString(chk.id),
                 "taskId": Self.fsString(chk.taskId),
                 "title": Self.fsString(chk.title),
@@ -1070,7 +1204,7 @@ public actor FirebaseCloudSyncService {
         }
 
         for tmpl in dirty.projectTemplates {
-            writes.append(Self.makeUpdateWrite(path: "\(baseDocPrefix)/project_templates/\(tmpl.id)", fields: [
+            writes.append(Self.makeEntityUpdateWrite(path: "\(baseDocPrefix)/project_templates/\(tmpl.id)", fields: [
                 "id": Self.fsString(tmpl.id),
                 "title": Self.fsString(tmpl.title),
                 "notes": Self.fsString(tmpl.notes),
@@ -1087,7 +1221,7 @@ public actor FirebaseCloudSyncService {
         guard !writes.isEmpty || !dirty.attachments.isEmpty else { return }
 
         let pulseNow = Int64(Date().timeIntervalSince1970 * 1000.0)
-        let pulseWrite = Self.makeUpdateWrite(
+        let pulseWrite = Self.makeEntityUpdateWrite(
             path: "\(baseDocPrefix)/sync_meta/pulse",
             fields: [
                 "pulseAt": Self.fsInt(pulseNow),
@@ -1154,9 +1288,99 @@ public actor FirebaseCloudSyncService {
         try database.markDirtyBatchSynced(dirty)
     }
 
+    public static func buildLegacyCompatibleNtfyChunks(
+        uid: String,
+        deviceId: String,
+        batchTimestamp: Int64,
+        collections: [(key: String, items: [[String: Any]])],
+        maxBytes: Int = maxNtfyPayloadBytes,
+        maxChunks: Int = 6
+    ) -> [Data] {
+        var fullBatch: [String: Any] = [
+            "userId": uid,
+            "deviceId": deviceId,
+            "batchTimestamp": batchTimestamp
+        ]
+        var nonEmptyCollections: [(key: String, items: [[String: Any]])] = []
+        for entry in collections where !entry.items.isEmpty {
+            fullBatch[entry.key] = entry.items
+            nonEmptyCollections.append(entry)
+        }
+        guard !nonEmptyCollections.isEmpty else { return [] }
+
+        if let single = try? JSONSerialization.data(withJSONObject: fullBatch), single.count <= maxBytes {
+            return [single]
+        }
+
+        var chunks: [Data] = []
+        var currentMap: [String: [[String: Any]]] = [:]
+        var currentHasAny = false
+
+        func serializeCurrent() -> Data? {
+            guard currentHasAny else { return nil }
+            var obj: [String: Any] = [
+                "userId": uid,
+                "deviceId": deviceId,
+                "batchTimestamp": batchTimestamp
+            ]
+            for (k, arr) in currentMap where !arr.isEmpty {
+                obj[k] = arr
+            }
+            return try? JSONSerialization.data(withJSONObject: obj)
+        }
+
+        outer: for (colKey, items) in nonEmptyCollections {
+            for item in items {
+                var candidateMap = currentMap
+                candidateMap[colKey, default: []].append(item)
+                var candidateObj: [String: Any] = [
+                    "userId": uid,
+                    "deviceId": deviceId,
+                    "batchTimestamp": batchTimestamp
+                ]
+                for (k, arr) in candidateMap where !arr.isEmpty {
+                    candidateObj[k] = arr
+                }
+                if let candidateData = try? JSONSerialization.data(withJSONObject: candidateObj),
+                   candidateData.count <= maxBytes {
+                    currentMap = candidateMap
+                    currentHasAny = true
+                } else {
+                    if let flushed = serializeCurrent() {
+                        chunks.append(flushed)
+                        if chunks.count >= maxChunks {
+                            currentHasAny = false
+                            break outer
+                        }
+                    }
+                    currentMap = [:]
+                    currentHasAny = false
+
+                    let soloObj: [String: Any] = [
+                        "userId": uid,
+                        "deviceId": deviceId,
+                        "batchTimestamp": batchTimestamp,
+                        colKey: [item]
+                    ]
+                    if let soloData = try? JSONSerialization.data(withJSONObject: soloObj),
+                       soloData.count <= maxBytes {
+                        currentMap = [colKey: [item]]
+                        currentHasAny = true
+                    }
+                }
+            }
+        }
+
+        if chunks.count < maxChunks, let tail = serializeCurrent() {
+            chunks.append(tail)
+        }
+        return chunks
+    }
+
     private func broadcastDirtyBatchToNtfyTopics(
         dirty: SyncDirtyBatch,
         uid: String,
+        email: String?,
         channelTopic: String,
         deviceId: String
     ) async {
@@ -1168,8 +1392,25 @@ public actor FirebaseCloudSyncService {
         let now = Int64(Date().timeIntervalSince1970 * 1000.0)
         let jsonEncoder = JSONEncoder()
 
+        func sanitize(_ dict: [String: Any]) -> [String: Any] {
+            var out: [String: Any] = [:]
+            for (k, v) in dict {
+                let mirror = Mirror(reflecting: v)
+                if mirror.displayStyle == .optional {
+                    if let child = mirror.children.first {
+                        out[k] = child.value
+                    } else {
+                        out[k] = NSNull()
+                    }
+                } else {
+                    out[k] = v
+                }
+            }
+            return out
+        }
+
         let tagMaps: [[String: Any]] = dirty.tags.map { tag in
-            [
+            sanitize([
                 "id": tag.id,
                 "title": tag.title,
                 "parentTagId": tag.parentTagId as Any,
@@ -1178,10 +1419,10 @@ public actor FirebaseCloudSyncService {
                 "createdAt": tag.createdAt,
                 "updatedAt": tag.updatedAt,
                 "isDeleted": tag.isDeleted
-            ]
+            ])
         }
         let areaMaps: [[String: Any]] = dirty.areas.map { area in
-            [
+            sanitize([
                 "id": area.id,
                 "title": area.title,
                 "sortOrder": area.sortOrder,
@@ -1189,10 +1430,11 @@ public actor FirebaseCloudSyncService {
                 "createdAt": area.createdAt,
                 "updatedAt": area.updatedAt,
                 "isDeleted": area.isDeleted
-            ]
+            ])
         }
         let projMaps: [[String: Any]] = dirty.projects.map { proj in
-            [
+            let isPurged = proj.isDeleted && proj.title.isEmpty && proj.notes.isEmpty
+            return sanitize([
                 "id": proj.id,
                 "areaId": proj.areaId as Any,
                 "title": proj.title,
@@ -1207,11 +1449,12 @@ public actor FirebaseCloudSyncService {
                 "tagIds": proj.tagIds,
                 "createdAt": proj.createdAt,
                 "updatedAt": proj.updatedAt,
-                "isDeleted": proj.isDeleted
-            ]
+                "isDeleted": proj.isDeleted,
+                "purgedFromTrash": isPurged
+            ])
         }
         let headMaps: [[String: Any]] = dirty.headings.map { head in
-            [
+            sanitize([
                 "id": head.id,
                 "projectId": head.projectId,
                 "title": head.title,
@@ -1220,14 +1463,15 @@ public actor FirebaseCloudSyncService {
                 "createdAt": head.createdAt,
                 "updatedAt": head.updatedAt,
                 "isDeleted": head.isDeleted
-            ]
+            ])
         }
         let taskMaps: [[String: Any]] = dirty.tasks.map { task in
             let recString: String? = task.recurrenceRule.flatMap {
                 guard let d = try? jsonEncoder.encode($0) else { return nil }
                 return String(data: d, encoding: .utf8)
             }
-            return [
+            let isPurged = task.isDeleted && task.title.isEmpty && task.notes.isEmpty
+            return sanitize([
                 "id": task.id,
                 "title": task.title,
                 "notes": task.notes,
@@ -1247,11 +1491,12 @@ public actor FirebaseCloudSyncService {
                 "tagIds": task.tagIds,
                 "createdAt": task.createdAt,
                 "updatedAt": task.updatedAt,
-                "isDeleted": task.isDeleted
-            ]
+                "isDeleted": task.isDeleted,
+                "purgedFromTrash": isPurged
+            ])
         }
         let chkMaps: [[String: Any]] = dirty.checklistItems.map { chk in
-            [
+            sanitize([
                 "id": chk.id,
                 "taskId": chk.taskId,
                 "title": chk.title,
@@ -1260,10 +1505,10 @@ public actor FirebaseCloudSyncService {
                 "createdAt": chk.createdAt,
                 "updatedAt": chk.updatedAt,
                 "isDeleted": chk.isDeleted
-            ]
+            ])
         }
         let attMaps: [[String: Any]] = dirty.attachments.map { att in
-            [
+            sanitize([
                 "id": att.id,
                 "taskId": att.taskId as Any,
                 "projectId": att.projectId as Any,
@@ -1274,10 +1519,10 @@ public actor FirebaseCloudSyncService {
                 "createdAt": att.createdAt,
                 "updatedAt": att.updatedAt,
                 "isDeleted": att.isDeleted
-            ]
+            ])
         }
         let tmplMaps: [[String: Any]] = dirty.projectTemplates.map { tmpl in
-            [
+            sanitize([
                 "id": tmpl.id,
                 "title": tmpl.title,
                 "notes": tmpl.notes,
@@ -1288,149 +1533,226 @@ public actor FirebaseCloudSyncService {
                 "createdAt": tmpl.createdAt,
                 "updatedAt": tmpl.updatedAt,
                 "isDeleted": tmpl.isDeleted
-            ]
+            ])
         }
 
-        func sanitize(_ dict: [String: Any]) -> [String: Any] {
-            var out: [String: Any] = [:]
-            for (k, v) in dict {
-                let mirror = Mirror(reflecting: v)
-                if mirror.displayStyle == .optional {
-                    if let child = mirror.children.first {
-                        out[k] = child.value
-                    } else {
-                        out[k] = NSNull()
-                    }
-                } else {
-                    out[k] = v
-                }
-            }
-            return out
-        }
+        let orderedCollections: [(key: String, items: [[String: Any]])] = [
+            ("tags", tagMaps),
+            ("areas", areaMaps),
+            ("projects", projMaps),
+            ("headings", headMaps),
+            ("tasks", taskMaps),
+            ("checklistItems", chkMaps),
+            ("attachments", attMaps),
+            ("projectTemplates", tmplMaps)
+        ]
 
         var fullBatch: [String: Any] = [
             "userId": uid,
             "deviceId": deviceId,
             "batchTimestamp": now
         ]
-        if !tagMaps.isEmpty { fullBatch["tags"] = tagMaps.map(sanitize) }
-        if !areaMaps.isEmpty { fullBatch["areas"] = areaMaps.map(sanitize) }
-        if !projMaps.isEmpty { fullBatch["projects"] = projMaps.map(sanitize) }
-        if !headMaps.isEmpty { fullBatch["headings"] = headMaps.map(sanitize) }
-        if !taskMaps.isEmpty { fullBatch["tasks"] = taskMaps.map(sanitize) }
-        if !chkMaps.isEmpty { fullBatch["checklistItems"] = chkMaps.map(sanitize) }
-        if !attMaps.isEmpty { fullBatch["attachments"] = attMaps.map(sanitize) }
-        if !tmplMaps.isEmpty { fullBatch["projectTemplates"] = tmplMaps.map(sanitize) }
-
-        let bodyToSend: Data
-        if let single = try? JSONSerialization.data(withJSONObject: fullBatch), single.count < 3800 {
-            bodyToSend = single
-        } else if let wakeOnlyData = try? JSONSerialization.data(withJSONObject: [
-            "userId": uid,
-            "deviceId": deviceId,
-            "batchTimestamp": now,
-            "wakeOnly": true
-        ]) {
-            bodyToSend = wakeOnlyData
-        } else {
-            return
+        for (k, arr) in orderedCollections where !arr.isEmpty {
+            fullBatch[k] = arr
         }
 
+        // 1. v2.x UID wake topic (`tb_uid_*`): full batch if compact, else lightweight `wakeOnly: true`
         let uidWakeTopic = Self.deriveUidWakeTopic(uid: uid)
-        var targetTopics: [String] = []
-        if !uidWakeTopic.isEmpty { targetTopics.append(uidWakeTopic) }
-        if !channelTopic.isEmpty && !targetTopics.contains(channelTopic) {
-            targetTopics.append(channelTopic)
+        if !uidWakeTopic.isEmpty {
+            let uidPayload: Data?
+            if let single = try? JSONSerialization.data(withJSONObject: fullBatch),
+               single.count < Self.maxNtfyPayloadBytes {
+                uidPayload = single
+            } else {
+                uidPayload = try? JSONSerialization.data(withJSONObject: [
+                    "userId": uid,
+                    "deviceId": deviceId,
+                    "batchTimestamp": now,
+                    "wakeOnly": true
+                ])
+            }
+            if let uidPayload {
+                await postNtfyPayload(topic: uidWakeTopic, body: uidPayload)
+            }
         }
 
-        for topic in targetTopics {
-            guard let encoded = topic.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-                  let url = URL(string: "https://ntfy.sh/\(encoded)") else { continue }
-            var req = URLRequest(url: url)
-            req.httpMethod = "POST"
-            req.timeoutInterval = 2.5
-            req.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")
-            req.setValue("yes", forHTTPHeaderField: "Cache")
-            req.httpBody = bodyToSend
-            _ = try? await session.data(for: req)
+        // 2. Legacy v1.8-compatible `tb_sync_*` topics: NEVER send `wakeOnly: true` (v1.8 ignores empty batches!);
+        //    instead send chunked entity payloads so v1.8 Android & PWA peers apply deltas immediately in <200ms!
+        let legacyChunks = Self.buildLegacyCompatibleNtfyChunks(
+            uid: uid,
+            deviceId: deviceId,
+            batchTimestamp: now,
+            collections: orderedCollections
+        )
+        guard !legacyChunks.isEmpty else { return }
+        let legacyTopics = Self.deriveLegacySyncTopics(uid: uid, email: email, primaryTopic: channelTopic)
+        for topic in legacyTopics {
+            for chunk in legacyChunks {
+                await postNtfyPayload(topic: topic, body: chunk)
+            }
         }
     }
 
-    private func pullDeltasFromFirestore(uid: String, idToken: String, projectId: String, sinceTimestamp: Int64) async throws -> Int64 {
+    private func postNtfyPayload(topic: String, body: Data) async {
+        guard let encoded = topic.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "https://ntfy.sh/\(encoded)") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 2.5
+        req.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        req.setValue("yes", forHTTPHeaderField: "Cache")
+        req.httpBody = body
+        _ = try? await session.data(for: req)
+    }
+
+    private func pullDeltasFromFirestore(
+        uid: String,
+        idToken: String,
+        projectId: String,
+        sinceTimestamp: Int64,
+        forceFullPull: Bool = false
+    ) async throws -> Int64 {
+        let reconcileKey = Self.reconcileV222DefaultsKey(uid: uid)
+        let needsReconcileV222 = !UserDefaults.standard.bool(forKey: reconcileKey)
+        let fullAll = forceFullPull || needsReconcileV222 || sinceTimestamp <= 0
+
         let attBackfillKey = Self.attachmentBackfillDefaultsKey(uid: uid)
         let needsAttBackfill = !UserDefaults.standard.bool(forKey: attBackfillKey)
-        let attSince: Int64 = needsAttBackfill ? 0 : sinceTimestamp
 
         let tmplBackfillKey = Self.templateBackfillDefaultsKey(uid: uid)
         let needsTmplBackfill = !UserDefaults.standard.bool(forKey: tmplBackfillKey)
-        let tmplSince: Int64 = needsTmplBackfill ? 0 : sinceTimestamp
 
         let projReviewBackfillKey = Self.projectReviewBackfillDefaultsKey(uid: uid)
         let needsProjReviewBackfill = !UserDefaults.standard.bool(forKey: projReviewBackfillKey)
-        let projSince: Int64 = needsProjReviewBackfill ? 0 : sinceTimestamp
 
-        async let rawTags = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "tags", since: sinceTimestamp)
-        async let rawAreas = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "areas", since: sinceTimestamp)
+        let orphanFlags = (try? database.missingContainerFlags()) ?? (false, false, false)
+
+        func collectionSince(_ collection: String, forceZero: Bool = false) -> Int64 {
+            if fullAll || forceZero { return 0 }
+            let colCursor = loadCollectionSyncCursor(uid: uid, collection: collection)
+            if colCursor <= 0 { return 0 }
+            return max(0, colCursor - Self.clockSkewOverlapMillis)
+        }
+
+        let tagsSince = collectionSince("tags")
+        let areasSince = collectionSince("areas", forceZero: orphanFlags.hasOrphanArea)
+        let projSince = collectionSince("projects", forceZero: needsProjReviewBackfill || orphanFlags.hasOrphanProject)
+        let headSince = collectionSince("headings", forceZero: orphanFlags.hasOrphanHeading)
+        let tasksSince = collectionSince("tasks")
+        let chkSince = collectionSince("checklist_items")
+        let attSince = collectionSince("attachments", forceZero: needsAttBackfill)
+        let tmplSince = collectionSince("project_templates", forceZero: needsTmplBackfill)
+
+        async let rawTags = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "tags", since: tagsSince)
+        async let rawAreas = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "areas", since: areasSince)
         async let rawProjects = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "projects", since: projSince)
-        async let rawHeadings = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "headings", since: sinceTimestamp)
-        async let rawTasks = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "tasks", since: sinceTimestamp)
-        async let rawChecklists = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "checklist_items", since: sinceTimestamp)
+        async let rawHeadings = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "headings", since: headSince)
+        async let rawTasks = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "tasks", since: tasksSince)
+        async let rawChecklists = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "checklist_items", since: chkSince)
         async let rawAttachments = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "attachments", since: attSince)
-        async let rawTemplates = queryCollection(projectId: projectId, uid: uid, idToken: idToken, collection: "project_templates", since: tmplSince)
+        async let rawTemplates = queryCollectionOptional(projectId: projectId, uid: uid, idToken: idToken, collection: "project_templates", since: tmplSince)
 
-        let (tagMaps, areaMaps, projMaps, headMaps, taskMaps, chkMaps, attMaps, tmplMaps) = try await (
+        let (tagMaps, areaMaps, projMaps, headMaps, taskMaps, chkMaps, attMaps, tmplResult) = try await (
             rawTags, rawAreas, rawProjects, rawHeadings, rawTasks, rawChecklists, rawAttachments, rawTemplates
         )
+        let tmplMaps = tmplResult.docs
 
         let tags = tagMaps.compactMap(Self.parseTag)
         let areas = areaMaps.compactMap(Self.parseArea)
         let projects = projMaps.compactMap(Self.parseProject)
         let headings = headMaps.compactMap(Self.parseHeading)
         var taskTagIds: [String: [String]] = [:]
+        var omittedTimeblockTaskIds = Set<String>()
         let tasks = taskMaps.compactMap { map -> TaskItem? in
-            guard let (t, tids) = Self.parseTask(map) else { return nil }
-            taskTagIds[t.id] = tids
-            return t
+            guard let parsed = Self.parseTaskWithHints(map) else { return nil }
+            taskTagIds[parsed.task.id] = parsed.tagIds
+            if parsed.omittedTimeblock {
+                omittedTimeblockTaskIds.insert(parsed.task.id)
+            }
+            return parsed.task
         }
         let checklists = chkMaps.compactMap(Self.parseChecklist)
         let attachments = attMaps.compactMap(Self.parseAttachment)
         let projectTemplates = tmplMaps.compactMap(Self.parseProjectTemplate)
 
-        if tags.isEmpty && areas.isEmpty && projects.isEmpty && headings.isEmpty && tasks.isEmpty && checklists.isEmpty && attachments.isEmpty && projectTemplates.isEmpty {
-            if needsAttBackfill {
-                UserDefaults.standard.set(true, forKey: attBackfillKey)
+        let now = Int64(Date().timeIntervalSince1970 * 1000.0)
+        let maxAllowed = now + 60_000
+
+        func commitCollectionCursor(_ collection: String, maxRemoteUpdatedAt: Int64?) {
+            let prev = loadCollectionSyncCursor(uid: uid, collection: collection)
+            if let maxRemoteUpdatedAt, maxRemoteUpdatedAt > 0 {
+                let clamped = min(maxRemoteUpdatedAt, maxAllowed)
+                if clamped > prev {
+                    saveCollectionSyncCursor(uid: uid, collection: collection, timestamp: clamped)
+                }
+            } else if prev <= 0 {
+                saveCollectionSyncCursor(uid: uid, collection: collection, timestamp: now)
             }
+        }
+
+        let appliedMax: Int64
+        if tags.isEmpty && areas.isEmpty && projects.isEmpty && headings.isEmpty && tasks.isEmpty && checklists.isEmpty && attachments.isEmpty && projectTemplates.isEmpty {
+            appliedMax = sinceTimestamp
+        } else {
+            let batch = RemoteDeltaBatch(
+                tags: tags,
+                areas: areas,
+                projects: projects,
+                headings: headings,
+                tasks: tasks,
+                taskTagIdsByTaskId: taskTagIds,
+                taskOmittedTimeblockTaskIds: omittedTimeblockTaskIds,
+                checklistItems: checklists,
+                attachments: attachments,
+                projectTemplates: projectTemplates
+            )
+            appliedMax = try database.applyRemoteDeltas(batch)
+        }
+
+        commitCollectionCursor("tags", maxRemoteUpdatedAt: tags.map(\.updatedAt).max())
+        commitCollectionCursor("areas", maxRemoteUpdatedAt: areas.map(\.updatedAt).max())
+        commitCollectionCursor("projects", maxRemoteUpdatedAt: projects.map(\.updatedAt).max())
+        commitCollectionCursor("headings", maxRemoteUpdatedAt: headings.map(\.updatedAt).max())
+        commitCollectionCursor("tasks", maxRemoteUpdatedAt: tasks.map(\.updatedAt).max())
+        commitCollectionCursor("checklist_items", maxRemoteUpdatedAt: checklists.map(\.updatedAt).max())
+        commitCollectionCursor("attachments", maxRemoteUpdatedAt: attachments.map(\.attachment.updatedAt).max())
+        if tmplResult.succeeded {
+            commitCollectionCursor("project_templates", maxRemoteUpdatedAt: projectTemplates.map(\.updatedAt).max())
             if needsTmplBackfill {
                 UserDefaults.standard.set(true, forKey: tmplBackfillKey)
             }
-            if needsProjReviewBackfill {
-                UserDefaults.standard.set(true, forKey: projReviewBackfillKey)
-            }
-            return sinceTimestamp
         }
-
-        let batch = RemoteDeltaBatch(
-            tags: tags,
-            areas: areas,
-            projects: projects,
-            headings: headings,
-            tasks: tasks,
-            taskTagIdsByTaskId: taskTagIds,
-            checklistItems: checklists,
-            attachments: attachments,
-            projectTemplates: projectTemplates
-        )
-        let appliedMax = try database.applyRemoteDeltas(batch)
         if needsAttBackfill {
             UserDefaults.standard.set(true, forKey: attBackfillKey)
-        }
-        if needsTmplBackfill {
-            UserDefaults.standard.set(true, forKey: tmplBackfillKey)
         }
         if needsProjReviewBackfill {
             UserDefaults.standard.set(true, forKey: projReviewBackfillKey)
         }
+        if needsReconcileV222 {
+            UserDefaults.standard.set(true, forKey: reconcileKey)
+        }
         return appliedMax
+    }
+
+    private func queryCollectionOptional(
+        projectId: String,
+        uid: String,
+        idToken: String,
+        collection: String,
+        since: Int64
+    ) async -> (docs: [[String: Any]], succeeded: Bool) {
+        do {
+            let rows = try await queryCollection(
+                projectId: projectId,
+                uid: uid,
+                idToken: idToken,
+                collection: collection,
+                since: since
+            )
+            return (rows, true)
+        } catch {
+            return ([], false)
+        }
     }
 
     private func queryCollection(
@@ -1481,6 +1803,12 @@ public actor FirebaseCloudSyncService {
                 plain["id"] = String(docId)
             }
             for (k, v) in fields {
+                if v["nullValue"] != nil {
+                    if k != "id" {
+                        plain[k] = NSNull()
+                    }
+                    continue
+                }
                 if let val = Self.unwrapFirestoreValue(v) {
                     if k == "id", let s = val as? String, s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         continue
@@ -1532,10 +1860,14 @@ public actor FirebaseCloudSyncService {
             let projects = (batch["projects"] as? [[String: Any]] ?? []).compactMap(Self.parseProject)
             let headings = (batch["headings"] as? [[String: Any]] ?? []).compactMap(Self.parseHeading)
             var taskTags: [String: [String]] = [:]
+            var omittedTimeblockTaskIds = Set<String>()
             let tasks = (batch["tasks"] as? [[String: Any]] ?? []).compactMap { m -> TaskItem? in
-                guard let (t, tids) = Self.parseTask(m) else { return nil }
-                taskTags[t.id] = tids
-                return t
+                guard let parsed = Self.parseTaskWithHints(m) else { return nil }
+                taskTags[parsed.task.id] = parsed.tagIds
+                if parsed.omittedTimeblock {
+                    omittedTimeblockTaskIds.insert(parsed.task.id)
+                }
+                return parsed.task
             }
             let checklists = (batch["checklistItems"] as? [[String: Any]] ?? []).compactMap(Self.parseChecklist)
             let attachments = (batch["attachments"] as? [[String: Any]] ?? []).compactMap(Self.parseAttachment)
@@ -1549,6 +1881,7 @@ public actor FirebaseCloudSyncService {
                     headings: headings,
                     tasks: tasks,
                     taskTagIdsByTaskId: taskTags,
+                    taskOmittedTimeblockTaskIds: omittedTimeblockTaskIds,
                     checklistItems: checklists,
                     attachments: attachments,
                     projectTemplates: projectTemplates
@@ -1792,6 +2125,24 @@ public actor FirebaseCloudSyncService {
         UserDefaults.standard.set(Int(timestamp), forKey: "\(Self.lastSyncCursorPrefix)\(uid)")
     }
 
+    private func loadCollectionSyncCursor(uid: String, collection: String) -> Int64 {
+        let key = Self.collectionCursorDefaultsKey(uid: uid, collection: collection)
+        let saved = Int64(UserDefaults.standard.integer(forKey: key))
+        if saved > 0 { return saved }
+        return loadLastSyncCursor(uid: uid)
+    }
+
+    private func saveCollectionSyncCursor(uid: String, collection: String, timestamp: Int64) {
+        let key = Self.collectionCursorDefaultsKey(uid: uid, collection: collection)
+        UserDefaults.standard.set(Int(timestamp), forKey: key)
+    }
+
+    private func resetCollectionSyncCursors(uid: String) {
+        for col in Self.syncCollectionNames {
+            saveCollectionSyncCursor(uid: uid, collection: col, timestamp: 0)
+        }
+    }
+
     private func loadLastWallSyncTimestamp(uid: String) -> Int64 {
         Int64(UserDefaults.standard.integer(forKey: "\(Self.lastWallSyncPrefix)\(uid)"))
     }
@@ -1857,6 +2208,17 @@ public actor FirebaseCloudSyncService {
             write["updateMask"] = ["fieldPaths": mask]
         }
         return write
+    }
+
+    public static func makeEntityUpdateWrite(
+        path: String,
+        fields: [String: [String: Any]]
+    ) -> [String: Any] {
+        makeUpdateWrite(
+            path: path,
+            fields: fields,
+            updateMaskFieldPaths: Array(fields.keys).sorted()
+        )
     }
 
     public static func makeAttachmentWrite(
@@ -1985,11 +2347,13 @@ public actor FirebaseCloudSyncService {
 
     public static func parseProject(_ map: [String: Any]) -> Project? {
         guard let id = asString(map["id"]) else { return nil }
+        let isDeleted = asBool(map["isDeleted"])
+        let purged = isDeleted && asBool(map["purgedFromTrash"])
         return Project(
             id: id,
             areaId: asString(map["areaId"]),
-            title: (map["title"] as? String) ?? "",
-            notes: (map["notes"] as? String) ?? "",
+            title: purged ? "" : ((map["title"] as? String) ?? ""),
+            notes: purged ? "" : ((map["notes"] as? String) ?? ""),
             status: ProjectStatus.normalized(map["status"] as? String),
             scheduleState: ScheduleState.normalized(map["scheduleState"] as? String, fallback: .anytime),
             whenDate: asInt64(map["whenDate"]),
@@ -2000,7 +2364,7 @@ public actor FirebaseCloudSyncService {
             tagIds: asStringList(map["tagIds"]),
             createdAt: asInt64(map["createdAt"]) ?? 0,
             updatedAt: asInt64(map["updatedAt"]) ?? 0,
-            isDeleted: asBool(map["isDeleted"])
+            isDeleted: isDeleted
         )
     }
 
@@ -2018,17 +2382,22 @@ public actor FirebaseCloudSyncService {
         )
     }
 
-    public static func parseTask(_ map: [String: Any]) -> (TaskItem, [String])? {
+    public static func parseTaskWithHints(
+        _ map: [String: Any]
+    ) -> (task: TaskItem, tagIds: [String], omittedTimeblock: Bool)? {
         guard let id = asString(map["id"]) else { return nil }
         var rule: RecurrenceRule? = nil
         if let recStr = asString(map["recurrenceRule"]), let data = recStr.data(using: .utf8) {
             rule = try? JSONDecoder().decode(RecurrenceRule.self, from: data)
         }
         let tids = asStringList(map["tagIds"])
+        let isDeleted = asBool(map["isDeleted"])
+        let purged = isDeleted && asBool(map["purgedFromTrash"])
+        let omittedTimeblock = !map.keys.contains("scheduledStartMinutes") && !map.keys.contains("durationMinutes")
         let task = TaskItem(
             id: id,
-            title: (map["title"] as? String) ?? "",
-            notes: (map["notes"] as? String) ?? "",
+            title: purged ? "" : ((map["title"] as? String) ?? ""),
+            notes: purged ? "" : ((map["notes"] as? String) ?? ""),
             status: TaskStatus.normalized(map["status"] as? String),
             scheduleState: ScheduleState.normalized(map["scheduleState"] as? String, fallback: .inbox),
             whenDate: asInt64(map["whenDate"]),
@@ -2044,9 +2413,14 @@ public actor FirebaseCloudSyncService {
             sortOrder: asDouble(map["sortOrder"]),
             createdAt: asInt64(map["createdAt"]) ?? 0,
             updatedAt: asInt64(map["updatedAt"]) ?? 0,
-            isDeleted: asBool(map["isDeleted"])
+            isDeleted: isDeleted
         )
-        return (task, tids)
+        return (task, tids, omittedTimeblock)
+    }
+
+    public static func parseTask(_ map: [String: Any]) -> (TaskItem, [String])? {
+        guard let parsed = parseTaskWithHints(map) else { return nil }
+        return (parsed.task, parsed.tagIds)
     }
 
     public static func parseChecklist(_ map: [String: Any]) -> ChecklistItem? {

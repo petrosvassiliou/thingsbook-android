@@ -215,8 +215,8 @@ jobs:
           gh release edit "$TAG" --draft=false --prerelease
 
   build-macos-fallback:
-    name: Parity Gate, Swift Tests & Universal DMG (macOS 14 Fallback)
-    runs-on: macos-14
+    name: Parity Gate, Swift Tests & Universal DMG (macOS 15 Intel Fallback)
+    runs-on: macos-15-intel
     needs:
       - build-macos
     if: always() && needs.build-macos.outputs.built != 'true'
@@ -302,19 +302,39 @@ jobs:
 
           if [[ "$TAG" == *-* ]]; then
             echo "Publishing $TAG as an isolated PRE-RELEASE (stable latest remains untouched)..."
-            gh release create "$TAG" release-bundle/* \
-              --draft \
-              --prerelease \
-              --target "${{ github.sha }}" \
-              --title "Thingsbook ${TAG} Beta (Build ${VERSION_CODE}) — Android, ChromeOS & macOS" \
-              "${NOTES_ARGS[@]}"
-            gh release edit "$TAG" --draft=false --prerelease
+            TITLE="Thingsbook ${TAG} Beta (Build ${VERSION_CODE}) — Android, ChromeOS & macOS"
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release upload "$TAG" release-bundle/* --clobber
+              if [ -f "$NOTES_FILE" ]; then
+                gh release edit "$TAG" --draft=false --prerelease --latest=false --title "$TITLE" --notes-file "$NOTES_FILE"
+              else
+                gh release edit "$TAG" --draft=false --prerelease --latest=false --title "$TITLE"
+              fi
+            else
+              gh release create "$TAG" release-bundle/* \
+                --draft \
+                --prerelease \
+                --target "${{ github.sha }}" \
+                --title "$TITLE" \
+                "${NOTES_ARGS[@]}"
+              gh release edit "$TAG" --draft=false --prerelease --latest=false
+            fi
           else
             echo "Publishing $TAG as the official STABLE release..."
-            gh release create "$TAG" release-bundle/* \
-              --draft \
-              --target "${{ github.sha }}" \
-              --title "Thingsbook ${TAG} (Build ${VERSION_CODE}) — Android, ChromeOS & macOS" \
-              "${NOTES_ARGS[@]}"
-            gh release edit "$TAG" --draft=false --latest
+            TITLE="Thingsbook ${TAG} (Build ${VERSION_CODE}) — Android, ChromeOS & macOS"
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release upload "$TAG" release-bundle/* --clobber
+              if [ -f "$NOTES_FILE" ]; then
+                gh release edit "$TAG" --draft=false --latest --title "$TITLE" --notes-file "$NOTES_FILE"
+              else
+                gh release edit "$TAG" --draft=false --latest --title "$TITLE"
+              fi
+            else
+              gh release create "$TAG" release-bundle/* \
+                --draft \
+                --target "${{ github.sha }}" \
+                --title "$TITLE" \
+                "${NOTES_ARGS[@]}"
+              gh release edit "$TAG" --draft=false --latest
+            fi
           fi

@@ -5,12 +5,21 @@ import path from 'node:path';
 import {
   COLLECTION_CURSOR_STORAGE_PREFIX,
   ENTITIES_RECONCILE_V2_21_STORAGE_PREFIX,
+  ENTITIES_RECONCILE_V2_22_STORAGE_PREFIX,
   MAX_FUTURE_CURSOR_DRIFT_MS,
+  MAX_NTFY_PAYLOAD_BYTES,
+  OFFLINE_COMMIT_RESTAMP_THRESHOLD_MS,
   SYNC_COLLECTION_NAMES,
+  buildLegacyCompatibleNtfyChunks,
   computeEffectivePullCursor,
   computeNextCollectionCursor,
   detectMissingReferencedEntityContainers,
-  normalizeFirestoreDocWithId
+  formatInstantChannelSeed,
+  formatLegacySyncChannelFromHex,
+  formatOAuthChannelSeed,
+  normalizeFirestoreDocWithId,
+  planRecurringDeduplication,
+  sha256HexWebCrypto
 } from '../src/data/syncUtils.ts';
 
 test('normalizeFirestoreDocWithId preserves doc.id when raw Firestore data has missing, null, blank, or non-string id', () => {
@@ -166,11 +175,152 @@ test('detectMissingReferencedEntityContainers flags missing parent projects, are
   });
 });
 
-test('v2.0.0-beta.21 cloudSync.ts and localDb.ts enforce per-collection cursors, reconcile-before-listeners ordering, and corrupted timestamp recovery', async () => {
+test('planRecurringDeduplication merges Cialis standalone/Privat area-split & v1.8 stripped timeblock duplicates while preserving distinct explicit areas', () => {
+  const dailyRule = {
+    mode: 'FIXED_SCHEDULE' as const,
+    unit: 'DAY' as const,
+    interval: 1,
+    daysOfWeek: [] as number[],
+    dayOfMonth: null,
+    endDateEpochMillis: null
+  };
+
+  // Exact bug scenario: v1.8 or detached task has areaId=null + newer whenDate, while v2.x task has areaId='area-privat' + timeblock + notes
+  const cialisPlan = planRecurringDeduplication([
+    {
+      id: 'cialis-detached-v18',
+      title: 'Cialis',
+      notes: '',
+      status: 'OPEN',
+      isDeleted: false,
+      whenDate: 1_795_100_000_000,
+      createdAt: 1_795_000_000_000,
+      updatedAt: 1_795_100_500_000,
+      projectId: null,
+      headingId: null,
+      areaId: null,
+      recurrenceRule: dailyRule,
+      tagIds: ['tag-gesundheit'],
+      scheduledStartMinutes: null,
+      durationMinutes: null,
+      deadline: null,
+      reminderTime: null
+    },
+    {
+      id: 'cialis-privat-v2',
+      title: '  cialis ',
+      notes: 'Daily morning',
+      status: 'OPEN',
+      isDeleted: false,
+      whenDate: 1_795_013_600_000,
+      createdAt: 1_794_900_000_000,
+      updatedAt: 1_795_100_200_000,
+      projectId: null,
+      headingId: null,
+      areaId: 'area-privat',
+      recurrenceRule: dailyRule,
+      tagIds: ['tag-gesundheit', 'tag-routine'],
+      scheduledStartMinutes: 480,
+      durationMinutes: 15,
+      deadline: null,
+      reminderTime: 1_795_120_000_000
+    }
+  ]);
+
+  assert.deepEqual(cialisPlan.loserIds, ['cialis-privat-v2']);
+  assert.equal(cialisPlan.winnerEnrichments.length, 1);
+  assert.deepEqual(cialisPlan.winnerEnrichments[0], {
+    winnerId: 'cialis-detached-v18',
+    areaId: 'area-privat',
+    notes: 'Daily morning',
+    tagIds: ['tag-gesundheit', 'tag-routine'],
+    scheduledStartMinutes: 480,
+    durationMinutes: 15,
+    reminderTime: 1_795_120_000_000,
+    minUpdatedAt: 1_795_100_500_001
+  });
+
+  // Two distinct explicit areas ('area-work' vs 'area-home') with same title must NOT merge across areas
+  const distinctAreaPlan = planRecurringDeduplication([
+    {
+      id: 'standup-work',
+      title: 'Check mail',
+      notes: '',
+      status: 'OPEN',
+      isDeleted: false,
+      whenDate: 1_795_100_000_000,
+      createdAt: 1_795_000_000_000,
+      projectId: null,
+      headingId: null,
+      areaId: 'area-work',
+      recurrenceRule: dailyRule,
+      tagIds: [],
+      scheduledStartMinutes: null,
+      durationMinutes: null
+    },
+    {
+      id: 'standup-home',
+      title: 'Check mail',
+      notes: '',
+      status: 'OPEN',
+      isDeleted: false,
+      whenDate: 1_795_100_000_000,
+      createdAt: 1_795_000_100_000,
+      projectId: null,
+      headingId: null,
+      areaId: 'area-home',
+      recurrenceRule: dailyRule,
+      tagIds: [],
+      scheduledStartMinutes: null,
+      durationMinutes: null
+    }
+  ]);
+  assert.deepEqual(distinctAreaPlan.loserIds, []);
+  assert.deepEqual(distinctAreaPlan.winnerEnrichments, []);
+});
+
+test('buildLegacyCompatibleNtfyChunks splits oversized batches and never emits wakeOnly on legacy tb_sync_* channels', async () => {
+  const manyTasks = Array.from({ length: 24 }, (_, idx) => ({
+    id: `task-bulk-${idx}`,
+    title: `Synchronized Task #${idx} with detailed cross-platform description text`,
+    notes: 'x'.repeat(180),
+    status: 'OPEN',
+    schedule: 'TODAY',
+    updatedAt: 1_795_200_000_000 + idx
+  }));
+
+  const chunks = buildLegacyCompatibleNtfyChunks(
+    {
+      userId: 'uid-test-123',
+      deviceId: 'dev-chromeos',
+      batchTimestamp: 1_795_200_050_000,
+      tasks: manyTasks
+    },
+    MAX_NTFY_PAYLOAD_BYTES,
+    3
+  );
+
+  assert.ok(chunks.length >= 2 && chunks.length <= 3);
+  for (const chunk of chunks) {
+    assert.ok(new TextEncoder().encode(chunk).byteLength < MAX_NTFY_PAYLOAD_BYTES);
+    const parsed = JSON.parse(chunk);
+    assert.equal(parsed.wakeOnly, undefined, 'Legacy tb_sync_* chunks must never contain wakeOnly');
+    assert.ok(Array.isArray(parsed.tasks) && parsed.tasks.length > 0);
+  }
+
+  const oauthHex = await sha256HexWebCrypto(formatOAuthChannelSeed('uid-test-123'));
+  const instantHex = await sha256HexWebCrypto(formatInstantChannelSeed('User@Example.com '));
+  assert.match(formatLegacySyncChannelFromHex(oauthHex), /^tb_sync_[0-9a-f]{28}$/);
+  assert.match(formatLegacySyncChannelFromHex(instantHex), /^tb_sync_[0-9a-f]{28}$/);
+});
+
+test('v2.0.0-beta.22 cloudSync.ts and localDb.ts enforce pull-before-push, offline restamping, v1.8 rollover protection, and tag remapping', async () => {
   assert.equal(SYNC_COLLECTION_NAMES.length, 8);
   assert.ok(SYNC_COLLECTION_NAMES.includes('projects'));
   assert.equal(ENTITIES_RECONCILE_V2_21_STORAGE_PREFIX, 'thingsbook_v2_reconcile_b21_');
+  assert.equal(ENTITIES_RECONCILE_V2_22_STORAGE_PREFIX, 'thingsbook_v2_reconcile_b22_');
   assert.equal(COLLECTION_CURSOR_STORAGE_PREFIX, 'thingsbook_col_sync_ts_v2_');
+  assert.equal(OFFLINE_COMMIT_RESTAMP_THRESHOLD_MS, 30_000);
 
   const cloudSyncPath = path.resolve(import.meta.dirname, '../src/data/cloudSync.ts');
   const cloudSyncSrc = await fs.readFile(cloudSyncPath, 'utf8');
@@ -180,6 +330,12 @@ test('v2.0.0-beta.21 cloudSync.ts and localDb.ts enforce per-collection cursors,
   const firstBidirectionalIdx = cloudSyncSrc.indexOf('await this.syncBidirectionalDeltas()', initIdx);
   const firstAttachIdx = cloudSyncSrc.indexOf('this.attachRealtimeListeners(user.uid)', initIdx);
   assert.ok(initIdx >= 0 && firstBidirectionalIdx > initIdx && firstAttachIdx > firstBidirectionalIdx);
+
+  // Ensure runSyncInternal pulls remote deltas BEFORE pushing local dirty records
+  const runSyncStart = cloudSyncSrc.indexOf('private async runSyncInternal(');
+  const pullCallIdx = cloudSyncSrc.indexOf('await this.pullDeltaRecordsFromFirestore(', runSyncStart);
+  const pushCallIdx = cloudSyncSrc.indexOf('await this.pushDirtyRecordsToFirestore(', runSyncStart);
+  assert.ok(runSyncStart > 0 && pullCallIdx > runSyncStart && pushCallIdx > pullCallIdx);
 
   // Ensure attachRealtimeListeners and handleIncomingNtfyEnvelope never mutate collection or global pull cursors
   const attachSectionStart = cloudSyncSrc.indexOf('private attachRealtimeListeners(');
@@ -197,9 +353,13 @@ test('v2.0.0-beta.21 cloudSync.ts and localDb.ts enforce per-collection cursors,
     'Realtime listeners and ntfy SSE must never advance the shared low-watermark pull cursor'
   );
 
-  // Ensure localDb.applyRemoteDeltas heals non-finite or clock-skewed future local updatedAt values
+  // Ensure localDb.applyRemoteDeltas heals corrupted timestamps, protects completed recurring parents, and remaps duplicate tags
   const localDbPath = path.resolve(import.meta.dirname, '../src/data/localDb.ts');
   const localDbSrc = await fs.readFile(localDbPath, 'utf8');
   assert.ok(localDbSrc.includes('!Number.isFinite(local.updatedAt)'));
   assert.ok(localDbSrc.includes('!local.isDirty && local.updatedAt > nowCeiling'));
+  assert.ok(localDbSrc.includes('omittedTimeblockFields'));
+  assert.ok(localDbSrc.includes('remapTagId.size > 0'));
+  assert.ok(localDbSrc.includes("local.status === 'COMPLETED'"));
 });
+

@@ -658,28 +658,71 @@ class ThingsRepository @Inject constructor(
             isDirty = true
         )
 
-        val seriesKey = SyncRepository.buildRecurringSeriesKey(nextEntity)
-        if (seriesKey != null) {
+        if (SyncRepository.buildRecurringSeriesKey(nextEntity) != null) {
             val openSiblings = database.taskDao().getOpenRecurringTasks()
-                .filter { it.id != completedTask.id && SyncRepository.buildRecurringSeriesKey(it) == seriesKey }
+                .filter { it.id != completedTask.id && SyncRepository.areSameRecurringSeries(nextEntity, it) }
+                .sortedWith(SyncRepository::compareRecurringTaskPriority)
             if (openSiblings.isNotEmpty()) {
                 val primary = openSiblings.first()
                 if (openSiblings.size > 1) {
                     silentlyPurgeTaskEntities(openSiblings.drop(1), now)
                 }
-                if ((primary.whenDate ?: 0L) < nextWhenEpoch) {
+                val primaryTags = decodeStringList(primary.tagIdsJson)
+                val mergedTags = LinkedHashSet<String>(primaryTags).apply { addAll(tagIds) }.toList()
+                val needsAdvance = (primary.whenDate ?: 0L) < nextWhenEpoch
+                val enrichedArea = if (primary.projectId.isNullOrBlank() && primary.areaId.isNullOrBlank()) {
+                    nextEntity.areaId
+                } else {
+                    primary.areaId
+                }
+                val enrichedHeading = if (!primary.projectId.isNullOrBlank() && primary.headingId.isNullOrBlank()) {
+                    nextEntity.headingId
+                } else {
+                    primary.headingId
+                }
+                val enrichedNotes = primary.notes.ifBlank { nextEntity.notes }
+                val enrichedStart = primary.scheduledStartMinutes ?: nextEntity.scheduledStartMinutes
+                val enrichedDuration = primary.durationMinutes ?: nextEntity.durationMinutes
+                val needsEnrich = enrichedArea != primary.areaId ||
+                    enrichedHeading != primary.headingId ||
+                    enrichedNotes != primary.notes ||
+                    enrichedStart != primary.scheduledStartMinutes ||
+                    enrichedDuration != primary.durationMinutes ||
+                    mergedTags.size != primaryTags.size
+
+                if (needsAdvance || needsEnrich) {
+                    val effectiveReminder = if (needsAdvance) nextReminderTime else (primary.reminderTime ?: nextReminderTime)
                     val advanced = primary.copy(
-                        whenDate = nextWhenEpoch,
-                        scheduleState = nextScheduleState,
-                        deadline = nextDeadlineEpoch,
-                        reminderTime = nextReminderTime,
+                        whenDate = if (needsAdvance) nextWhenEpoch else primary.whenDate,
+                        scheduleState = if (needsAdvance) nextScheduleState else primary.scheduleState,
+                        deadline = if (needsAdvance) nextDeadlineEpoch else (primary.deadline ?: nextDeadlineEpoch),
+                        reminderTime = effectiveReminder,
+                        areaId = enrichedArea,
+                        headingId = enrichedHeading,
+                        notes = enrichedNotes,
+                        scheduledStartMinutes = enrichedStart,
+                        durationMinutes = enrichedDuration,
+                        tagIdsJson = json.encodeToString(mergedTags),
                         updatedAt = maxOf(now, primary.updatedAt + 1L),
                         isDirty = true
                     )
-                    database.taskDao().upsertTaskWithTags(advanced, tagIds)
-                    if (nextReminderTime != null && nextReminderTime > now) {
-                        reminderScheduler.scheduleExactReminder(primary.id, advanced.title, nextReminderTime)
+                    database.taskDao().upsertTaskWithTags(advanced, mergedTags)
+                    if (effectiveReminder != null && effectiveReminder > now) {
+                        reminderScheduler.scheduleExactReminder(primary.id, advanced.title, effectiveReminder)
                     }
+                }
+                val siblingSubtasks = database.checklistDao().getForTaskSync(primary.id)
+                val completedSubtasks = siblingSubtasks.filter { !it.isDeleted && it.isCompleted }
+                if (completedSubtasks.isNotEmpty()) {
+                    database.checklistDao().upsertAll(
+                        completedSubtasks.map { chk ->
+                            chk.copy(
+                                isCompleted = false,
+                                updatedAt = maxOf(now, chk.updatedAt + 1L),
+                                isDirty = true
+                            )
+                        }
+                    )
                 }
                 return primary.id
             }
@@ -1091,6 +1134,9 @@ class ThingsRepository @Inject constructor(
             )
         }
         val activeAreas = database.areaDao().getActiveAreasList()
+        activeAreas.firstOrNull { it.title.trim().equals(trimmed, ignoreCase = true) }?.let { existingArea ->
+            return Result.success(existingArea.id)
+        }
         if (activeAreas.size >= MAX_AREAS) {
             return Result.failure(
                 IllegalStateException(
@@ -2182,12 +2228,16 @@ class ThingsRepository @Inject constructor(
         val trimmedTitle = title.trim()
         if (trimmedTitle.isEmpty()) return id
         val now = System.currentTimeMillis()
-        val existing = database.tagDao().getById(id)
+        val existingById = database.tagDao().getById(id)
+        val existing = existingById ?: database.tagDao().getAllNonDeletedTagsList()
+            .firstOrNull { it.title.trim().equals(trimmedTitle, ignoreCase = true) }
+        val resolvedId = existing?.id ?: id
+        val cleanShortcut = shortcut?.trim()?.takeIf { it.isNotEmpty() }
         val tagEntity = TagEntity(
-            id = id,
-            title = trimmedTitle,
-            parentTagId = parentTagId,
-            shortcut = shortcut?.trim()?.takeIf { it.isNotEmpty() },
+            id = resolvedId,
+            title = if (existingById == null && existing != null) existing.title else trimmedTitle,
+            parentTagId = parentTagId ?: existing?.parentTagId,
+            shortcut = cleanShortcut ?: existing?.shortcut,
             sortOrder = existing?.sortOrder ?: (now % 100_000).toDouble(),
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
@@ -2196,7 +2246,7 @@ class ThingsRepository @Inject constructor(
         )
         database.tagDao().upsert(tagEntity)
         syncRepository.triggerBackgroundSync()
-        return id
+        return resolvedId
     }
 
     suspend fun softDeleteTag(tagId: String) {
@@ -2970,7 +3020,10 @@ class ThingsRepository @Inject constructor(
             }
 
             if (markRemainingDirtyForMerge) {
-                val areasToMarkDirty = database.areaDao().getActiveAreasList().mapNotNull { area ->
+                val activeAreasSnapshot = database.areaDao().getActiveAreasList()
+                val emptyUntouchedSampleAreaIds = mutableListOf<String>()
+                val areasToMarkDirty = mutableListOf<AreaEntity>()
+                for (area in activeAreasSnapshot) {
                     val isSampleArea = area.id in DatabaseSeeder.SAMPLE_AREA_IDS
                     val defaultTitle = when (area.id) {
                         "area-work-001" -> "Work"
@@ -2982,11 +3035,17 @@ class ThingsRepository @Inject constructor(
                         area.isDirty ||
                         (defaultTitle != null && area.title != defaultTitle) ||
                         areaTags.any { it !in DatabaseSeeder.SAMPLE_TAG_IDS }
-                    if (modifiedByUser && !area.isDirty) {
-                        area.copy(isDirty = true)
-                    } else {
-                        null
+                    if (!modifiedByUser &&
+                        database.areaDao().countActiveTasksInArea(area.id) == 0 &&
+                        database.areaDao().countActiveProjectsInArea(area.id) == 0
+                    ) {
+                        emptyUntouchedSampleAreaIds += area.id
+                    } else if (modifiedByUser && !area.isDirty) {
+                        areasToMarkDirty += area.copy(isDirty = true)
                     }
+                }
+                if (emptyUntouchedSampleAreaIds.isNotEmpty()) {
+                    database.areaDao().hardDeleteByIds(emptyUntouchedSampleAreaIds)
                 }
                 if (areasToMarkDirty.isNotEmpty()) {
                     database.areaDao().upsertAll(areasToMarkDirty)

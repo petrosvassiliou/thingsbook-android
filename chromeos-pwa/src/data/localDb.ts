@@ -2982,6 +2982,17 @@ export class ThingsLocalDb {
         'readwrite'
       );
 
+      const nowCeiling = Date.now() + 120_000;
+      const shouldRemoteWin = (
+        local: { updatedAt: number; isDirty: boolean } | undefined,
+        remoteUpdatedAt: number
+      ): boolean => {
+        if (!local) return true;
+        if (!Number.isFinite(local.updatedAt)) return true;
+        if (!local.isDirty && local.updatedAt > nowCeiling) return true;
+        return remoteUpdatedAt >= local.updatedAt;
+      };
+
       const applyList = async <T extends { id: string; updatedAt: number; isDirty: boolean }>(
         storeName: string,
         items: T[] | undefined,
@@ -2992,7 +3003,7 @@ export class ThingsLocalDb {
         for (const remote of items) {
           if (!remote.id) continue;
           const local = (await store.get(remote.id)) as T | undefined;
-          if (!local || remote.updatedAt >= local.updatedAt) {
+          if (shouldRemoteWin(local, remote.updatedAt)) {
             const merged = mergeFn ? mergeFn(local, remote) : remote;
             await store.put({ ...merged, isDirty: false });
           }
@@ -3012,7 +3023,7 @@ export class ThingsLocalDb {
           const mergedLastReviewed: number | null = remote.isDeleted
             ? (remote.lastReviewedAt ?? null)
             : mergeMonotonicReviewTimestamp(local?.lastReviewedAt, remote.lastReviewedAt);
-          if (!local || remote.updatedAt >= local.updatedAt) {
+          if (shouldRemoteWin(local, remote.updatedAt)) {
             await projStore.put({
               ...remote,
               lastReviewedAt: mergedLastReviewed,
@@ -3024,6 +3035,7 @@ export class ThingsLocalDb {
               isDirty: false
             });
           } else if (
+            local &&
             !remote.isDeleted &&
             !local.isDeleted &&
             mergedLastReviewed !== null &&

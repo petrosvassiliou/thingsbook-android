@@ -49,16 +49,23 @@ import { loadPreferences, localDb, savePreferences } from './localDb';
 import {
   ATTACHMENT_BACKFILL_STORAGE_PREFIX,
   ATTACHMENT_BATCH_CHUNK_SIZE,
+  COLLECTION_CURSOR_STORAGE_PREFIX,
+  ENTITIES_RECONCILE_V2_21_STORAGE_PREFIX,
   FAST_SYNC_COALESCE_MS,
   METADATA_BATCH_CHUNK_SIZE,
   PROJECTS_REVIEW_BACKFILL_STORAGE_PREFIX,
+  SYNC_COLLECTION_NAMES,
   attachmentToFirestoreMap,
   buildNtfyRelayOrWakePayload,
   chunkItems,
   clampRemoteCursorTimestamp,
   computeEffectivePullCursor,
+  computeNextCollectionCursor,
+  detectMissingReferencedEntityContainers,
   formatUidWakeChannelFromHex,
-  formatUidWakeSeed
+  formatUidWakeSeed,
+  normalizeFirestoreDocWithId,
+  type SyncCollectionName
 } from './syncUtils';
 
 function extractAuthErrorCode(err: unknown): string {
@@ -125,6 +132,7 @@ interface PersistedSyncMeta {
 
 const SYNC_META_STORAGE_KEY = 'thingsbook_chromeos_sync_meta_v1';
 const LAST_SYNC_PREFIX = 'thingsbook_last_sync_ts_';
+const LAST_WALL_SYNC_PREFIX = 'thingsbook_last_wall_sync_ts_';
 
 async function sha256Hex(input: string): Promise<string> {
   const bytes = new TextEncoder().encode(input);
@@ -543,7 +551,48 @@ class ThingsCloudSyncService {
   private setLastSyncTs(userId: string, ts: number) {
     const clamped = ts > 0 ? clampRemoteCursorTimestamp(ts, Date.now()) : 0;
     localStorage.setItem(`${LAST_SYNC_PREFIX}${userId}`, String(Math.trunc(clamped)));
-    this.emit({ lastSyncedAt: Math.trunc(clamped) });
+  }
+
+  private getCollectionCursor(userId: string, colName: SyncCollectionName): number {
+    const raw = localStorage.getItem(`${COLLECTION_CURSOR_STORAGE_PREFIX}${userId}_${colName}`);
+    if (raw !== null) {
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+      return clampRemoteCursorTimestamp(parsed, Date.now());
+    }
+    return this.getLastSyncTs(userId);
+  }
+
+  private setCollectionCursor(userId: string, colName: SyncCollectionName, ts: number) {
+    const clamped = ts > 0 ? clampRemoteCursorTimestamp(ts, Date.now()) : 0;
+    localStorage.setItem(
+      `${COLLECTION_CURSOR_STORAGE_PREFIX}${userId}_${colName}`,
+      String(Math.trunc(clamped))
+    );
+  }
+
+  private resetAllCollectionCursors(userId: string) {
+    for (const colName of SYNC_COLLECTION_NAMES) {
+      this.setCollectionCursor(userId, colName, 0);
+    }
+    this.setLastSyncTs(userId, 0);
+    localStorage.removeItem(`${LAST_WALL_SYNC_PREFIX}${userId}`);
+    this.emit({ lastSyncedAt: 0 });
+  }
+
+  private getLastWallSyncDisplay(userId: string): number {
+    const raw = localStorage.getItem(`${LAST_WALL_SYNC_PREFIX}${userId}`);
+    const parsed = raw ? Number(raw) : 0;
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.trunc(parsed);
+    }
+    return this.getLastSyncTs(userId);
+  }
+
+  private recordWallSyncDisplay(userId: string, nowMs: number = Date.now()) {
+    const ts = Math.trunc(nowMs);
+    localStorage.setItem(`${LAST_WALL_SYNC_PREFIX}${userId}`, String(ts));
+    this.emit({ lastSyncedAt: ts });
   }
 
   private isLocalOnly(): boolean {
@@ -592,13 +641,15 @@ class ThingsCloudSyncService {
         this.emit({
           userId: user.uid,
           userEmailOrId: user.email || user.uid,
-          lastSyncedAt: this.getLastSyncTs(user.uid),
+          lastSyncedAt: this.getLastWallSyncDisplay(user.uid),
           errorMessage: null
         });
 
         if (!this.isLocalOnly()) {
-          this.attachRealtimeListeners(user.uid);
           await this.syncBidirectionalDeltas();
+          if (!this.isLocalOnly() && this.state.userId === user.uid) {
+            this.attachRealtimeListeners(user.uid);
+          }
         } else {
           this.emit({ status: 'OFFLINE' });
         }
@@ -617,10 +668,14 @@ class ThingsCloudSyncService {
     if (!this.listenersRegistered && typeof window !== 'undefined') {
       this.listenersRegistered = true;
       window.addEventListener('online', () => {
-        if (!this.isLocalOnly() && this.state.userId) {
-          this.attachRealtimeListeners(this.state.userId);
+        const uid = this.state.userId;
+        if (!this.isLocalOnly() && uid) {
           this.triggerFastPush(0);
-          this.triggerBackgroundSync(40);
+          void this.syncBidirectionalDeltas(false).finally(() => {
+            if (!this.isLocalOnly() && this.state.userId === uid && navigator.onLine) {
+              this.attachRealtimeListeners(uid);
+            }
+          });
         }
       });
       window.addEventListener('offline', () => {
@@ -652,9 +707,13 @@ class ThingsCloudSyncService {
       this.detachRealtimeListeners();
       this.emit({ status: 'OFFLINE' });
     } else if (this.state.userId) {
-      const forceFull = this.getLastSyncTs(this.state.userId) === 0;
-      this.attachRealtimeListeners(this.state.userId);
-      void this.syncBidirectionalDeltas(forceFull);
+      const uid = this.state.userId;
+      const forceFull = this.getLastSyncTs(uid) === 0;
+      void this.syncBidirectionalDeltas(forceFull).finally(() => {
+        if (!this.isLocalOnly() && this.state.userId === uid) {
+          this.attachRealtimeListeners(uid);
+        }
+      });
     }
   }
 
@@ -736,7 +795,7 @@ class ThingsCloudSyncService {
       userEmailOrId: emailOrId,
       errorMessage: null
     });
-    this.setLastSyncTs(uid, 0);
+    this.resetAllCollectionCursors(uid);
     await this.syncBidirectionalDeltas(true);
     this.attachRealtimeListeners(uid);
   }
@@ -1135,11 +1194,10 @@ class ThingsCloudSyncService {
     }
 
     try {
-      const lastSync = forceFullPull ? 0 : this.getLastSyncTs(userId);
+      const prevLowWatermark = forceFullPull ? 0 : this.getLastSyncTs(userId);
 
       const relayPushMaps = await this.pushDirtyRecordsToFirestore(userId);
-      const rawPulledMax = await this.pullDeltaRecordsFromFirestore(userId, lastSync);
-      const pulledMax = clampRemoteCursorTimestamp(rawPulledMax, Date.now());
+      await this.pullDeltaRecordsFromFirestore(userId, forceFullPull);
 
       const meta = this.loadPersistedMeta();
       const localDeviceId = meta?.deviceId || this.getOrCreateDeviceId();
@@ -1156,13 +1214,11 @@ class ThingsCloudSyncService {
           userId,
           meta.channelTopic,
           localDeviceId,
-          lastSync
+          prevLowWatermark
         );
       }
 
-      const nextSyncTs =
-        pulledMax > lastSync ? pulledMax : lastSync === 0 ? Date.now() : lastSync;
-      this.setLastSyncTs(userId, nextSyncTs);
+      this.recordWallSyncDisplay(userId, Date.now());
       this.emit({ status: 'SYNCED', errorMessage: null });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1306,23 +1362,63 @@ class ThingsCloudSyncService {
 
   private async pullDeltaRecordsFromFirestore(
     userId: string,
-    sinceTimestamp: number
-  ): Promise<number> {
+    forceFullPull: boolean
+  ): Promise<void> {
     const db = getFirestoreInstance();
-    const effectiveSince = computeEffectivePullCursor(sinceTimestamp);
     const backfillKey = `${ATTACHMENT_BACKFILL_STORAGE_PREFIX}${userId}`;
     const needsAttachmentBackfill = localStorage.getItem(backfillKey) !== '1';
     const projReviewBackfillKey = `${PROJECTS_REVIEW_BACKFILL_STORAGE_PREFIX}${userId}`;
     const needsProjectsReviewBackfill = localStorage.getItem(projReviewBackfillKey) !== '1';
+    const reconcileV221Key = `${ENTITIES_RECONCILE_V2_21_STORAGE_PREFIX}${userId}`;
+    const needsReconcileV221 = localStorage.getItem(reconcileV221Key) !== '1';
+    const orphanCheck = detectMissingReferencedEntityContainers(localDb.getSnapshot());
+
+    const prevCursors: Record<SyncCollectionName, number> = {
+      tags: forceFullPull || needsReconcileV221 ? 0 : this.getCollectionCursor(userId, 'tags'),
+      areas:
+        forceFullPull ||
+        needsReconcileV221 ||
+        orphanCheck.hasOrphanAreaRef ||
+        orphanCheck.hasOrphanProjectRef
+          ? 0
+          : this.getCollectionCursor(userId, 'areas'),
+      projects:
+        forceFullPull ||
+        needsReconcileV221 ||
+        needsProjectsReviewBackfill ||
+        orphanCheck.hasOrphanProjectRef
+          ? 0
+          : this.getCollectionCursor(userId, 'projects'),
+      headings:
+        forceFullPull ||
+        needsReconcileV221 ||
+        orphanCheck.hasOrphanHeadingRef ||
+        orphanCheck.hasOrphanProjectRef
+          ? 0
+          : this.getCollectionCursor(userId, 'headings'),
+      tasks: forceFullPull || needsReconcileV221 ? 0 : this.getCollectionCursor(userId, 'tasks'),
+      checklist_items:
+        forceFullPull || needsReconcileV221
+          ? 0
+          : this.getCollectionCursor(userId, 'checklist_items'),
+      attachments:
+        forceFullPull || needsAttachmentBackfill
+          ? 0
+          : this.getCollectionCursor(userId, 'attachments'),
+      project_templates:
+        forceFullPull || needsReconcileV221
+          ? 0
+          : this.getCollectionCursor(userId, 'project_templates')
+    };
 
     const fetchCollection = async (
-      colName: string,
-      colSince: number
+      colName: SyncCollectionName
     ): Promise<Record<string, unknown>[]> => {
+      const colSince = computeEffectivePullCursor(prevCursors[colName]);
       const colRef = collection(db, 'users', userId, colName);
       const q = colSince > 0 ? query(colRef, where('updatedAt', '>', colSince)) : colRef;
       const snap = await getDocs(q);
-      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      return snap.docs.map((d) => normalizeFirestoreDocWithId(d.id, d.data()));
     };
 
     const [
@@ -1335,14 +1431,14 @@ class ThingsCloudSyncService {
       rawAttachments,
       rawTemplates
     ] = await Promise.all([
-      fetchCollection('tags', effectiveSince),
-      fetchCollection('areas', effectiveSince),
-      fetchCollection('projects', needsProjectsReviewBackfill ? 0 : effectiveSince),
-      fetchCollection('headings', effectiveSince),
-      fetchCollection('tasks', effectiveSince),
-      fetchCollection('checklist_items', effectiveSince),
-      fetchCollection('attachments', needsAttachmentBackfill ? 0 : effectiveSince),
-      fetchCollection('project_templates', effectiveSince)
+      fetchCollection('tags'),
+      fetchCollection('areas'),
+      fetchCollection('projects'),
+      fetchCollection('headings'),
+      fetchCollection('tasks'),
+      fetchCollection('checklist_items'),
+      fetchCollection('attachments'),
+      fetchCollection('project_templates').catch(() => null)
     ]);
 
     const tags = rawTags.map(tagFromFirestoreMap).filter((x): x is TagRecord => x !== null);
@@ -1360,39 +1456,79 @@ class ThingsCloudSyncService {
     const attachments = rawAttachments
       .map(attachmentFromFirestoreMap)
       .filter((x): x is AttachmentRecord => x !== null);
-    const projectTemplates = rawTemplates
+    const projectTemplates = (rawTemplates ?? [])
       .map(projectTemplateFromFirestoreMap)
       .filter((x): x is ProjectTemplate => x !== null);
 
-    if (
-      tags.length === 0 &&
-      areas.length === 0 &&
-      projects.length === 0 &&
-      headings.length === 0 &&
-      tasks.length === 0 &&
-      checklistItems.length === 0 &&
-      attachments.length === 0 &&
-      projectTemplates.length === 0
-    ) {
-      if (needsAttachmentBackfill) {
-        localStorage.setItem(backfillKey, '1');
-      }
-      if (needsProjectsReviewBackfill) {
-        localStorage.setItem(projReviewBackfillKey, '1');
-      }
-      return sinceTimestamp;
+    const hasAnyRecords =
+      tags.length > 0 ||
+      areas.length > 0 ||
+      projects.length > 0 ||
+      headings.length > 0 ||
+      tasks.length > 0 ||
+      checklistItems.length > 0 ||
+      attachments.length > 0 ||
+      projectTemplates.length > 0;
+
+    if (hasAnyRecords) {
+      await localDb.applyRemoteDeltas({
+        tags,
+        areas,
+        projects,
+        headings,
+        tasks,
+        checklistItems,
+        attachments,
+        projectTemplates
+      });
     }
 
-    const appliedMax = await localDb.applyRemoteDeltas({
-      tags,
-      areas,
-      projects,
-      headings,
-      tasks,
-      checklistItems,
-      attachments,
-      projectTemplates
-    });
+    const nowMs = Date.now();
+    const maxOf = <T extends { updatedAt: number }>(arr: readonly T[]): number =>
+      arr.reduce((m, x) => (x.updatedAt > m ? x.updatedAt : m), 0);
+
+    this.setCollectionCursor(
+      userId,
+      'tags',
+      computeNextCollectionCursor(prevCursors.tags, maxOf(tags), nowMs)
+    );
+    this.setCollectionCursor(
+      userId,
+      'areas',
+      computeNextCollectionCursor(prevCursors.areas, maxOf(areas), nowMs)
+    );
+    this.setCollectionCursor(
+      userId,
+      'projects',
+      computeNextCollectionCursor(prevCursors.projects, maxOf(projects), nowMs)
+    );
+    this.setCollectionCursor(
+      userId,
+      'headings',
+      computeNextCollectionCursor(prevCursors.headings, maxOf(headings), nowMs)
+    );
+    this.setCollectionCursor(
+      userId,
+      'tasks',
+      computeNextCollectionCursor(prevCursors.tasks, maxOf(tasks), nowMs)
+    );
+    this.setCollectionCursor(
+      userId,
+      'checklist_items',
+      computeNextCollectionCursor(prevCursors.checklist_items, maxOf(checklistItems), nowMs)
+    );
+    this.setCollectionCursor(
+      userId,
+      'attachments',
+      computeNextCollectionCursor(prevCursors.attachments, maxOf(attachments), nowMs)
+    );
+    if (rawTemplates !== null) {
+      this.setCollectionCursor(
+        userId,
+        'project_templates',
+        computeNextCollectionCursor(prevCursors.project_templates, maxOf(projectTemplates), nowMs)
+      );
+    }
 
     if (needsAttachmentBackfill) {
       localStorage.setItem(backfillKey, '1');
@@ -1400,8 +1536,14 @@ class ThingsCloudSyncService {
     if (needsProjectsReviewBackfill) {
       localStorage.setItem(projReviewBackfillKey, '1');
     }
+    if (needsReconcileV221 && rawTemplates !== null) {
+      localStorage.setItem(reconcileV221Key, '1');
+    }
 
-    return clampRemoteCursorTimestamp(appliedMax, Date.now());
+    const lowWatermark = Math.min(
+      ...SYNC_COLLECTION_NAMES.map((col) => this.getCollectionCursor(userId, col))
+    );
+    this.setLastSyncTs(userId, lowWatermark);
   }
 
   private scheduleRealtimeReconnect(userId: string) {
@@ -1410,8 +1552,11 @@ class ThingsCloudSyncService {
     this.realtimeReconnectTimer = window.setTimeout(() => {
       this.realtimeReconnectTimer = null;
       if (!this.isLocalOnly() && this.state.userId === userId && navigator.onLine) {
-        this.attachRealtimeListeners(userId);
-        this.triggerIncrementalPull(0);
+        void this.syncBidirectionalDeltas(false).finally(() => {
+          if (!this.isLocalOnly() && this.state.userId === userId && navigator.onLine) {
+            this.attachRealtimeListeners(userId);
+          }
+        });
       }
     }, 1200);
   }
@@ -1422,19 +1567,9 @@ class ThingsCloudSyncService {
 
     const db = getFirestoreInstance();
     const localDeviceId = this.getOrCreateDeviceId();
-    const collections = [
-      'tags',
-      'areas',
-      'projects',
-      'headings',
-      'tasks',
-      'checklist_items',
-      'attachments',
-      'project_templates'
-    ] as const;
 
-    for (const colName of collections) {
-      const since = computeEffectivePullCursor(this.getLastSyncTs(userId));
+    for (const colName of SYNC_COLLECTION_NAMES) {
+      const since = computeEffectivePullCursor(this.getCollectionCursor(userId, colName));
       const colRef = collection(db, 'users', userId, colName);
       const q = since > 0 ? query(colRef, where('updatedAt', '>', since)) : colRef;
 
@@ -1450,53 +1585,51 @@ class ThingsCloudSyncService {
             );
           if (changed.length === 0) return;
 
-          const docs = changed.map((c) => ({ id: c.doc.id, ...c.doc.data() }));
-          let maxTs = 0;
+          const docs = changed.map((c) => normalizeFirestoreDocWithId(c.doc.id, c.doc.data()));
 
           if (colName === 'tags') {
-            maxTs = await localDb.applyRemoteDeltas({
+            await localDb.applyRemoteDeltas({
               tags: docs.map(tagFromFirestoreMap).filter((x): x is TagRecord => x !== null)
             });
           } else if (colName === 'areas') {
-            maxTs = await localDb.applyRemoteDeltas({
+            await localDb.applyRemoteDeltas({
               areas: docs.map(areaFromFirestoreMap).filter((x): x is AreaRecord => x !== null)
             });
           } else if (colName === 'projects') {
-            maxTs = await localDb.applyRemoteDeltas({
+            await localDb.applyRemoteDeltas({
               projects: docs.map(projectFromFirestoreMap).filter((x): x is ProjectRecord => x !== null)
             });
           } else if (colName === 'headings') {
-            maxTs = await localDb.applyRemoteDeltas({
+            await localDb.applyRemoteDeltas({
               headings: docs.map(headingFromFirestoreMap).filter((x): x is HeadingRecord => x !== null)
             });
           } else if (colName === 'tasks') {
-            maxTs = await localDb.applyRemoteDeltas({
+            await localDb.applyRemoteDeltas({
               tasks: docs.map(taskFromFirestoreMap).filter((x): x is TaskRecord => x !== null)
             });
           } else if (colName === 'checklist_items') {
-            maxTs = await localDb.applyRemoteDeltas({
+            await localDb.applyRemoteDeltas({
               checklistItems: docs
                 .map(checklistFromFirestoreMap)
                 .filter((x): x is ChecklistItemRecord => x !== null)
             });
           } else if (colName === 'attachments') {
-            maxTs = await localDb.applyRemoteDeltas({
+            await localDb.applyRemoteDeltas({
               attachments: docs
                 .map(attachmentFromFirestoreMap)
                 .filter((x): x is AttachmentRecord => x !== null)
             });
           } else if (colName === 'project_templates') {
-            maxTs = await localDb.applyRemoteDeltas({
+            await localDb.applyRemoteDeltas({
               projectTemplates: docs
                 .map(projectTemplateFromFirestoreMap)
                 .filter((x): x is ProjectTemplate => x !== null)
             });
           }
 
-          const clampedMax = clampRemoteCursorTimestamp(maxTs, Date.now());
-          if (clampedMax > this.getLastSyncTs(userId)) {
-            this.setLastSyncTs(userId, clampedMax);
-          }
+          // Never advance pull cursors from a single-collection listener callback;
+          // only update the wall-clock UI display timestamp.
+          this.recordWallSyncDisplay(userId, Date.now());
           this.emit({ status: 'SYNCED', errorMessage: null });
         },
         () => {
@@ -1597,11 +1730,11 @@ class ThingsCloudSyncService {
 
       const maxApplied = await this.applyParsedNtfyBatch(batch);
       if (maxApplied > 0) {
-        const clamped = clampRemoteCursorTimestamp(maxApplied, Date.now());
-        if (clamped > this.getLastSyncTs(userId)) {
-          this.setLastSyncTs(userId, clamped);
-        }
+        // Never advance Firestore pull cursors from a partial ntfy SSE batch;
+        // update wall-clock UI display and trigger a reconciled Firestore pull.
+        this.recordWallSyncDisplay(userId, Date.now());
         this.emit({ status: 'SYNCED', errorMessage: null });
+        this.triggerIncrementalPull(40);
       }
     } catch {
       // Ignore malformed relay message

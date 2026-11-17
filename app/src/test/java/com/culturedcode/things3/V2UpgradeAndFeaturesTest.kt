@@ -759,9 +759,9 @@ class V2UpgradeAndFeaturesTest {
     }
 
     @Test
-    fun `v2_0_0_beta_20 BuildConfig and all 5 localized strings_xml files verify project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(64, BuildConfig.VERSION_CODE)
-        assertEquals("2.0.0-beta.20", BuildConfig.VERSION_NAME)
+    fun `v2_0_0_beta_21 BuildConfig and all 5 localized strings_xml files verify project deletion prompt and topbar_tooltip keys`() {
+        assertEquals(65, BuildConfig.VERSION_CODE)
+        assertEquals("2.0.0-beta.21", BuildConfig.VERSION_NAME)
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -1488,6 +1488,52 @@ class V2UpgradeAndFeaturesTest {
             )
         )
     }
+
+    @Test
+    fun `v2_0_0_beta_21 SyncRepository preserves Firestore document path ID and prevents partial listeners from advancing pull cursor`() {
+        assertNull(SyncRepository.normalizeFirestoreMapWithId("proj-doc-null", null))
+
+        // Missing or blank id inside document fields falls back to Firestore document path ID
+        val missingIdDoc = SyncRepository.normalizeFirestoreMapWithId(
+            "proj-from-doc-path",
+            mapOf("title" to "Recovered Googlebook Project", "status" to "ACTIVE", "updatedAt" to 1_795_000_000_000L)
+        )
+        val parsedMissing = ProjectFirestoreDto.fromFirestoreMap(missingIdDoc)
+        assertNotNull(parsedMissing)
+        assertEquals("proj-from-doc-path", parsedMissing!!.id)
+        assertEquals("Recovered Googlebook Project", parsedMissing.title)
+
+        val blankIdDoc = SyncRepository.normalizeFirestoreMapWithId(
+            "proj-blank-override",
+            mapOf("id" to "   ", "title" to "Blank Field Project", "updatedAt" to 1_795_000_000_000L)
+        )
+        val parsedBlank = ProjectFirestoreDto.fromFirestoreMap(blankIdDoc)
+        assertNotNull(parsedBlank)
+        assertEquals("proj-blank-override", parsedBlank!!.id)
+
+        // Explicit non-blank id is preserved untouched
+        val explicitIdDoc = SyncRepository.normalizeFirestoreMapWithId(
+            "doc-path-id",
+            mapOf("id" to "explicit-proj-id", "title" to "Explicit ID Project", "updatedAt" to 1_795_000_000_000L)
+        )
+        assertEquals("explicit-proj-id", ProjectFirestoreDto.fromFirestoreMap(explicitIdDoc)!!.id)
+
+        // Source invariant: attachRealtimeDeltaListeners must never call saveLastSyncTimestamp
+        val syncRepoFile = sequenceOf(
+            File("src/main/java/com/culturedcode/things3/data/repository/SyncRepository.kt"),
+            File("app/src/main/java/com/culturedcode/things3/data/repository/SyncRepository.kt")
+        ).first { it.isFile }
+        val syncRepoSrc = syncRepoFile.readText()
+        val attachStart = syncRepoSrc.indexOf("suspend fun attachRealtimeDeltaListeners(")
+        val attachEnd = syncRepoSrc.indexOf("private fun scheduleListenerReconnect(", attachStart)
+        assertTrue(attachStart > 0 && attachEnd > attachStart)
+        val attachBody = syncRepoSrc.substring(attachStart, attachEnd)
+        assertFalse(
+            "Single-collection listeners must never advance saveLastSyncTimestamp",
+            attachBody.contains("saveLastSyncTimestamp(")
+        )
+    }
 }
+
 
 

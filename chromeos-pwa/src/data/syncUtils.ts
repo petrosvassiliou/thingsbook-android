@@ -1,4 +1,11 @@
-import type { AttachmentRecord, RecurrenceRule, TaskRecord } from '../domain/types.ts';
+import type {
+  AreaRecord,
+  AttachmentRecord,
+  HeadingRecord,
+  ProjectRecord,
+  RecurrenceRule,
+  TaskRecord
+} from '../domain/types.ts';
 
 export const MAX_ATTACHMENT_INLINE_BYTES = 700_000;
 export const ATTACHMENT_BATCH_CHUNK_SIZE = 8;
@@ -9,6 +16,21 @@ export const MAX_NTFY_PAYLOAD_BYTES = 3_800;
 export const FAST_SYNC_COALESCE_MS = 50;
 export const ATTACHMENT_BACKFILL_STORAGE_PREFIX = 'thingsbook_att_backfill_v1_';
 export const PROJECTS_REVIEW_BACKFILL_STORAGE_PREFIX = 'thingsbook_proj_review_backfill_v1_';
+export const ENTITIES_RECONCILE_V2_21_STORAGE_PREFIX = 'thingsbook_v2_reconcile_b21_';
+export const COLLECTION_CURSOR_STORAGE_PREFIX = 'thingsbook_col_sync_ts_v2_';
+
+export const SYNC_COLLECTION_NAMES = [
+  'tags',
+  'areas',
+  'projects',
+  'headings',
+  'tasks',
+  'checklist_items',
+  'attachments',
+  'project_templates'
+] as const;
+
+export type SyncCollectionName = (typeof SYNC_COLLECTION_NAMES)[number];
 
 export function formatUidWakeSeed(userId: string): string {
   return `thingsbook-uid-v2:${userId.trim()}`;
@@ -210,6 +232,114 @@ export function clampRemoteCursorTimestamp(
   if (!Number.isFinite(remoteUpdatedAt) || remoteUpdatedAt <= 0) return 0;
   return Math.trunc(Math.min(remoteUpdatedAt, nowMillis + MAX_FUTURE_CURSOR_DRIFT_MS));
 }
+
+export function computeNextCollectionCursor(
+  prevCursor: number,
+  collectionMaxUpdatedAt: number,
+  nowMillis: number = Date.now()
+): number {
+  const safePrev =
+    Number.isFinite(prevCursor) && prevCursor > 0
+      ? clampRemoteCursorTimestamp(prevCursor, nowMillis)
+      : 0;
+  const clampedMax = clampRemoteCursorTimestamp(collectionMaxUpdatedAt, nowMillis);
+  if (clampedMax > safePrev) return clampedMax;
+  if (safePrev === 0) return Math.trunc(nowMillis);
+  return safePrev;
+}
+
+/**
+ * Ensures a Firestore document's path ID (`doc.id`) is never clobbered by a null, missing,
+ * or whitespace-only `id` field inside `doc.data()` (exact parity with macOS `queryCollection`).
+ */
+export function normalizeFirestoreDocWithId(
+  docId: string,
+  rawData: Record<string, unknown> | undefined | null
+): Record<string, unknown> {
+  const base: Record<string, unknown> =
+    rawData && typeof rawData === 'object' ? { ...rawData } : {};
+  const fieldId = typeof base.id === 'string' ? base.id.trim() : '';
+  const fallbackId = typeof docId === 'string' ? docId.trim() : '';
+  base.id = fieldId.length > 0 ? fieldId : fallbackId;
+  return base;
+}
+
+export interface OrphanContainerCheckResult {
+  hasOrphanProjectRef: boolean;
+  hasOrphanAreaRef: boolean;
+  hasOrphanHeadingRef: boolean;
+}
+
+/**
+ * Detects whether local IndexedDB holds active tasks, headings, or projects referencing a parent
+ * Project, Area, or Heading ID that is completely absent from the local object store (e.g. skipped
+ * by an interrupted sync), allowing `pullDeltaRecordsFromFirestore` to self-heal from `since = 0`.
+ */
+export function detectMissingReferencedEntityContainers(snapshot: {
+  areas: readonly Pick<AreaRecord, 'id'>[];
+  projects: readonly Pick<ProjectRecord, 'id' | 'areaId' | 'isDeleted'>[];
+  headings: readonly Pick<HeadingRecord, 'id' | 'projectId' | 'isDeleted'>[];
+  tasks: readonly Pick<TaskRecord, 'id' | 'projectId' | 'areaId' | 'headingId' | 'isDeleted'>[];
+}): OrphanContainerCheckResult {
+  const areaIds = new Set<string>();
+  for (const a of snapshot.areas) {
+    const id = a.id?.trim();
+    if (id) areaIds.add(id);
+  }
+  const projectIds = new Set<string>();
+  for (const p of snapshot.projects) {
+    const id = p.id?.trim();
+    if (id) projectIds.add(id);
+  }
+  const headingIds = new Set<string>();
+  for (const h of snapshot.headings) {
+    const id = h.id?.trim();
+    if (id) headingIds.add(id);
+  }
+
+  let hasOrphanProjectRef = false;
+  let hasOrphanAreaRef = false;
+  let hasOrphanHeadingRef = false;
+
+  for (const p of snapshot.projects) {
+    if (p.isDeleted) continue;
+    const aid = p.areaId?.trim();
+    if (aid && !areaIds.has(aid)) {
+      hasOrphanAreaRef = true;
+    }
+  }
+
+  for (const h of snapshot.headings) {
+    if (h.isDeleted) continue;
+    const pid = h.projectId?.trim();
+    if (pid && !projectIds.has(pid)) {
+      hasOrphanProjectRef = true;
+    }
+  }
+
+  for (const t of snapshot.tasks) {
+    if (t.isDeleted) continue;
+    const pid = t.projectId?.trim();
+    if (pid && !projectIds.has(pid)) {
+      hasOrphanProjectRef = true;
+    }
+    const aid = t.areaId?.trim();
+    if (aid && !areaIds.has(aid)) {
+      hasOrphanAreaRef = true;
+    }
+    const hid = t.headingId?.trim();
+    if (hid && !headingIds.has(hid)) {
+      hasOrphanHeadingRef = true;
+    }
+  }
+
+  return {
+    hasOrphanProjectRef,
+    hasOrphanAreaRef,
+    hasOrphanHeadingRef
+  };
+}
+
 
 export function chunkItems<T>(items: readonly T[], chunkSize: number): T[][] {
   const step = Math.max(1, Math.trunc(chunkSize));

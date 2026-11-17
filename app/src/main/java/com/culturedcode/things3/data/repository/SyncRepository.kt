@@ -870,10 +870,12 @@ class SyncRepository @Inject constructor(
                 }
 
                 val nowMillis = System.currentTimeMillis()
-                if (maxObservedTimestamp > lastSync) {
-                    saveLastSyncTimestamp(userId, clampRemoteTimestamp(maxObservedTimestamp, nowMillis))
-                } else if (lastSync == 0L) {
-                    saveLastSyncTimestamp(userId, nowMillis)
+                if (fbPullSucceeded || !liveFb) {
+                    if (maxObservedTimestamp > lastSync) {
+                        saveLastSyncTimestamp(userId, clampRemoteTimestamp(maxObservedTimestamp, nowMillis))
+                    } else if (lastSync == 0L) {
+                        saveLastSyncTimestamp(userId, nowMillis)
+                    }
                 }
                 _lastSyncedAt.value = nowMillis
 
@@ -1435,11 +1437,13 @@ class SyncRepository @Inject constructor(
                                 } else {
                                     val lastSync = getLastSyncTimestamp(userId)
                                     val batchMax = applyDeltaBatchToRoom(batch, lastSync)
-                                    if (batchMax > lastSync) {
+                                    if (isLiveFirebaseConfigured()) {
+                                        if (batchMax > 0L) {
+                                            _lastSyncedAt.value = System.currentTimeMillis()
+                                            scheduleIncrementalFirestorePull(userId, 35L)
+                                        }
+                                    } else if (batchMax > lastSync) {
                                         saveLastSyncTimestamp(userId, batchMax)
-                                    }
-                                    if (batch.attachments.isNotEmpty() && isLiveFirebaseConfigured()) {
-                                        scheduleIncrementalFirestorePull(userId, 20L)
                                     }
                                 }
                             }
@@ -1556,6 +1560,15 @@ class SyncRepository @Inject constructor(
         }
     }
 
+    private fun queryCollectionSince(
+        userDoc: com.google.firebase.firestore.DocumentReference,
+        collectionName: String,
+        floor: Long
+    ): com.google.firebase.firestore.Query {
+        val col = userDoc.collection(collectionName)
+        return if (floor > 0L) col.whereGreaterThan("updatedAt", floor) else col
+    }
+
     suspend fun pullDeltaRecordsFromFirestore(userId: String, lastSyncTimestamp: Long): Long {
         if (isLocalOnlyDbModeEnabled()) return lastSyncTimestamp
         val userDoc = firestore.collection("users").document(userId)
@@ -1568,6 +1581,24 @@ class SyncRepository @Inject constructor(
         val needsAttachmentsBackfill = prefs[attachmentsBackfillKeyForUser(userId)] != true
         val needsTemplatesBackfill = prefs[projectTemplatesBackfillKeyForUser(userId)] != true
         val needsProjectsReviewBackfill = prefs[projectsReviewBackfillKeyForUser(userId)] != true
+
+        val activeTasksLocal = database.taskDao().getAllNonDeletedTasksList()
+        val activeHeadingsLocal = database.headingDao().getAllNonDeletedHeadingsList()
+        val activeProjectsLocal = database.projectDao().getAllNonDeletedProjectsList()
+        val referencedProjIds = buildSet {
+            activeTasksLocal.mapNotNullTo(this) { it.projectId?.trim()?.takeIf(String::isNotEmpty) }
+            activeHeadingsLocal.mapNotNullTo(this) { it.projectId.trim().takeIf(String::isNotEmpty) }
+        }
+        val referencedAreaIds = buildSet {
+            activeTasksLocal.mapNotNullTo(this) { it.areaId?.trim()?.takeIf(String::isNotEmpty) }
+            activeProjectsLocal.mapNotNullTo(this) { it.areaId?.trim()?.takeIf(String::isNotEmpty) }
+        }
+        val referencedHeadingIds = buildSet {
+            activeTasksLocal.mapNotNullTo(this) { it.headingId?.trim()?.takeIf(String::isNotEmpty) }
+        }
+        val hasOrphanProjectRef = referencedProjIds.any { database.projectDao().getById(it) == null }
+        val hasOrphanAreaRef = referencedAreaIds.any { database.areaDao().getById(it) == null }
+        val hasOrphanHeadingRef = referencedHeadingIds.any { database.headingDao().getById(it) == null }
 
         data class ParallelSnapshots(
             val tags: com.google.firebase.firestore.QuerySnapshot,
@@ -1582,54 +1613,34 @@ class SyncRepository @Inject constructor(
 
         val fetched = coroutineScope {
             val tagDef = async {
-                userDoc.collection("tags")
-                    .whereGreaterThan("updatedAt", queryFloor)
-                    .get()
-                    .await()
+                queryCollectionSince(userDoc, "tags", queryFloor).get().await()
             }
             val areaDef = async {
-                userDoc.collection("areas")
-                    .whereGreaterThan("updatedAt", queryFloor)
-                    .get()
-                    .await()
+                val floor = if (hasOrphanAreaRef || hasOrphanProjectRef) 0L else queryFloor
+                queryCollectionSince(userDoc, "areas", floor).get().await()
             }
             val projectDef = async {
-                userDoc.collection("projects")
-                    .whereGreaterThan("updatedAt", if (needsProjectsReviewBackfill) 0L else queryFloor)
-                    .get()
-                    .await()
+                val floor = if (needsProjectsReviewBackfill || hasOrphanProjectRef) 0L else queryFloor
+                queryCollectionSince(userDoc, "projects", floor).get().await()
             }
             val headingDef = async {
-                userDoc.collection("headings")
-                    .whereGreaterThan("updatedAt", queryFloor)
-                    .get()
-                    .await()
+                val floor = if (hasOrphanHeadingRef || hasOrphanProjectRef) 0L else queryFloor
+                queryCollectionSince(userDoc, "headings", floor).get().await()
             }
             val taskDef = async {
-                userDoc.collection("tasks")
-                    .whereGreaterThan("updatedAt", queryFloor)
-                    .get()
-                    .await()
+                queryCollectionSince(userDoc, "tasks", queryFloor).get().await()
             }
             val checklistDef = async {
-                userDoc.collection("checklist_items")
-                    .whereGreaterThan("updatedAt", queryFloor)
-                    .get()
-                    .await()
+                queryCollectionSince(userDoc, "checklist_items", queryFloor).get().await()
             }
             val attachmentDef = async {
-                userDoc.collection("attachments")
-                    .whereGreaterThan("updatedAt", if (needsAttachmentsBackfill) 0L else queryFloor)
-                    .get()
-                    .await()
+                val floor = if (needsAttachmentsBackfill) 0L else queryFloor
+                queryCollectionSince(userDoc, "attachments", floor).get().await()
             }
             val templateDef = async {
                 runCatchingCancellable {
                     val floor = if (needsTemplatesBackfill) 0L else queryFloor
-                    userDoc.collection("project_templates")
-                        .whereGreaterThan("updatedAt", floor)
-                        .get()
-                        .await()
+                    queryCollectionSince(userDoc, "project_templates", floor).get().await()
                 }.getOrNull()
             }
             ParallelSnapshots(
@@ -1655,7 +1666,8 @@ class SyncRepository @Inject constructor(
         val nowMillis = System.currentTimeMillis()
         dbApplyMutex.withLock {
             for (doc in tagSnapshots.documents) {
-                val dto = runCatching { TagFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
+                val map = normalizeFirestoreMapWithId(doc.id, doc.data)
+                val dto = runCatching { TagFirestoreDto.fromFirestoreMap(map) }.getOrNull() ?: continue
                 if (dto.id.isBlank()) continue
                 val local = database.tagDao().getById(dto.id)
                 if (local == null || dto.updatedAt >= local.updatedAt) {
@@ -1666,7 +1678,8 @@ class SyncRepository @Inject constructor(
             }
 
             for (doc in areaSnapshots.documents) {
-                val dto = runCatching { AreaFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
+                val map = normalizeFirestoreMapWithId(doc.id, doc.data)
+                val dto = runCatching { AreaFirestoreDto.fromFirestoreMap(map) }.getOrNull() ?: continue
                 if (dto.id.isBlank()) continue
                 val local = database.areaDao().getById(dto.id)
                 if (local == null || dto.updatedAt >= local.updatedAt) {
@@ -1677,7 +1690,8 @@ class SyncRepository @Inject constructor(
             }
 
             for (doc in projectSnapshots.documents) {
-                val dto = runCatching { ProjectFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
+                val map = normalizeFirestoreMapWithId(doc.id, doc.data)
+                val dto = runCatching { ProjectFirestoreDto.fromFirestoreMap(map) }.getOrNull() ?: continue
                 if (dto.id.isBlank()) continue
                 applyRemoteProjectDto(dto)
                 val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
@@ -1685,7 +1699,8 @@ class SyncRepository @Inject constructor(
             }
 
             for (doc in headingSnapshots.documents) {
-                val dto = runCatching { HeadingFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
+                val map = normalizeFirestoreMapWithId(doc.id, doc.data)
+                val dto = runCatching { HeadingFirestoreDto.fromFirestoreMap(map) }.getOrNull() ?: continue
                 if (dto.id.isBlank() || dto.projectId.isBlank()) continue
                 val local = database.headingDao().getById(dto.id)
                 if (local == null || dto.updatedAt >= local.updatedAt) {
@@ -1696,7 +1711,8 @@ class SyncRepository @Inject constructor(
             }
 
             for (doc in taskSnapshots.documents) {
-                val dto = runCatching { TaskFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
+                val map = normalizeFirestoreMapWithId(doc.id, doc.data)
+                val dto = runCatching { TaskFirestoreDto.fromFirestoreMap(map) }.getOrNull() ?: continue
                 if (dto.id.isBlank()) continue
                 val local = database.taskDao().getById(dto.id)
                 if (local == null || dto.updatedAt >= local.updatedAt) {
@@ -1709,7 +1725,8 @@ class SyncRepository @Inject constructor(
             }
 
             for (doc in checklistSnapshots.documents) {
-                val dto = runCatching { ChecklistItemFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
+                val map = normalizeFirestoreMapWithId(doc.id, doc.data)
+                val dto = runCatching { ChecklistItemFirestoreDto.fromFirestoreMap(map) }.getOrNull() ?: continue
                 if (dto.id.isBlank() || dto.taskId.isBlank()) continue
                 val local = database.checklistDao().getById(dto.id)
                 if (local == null || dto.updatedAt >= local.updatedAt) {
@@ -1721,7 +1738,8 @@ class SyncRepository @Inject constructor(
 
             if (templateSnapshots != null) {
                 for (doc in templateSnapshots.documents) {
-                    val dto = runCatching { ProjectTemplateFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
+                    val map = normalizeFirestoreMapWithId(doc.id, doc.data)
+                    val dto = runCatching { ProjectTemplateFirestoreDto.fromFirestoreMap(map) }.getOrNull() ?: continue
                     if (dto.id.isBlank()) continue
                     val local = database.projectTemplateDao().getById(dto.id)
                     if (local == null || dto.updatedAt >= local.updatedAt) {
@@ -1733,7 +1751,8 @@ class SyncRepository @Inject constructor(
             }
 
             for (doc in attachmentSnapshots.documents) {
-                val dto = runCatching { AttachmentFirestoreDto.fromFirestoreMap(doc.data) }.getOrNull() ?: continue
+                val map = normalizeFirestoreMapWithId(doc.id, doc.data)
+                val dto = runCatching { AttachmentFirestoreDto.fromFirestoreMap(map) }.getOrNull() ?: continue
                 if (dto.id.isBlank()) continue
                 applyRemoteAttachmentDto(dto)
                 val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
@@ -1782,19 +1801,18 @@ class SyncRepository @Inject constructor(
             val queryFloor = computeDeltaQueryFloor(sinceTimestamp)
             val userDoc = firestore.collection("users").document(userId)
 
-            activeListeners += userDoc.collection("tasks")
-                .whereGreaterThan("updatedAt", queryFloor)
+            activeListeners += queryCollectionSince(userDoc, "tasks", queryFloor)
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
                             dbApplyMutex.withLock {
-                                var maxTs = getLastSyncTimestamp(userId)
                                 var changed = false
                                 var appliedAnyTask = false
                                 for (change in snapshot.documentChanges) {
                                     runCatchingCancellable {
-                                        val dto = TaskFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
+                                        val map = normalizeFirestoreMapWithId(change.document.id, change.document.data)
+                                        val dto = TaskFirestoreDto.fromFirestoreMap(map) ?: return@runCatchingCancellable
                                         if (dto.id.isNotBlank()) {
                                             val local = database.taskDao().getById(dto.id)
                                             if (local == null || dto.updatedAt >= local.updatedAt) {
@@ -1803,11 +1821,7 @@ class SyncRepository @Inject constructor(
                                                 syncTaskReminderSchedule(entity)
                                                 appliedAnyTask = true
                                             }
-                                            val clamped = clampRemoteTimestamp(dto.updatedAt)
-                                            if (clamped > maxTs) {
-                                                maxTs = clamped
-                                                changed = true
-                                            }
+                                            changed = true
                                         }
                                     }
                                 }
@@ -1817,197 +1831,166 @@ class SyncRepository @Inject constructor(
                                         triggerBackgroundSync()
                                     }
                                 }
-                                if (changed) saveLastSyncTimestamp(userId, maxTs)
+                                if (changed) _lastSyncedAt.value = System.currentTimeMillis()
                             }
                         }
                     } catch (_: Throwable) {}
                 }
 
-            activeListeners += userDoc.collection("projects")
-                .whereGreaterThan("updatedAt", queryFloor)
+            activeListeners += queryCollectionSince(userDoc, "projects", queryFloor)
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
                             dbApplyMutex.withLock {
-                                var maxTs = getLastSyncTimestamp(userId)
                                 var changed = false
                                 for (change in snapshot.documentChanges) {
                                     runCatchingCancellable {
-                                        val dto = ProjectFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
+                                        val map = normalizeFirestoreMapWithId(change.document.id, change.document.data)
+                                        val dto = ProjectFirestoreDto.fromFirestoreMap(map) ?: return@runCatchingCancellable
                                         if (dto.id.isNotBlank()) {
                                             applyRemoteProjectDto(dto)
-                                            val clamped = clampRemoteTimestamp(dto.updatedAt)
-                                            if (clamped > maxTs) {
-                                                maxTs = clamped
-                                                changed = true
-                                            }
+                                            changed = true
                                         }
                                     }
                                 }
-                                if (changed) saveLastSyncTimestamp(userId, maxTs)
+                                if (changed) _lastSyncedAt.value = System.currentTimeMillis()
                             }
                         }
                     } catch (_: Throwable) {}
                 }
 
-            activeListeners += userDoc.collection("areas")
-                .whereGreaterThan("updatedAt", queryFloor)
+            activeListeners += queryCollectionSince(userDoc, "areas", queryFloor)
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
                             dbApplyMutex.withLock {
-                                var maxTs = getLastSyncTimestamp(userId)
                                 var changed = false
                                 for (change in snapshot.documentChanges) {
                                     runCatchingCancellable {
-                                        val dto = AreaFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
+                                        val map = normalizeFirestoreMapWithId(change.document.id, change.document.data)
+                                        val dto = AreaFirestoreDto.fromFirestoreMap(map) ?: return@runCatchingCancellable
                                         if (dto.id.isNotBlank()) {
                                             val local = database.areaDao().getById(dto.id)
                                             if (local == null || dto.updatedAt >= local.updatedAt) {
                                                 database.areaDao().upsert(dto.toEntity())
                                             }
-                                            val clamped = clampRemoteTimestamp(dto.updatedAt)
-                                            if (clamped > maxTs) {
-                                                maxTs = clamped
-                                                changed = true
-                                            }
+                                            changed = true
                                         }
                                     }
                                 }
-                                if (changed) saveLastSyncTimestamp(userId, maxTs)
+                                if (changed) _lastSyncedAt.value = System.currentTimeMillis()
                             }
                         }
                     } catch (_: Throwable) {}
                 }
 
-            activeListeners += userDoc.collection("headings")
-                .whereGreaterThan("updatedAt", queryFloor)
+            activeListeners += queryCollectionSince(userDoc, "headings", queryFloor)
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
                             dbApplyMutex.withLock {
-                                var maxTs = getLastSyncTimestamp(userId)
                                 var changed = false
                                 for (change in snapshot.documentChanges) {
                                     runCatchingCancellable {
-                                        val dto = HeadingFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
+                                        val map = normalizeFirestoreMapWithId(change.document.id, change.document.data)
+                                        val dto = HeadingFirestoreDto.fromFirestoreMap(map) ?: return@runCatchingCancellable
                                         if (dto.id.isNotBlank() && dto.projectId.isNotBlank()) {
                                             val local = database.headingDao().getById(dto.id)
                                             if (local == null || dto.updatedAt >= local.updatedAt) {
                                                 database.headingDao().upsert(dto.toEntity())
                                             }
-                                            val clamped = clampRemoteTimestamp(dto.updatedAt)
-                                            if (clamped > maxTs) {
-                                                maxTs = clamped
-                                                changed = true
-                                            }
+                                            changed = true
                                         }
                                     }
                                 }
-                                if (changed) saveLastSyncTimestamp(userId, maxTs)
+                                if (changed) _lastSyncedAt.value = System.currentTimeMillis()
                             }
                         }
                     } catch (_: Throwable) {}
                 }
 
-            activeListeners += userDoc.collection("checklist_items")
-                .whereGreaterThan("updatedAt", queryFloor)
+            activeListeners += queryCollectionSince(userDoc, "checklist_items", queryFloor)
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
                             dbApplyMutex.withLock {
-                                var maxTs = getLastSyncTimestamp(userId)
                                 var changed = false
                                 for (change in snapshot.documentChanges) {
                                     runCatchingCancellable {
-                                        val dto = ChecklistItemFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
+                                        val map = normalizeFirestoreMapWithId(change.document.id, change.document.data)
+                                        val dto = ChecklistItemFirestoreDto.fromFirestoreMap(map) ?: return@runCatchingCancellable
                                         if (dto.id.isNotBlank() && dto.taskId.isNotBlank()) {
                                             val local = database.checklistDao().getById(dto.id)
                                             if (local == null || dto.updatedAt >= local.updatedAt) {
                                                 database.checklistDao().upsert(dto.toEntity())
                                             }
-                                            val clamped = clampRemoteTimestamp(dto.updatedAt)
-                                            if (clamped > maxTs) {
-                                                maxTs = clamped
-                                                changed = true
-                                            }
+                                            changed = true
                                         }
                                     }
                                 }
-                                if (changed) saveLastSyncTimestamp(userId, maxTs)
+                                if (changed) _lastSyncedAt.value = System.currentTimeMillis()
                             }
                         }
                     } catch (_: Throwable) {}
                 }
 
-            activeListeners += userDoc.collection("tags")
-                .whereGreaterThan("updatedAt", queryFloor)
+            activeListeners += queryCollectionSince(userDoc, "tags", queryFloor)
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
                             dbApplyMutex.withLock {
-                                var maxTs = getLastSyncTimestamp(userId)
                                 var changed = false
                                 for (change in snapshot.documentChanges) {
                                     runCatchingCancellable {
-                                        val dto = TagFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
+                                        val map = normalizeFirestoreMapWithId(change.document.id, change.document.data)
+                                        val dto = TagFirestoreDto.fromFirestoreMap(map) ?: return@runCatchingCancellable
                                         if (dto.id.isNotBlank()) {
                                             val local = database.tagDao().getById(dto.id)
                                             if (local == null || dto.updatedAt >= local.updatedAt) {
                                                 database.tagDao().upsert(dto.toEntity())
                                             }
-                                            val clamped = clampRemoteTimestamp(dto.updatedAt)
-                                            if (clamped > maxTs) {
-                                                maxTs = clamped
-                                                changed = true
-                                            }
+                                            changed = true
                                         }
                                     }
                                 }
-                                if (changed) saveLastSyncTimestamp(userId, maxTs)
+                                if (changed) _lastSyncedAt.value = System.currentTimeMillis()
                             }
                         }
                     } catch (_: Throwable) {}
                 }
 
-            activeListeners += userDoc.collection("project_templates")
-                .whereGreaterThan("updatedAt", queryFloor)
+            activeListeners += queryCollectionSince(userDoc, "project_templates", queryFloor)
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null || snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
                             dbApplyMutex.withLock {
-                                var maxTs = getLastSyncTimestamp(userId)
                                 var changed = false
                                 for (change in snapshot.documentChanges) {
                                     runCatchingCancellable {
-                                        val dto = ProjectTemplateFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
+                                        val map = normalizeFirestoreMapWithId(change.document.id, change.document.data)
+                                        val dto = ProjectTemplateFirestoreDto.fromFirestoreMap(map) ?: return@runCatchingCancellable
                                         if (dto.id.isNotBlank()) {
                                             val local = database.projectTemplateDao().getById(dto.id)
                                             if (local == null || dto.updatedAt >= local.updatedAt) {
                                                 database.projectTemplateDao().upsert(dto.toEntity())
                                             }
-                                            val clamped = clampRemoteTimestamp(dto.updatedAt)
-                                            if (clamped > maxTs) {
-                                                maxTs = clamped
-                                                changed = true
-                                            }
+                                            changed = true
                                         }
                                     }
                                 }
-                                if (changed) saveLastSyncTimestamp(userId, maxTs)
+                                if (changed) _lastSyncedAt.value = System.currentTimeMillis()
                             }
                         }
                     } catch (_: Throwable) {}
                 }
 
-            activeListeners += userDoc.collection("attachments")
-                .whereGreaterThan("updatedAt", queryFloor)
+            activeListeners += queryCollectionSince(userDoc, "attachments", queryFloor)
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null) {
@@ -2017,22 +2000,18 @@ class SyncRepository @Inject constructor(
                         if (snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
                         scope.launch {
                             dbApplyMutex.withLock {
-                                var maxTs = getLastSyncTimestamp(userId)
                                 var changed = false
                                 for (change in snapshot.documentChanges) {
                                     runCatchingCancellable {
-                                        val dto = AttachmentFirestoreDto.fromFirestoreMap(change.document.data) ?: return@runCatchingCancellable
+                                        val map = normalizeFirestoreMapWithId(change.document.id, change.document.data)
+                                        val dto = AttachmentFirestoreDto.fromFirestoreMap(map) ?: return@runCatchingCancellable
                                         if (dto.id.isNotBlank()) {
                                             applyRemoteAttachmentDto(dto)
-                                            val clamped = clampRemoteTimestamp(dto.updatedAt)
-                                            if (clamped > maxTs) {
-                                                maxTs = clamped
-                                                changed = true
-                                            }
+                                            changed = true
                                         }
                                     }
                                 }
-                                if (changed) saveLastSyncTimestamp(userId, maxTs)
+                                if (changed) _lastSyncedAt.value = System.currentTimeMillis()
                             }
                         }
                     } catch (_: Throwable) {}
@@ -2066,6 +2045,7 @@ class SyncRepository @Inject constructor(
         listenerReconnectJob = scope.launch {
             delay(2000L)
             if (!isLocalOnlyDbModeEnabled()) {
+                runCatchingCancellable { syncBidirectionalDeltas() }
                 runCatchingCancellable { attachRealtimeDeltaListeners(userId) }
             }
         }
@@ -2266,6 +2246,18 @@ class SyncRepository @Inject constructor(
             remoteUpdatedAt: Long,
             nowMillis: Long = System.currentTimeMillis()
         ): Long = minOf(remoteUpdatedAt, nowMillis + MAX_FUTURE_DRIFT_MS)
+
+        fun normalizeFirestoreMapWithId(
+            docId: String,
+            rawData: Map<String, Any>?
+        ): Map<String, Any>? {
+            val base = rawData ?: return null
+            val fieldId = (base["id"] as? String)?.trim().orEmpty()
+            if (fieldId.isNotEmpty()) return base
+            val fallbackId = docId.trim()
+            if (fallbackId.isEmpty()) return base
+            return base + ("id" to fallbackId)
+        }
 
         fun mergeMonotonicReviewTimestamp(
             localLastReviewedAt: Long?,

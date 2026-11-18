@@ -2636,5 +2636,28 @@ public enum MacSettingsTabLayoutMetrics {
     }
 }
 
+// MARK: - Task Card Focus & Quick Triage Interaction Rules
+
+public enum TaskCardInteractionRules {
+    /// Only auto-focus the title input when expanding a brand-new untitled task — never auto-focus or select existing titles.
+    public static func shouldAutoFocusTitleOnExpand(title: String) -> Bool {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Never start in active notes-editing mode when opening a task so notes are never auto-selected on expand.
+    public static func shouldAutoEditNotesOnExpand(notes: String) -> Bool {
+        false
+    }
+
+    /// Show the 1-click "This Evening" + immediate-close pill exclusively in the Today view for open tasks not yet in This Evening.
+    public static func shouldShowQuickThisEveningPill(
+        isTodayView: Bool,
+        status: TaskStatus,
+        scheduleState: ScheduleState
+    ) -> Bool {
+        isTodayView && status == .open && scheduleState != .thisEvening
+    }
+}
+
 
 

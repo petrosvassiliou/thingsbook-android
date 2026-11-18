@@ -604,6 +604,34 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
+    fun quickMoveTaskToThisEveningAndCollapse(
+        task: TaskItem,
+        latestTitle: String,
+        latestNotes: String
+    ) {
+        if (_expandedTaskId.value == task.id) {
+            _expandedTaskId.value = null
+        }
+        safeVmScope.launch {
+            if (latestTitle != task.title || latestNotes != task.notes) {
+                repository.updateTaskTitleAndNotes(
+                    taskId = task.id,
+                    newTitle = latestTitle,
+                    newNotes = latestNotes
+                )
+            }
+            val startOfTodayMillis = LocalDate.now()
+                .atStartOfDay(ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli()
+            repository.updateTaskSchedule(
+                taskId = task.id,
+                newState = ScheduleState.THIS_EVENING,
+                newWhenDate = startOfTodayMillis
+            )
+        }
+    }
+
     fun updateTaskDeadline(task: TaskItem, newDeadline: Long?) {
         safeVmScope.launch {
             repository.updateTaskDeadline(

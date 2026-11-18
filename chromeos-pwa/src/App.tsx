@@ -1929,6 +1929,7 @@ export const App: React.FC = () => {
       key={tk.id}
       task={tk}
       isExpanded={expandedTaskId === tk.id}
+      isTodayView={activeNav.kind === 'smart' && activeNav.view === 'TODAY'}
       isSelected={selectedTaskIds.includes(tk.id)}
       isMultiSelectMode={selectedTaskIds.length > 0}
       showContextSubtitle={showContextSubtitle}

@@ -760,9 +760,9 @@ class V2UpgradeAndFeaturesTest {
     }
 
     @Test
-    fun `v2_0_0_beta_24 BuildConfig and all 5 localized strings_xml files verify project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(68, BuildConfig.VERSION_CODE)
-        assertEquals("2.0.0-beta.24", BuildConfig.VERSION_NAME)
+    fun `v2_0_0_beta_25 BuildConfig and all 5 localized strings_xml files verify project deletion prompt and topbar_tooltip keys`() {
+        assertEquals(69, BuildConfig.VERSION_CODE)
+        assertEquals("2.0.0-beta.25", BuildConfig.VERSION_NAME)
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -1687,7 +1687,44 @@ class V2UpgradeAndFeaturesTest {
         assertFalse(DatabaseSeeder.isActiveSampleTask(normalUserTask))
         assertFalse(DatabaseSeeder.isPurgeableSampleTask(normalUserTask))
     }
+
+    @Test
+    fun `v2_0_0_beta_25 TaskCardInteractionRules suppresses auto-focus on existing tasks and scopes quick This Evening pill strictly to Today view`() {
+        assertTrue(com.culturedcode.things3.domain.model.TaskCardInteractionRules.shouldAutoFocusTitleOnExpand(""))
+        assertTrue(com.culturedcode.things3.domain.model.TaskCardInteractionRules.shouldAutoFocusTitleOnExpand("   "))
+        assertFalse(com.culturedcode.things3.domain.model.TaskCardInteractionRules.shouldAutoFocusTitleOnExpand("Review Q4 Plan"))
+
+        assertTrue(
+            com.culturedcode.things3.domain.model.TaskCardInteractionRules.shouldShowQuickThisEveningPill(
+                isTodayView = true,
+                status = TaskStatus.OPEN,
+                scheduleState = ScheduleState.TODAY
+            )
+        )
+        assertFalse(
+            com.culturedcode.things3.domain.model.TaskCardInteractionRules.shouldShowQuickThisEveningPill(
+                isTodayView = true,
+                status = TaskStatus.OPEN,
+                scheduleState = ScheduleState.THIS_EVENING
+            )
+        )
+        assertFalse(
+            com.culturedcode.things3.domain.model.TaskCardInteractionRules.shouldShowQuickThisEveningPill(
+                isTodayView = false,
+                status = TaskStatus.OPEN,
+                scheduleState = ScheduleState.TODAY
+            )
+        )
+        assertFalse(
+            com.culturedcode.things3.domain.model.TaskCardInteractionRules.shouldShowQuickThisEveningPill(
+                isTodayView = true,
+                status = TaskStatus.COMPLETED,
+                scheduleState = ScheduleState.TODAY
+            )
+        )
+    }
 }
+
 
 
 

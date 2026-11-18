@@ -26,12 +26,16 @@ import {
   isActiveSampleTask,
   isPurgeableSampleTask
 } from '../src/data/seedData.ts';
+import {
+  shouldAutoFocusTitleOnExpand,
+  shouldShowQuickThisEveningPill
+} from '../src/domain/v2Utils.ts';
 
-test('v2.0.0-beta.24 build metadata constants are bumped to 2.0.0-beta.24 (Build 68)', () => {
-  assert.equal(APP_VERSION, '2.0.0-beta.24');
-  assert.equal(APP_BUILD_CODE, 68);
-  assert.equal(versionFromUtils, '2.0.0-beta.24');
-  assert.equal(buildFromUtils, 68);
+test('v2.0.0-beta.25 build metadata constants are bumped to 2.0.0-beta.25 (Build 69)', () => {
+  assert.equal(APP_VERSION, '2.0.0-beta.25');
+  assert.equal(APP_BUILD_CODE, 69);
+  assert.equal(versionFromUtils, '2.0.0-beta.25');
+  assert.equal(buildFromUtils, 69);
   assert.equal(isPrereleaseVersion(APP_VERSION), true);
   assert.equal(isPrereleaseVersion('1.8.1'), false);
   assert.equal(isPrereleaseVersion('2.0.0'), false);
@@ -486,4 +490,44 @@ test('v2.0.0-beta.24 sample task detection ignores Logbook completed items and p
     assert.equal(isPurgeableSampleTask(renamedTask), false);
   }
 });
+
+test('v2.0.0-beta.25 suppresses auto-selection on existing tasks and scopes 1-click This Evening pill strictly to Today view', () => {
+  assert.equal(shouldAutoFocusTitleOnExpand(''), true);
+  assert.equal(shouldAutoFocusTitleOnExpand('   '), true);
+  assert.equal(shouldAutoFocusTitleOnExpand('Buy groceries'), false);
+
+  assert.equal(
+    shouldShowQuickThisEveningPill({
+      isTodayView: true,
+      status: 'OPEN',
+      scheduleState: 'TODAY'
+    }),
+    true
+  );
+  assert.equal(
+    shouldShowQuickThisEveningPill({
+      isTodayView: true,
+      status: 'OPEN',
+      scheduleState: 'THIS_EVENING'
+    }),
+    false
+  );
+  assert.equal(
+    shouldShowQuickThisEveningPill({
+      isTodayView: false,
+      status: 'OPEN',
+      scheduleState: 'TODAY'
+    }),
+    false
+  );
+  assert.equal(
+    shouldShowQuickThisEveningPill({
+      isTodayView: true,
+      status: 'COMPLETED',
+      scheduleState: 'TODAY'
+    }),
+    false
+  );
+});
+
 

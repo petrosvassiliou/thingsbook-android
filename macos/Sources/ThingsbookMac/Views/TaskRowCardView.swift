@@ -59,12 +59,7 @@ public struct TaskRowCardView: View {
         .onAppear {
             syncDrafts()
             if isExpanded {
-                isEditingNotes = latestTask.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                if latestTask.title.isEmpty {
-                    DispatchQueue.main.async {
-                        isTitleFocused = true
-                    }
-                }
+                applyInitialExpandFocusState()
             }
         }
         .onDisappear {
@@ -94,10 +89,7 @@ public struct TaskRowCardView: View {
         .onChange(of: isExpanded) { _, expanded in
             if expanded {
                 syncDrafts()
-                isEditingNotes = latestTask.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                if latestTask.title.isEmpty {
-                    isTitleFocused = true
-                }
+                applyInitialExpandFocusState()
             } else {
                 draftSaveTask?.cancel()
                 rowVoiceController.stopRecording()
@@ -348,22 +340,33 @@ public struct TaskRowCardView: View {
 
             // Markdown Notes Box + Detected Smart Link Chips
             VStack(alignment: .leading, spacing: 8) {
-                if !isEditingNotes && !draftNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(MarkdownNotesParser.renderAttributed(draftNotes))
-                        .font(.system(size: 13.5))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(11)
-                        .background(
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .fill(ThingsMacPalette.subtleContainer)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                        .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.8)
-                                )
-                        )
-                        .onTapGesture {
-                            isEditingNotes = true
+                if !isEditingNotes {
+                    let hasNotes = !draftNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    Group {
+                        if hasNotes {
+                            Text(MarkdownNotesParser.renderAttributed(draftNotes))
+                                .font(.system(size: 13.5))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            Text(store.tr("placeholder_notes"))
+                                .font(.system(size: 13.5))
+                                .foregroundStyle(.tertiary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
+                    }
+                    .padding(11)
+                    .background(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(ThingsMacPalette.subtleContainer)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.8)
+                            )
+                    )
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        isEditingNotes = true
+                    }
                 } else {
                     ZStack(alignment: .topLeading) {
                         if draftNotes.isEmpty {
@@ -534,23 +537,58 @@ public struct TaskRowCardView: View {
 
             // Active Badges Summary Row
             let hasContext = contextBreadcrumb != nil
-            if task.whenDate != nil || task.formattedTimeblockPill != nil || task.reminderTime != nil || task.deadline != nil || task.recurrenceRule != nil || hasContext || !task.tags.isEmpty {
+            if task.whenDate != nil || showQuickThisEveningPill || task.formattedTimeblockPill != nil || task.reminderTime != nil || task.deadline != nil || task.recurrenceRule != nil || hasContext || !task.tags.isEmpty {
                 ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
                     if let whenStr = whenSummaryLabel {
-                        HStack(spacing: 4) {
-                            Image(systemName: task.scheduleState == .thisEvening ? "moon.stars.fill" : "star.fill")
-                                .font(.system(size: 10.5))
-                                .foregroundStyle(task.scheduleState == .thisEvening ? ThingsMacPalette.eveningPurple : ThingsMacPalette.todayYellow)
-                            Text(whenStr)
-                                .font(.system(size: 11.5, weight: .semibold))
-                                .foregroundStyle(ThingsMacPalette.accentBlue)
-                                .lineLimit(1)
+                        Button {
+                            commitDraftEditsIfNeeded()
+                            isWhenPopoverOpen = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: task.scheduleState == .thisEvening ? "moon.stars.fill" : "star.fill")
+                                    .font(.system(size: 10.5))
+                                    .foregroundStyle(task.scheduleState == .thisEvening ? ThingsMacPalette.eveningPurple : ThingsMacPalette.todayYellow)
+                                Text(whenStr)
+                                    .font(.system(size: 11.5, weight: .semibold))
+                                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                                    .lineLimit(1)
+                            }
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 3.5)
+                            .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.10)))
                         }
-                        .fixedSize(horizontal: true, vertical: false)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 3.5)
-                        .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.10)))
+                        .buttonStyle(.plain)
                         .thingsTooltip(whenButtonTooltip)
+                    }
+
+                    if showQuickThisEveningPill {
+                        Button {
+                            quickMoveToThisEveningAndCollapse()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "moon.stars.fill")
+                                    .font(.system(size: 10.5, weight: .semibold))
+                                    .foregroundStyle(ThingsMacPalette.eveningPurple)
+                                Text(store.tr("view_this_evening"))
+                                    .font(.system(size: 11.5, weight: .semibold))
+                                    .foregroundStyle(ThingsMacPalette.eveningPurple)
+                                    .lineLimit(1)
+                            }
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 3.5)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(ThingsMacPalette.eveningPurple.opacity(0.13))
+                                    .overlay(
+                                        Capsule(style: .continuous)
+                                            .strokeBorder(ThingsMacPalette.eveningPurple.opacity(0.28), lineWidth: 0.8)
+                                    )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .thingsTooltip(store.tr("view_this_evening"))
                     }
 
                     if let tbPill = task.formattedTimeblockPill {
@@ -909,6 +947,50 @@ public struct TaskRowCardView: View {
             store.deleteTask(latestTask)
         } label: {
             Text(store.tr("action_delete"))
+        }
+    }
+
+    private var showQuickThisEveningPill: Bool {
+        TaskCardInteractionRules.shouldShowQuickThisEveningPill(
+            isTodayView: store.selectedDestination == .smartView(.today),
+            status: latestTask.status,
+            scheduleState: latestTask.scheduleState
+        )
+    }
+
+    private func applyInitialExpandFocusState() {
+        isEditingNotes = TaskCardInteractionRules.shouldAutoEditNotesOnExpand(notes: latestTask.notes)
+        if TaskCardInteractionRules.shouldAutoFocusTitleOnExpand(title: latestTask.title) {
+            DispatchQueue.main.async {
+                isTitleFocused = true
+            }
+        } else {
+            isTitleFocused = false
+            DispatchQueue.main.async {
+                isTitleFocused = false
+                if let window = NSApp.keyWindow, window.firstResponder is NSTextView {
+                    window.makeFirstResponder(nil)
+                }
+            }
+        }
+    }
+
+    private func quickMoveToThisEveningAndCollapse() {
+        draftSaveTask?.cancel()
+        rowVoiceController.stopRecording()
+        let pendingChecklist = newChecklistTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !pendingChecklist.isEmpty {
+            _ = try? store.database.addChecklistItem(taskId: task.id, title: pendingChecklist)
+            newChecklistTitle = ""
+        }
+        var copy = latestTask
+        copy.title = draftTitle
+        copy.notes = draftNotes
+        copy.scheduleState = .thisEvening
+        copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
+        store.updateTask(copy)
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.86)) {
+            store.expandedTaskId = nil
         }
     }
 

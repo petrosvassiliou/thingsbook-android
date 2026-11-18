@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { ExternalLink, Mail, Phone, MapPin, Eye, Edit3 } from 'lucide-react';
+import { ExternalLink, Mail, Phone, MapPin, Eye } from 'lucide-react';
 import {
   extractDetectedLinksFromNotes,
   stripTrailingPunctuation,
@@ -173,12 +173,6 @@ export const FormattedMarkdownText: React.FC<{
   );
 };
 
-function hasMarkdownFormatting(text: string): boolean {
-  return /(^|\n)\s*(#{1,4}\s+|[-*•]\s+|[-*]\s+\[[ xX]\])|(\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|\*[^*\n]+\*)/.test(
-    text
-  );
-}
-
 export const MarkdownNotesField: React.FC<{
   value: string;
   onChange: (next: string) => void;
@@ -199,11 +193,14 @@ export const MarkdownNotesField: React.FC<{
   const [isEditing, setIsEditing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const detectedLinks = useMemo(() => extractDetectedLinksFromNotes(value), [value]);
-  const showFormattedPreview = !isEditing && value.trim().length > 0 && hasMarkdownFormatting(value);
+  const showFormattedPreview = !isEditing && value.trim().length > 0;
 
   useEffect(() => {
     if (isEditing && textareaRef.current) {
-      textareaRef.current.focus();
+      const el = textareaRef.current;
+      el.focus();
+      const endPos = el.value.length;
+      el.setSelectionRange(endPos, endPos);
     }
   }, [isEditing]);
 
@@ -249,7 +246,7 @@ export const MarkdownNotesField: React.FC<{
 
   return (
     <div className="md-notes-container">
-      {(isEditing || value.trim().length > 0) && (
+      {isEditing && (
         <div className="md-notes-toolbar" onMouseDown={(e) => e.preventDefault()}>
           <button
             type="button"
@@ -299,20 +296,17 @@ export const MarkdownNotesField: React.FC<{
           >
             ☑
           </button>
-          {hasMarkdownFormatting(value) && (
+          {value.trim().length > 0 && (
             <button
               type="button"
-              className={`md-fmt-btn preview-toggle ${showFormattedPreview ? 'active' : ''}`}
-              title={showFormattedPreview ? 'Edit Markdown' : 'Preview Markdown'}
-              onClick={() =>
-                setIsEditing((prev) => {
-                  const next = !prev;
-                  onFocusChange?.(next);
-                  return next;
-                })
-              }
+              className="md-fmt-btn preview-toggle"
+              title="Preview Notes"
+              onClick={() => {
+                setIsEditing(false);
+                onFocusChange?.(false);
+              }}
             >
-              {showFormattedPreview ? <Edit3 size={11} /> : <Eye size={11} />}
+              <Eye size={11} />
             </button>
           )}
         </div>

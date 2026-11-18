@@ -1613,6 +1613,8 @@ private fun ThingsTaskRowItem(
     modifier: Modifier = Modifier
 ) {
     val currentEpochDay by viewModel.currentEpochDay.collectAsState()
+    val navTarget by viewModel.navigationTarget.collectAsState()
+    val isTodayView = navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
     androidx.compose.runtime.key(currentEpochDay) {
         ExpandableTaskCard(
             modifier = modifier,
@@ -1624,6 +1626,7 @@ private fun ThingsTaskRowItem(
             allProjects = activeProjects,
             allHeadings = allHeadings,
             isExpanded = expandedTaskId == task.id,
+            isTodayView = isTodayView,
             isSelected = task.id in selectedTaskIds,
             isSelectionModeActive = selectedTaskIds.isNotEmpty(),
             suppressContextMenuExternal = expandedTaskId != null || isQuickFindOpen,
@@ -1634,6 +1637,9 @@ private fun ThingsTaskRowItem(
             onStatusChange = { viewModel.updateTaskStatus(task.id, it) },
             onTitleNotesChange = { t, n -> viewModel.updateTaskTitleAndNotes(task, t, n) },
             onScheduleChange = { s, w -> viewModel.updateTaskSchedule(task, s, w) },
+            onQuickThisEveningAndClose = { latestTitle, latestNotes ->
+                viewModel.quickMoveTaskToThisEveningAndCollapse(task, latestTitle, latestNotes)
+            },
             onScheduleWithReminderChange = { s, w, r ->
                 viewModel.updateTaskScheduleWithReminder(task, s, w, r)
             },

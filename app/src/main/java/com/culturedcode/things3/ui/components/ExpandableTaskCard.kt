@@ -49,6 +49,7 @@ import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircleOutline
@@ -136,6 +137,7 @@ import com.culturedcode.things3.domain.model.Project
 import com.culturedcode.things3.domain.model.RecurrenceRule
 import com.culturedcode.things3.domain.model.ScheduleState
 import com.culturedcode.things3.domain.model.Tag
+import com.culturedcode.things3.domain.model.TaskCardInteractionRules
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
 import com.culturedcode.things3.domain.model.TimeblockScheduleUtils
@@ -182,6 +184,7 @@ fun ExpandableTaskCard(
     allProjects: List<Project> = emptyList(),
     allHeadings: List<Heading> = emptyList(),
     isExpanded: Boolean,
+    isTodayView: Boolean = false,
     isSelected: Boolean = false,
     isSelectionModeActive: Boolean = false,
     suppressContextMenuExternal: Boolean = false,
@@ -192,6 +195,7 @@ fun ExpandableTaskCard(
     onStatusChange: (TaskStatus) -> Unit,
     onTitleNotesChange: (String, String) -> Unit,
     onScheduleChange: (ScheduleState, Long?) -> Unit,
+    onQuickThisEveningAndClose: ((latestTitle: String, latestNotes: String) -> Unit)? = null,
     onScheduleWithReminderChange: ((ScheduleState, Long?, Long?) -> Unit)? = null,
     onDeadlineChange: (Long?) -> Unit,
     onRecurrenceChange: ((RecurrenceRule?) -> Unit)? = null,
@@ -242,7 +246,7 @@ fun ExpandableTaskCard(
         mutableStateOf(
             TextFieldValue(
                 text = task.title,
-                selection = if (task.title.isEmpty()) TextRange(0) else TextRange(0, task.title.length)
+                selection = TextRange(task.title.length)
             )
         )
     }
@@ -250,7 +254,7 @@ fun ExpandableTaskCard(
         mutableStateOf(
             TextFieldValue(
                 text = task.notes,
-                selection = if (task.notes.isEmpty()) TextRange(0) else TextRange(0, task.notes.length)
+                selection = TextRange(task.notes.length)
             )
         )
     }
@@ -259,7 +263,7 @@ fun ExpandableTaskCard(
         if (!isTitleFocused && editedTitleField.text != task.title) {
             editedTitleField = TextFieldValue(
                 text = task.title,
-                selection = if (task.title.isEmpty()) TextRange(0) else TextRange(0, task.title.length)
+                selection = TextRange(task.title.length)
             )
         }
     }
@@ -268,7 +272,7 @@ fun ExpandableTaskCard(
         if (!isNotesFocused && editedNotesField.text != task.notes) {
             editedNotesField = TextFieldValue(
                 text = task.notes,
-                selection = if (task.notes.isEmpty()) TextRange(0) else TextRange(0, task.notes.length)
+                selection = TextRange(task.notes.length)
             )
         }
     }
@@ -402,10 +406,15 @@ fun ExpandableTaskCard(
         if (isExpanded) {
             val txt = editedTitleField.text
             editedTitleField = editedTitleField.copy(
-                selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                selection = TextRange(txt.length)
             )
-            delay(60)
-            runCatching { titleFocusRequester.requestFocus() }
+            editedNotesField = editedNotesField.copy(
+                selection = TextRange(editedNotesField.text.length)
+            )
+            if (TaskCardInteractionRules.shouldAutoFocusTitleOnExpand(txt)) {
+                delay(60)
+                runCatching { titleFocusRequester.requestFocus() }
+            }
         } else {
             isTitleFocused = false
             isNotesFocused = false
@@ -674,10 +683,6 @@ fun ExpandableTaskCard(
                                 .onFocusChanged { focusState ->
                                     isTitleFocused = focusState.isFocused
                                     if (focusState.isFocused) {
-                                        val txt = editedTitleField.text
-                                        editedTitleField = editedTitleField.copy(
-                                            selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
-                                        )
                                         onRequestEnsureVisible?.invoke(false)
                                     }
                                 }
@@ -734,6 +739,11 @@ fun ExpandableTaskCard(
                         task = task,
                         assignedProject = assignedProject,
                         assignedArea = assignedArea,
+                        showQuickThisEveningPill = TaskCardInteractionRules.shouldShowQuickThisEveningPill(
+                            isTodayView = isTodayView,
+                            status = task.status,
+                            scheduleState = task.scheduleState
+                        ),
                         editedTitle = editedTitleField.text,
                         editedNotesField = editedNotesField,
                         onNotesFieldChange = { newVal ->
@@ -782,6 +792,9 @@ fun ExpandableTaskCard(
                         },
                         onTriggerGeminiMagicBreakdown = onTriggerGeminiMagicBreakdown,
                         onOpenWhenDialog = { showWhenDialog = true },
+                        onQuickThisEveningAndClose = if (onQuickThisEveningAndClose != null) {
+                            { onQuickThisEveningAndClose(editedTitleField.text, editedNotesField.text) }
+                        } else null,
                         onOpenDeadlineDialog = { showDeadlineDialog = true },
                         onOpenRepeatDialog = { showRepeatDialog = true },
                         onOpenTimeblockDialog = if (onUpdateTimeblock != null) ({ showTimeblockDialog = true }) else null,
@@ -1159,6 +1172,7 @@ private fun ExpandedTaskCardBody(
     task: TaskItem,
     assignedProject: Project?,
     assignedArea: Area?,
+    showQuickThisEveningPill: Boolean = false,
     editedTitle: String,
     editedNotesField: TextFieldValue,
     onNotesFieldChange: (TextFieldValue) -> Unit,
@@ -1180,6 +1194,7 @@ private fun ExpandedTaskCardBody(
     onDictateTitleOrNotes: ((String) -> Unit)? = null,
     onTriggerGeminiMagicBreakdown: () -> Unit,
     onOpenWhenDialog: () -> Unit,
+    onQuickThisEveningAndClose: (() -> Unit)? = null,
     onOpenDeadlineDialog: () -> Unit,
     onOpenRepeatDialog: () -> Unit,
     onOpenTimeblockDialog: (() -> Unit)? = null,
@@ -1196,6 +1211,16 @@ private fun ExpandedTaskCardBody(
     val haptics = LocalHapticFeedback.current
     val newChecklistFocusRequester = remember(task.id) { FocusRequester() }
     var pendingAutoFocusSubtaskId by remember(task.id) { mutableStateOf<String?>(null) }
+    var newChecklistField by remember(task.id) {
+        mutableStateOf(TextFieldValue(text = "", selection = TextRange(0)))
+    }
+    val flushPendingChecklistIfNeeded = {
+        val cleaned = newChecklistField.text.replace("\r", "").replace("\n", " ").trim()
+        if (cleaned.isNotEmpty()) {
+            onAddChecklistItem(cleaned)
+            newChecklistField = TextFieldValue(text = "", selection = TextRange(0))
+        }
+    }
     val tooLargeMsg = stringResource(R.string.attachment_too_large)
     val importErrorMsg = stringResource(R.string.attachment_import_error)
     val voicePromptMsg = stringResource(R.string.voice_capture_prompt)
@@ -1278,14 +1303,6 @@ private fun ExpandedTaskCardBody(
                 }
                 .onFocusChanged { focusState ->
                     onNotesFocusChanged(focusState.isFocused)
-                    if (focusState.isFocused) {
-                        val txt = editedNotesField.text
-                        onNotesFieldChange(
-                            editedNotesField.copy(
-                                selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
-                            )
-                        )
-                    }
                 },
             decorationBox = { innerTextField ->
                 Box {
@@ -1374,13 +1391,13 @@ private fun ExpandedTaskCardBody(
                                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 onMoveChecklistItem?.invoke(item.id, true)
                             },
-                            onMoveDown = {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onMoveChecklistItem?.invoke(item.id, false)
-                            },
                             onDelete = {
                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                 onDeleteChecklistItem?.invoke(item.id)
+                            },
+                            onMoveDown = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onMoveChecklistItem?.invoke(item.id, false)
                             }
                         )
                     }
@@ -1391,9 +1408,6 @@ private fun ExpandedTaskCardBody(
 
         // Add new subtask inline field + explicit '+' Button
         key("new_checklist_input_row_${task.id}") {
-            var newChecklistField by remember(task.id) {
-                mutableStateOf(TextFieldValue(text = "", selection = TextRange(0)))
-            }
             val submitNewChecklistEntry = {
                 val cleaned = newChecklistField.text.replace("\r", "").replace("\n", " ").trim()
                 if (cleaned.isNotEmpty()) {
@@ -1514,7 +1528,7 @@ private fun ExpandedTaskCardBody(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Interactive Metadata Badges Row: When, Repeat, Deadline, Project/Area, Tags
+        // Interactive Metadata Badges Row: When, Quick This Evening (Today view), Repeat, Deadline, Project/Area, Tags
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1526,6 +1540,42 @@ private fun ExpandedTaskCardBody(
                 locale = locale,
                 onClick = onOpenWhenDialog
             )
+
+            if (showQuickThisEveningPill && onQuickThisEveningAndClose != null) {
+                val eveningLabel = stringResource(R.string.view_this_evening)
+                ThingsHoverTooltip(text = eveningLabel) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(colors.eveningMoonIndigo.copy(alpha = 0.14f))
+                            .border(
+                                width = 0.75.dp,
+                                color = colors.eveningMoonIndigo.copy(alpha = 0.30f),
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                flushPendingChecklistIfNeeded()
+                                onQuickThisEveningAndClose()
+                            }
+                            .padding(horizontal = 9.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Bedtime,
+                            contentDescription = eveningLabel,
+                            tint = colors.eveningMoonIndigo,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = eveningLabel,
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.eveningMoonIndigo
+                        )
+                    }
+                }
+            }
 
             task.reminderTime?.let { rt ->
                 ThingsReminderBadge(

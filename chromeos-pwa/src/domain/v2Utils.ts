@@ -9,7 +9,8 @@ import {
   type ProjectTemplateTaskBlueprint,
   type ScheduleState,
   type SupportedLang,
-  type TaskRecord
+  type TaskRecord,
+  type TaskStatus
 } from './types.ts';
 
 export const STALLED_PROJECT_THRESHOLD_DAYS = 14;
@@ -2263,4 +2264,27 @@ export function matchesQuickFindProject(
     bounds
   );
 }
+
+/**
+ * Only auto-focus the title input when expanding a brand-new untitled task — never auto-focus or select existing titles.
+ */
+export function shouldAutoFocusTitleOnExpand(title: string): boolean {
+  return title.trim().length === 0;
+}
+
+/**
+ * Show the 1-click "This Evening" + immediate-close pill exclusively in the Today view for open tasks not yet in This Evening.
+ */
+export function shouldShowQuickThisEveningPill(params: {
+  isTodayView: boolean;
+  status: TaskStatus;
+  scheduleState: ScheduleState;
+}): boolean {
+  return (
+    params.isTodayView &&
+    params.status === 'OPEN' &&
+    params.scheduleState !== 'THIS_EVENING'
+  );
+}
+
 

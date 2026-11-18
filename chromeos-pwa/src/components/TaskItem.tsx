@@ -48,7 +48,9 @@ import {
   computeClampedContextMenuPosition,
   formatMinutesAsClock,
   formatTimeblockRange,
-  parseClockToMinutes
+  parseClockToMinutes,
+  shouldAutoFocusTitleOnExpand,
+  shouldShowQuickThisEveningPill
 } from '../domain/v2Utils';
 import { generateMagicChecklist } from '../data/geminiService';
 import { localDb } from '../data/localDb';
@@ -196,6 +198,7 @@ const ChecklistSubtaskRow: React.FC<ChecklistSubtaskRowProps> = ({
 interface TaskItemProps {
   task: TaskRecord;
   isExpanded: boolean;
+  isTodayView?: boolean;
   isSelected: boolean;
   isMultiSelectMode: boolean;
   showContextSubtitle: boolean;
@@ -232,6 +235,7 @@ interface TaskItemProps {
 export const TaskItem: React.FC<TaskItemProps> = ({
   task,
   isExpanded,
+  isTodayView = false,
   isSelected,
   isMultiSelectMode,
   showContextSubtitle,
@@ -285,6 +289,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const strikeTimerRef = useRef<number | null>(null);
   const glideTimerRef = useRef<number | null>(null);
   const ctxMenuRef = useRef<HTMLDivElement | null>(null);
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
   const subtaskRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const addSubtaskInputRef = useRef<HTMLInputElement | null>(null);
   const attachmentFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -323,7 +328,12 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   };
 
   useEffect(() => {
-    if (wasExpandedRef.current && !isExpanded) {
+    if (isExpanded && !wasExpandedRef.current) {
+      if (shouldAutoFocusTitleOnExpand(task.title) && titleInputRef.current) {
+        titleInputRef.current.focus();
+        titleInputRef.current.setSelectionRange(0, 0);
+      }
+    } else if (wasExpandedRef.current && !isExpanded) {
       flushPendingSubtaskIfNeeded();
       setIsNotesFocused(false);
       setIsTitleFocused(false);
@@ -332,6 +342,14 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     wasExpandedRef.current = isExpanded;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isExpanded, task.id]);
+
+  useEffect(() => {
+    if (isExpanded && shouldAutoFocusTitleOnExpand(task.title) && titleInputRef.current) {
+      titleInputRef.current.focus();
+      titleInputRef.current.setSelectionRange(0, 0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (focusSubtaskId && subtaskRefs.current[focusSubtaskId]) {
@@ -703,9 +721,9 @@ export const TaskItem: React.FC<TaskItemProps> = ({
         <div className="task-card-top">
           {renderCheckboxWithStatusMenu()}
           <input
+            ref={titleInputRef}
             type="text"
             className="task-card-title-input"
-            autoFocus
             value={titleDraft}
             onPointerDown={() => onRequestEnsureVisible?.(false)}
             onFocus={() => {
@@ -836,7 +854,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           </div>
         </div>
 
-        {/* Interactive Metadata Chips Row (When, Timeblock, Reminder, Repeat, Deadline, Container, Tags) */}
+        {/* Interactive Metadata Chips Row (When, This Evening Quick Defer, Timeblock, Reminder, Repeat, Deadline, Container, Tags) */}
         <div className="task-card-chips-row">
           {/* 1. When Pill */}
           <button
@@ -867,6 +885,44 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             )}
             <span>{whenChipText}</span>
           </button>
+
+          {/* 1a. Today-View Exclusive 1-Click "This Evening" + Immediate Close Pill */}
+          {shouldShowQuickThisEveningPill({
+            isTodayView,
+            status: task.status,
+            scheduleState: task.scheduleState
+          }) && (
+            <button
+              type="button"
+              data-testid="task-quick-this-evening-chip"
+              className="chip-btn evening-quick"
+              title={t.viewThisEvening}
+              onClick={() => {
+                flushPendingSubtaskIfNeeded();
+                const now = new Date();
+                const todayMidnight = new Date(
+                  now.getFullYear(),
+                  now.getMonth(),
+                  now.getDate(),
+                  0,
+                  0,
+                  0,
+                  0
+                ).getTime();
+                void localDb.upsertTask({
+                  id: task.id,
+                  title: titleDraft,
+                  notes: notesDraft,
+                  scheduleState: 'THIS_EVENING',
+                  whenDate: todayMidnight
+                });
+                onCollapse();
+              }}
+            >
+              <Moon size={12} />
+              <span>{t.viewThisEvening}</span>
+            </button>
+          )}
 
           {/* 1b. v2.0 Timeblock Chip */}
           <button

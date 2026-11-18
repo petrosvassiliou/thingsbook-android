@@ -190,7 +190,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.24"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.25"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -408,9 +408,9 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.24")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.24")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 68)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.25")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.25")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 69)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
         XCTAssertEqual(
             FirebaseCloudSyncService.deriveUidWakeTopic(uid: " user-abc-123 "),
@@ -3005,5 +3005,46 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertTrue(dirtyPurgedIds.contains("task-today-002"))
         XCTAssertFalse(dirtyPurgedIds.contains("task-inbox-001"))
     }
+
+    // MARK: - 24. v2.0.0-beta.25 Task Card Focus Suppression & Today Evening Quick Pill
+
+    func testTaskCardInteractionRulesNoAutoSelectAndTodayEveningQuickPillBeta25() {
+        XCTAssertTrue(TaskCardInteractionRules.shouldAutoFocusTitleOnExpand(title: ""))
+        XCTAssertTrue(TaskCardInteractionRules.shouldAutoFocusTitleOnExpand(title: "   \n "))
+        XCTAssertFalse(TaskCardInteractionRules.shouldAutoFocusTitleOnExpand(title: "Steuererklärung prüfen"))
+
+        XCTAssertFalse(TaskCardInteractionRules.shouldAutoEditNotesOnExpand(notes: ""))
+        XCTAssertFalse(TaskCardInteractionRules.shouldAutoEditNotesOnExpand(notes: "Wichtige Notiz"))
+
+        XCTAssertTrue(
+            TaskCardInteractionRules.shouldShowQuickThisEveningPill(
+                isTodayView: true,
+                status: .open,
+                scheduleState: .today
+            )
+        )
+        XCTAssertFalse(
+            TaskCardInteractionRules.shouldShowQuickThisEveningPill(
+                isTodayView: true,
+                status: .open,
+                scheduleState: .thisEvening
+            )
+        )
+        XCTAssertFalse(
+            TaskCardInteractionRules.shouldShowQuickThisEveningPill(
+                isTodayView: false,
+                status: .open,
+                scheduleState: .today
+            )
+        )
+        XCTAssertFalse(
+            TaskCardInteractionRules.shouldShowQuickThisEveningPill(
+                isTodayView: true,
+                status: .completed,
+                scheduleState: .today
+            )
+        )
+    }
 }
+
 

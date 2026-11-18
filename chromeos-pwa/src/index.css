@@ -1375,6 +1375,25 @@ button {
   color: var(--gemini-violet);
 }
 
+.chip-btn.evening-quick {
+  background: var(--evening-moon-bg);
+  color: var(--evening-moon);
+}
+
+.chip-btn.evening-quick:hover {
+  filter: brightness(0.95);
+}
+
+.task-card-expanded > .md-notes-container {
+  margin: 8px 0 6px 31px;
+  width: calc(100% - 31px);
+}
+
+.task-card-expanded > .md-notes-container .task-card-notes {
+  margin: 0;
+  width: 100%;
+}
+
 /* ==================== Context Menu (v1.6.16 Task Header + 10 Items) ==================== */
 
 .context-menu {

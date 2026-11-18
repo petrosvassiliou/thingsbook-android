@@ -141,3 +141,24 @@ data class CalendarEventItem(
     val startDateEpochDay: Long,
     val endDateInclusiveEpochDay: Long
 )
+
+object TaskCardInteractionRules {
+    /**
+     * Only auto-focus the title input when expanding a brand-new untitled task — never auto-focus or select existing titles.
+     */
+    fun shouldAutoFocusTitleOnExpand(title: String): Boolean {
+        return title.trim().isEmpty()
+    }
+
+    /**
+     * Show the 1-click "This Evening" + immediate-close pill exclusively in the Today view for open tasks not yet in This Evening.
+     */
+    fun shouldShowQuickThisEveningPill(
+        isTodayView: Boolean,
+        status: TaskStatus,
+        scheduleState: ScheduleState
+    ): Boolean {
+        return isTodayView && status == TaskStatus.OPEN && scheduleState != ScheduleState.THIS_EVENING
+    }
+}
+

@@ -60,7 +60,7 @@ jobs:
           github.ref == 'refs/heads/main' ||
           (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-'))
         run: |
-          npx --yes firebase-tools hosting:channel:deploy live --project thingsbook-prod
+          npx --yes firebase-tools deploy --only hosting --project thingsbook-prod
 
       - name: Deploy Beta to Isolated Firebase Preview Channel (beta)
         if: >-

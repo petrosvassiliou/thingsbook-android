@@ -2659,5 +2659,32 @@ public enum TaskCardInteractionRules {
     }
 }
 
+// MARK: - macOS Compact Calendar Appointment Metrics (Android & ChromeOS Parity)
+
+public enum MacCalendarAppointmentStyleMetrics {
+    public static let taskTitleFontSize: Double = 14.0
+    public static let eventTitleFontSize: Double = 12.0
+    public static let eventTimeFontSize: Double = 11.0
+    public static let eventAllDayPillFontSize: Double = 10.0
+    public static let eventCalendarNameFontSize: Double = 10.5
+    public static let colorBarWidth: Double = 3.0
+    public static let colorBarHeight: Double = 13.0
+    public static let rowVerticalPadding: Double = 3.0
+    public static let rowHorizontalPadding: Double = 6.0
+    public static let containerVerticalPadding: Double = 5.0
+    public static let containerHorizontalPadding: Double = 8.0
+    public static let rowSpacing: Double = 1.5
+    public static let showsInlineOpenInCalendarButton: Bool = false
+
+    /// Verifies that calendar appointment typography and padding stay visibly smaller and quieter than primary task rows.
+    public static var isSubordinateToTaskRow: Bool {
+        eventTitleFontSize < taskTitleFontSize
+            && eventTimeFontSize < eventTitleFontSize
+            && eventAllDayPillFontSize <= eventTimeFontSize
+            && rowVerticalPadding < 6.0
+            && !showsInlineOpenInCalendarButton
+    }
+}
+
 
 

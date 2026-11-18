@@ -190,7 +190,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.25"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.26"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -408,9 +408,9 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.25")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.25")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 69)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.26")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.26")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 70)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
         XCTAssertEqual(
             FirebaseCloudSyncService.deriveUidWakeTopic(uid: " user-abc-123 "),
@@ -3044,6 +3044,21 @@ final class ThingsbookCoreTests: XCTestCase {
                 scheduleState: .today
             )
         )
+    }
+
+    // MARK: - 25. v2.0.0-beta.26 Compact macOS Calendar Appointments (Android & ChromeOS Parity)
+
+    func testMacCalendarAppointmentCompactStyleMetricsBeta26() {
+        XCTAssertTrue(MacCalendarAppointmentStyleMetrics.isSubordinateToTaskRow)
+        XCTAssertLessThan(
+            MacCalendarAppointmentStyleMetrics.eventTitleFontSize,
+            MacCalendarAppointmentStyleMetrics.taskTitleFontSize
+        )
+        XCTAssertLessThan(
+            MacCalendarAppointmentStyleMetrics.eventTimeFontSize,
+            MacCalendarAppointmentStyleMetrics.eventTitleFontSize
+        )
+        XCTAssertFalse(MacCalendarAppointmentStyleMetrics.showsInlineOpenInCalendarButton)
     }
 }
 

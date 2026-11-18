@@ -1070,54 +1070,7 @@ public struct SmartViewCanvas: View {
     // MARK: - Shared Subcomponents
 
     private func calendarEventsCard(_ events: [CalendarEventItem]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(events) { ev in
-                Button {
-                    AppleCalendarService.shared.openEventInAppleCalendar(ev)
-                } label: {
-                    HStack(spacing: 10) {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(ThingsMacPalette.colorFromArgb(ev.colorHex))
-                            .frame(width: 4, height: 18)
-
-                        if ev.isAllDay {
-                            Text(store.tr("calendar_all_day"))
-                                .font(.system(size: 11.5, weight: .bold))
-                                .foregroundStyle(ThingsMacPalette.accentBlue)
-                        } else {
-                            Text("\(formatEventTime(ev.startMillis)) – \(formatEventTime(ev.endMillis))")
-                                .font(.system(size: 12, weight: .bold, design: .rounded))
-                                .foregroundStyle(ThingsMacPalette.accentBlue)
-                        }
-
-                        Text(ev.title.isEmpty ? store.tr("calendar_untitled_event") : ev.title)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-
-                        Spacer()
-
-                        Text(store.tr("macos_open_in_calendar"))
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(Color.primary.opacity(0.05)))
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(ThingsMacPalette.accentBlue.opacity(0.06))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.16), lineWidth: 0.8)
-                            )
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
+        MacCompactCalendarEventsBlock(store: store, events: events)
     }
 
     private func reorderableTaskStack(
@@ -1415,12 +1368,6 @@ public struct SmartViewCanvas: View {
         case .trash: return store.trashedTasks
         }
     }
-
-    private func formatEventTime(_ millis: Int64) -> String {
-        let df = DateFormatter()
-        df.timeStyle = .short
-        return df.string(from: DateEpochConverter.date(fromMillis: millis))
-    }
 }
 
 // MARK: - v2.0 Interactive Daily Timeline View in Today
@@ -1527,32 +1474,7 @@ private struct TodayDailyTimelineView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             if !allDayEvents.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(allDayEvents) { ev in
-                        Button {
-                            AppleCalendarService.shared.openEventInAppleCalendar(ev)
-                        } label: {
-                            HStack(spacing: 10) {
-                                RoundedRectangle(cornerRadius: 2)
-                                    .fill(ThingsMacPalette.colorFromArgb(ev.colorHex))
-                                    .frame(width: 4, height: 18)
-                                Text(store.tr("calendar_all_day"))
-                                    .font(.system(size: 11.5, weight: .bold))
-                                    .foregroundStyle(ThingsMacPalette.accentBlue)
-                                Text(ev.title.isEmpty ? store.tr("calendar_untitled_event") : ev.title)
-                                    .font(.system(size: 13, weight: .semibold))
-                                Spacer()
-                                Text(store.tr("macos_open_in_calendar"))
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .thingsCardSurface(cornerRadius: 10)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
+                MacCompactCalendarEventsBlock(store: store, events: allDayEvents)
             }
 
             let slots = timedSlots
@@ -1622,52 +1544,55 @@ private struct TodayDailyTimelineView: View {
         Button {
             AppleCalendarService.shared.openEventInAppleCalendar(ev)
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Text("\(TaskItem.formatMinutesOfDay(startMinutes))–\(TaskItem.formatMinutesOfDay(endMinutes % 1440))")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                    .font(.system(size: CGFloat(MacCalendarAppointmentStyleMetrics.eventTimeFontSize), weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
                     .frame(width: 98, alignment: .leading)
 
-                RoundedRectangle(cornerRadius: 2)
+                RoundedRectangle(cornerRadius: 1.5)
                     .fill(ThingsMacPalette.colorFromArgb(ev.colorHex))
-                    .frame(width: 4, height: 22)
+                    .frame(
+                        width: CGFloat(MacCalendarAppointmentStyleMetrics.colorBarWidth),
+                        height: CGFloat(MacCalendarAppointmentStyleMetrics.colorBarHeight + 1.0)
+                    )
 
                 Text(ev.title.isEmpty ? store.tr("calendar_untitled_event") : ev.title)
-                    .font(.system(size: 13.5, weight: .semibold))
+                    .font(.system(size: CGFloat(MacCalendarAppointmentStyleMetrics.eventTitleFontSize), weight: .regular))
+                    .foregroundStyle(Color.primary.opacity(0.84))
                     .lineLimit(1)
 
                 if hasConflict {
                     conflictBadge
                 }
 
-                Spacer()
+                Spacer(minLength: 6)
 
-                Text(ev.calendarDisplayName)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-
-                Text(store.tr("macos_open_in_calendar"))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Capsule().fill(Color.primary.opacity(0.05)))
+                if !ev.calendarDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(ev.calendarDisplayName)
+                        .font(.system(size: CGFloat(MacCalendarAppointmentStyleMetrics.eventCalendarNameFontSize)))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .frame(maxWidth: 120, alignment: .trailing)
+                }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5.5)
             .background(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(ThingsMacPalette.accentBlue.opacity(0.07))
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(ThingsMacPalette.subtleContainer)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
                             .strokeBorder(
-                                hasConflict ? ThingsMacPalette.somedayAmber.opacity(0.65) : ThingsMacPalette.accentBlue.opacity(0.18),
-                                lineWidth: hasConflict ? 1.2 : 0.8
+                                hasConflict ? ThingsMacPalette.somedayAmber.opacity(0.65) : Color.primary.opacity(0.07),
+                                lineWidth: hasConflict ? 1.1 : 0.75
                             )
                     )
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .thingsTooltip(store.tr("macos_open_in_calendar"))
     }
 
     private func timelineTaskRow(
@@ -2007,4 +1932,112 @@ private extension View {
         )
     }
 }
+
+// MARK: - Compact Grouped Calendar Appointments Block (Android & ChromeOS Parity)
+
+private struct MacCompactCalendarEventsBlock: View {
+    @ObservedObject var store: ThingsbookStore
+    let events: [CalendarEventItem]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: CGFloat(MacCalendarAppointmentStyleMetrics.rowSpacing)) {
+            ForEach(events) { event in
+                MacCompactCalendarEventRow(store: store, event: event)
+            }
+        }
+        .padding(.horizontal, CGFloat(MacCalendarAppointmentStyleMetrics.containerHorizontalPadding))
+        .padding(.vertical, CGFloat(MacCalendarAppointmentStyleMetrics.containerVerticalPadding))
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(ThingsMacPalette.subtleContainer)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.065), lineWidth: 0.75)
+                )
+        )
+    }
+}
+
+private struct MacCompactCalendarEventRow: View {
+    @ObservedObject var store: ThingsbookStore
+    let event: CalendarEventItem
+
+    @State private var isHovering = false
+
+    private static let shortTimeFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.timeStyle = .short
+        return df
+    }()
+
+    private var formattedTimeRange: String {
+        let start = Self.shortTimeFormatter.string(from: DateEpochConverter.date(fromMillis: event.startMillis))
+        let end = Self.shortTimeFormatter.string(from: DateEpochConverter.date(fromMillis: event.endMillis))
+        return "\(start) – \(end)"
+    }
+
+    var body: some View {
+        let calColor = ThingsMacPalette.colorFromArgb(event.colorHex)
+        let trimmedCalendarName = event.calendarDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        Button {
+            AppleCalendarService.shared.openEventInAppleCalendar(event)
+        } label: {
+            HStack(spacing: 7.5) {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(calColor)
+                    .frame(
+                        width: CGFloat(MacCalendarAppointmentStyleMetrics.colorBarWidth),
+                        height: CGFloat(MacCalendarAppointmentStyleMetrics.colorBarHeight)
+                    )
+
+                if event.isAllDay {
+                    Text(store.tr("calendar_all_day"))
+                        .font(.system(size: CGFloat(MacCalendarAppointmentStyleMetrics.eventAllDayPillFontSize), weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5.5)
+                        .padding(.vertical, 1)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4.5, style: .continuous)
+                                .fill(calColor.opacity(0.15))
+                        )
+                } else {
+                    Text(formattedTimeRange)
+                        .font(.system(size: CGFloat(MacCalendarAppointmentStyleMetrics.eventTimeFontSize), weight: .medium).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(event.title.isEmpty ? store.tr("calendar_untitled_event") : event.title)
+                    .font(.system(size: CGFloat(MacCalendarAppointmentStyleMetrics.eventTitleFontSize), weight: .regular))
+                    .foregroundStyle(Color.primary.opacity(0.84))
+                    .lineLimit(1)
+
+                Spacer(minLength: 6)
+
+                if !trimmedCalendarName.isEmpty {
+                    Text(trimmedCalendarName)
+                        .font(.system(size: CGFloat(MacCalendarAppointmentStyleMetrics.eventCalendarNameFontSize)))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .frame(maxWidth: 115, alignment: .trailing)
+                }
+            }
+            .padding(.horizontal, CGFloat(MacCalendarAppointmentStyleMetrics.rowHorizontalPadding))
+            .padding(.vertical, CGFloat(MacCalendarAppointmentStyleMetrics.rowVerticalPadding))
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(isHovering ? 0.045 : 0))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
+        .thingsTooltip(store.tr("macos_open_in_calendar"))
+    }
+}
+
 

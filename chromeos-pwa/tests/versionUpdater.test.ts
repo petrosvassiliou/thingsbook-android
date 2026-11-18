@@ -31,11 +31,11 @@ import {
   shouldShowQuickThisEveningPill
 } from '../src/domain/v2Utils.ts';
 
-test('v2.0.0-beta.25 build metadata constants are bumped to 2.0.0-beta.25 (Build 69)', () => {
-  assert.equal(APP_VERSION, '2.0.0-beta.25');
-  assert.equal(APP_BUILD_CODE, 69);
-  assert.equal(versionFromUtils, '2.0.0-beta.25');
-  assert.equal(buildFromUtils, 69);
+test('v2.0.0-beta.26 build metadata constants are bumped to 2.0.0-beta.26 (Build 70)', () => {
+  assert.equal(APP_VERSION, '2.0.0-beta.26');
+  assert.equal(APP_BUILD_CODE, 70);
+  assert.equal(versionFromUtils, '2.0.0-beta.26');
+  assert.equal(buildFromUtils, 70);
   assert.equal(isPrereleaseVersion(APP_VERSION), true);
   assert.equal(isPrereleaseVersion('1.8.1'), false);
   assert.equal(isPrereleaseVersion('2.0.0'), false);

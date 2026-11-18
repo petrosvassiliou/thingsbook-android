@@ -3,6 +3,7 @@ package com.culturedcode.things3.ui.screens
 import androidx.compose.ui.draw.alpha
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.geometry.Offset
 import com.culturedcode.things3.ui.components.MagicPlusDropMode
@@ -1776,11 +1777,20 @@ private fun ThingsMainTaskLazyList(
         return
     }
 
-    val listState = rememberLazyListState()
+    val navScopeKey = navTarget.scrollScopeKey()
+    val listState = remember(navScopeKey) {
+        LazyListState(firstVisibleItemIndex = 0, firstVisibleItemScrollOffset = 0)
+    }
     var focusScrollRequestTick by remember { mutableIntStateOf(0) }
     var preferBottomForExpandedTask by remember(expandedTaskId) { mutableStateOf(false) }
-    val lastKnownTaskIndices = remember { HashMap<String, Int>() }
-    val lastKnownTaskBounds = remember { HashMap<String, Pair<Int, Int>>() }
+    val lastKnownTaskIndices = remember(navScopeKey) { HashMap<String, Int>() }
+    val lastKnownTaskBounds = remember(navScopeKey) { HashMap<String, Pair<Int, Int>>() }
+
+    LaunchedEffect(navScopeKey) {
+        if (navTarget.shouldResetScrollToTop(expandedTaskId)) {
+            runCatching { listState.scrollToItem(0, 0) }
+        }
+    }
 
     val handleEnsureVisibleRequest: (Boolean) -> Unit = remember {
         { preferBottom ->
@@ -1807,7 +1817,13 @@ private fun ThingsMainTaskLazyList(
     SideEffect {
         listState.layoutInfo.visibleItemsInfo.forEach { info ->
             val keyStr = info.key?.toString() ?: return@forEach
-            if (keyStr.startsWith("today_calendar_") || keyStr.startsWith("upcoming_cal_events_")) return@forEach
+            if (
+                keyStr.startsWith("today_calendar_") ||
+                keyStr.startsWith("upcoming_cal_events_") ||
+                keyStr.startsWith("upcoming_day_header_") ||
+                keyStr.startsWith("top_scroll_anchor_") ||
+                keyStr.startsWith("trailing_magic_plus_gap")
+            ) return@forEach
             val resolvedId = when {
                 keyStr.startsWith("ungrouped_") -> keyStr.removePrefix("ungrouped_")
                 keyStr.startsWith("upcoming_") -> keyStr.substringAfter("_").substringAfter("_")
@@ -1914,7 +1930,13 @@ private fun ThingsMainTaskLazyList(
             .collect { visibleItems ->
                 visibleItems.forEach { info ->
                     val keyStr = info.key?.toString() ?: return@forEach
-                    if (keyStr.startsWith("today_calendar_") || keyStr.startsWith("upcoming_cal_events_")) return@forEach
+                    if (
+                        keyStr.startsWith("today_calendar_") ||
+                        keyStr.startsWith("upcoming_cal_events_") ||
+                        keyStr.startsWith("upcoming_day_header_") ||
+                        keyStr.startsWith("top_scroll_anchor_") ||
+                        keyStr.startsWith("trailing_magic_plus_gap")
+                    ) return@forEach
                     val resolvedId = when {
                         keyStr.startsWith("ungrouped_") -> keyStr.removePrefix("ungrouped_")
                         keyStr.startsWith("upcoming_") -> keyStr.substringAfter("_").substringAfter("_")
@@ -1993,6 +2015,10 @@ private fun ThingsMainTaskLazyList(
             .imePadding(),
         contentPadding = PaddingValues(bottom = if (isImeVisible) 28.dp else 110.dp)
     ) {
+        item(key = navTarget.topScrollAnchorKey()) {
+            Spacer(modifier = Modifier.height(0.dp))
+        }
+
         // If viewing Today and Google/Device Calendar Events are enabled, render today's events at the top only when Today has tasks
         val hasTodayTasks = primaryTasks.isNotEmpty() || filteredEveningTasks.isNotEmpty()
         if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) &&
@@ -2297,7 +2323,7 @@ private fun ThingsMainTaskLazyList(
             }
 
             // Trailing Magic Plus drop slot at the end of the list
-            item(key = "trailing_magic_plus_gap") {
+            item(key = navTarget.trailingMagicPlusGapKey()) {
                 MagicPlusInsertionGap(
                     visible = magicDragState.isDragging && magicDragState.dropIndex >= primaryTasks.size,
                     dropMode = magicDragState.dropMode
@@ -2443,7 +2469,7 @@ private fun ThingsMainTaskLazyList(
                 }
             }
 
-            item(key = "trailing_magic_plus_gap") {
+            item(key = navTarget.trailingMagicPlusGapKey()) {
                 MagicPlusInsertionGap(
                     visible = magicDragState.isDragging && magicDragState.dropIndex >= primaryTasks.size,
                     dropMode = magicDragState.dropMode
@@ -2479,7 +2505,7 @@ private fun ThingsMainTaskLazyList(
             }
 
             // Trailing Magic Plus drop slot at the end of the list
-            item(key = "trailing_magic_plus_gap") {
+            item(key = navTarget.trailingMagicPlusGapKey()) {
                 MagicPlusInsertionGap(
                     visible = magicDragState.isDragging && magicDragState.dropIndex >= primaryTasks.size,
                     dropMode = magicDragState.dropMode

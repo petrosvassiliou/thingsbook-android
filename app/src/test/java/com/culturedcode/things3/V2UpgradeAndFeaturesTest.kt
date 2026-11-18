@@ -761,9 +761,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(71, BuildConfig.VERSION_CODE)
-        assertEquals("2.0.0", BuildConfig.VERSION_NAME)
-        assertFalse("Final 2.0.0 release must not contain pre-release hyphen", BuildConfig.VERSION_NAME.contains("-"))
+        assertEquals(72, BuildConfig.VERSION_CODE)
+        assertEquals("2.0.1", BuildConfig.VERSION_NAME)
+        assertFalse("Final 2.0.1 release must not contain pre-release hyphen", BuildConfig.VERSION_NAME.contains("-"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -1723,6 +1723,37 @@ class V2UpgradeAndFeaturesTest {
                 scheduleState = ScheduleState.TODAY
             )
         )
+    }
+
+    @Test
+    fun `v2_0_1 Planned UPCOMING navigation isolates LazyColumn scroll scope and trailing gap keys so switching views always starts at top`() {
+        val todayNav = com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget.SmartView(
+            com.culturedcode.things3.ui.components.SmartViewType.TODAY
+        )
+        val inboxNav = com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget.SmartView(
+            com.culturedcode.things3.ui.components.SmartViewType.INBOX
+        )
+        val upcomingNav = com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget.SmartView(
+            com.culturedcode.things3.ui.components.SmartViewType.UPCOMING
+        )
+        val anytimeNav = com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget.SmartView(
+            com.culturedcode.things3.ui.components.SmartViewType.ANYTIME
+        )
+        val areaNav = com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget.AreaDetail("area-work")
+        val projectNav = com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget.ProjectDetail("proj-q4")
+
+        val allTargets = listOf(todayNav, inboxNav, upcomingNav, anytimeNav, areaNav, projectNav)
+
+        // Every destination has a distinct scrollScopeKey, topScrollAnchorKey, and trailingMagicPlusGapKey
+        assertEquals(allTargets.size, allTargets.map { it.scrollScopeKey() }.toSet().size)
+        assertEquals(allTargets.size, allTargets.map { it.topScrollAnchorKey() }.toSet().size)
+        assertEquals(allTargets.size, allTargets.map { it.trailingMagicPlusGapKey() }.toSet().size)
+
+        // Switching from Today/Inbox to Planned (UPCOMING) without an expanded task resets scroll to top (index 0)
+        assertEquals("smart_UPCOMING", upcomingNav.scrollScopeKey())
+        assertTrue(upcomingNav.shouldResetScrollToTop(expandedTaskId = null))
+        assertTrue(upcomingNav.shouldResetScrollToTop(expandedTaskId = ""))
+        assertFalse(upcomingNav.shouldResetScrollToTop(expandedTaskId = "task-deep-link-42"))
     }
 }
 

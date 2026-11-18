@@ -31,15 +31,16 @@ import {
   shouldShowQuickThisEveningPill
 } from '../src/domain/v2Utils.ts';
 
-test('v2.0.0 final release build metadata constants are promoted to 2.0.0 (Build 71, non-prerelease)', () => {
-  assert.equal(APP_VERSION, '2.0.0');
-  assert.equal(APP_BUILD_CODE, 71);
-  assert.equal(versionFromUtils, '2.0.0');
-  assert.equal(buildFromUtils, 71);
+test('v2.0.1 release build metadata constants are promoted to 2.0.1 (Build 72, non-prerelease)', () => {
+  assert.equal(APP_VERSION, '2.0.1');
+  assert.equal(APP_BUILD_CODE, 72);
+  assert.equal(versionFromUtils, '2.0.1');
+  assert.equal(buildFromUtils, 72);
   assert.equal(isPrereleaseVersion(APP_VERSION), false);
   assert.equal(isPrereleaseVersion('1.8.1'), false);
   assert.equal(isPrereleaseVersion('2.0.0'), false);
   assert.equal(isPrereleaseVersion('2.0.0-beta.26'), true);
+  assert.equal(compareSemver('2.0.1', '2.0.0'), 1);
   assert.equal(compareSemver('2.0.0', '2.0.0-beta.26'), 1);
   assert.equal(compareSemver, compareFromUtils);
   assert.equal(isEligibleReleasePayload, isEligibleFromUtils);

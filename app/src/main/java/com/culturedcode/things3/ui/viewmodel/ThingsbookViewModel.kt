@@ -88,6 +88,21 @@ sealed interface ActiveNavigationTarget {
     data class SmartView(val type: SmartViewType) : ActiveNavigationTarget
     data class ProjectDetail(val projectId: String) : ActiveNavigationTarget
     data class AreaDetail(val areaId: String) : ActiveNavigationTarget
+
+    fun scrollScopeKey(): String = when (this) {
+        is SmartView -> "smart_${type.name}"
+        is ProjectDetail -> "project_$projectId"
+        is AreaDetail -> "area_$areaId"
+    }
+
+    fun topScrollAnchorKey(): String =
+        "top_scroll_anchor_${scrollScopeKey()}"
+
+    fun trailingMagicPlusGapKey(variant: String = "standard"): String =
+        "trailing_magic_plus_gap_${scrollScopeKey()}_$variant"
+
+    fun shouldResetScrollToTop(expandedTaskId: String?): Boolean =
+        expandedTaskId.isNullOrBlank()
 }
 
 data class PendingProjectDeletePrompt(

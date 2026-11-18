@@ -6,6 +6,7 @@ import {
   ArrowUp,
   Bell,
   Calendar,
+  Camera,
   Check,
   CheckCircle2,
   CheckSquare,
@@ -16,7 +17,9 @@ import {
   FolderInput,
   GripVertical,
   Layers,
+  Mic,
   Moon,
+  MoreHorizontal,
   Paperclip,
   Plus,
   Repeat,
@@ -275,6 +278,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [statusMenuFlipUp, setStatusMenuFlipUp] = useState(false);
   const [timeblockOpen, setTimeblockOpen] = useState(false);
+  const [inlineMoreMenuOpen, setInlineMoreMenuOpen] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{
     anchorX: number;
     anchorY: number;
@@ -293,6 +297,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const subtaskRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const addSubtaskInputRef = useRef<HTMLInputElement | null>(null);
   const attachmentFileInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraCaptureInputRef = useRef<HTMLInputElement | null>(null);
   const newSubtaskRef = useRef(newSubtask);
   newSubtaskRef.current = newSubtask;
   const wasExpandedRef = useRef(isExpanded);
@@ -304,6 +309,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     setTitleDraft(task.title);
     setNotesDraft(task.notes);
     setTimeblockOpen(false);
+    setInlineMoreMenuOpen(false);
   } else {
     if (prevServerTitle !== task.title) {
       setPrevServerTitle(task.title);
@@ -327,6 +333,49 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     void localDb.addChecklistItems(task.id, [pending]);
   };
 
+  const triggerInlineVoiceDictation = () => {
+    const w = window as unknown as {
+      SpeechRecognition?: new () => {
+        lang: string;
+        interimResults: boolean;
+        onresult: ((ev: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+        start: () => void;
+      };
+      webkitSpeechRecognition?: new () => {
+        lang: string;
+        interimResults: boolean;
+        onresult: ((ev: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+        start: () => void;
+      };
+    };
+    const Ctor = w.SpeechRecognition ?? w.webkitSpeechRecognition;
+    if (!Ctor) {
+      onToast(t.voiceDictationLabel);
+      return;
+    }
+    try {
+      const rec = new Ctor();
+      rec.lang = lang === 'de' ? 'de-DE' : lang === 'fr' ? 'fr-FR' : lang === 'it' ? 'it-IT' : lang === 'es' ? 'es-ES' : 'en-US';
+      rec.interimResults = false;
+      rec.onresult = (ev) => {
+        const spoken = ev.results?.[0]?.[0]?.transcript?.trim() ?? '';
+        if (!spoken) return;
+        if (!titleDraft.trim()) {
+          setTitleDraft(spoken);
+          void localDb.upsertTask({ id: task.id, title: spoken });
+        } else {
+          const merged = notesDraft.trim() ? `${notesDraft.trim()}\n${spoken}` : spoken;
+          setNotesDraft(merged);
+          void localDb.upsertTask({ id: task.id, notes: merged });
+        }
+      };
+      onToast(t.voiceListeningHint);
+      rec.start();
+    } catch {
+      onToast(t.voiceDictationLabel);
+    }
+  };
+
   useEffect(() => {
     if (isExpanded && !wasExpandedRef.current) {
       if (shouldAutoFocusTitleOnExpand(task.title) && titleInputRef.current) {
@@ -338,6 +387,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
       setIsNotesFocused(false);
       setIsTitleFocused(false);
       setTimeblockOpen(false);
+      setInlineMoreMenuOpen(false);
     }
     wasExpandedRef.current = isExpanded;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -772,7 +822,22 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           fileInputRef={attachmentFileInputRef}
         />
 
-        {/* Checklist with Enter Cursor Split / Insert Below + Multiline Paste + Up/Down/Delete */}
+        <input
+          ref={cameraCaptureInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          style={{ display: 'none' }}
+          onChange={async (e) => {
+            const files = Array.from(e.target.files ?? []);
+            e.target.value = '';
+            for (const f of files) {
+              await processAndAddAttachmentFile(f, { taskId: task.id }, t, onToast);
+            }
+          }}
+        />
+
+        {/* Checklist with Enter Cursor Split / Insert Below + Multiline Paste + Inline Magic Breakdown */}
         <div className="checklist-section">
           {activeChecklists.length > 0 && (
             <div className="checklist-header">
@@ -803,8 +868,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             />
           ))}
 
-          <div className="checklist-add-row">
-            <Circle size={13.5} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+          <div className="checklist-add-row checklist-add-boxed">
+            <Circle size={13.5} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
             <input
               ref={addSubtaskInputRef}
               type="text"
@@ -851,201 +916,22 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 <Plus size={12} />
               </button>
             )}
+            <button
+              type="button"
+              className="chip-btn gemini checklist-magic-inline-btn"
+              disabled={loadingAi}
+              title={t.geminiMagicBreakdown}
+              onClick={() => void runMagicBreakdown()}
+            >
+              <Sparkles size={12.5} />
+              <span>{loadingAi ? t.geminiGenerating : t.geminiMagicBreakdown}</span>
+            </button>
           </div>
         </div>
 
-        {/* Interactive Metadata Chips Row (When, This Evening Quick Defer, Timeblock, Reminder, Repeat, Deadline, Container, Tags) */}
-        <div className="task-card-chips-row">
-          {/* 1. When Pill */}
-          <button
-            type="button"
-            className={`chip-btn ${
-              task.scheduleState === 'TODAY' ||
-              task.scheduleState === 'THIS_EVENING' ||
-              task.whenDate != null
-                ? 'active'
-                : ''
-            }`}
-            title={t.ctxWhenReminder}
-            onClick={() => {
-              flushDraftsIfNeeded();
-              onOpenWhenModal(task.id);
-            }}
-          >
-            {task.scheduleState === 'TODAY' ? (
-              <Star size={12} fill="var(--today-star)" style={{ color: 'var(--today-star)' }} />
-            ) : task.scheduleState === 'THIS_EVENING' ? (
-              <Moon size={12} />
-            ) : task.scheduleState === 'SOMEDAY' ? (
-              <Archive size={12} />
-            ) : task.scheduleState === 'ANYTIME' && task.whenDate == null ? (
-              <Layers size={12} />
-            ) : (
-              <Calendar size={12} />
-            )}
-            <span>{whenChipText}</span>
-          </button>
-
-          {/* 1a. Today-View Exclusive 1-Click "This Evening" + Immediate Close Pill */}
-          {shouldShowQuickThisEveningPill({
-            isTodayView,
-            status: task.status,
-            scheduleState: task.scheduleState
-          }) && (
-            <button
-              type="button"
-              data-testid="task-quick-this-evening-chip"
-              className="chip-btn evening-quick"
-              title={t.viewThisEvening}
-              onClick={() => {
-                flushPendingSubtaskIfNeeded();
-                const now = new Date();
-                const todayMidnight = new Date(
-                  now.getFullYear(),
-                  now.getMonth(),
-                  now.getDate(),
-                  0,
-                  0,
-                  0,
-                  0
-                ).getTime();
-                void localDb.upsertTask({
-                  id: task.id,
-                  title: titleDraft,
-                  notes: notesDraft,
-                  scheduleState: 'THIS_EVENING',
-                  whenDate: todayMidnight
-                });
-                onCollapse();
-              }}
-            >
-              <Moon size={12} />
-              <span>{t.viewThisEvening}</span>
-            </button>
-          )}
-
-          {/* 1b. v2.0 Timeblock Chip */}
-          <button
-            type="button"
-            data-testid="task-timeblock-chip"
-            className={`chip-btn ${
-              task.scheduledStartMinutes != null || timeblockOpen ? 'active' : ''
-            }`}
-            title={t.actionTimeblock}
-            onClick={() => {
-              flushDraftsIfNeeded();
-              setTimeblockOpen((v) => !v);
-            }}
-          >
-            <Clock size={12} />
-            <span>
-              {timeblockRangeLabel ? `🕐 ${timeblockRangeLabel}` : `⏱️ ${t.actionTimeblock}`}
-            </span>
-          </button>
-
-          {/* 2. Reminder Pill (when set) */}
-          {task.reminderTime != null && (
-            <button
-              type="button"
-              className="chip-btn active"
-              title={`${t.actionReminder}: ${formatReminderClock(task.reminderTime)}`}
-              onClick={() => {
-                flushDraftsIfNeeded();
-                onOpenWhenModal(task.id);
-              }}
-            >
-              <Bell size={12} />
-              <span>{formatReminderClock(task.reminderTime)}</span>
-            </button>
-          )}
-
-          {/* 3. Repeat Pill (ALWAYS visible, matching Android ExpandableTaskCard) */}
-          <button
-            type="button"
-            className={`chip-btn ${task.recurrenceRule != null ? 'active' : ''}`}
-            title={t.actionRepeat}
-            onClick={() => {
-              flushDraftsIfNeeded();
-              onOpenRepeatModal(task.id);
-            }}
-          >
-            <Repeat size={12} />
-            <span>
-              {task.recurrenceRule != null
-                ? formatRecurrenceShort(task.recurrenceRule, lang)
-                : t.actionRepeat}
-            </span>
-          </button>
-
-          {/* 4. Deadline / Due Date Pill (ALWAYS visible, matching Android ExpandableTaskCard) */}
-          <button
-            type="button"
-            className={`chip-btn ${
-              dlMeta ? (dlMeta.urgent ? 'urgent' : 'active') : ''
-            }`}
-            title={dlMeta ? `${t.actionDeadline}: ${dlMeta.label}` : t.actionDeadline}
-            onClick={() => {
-              flushDraftsIfNeeded();
-              onOpenDeadlineModal(task.id);
-            }}
-          >
-            <Flag
-              size={12}
-              style={
-                dlMeta == null ? { color: 'var(--deadline-red)', opacity: 0.85 } : undefined
-              }
-            />
-            <span>{dlMeta ? dlMeta.label : t.actionDeadline}</span>
-          </button>
-
-          {/* 5. Project / Area Container Pill (ALWAYS visible, matching Android ExpandableTaskCard) */}
-          <button
-            type="button"
-            className={`chip-btn ${containerLabel ? 'active' : ''}`}
-            title={t.ctxMoveContainer}
-            onClick={() => {
-              flushDraftsIfNeeded();
-              onOpenMoveModal(task.id);
-            }}
-          >
-            <FolderInput size={12} />
-            <span>{containerLabel || `${t.entityProject} / ${t.entityArea}`}</span>
-          </button>
-
-          {/* 6. Assigned Tag Pills + "+ Tags" */}
-          {taskTags.map((tg) => (
-            <button
-              key={tg.id}
-              type="button"
-              className="chip-btn active"
-              title={`${t.entityTag}: ${tg.title}`}
-              onClick={() => {
-                flushDraftsIfNeeded();
-                onOpenTagsModal(task.id);
-              }}
-            >
-              <Tag size={11.5} />
-              <span>{tg.title}</span>
-            </button>
-          ))}
-
-          <button
-            type="button"
-            className="chip-btn"
-            title={t.ctxAssignTags}
-            onClick={() => {
-              flushDraftsIfNeeded();
-              onOpenTagsModal(task.id);
-            }}
-          >
-            <Plus size={11.5} />
-            <span>{t.entityTags}</span>
-          </button>
-        </div>
-
-        {/* v2.0 Inline Interactive Timeblock Panel */}
+        {/* v2.0 Inline Interactive Timeblock Panel (opens right above the unified footer when toggled) */}
         {timeblockOpen && (
-          <div className="v2-timeblock-panel" data-testid="task-timeblock-panel">
+          <div className="v2-timeblock-panel" data-testid="task-timeblock-panel" style={{ marginLeft: 31 }}>
             <div className="v2-timeblock-row">
               <span className="v2-timeblock-label">{t.timeblockStartTime}</span>
               <input
@@ -1134,94 +1020,197 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           </div>
         )}
 
-        {/* Bottom Action Toolbar: Left = Magic Breakdown, Right = Action Icons */}
-        <div className="task-card-toolbar">
-          <button
-            type="button"
-            className="chip-btn gemini"
-            disabled={loadingAi}
-            title={t.geminiMagicBreakdown}
-            onClick={() => void runMagicBreakdown()}
-          >
-            <Sparkles size={13.5} />
-            <span>{loadingAi ? t.geminiGenerating : t.geminiMagicBreakdown}</span>
-          </button>
-
-          <div className="task-card-actions">
+        {/* v2.1 Unified Single Footer Row: Labeled Metadata Pills on Left + [Focus, ⋯ Menu, ✓ Done] on Right */}
+        <div className="task-card-unified-footer" data-testid="task-unified-footer">
+          <div className="task-card-chips-row">
+            {/* 1. When Pill */}
             <button
               type="button"
-              className="icon-btn"
-              title={t.attachmentsAddPhotoBtn}
-              onClick={() => attachmentFileInputRef.current?.click()}
-            >
-              <Paperclip size={15.5} />
-            </button>
-            <button
-              type="button"
-              className="icon-btn"
+              className={`chip-btn ${
+                task.scheduleState === 'TODAY' ||
+                task.scheduleState === 'THIS_EVENING' ||
+                task.whenDate != null
+                  ? 'active'
+                  : ''
+              }`}
               title={t.ctxWhenReminder}
               onClick={() => {
                 flushDraftsIfNeeded();
                 onOpenWhenModal(task.id);
               }}
             >
-              <Calendar size={15.5} />
+              {task.scheduleState === 'TODAY' ? (
+                <Star size={12} fill="var(--today-star)" style={{ color: 'var(--today-star)' }} />
+              ) : task.scheduleState === 'THIS_EVENING' ? (
+                <Moon size={12} />
+              ) : task.scheduleState === 'SOMEDAY' ? (
+                <Archive size={12} />
+              ) : task.scheduleState === 'ANYTIME' && task.whenDate == null ? (
+                <Layers size={12} />
+              ) : (
+                <Calendar size={12} />
+              )}
+              <span>{whenChipText}</span>
             </button>
+
+            {/* 1a. Today-View Exclusive 1-Click "This Evening" + Immediate Close Pill */}
+            {shouldShowQuickThisEveningPill({
+              isTodayView,
+              status: task.status,
+              scheduleState: task.scheduleState
+            }) && (
+              <button
+                type="button"
+                data-testid="task-quick-this-evening-chip"
+                className="chip-btn evening-quick"
+                title={t.viewThisEvening}
+                onClick={() => {
+                  flushPendingSubtaskIfNeeded();
+                  const now = new Date();
+                  const todayMidnight = new Date(
+                    now.getFullYear(),
+                    now.getMonth(),
+                    now.getDate(),
+                    0,
+                    0,
+                    0,
+                    0
+                  ).getTime();
+                  void localDb.upsertTask({
+                    id: task.id,
+                    title: titleDraft,
+                    notes: notesDraft,
+                    scheduleState: 'THIS_EVENING',
+                    whenDate: todayMidnight
+                  });
+                  onCollapse();
+                }}
+              >
+                <Moon size={12} />
+                <span>{t.viewThisEvening}</span>
+              </button>
+            )}
+
+            {/* 1b. v2.0 Timeblock Chip */}
             <button
               type="button"
-              className={`icon-btn ${timeblockOpen || task.scheduledStartMinutes != null ? 'active' : ''}`}
-              title={`⏱️ ${t.actionTimeblock}`}
+              data-testid="task-timeblock-chip"
+              className={`chip-btn ${
+                task.scheduledStartMinutes != null || timeblockOpen ? 'active' : ''
+              }`}
+              title={t.actionTimeblock}
               onClick={() => {
                 flushDraftsIfNeeded();
                 setTimeblockOpen((v) => !v);
               }}
             >
-              <Clock size={15.5} />
+              <Clock size={12} />
+              <span>
+                {timeblockRangeLabel ? `🕐 ${timeblockRangeLabel}` : `⏱️ ${t.actionTimeblock}`}
+              </span>
             </button>
+
+            {/* 2. Reminder Pill (when set) */}
+            {task.reminderTime != null && (
+              <button
+                type="button"
+                className="chip-btn active"
+                title={`${t.actionReminder}: ${formatReminderClock(task.reminderTime)}`}
+                onClick={() => {
+                  flushDraftsIfNeeded();
+                  onOpenWhenModal(task.id);
+                }}
+              >
+                <Bell size={12} />
+                <span>{formatReminderClock(task.reminderTime)}</span>
+              </button>
+            )}
+
+            {/* 3. Repeat Pill */}
             <button
               type="button"
-              className="icon-btn"
+              className={`chip-btn ${task.recurrenceRule != null ? 'active' : ''}`}
               title={t.actionRepeat}
               onClick={() => {
                 flushDraftsIfNeeded();
                 onOpenRepeatModal(task.id);
               }}
             >
-              <Repeat size={15.5} />
+              <Repeat size={12} />
+              <span>
+                {task.recurrenceRule != null
+                  ? formatRecurrenceShort(task.recurrenceRule, lang)
+                  : t.actionRepeat}
+              </span>
             </button>
+
+            {/* 4. Deadline / Due Date Pill */}
             <button
               type="button"
-              className="icon-btn"
+              className={`chip-btn ${
+                dlMeta ? (dlMeta.urgent ? 'urgent' : 'active') : ''
+              }`}
+              title={dlMeta ? `${t.actionDeadline}: ${dlMeta.label}` : t.actionDeadline}
+              onClick={() => {
+                flushDraftsIfNeeded();
+                onOpenDeadlineModal(task.id);
+              }}
+            >
+              <Flag
+                size={12}
+                style={
+                  dlMeta == null ? { color: 'var(--deadline-red)', opacity: 0.85 } : undefined
+                }
+              />
+              <span>{dlMeta ? dlMeta.label : t.actionDeadline}</span>
+            </button>
+
+            {/* 5. Project / Area Container Pill */}
+            <button
+              type="button"
+              className={`chip-btn ${containerLabel ? 'active' : ''}`}
               title={t.ctxMoveContainer}
               onClick={() => {
                 flushDraftsIfNeeded();
                 onOpenMoveModal(task.id);
               }}
             >
-              <FolderInput size={15.5} />
+              <FolderInput size={12} />
+              <span>{containerLabel || `${t.entityProject} / ${t.entityArea}`}</span>
             </button>
+
+            {/* 6. Assigned Tag Pills + "+ Tags" */}
+            {taskTags.map((tg) => (
+              <button
+                key={tg.id}
+                type="button"
+                className="chip-btn active"
+                title={`${t.entityTag}: ${tg.title}`}
+                onClick={() => {
+                  flushDraftsIfNeeded();
+                  onOpenTagsModal(task.id);
+                }}
+              >
+                <Tag size={11.5} />
+                <span>{tg.title}</span>
+              </button>
+            ))}
+
             <button
               type="button"
-              className="icon-btn"
+              className="chip-btn"
               title={t.ctxAssignTags}
               onClick={() => {
                 flushDraftsIfNeeded();
                 onOpenTagsModal(task.id);
               }}
             >
-              <Tag size={15.5} />
+              <Plus size={11.5} />
+              <span>{t.entityTags}</span>
             </button>
-            <button
-              type="button"
-              className="icon-btn"
-              title={t.actionDeadline}
-              onClick={() => {
-                flushDraftsIfNeeded();
-                onOpenDeadlineModal(task.id);
-              }}
-            >
-              <Flag size={15.5} />
-            </button>
+          </div>
+
+          <div className="task-card-actions">
             {task.status === 'OPEN' && (
               <button
                 type="button"
@@ -1240,36 +1229,124 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 <Timer size={15.5} />
               </button>
             )}
-            <button
-              type="button"
-              className="icon-btn"
-              title={`${t.actionDuplicateTodo} (Ctrl+D)`}
-              data-testid="task-duplicate-btn"
-              onClick={() => {
-                flushDraftsIfNeeded();
-                onDuplicateTask(task.id);
-              }}
-            >
-              <Copy size={15.5} />
-            </button>
-            <button
-              type="button"
-              className="icon-btn"
-              style={{ color: 'var(--deadline-red)' }}
-              title={t.actionDelete}
-              onClick={() => void localDb.softDeleteTasks([task.id])}
-            >
-              <Trash2 size={15.5} />
-            </button>
+
+            <div style={{ position: 'relative', display: 'inline-flex' }}>
+              <button
+                type="button"
+                className="chip-btn task-more-menu-trigger"
+                title={t.actionMoreOptions}
+                data-testid="task-more-menu-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setInlineMoreMenuOpen((v) => !v);
+                }}
+              >
+                <MoreHorizontal size={15.5} />
+              </button>
+
+              {inlineMoreMenuOpen && (
+                <>
+                  <div
+                    style={{ position: 'fixed', inset: 0, zIndex: 85 }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setInlineMoreMenuOpen(false);
+                    }}
+                  />
+                  <div
+                    className="dropdown-popover"
+                    style={{
+                      right: 0,
+                      left: 'auto',
+                      top: 'auto',
+                      bottom: 'calc(100% + 6px)',
+                      minWidth: 215,
+                      zIndex: 90
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      onClick={() => {
+                        setInlineMoreMenuOpen(false);
+                        attachmentFileInputRef.current?.click();
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <Paperclip size={14} style={{ color: 'var(--things-blue)' }} />
+                        <span>{t.attachmentsAddPhotoBtn}</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      onClick={() => {
+                        setInlineMoreMenuOpen(false);
+                        cameraCaptureInputRef.current?.click();
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <Camera size={14} style={{ color: 'var(--things-blue)' }} />
+                        <span>{t.actionTakePhoto}</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      onClick={() => {
+                        setInlineMoreMenuOpen(false);
+                        triggerInlineVoiceDictation();
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <Mic size={14} style={{ color: 'var(--things-blue)' }} />
+                        <span>{t.voiceDictationLabel}</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      data-testid="task-duplicate-btn"
+                      onClick={() => {
+                        setInlineMoreMenuOpen(false);
+                        flushDraftsIfNeeded();
+                        onDuplicateTask(task.id);
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <Copy size={14} style={{ color: 'var(--things-blue)' }} />
+                        <span>{t.actionDuplicateTodo}</span>
+                      </span>
+                    </button>
+                    <div className="dropdown-divider" />
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      style={{ color: 'var(--deadline-red)' }}
+                      onClick={() => {
+                        setInlineMoreMenuOpen(false);
+                        void localDb.softDeleteTasks([task.id]);
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <Trash2 size={14} style={{ color: 'var(--deadline-red)' }} />
+                        <span>{t.actionDelete}</span>
+                      </span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
             <button
               type="button"
               className="btn-primary"
-              style={{ padding: '5px 11px', fontSize: 12.2 }}
+              style={{ padding: '5px 10px', fontSize: 12.2 }}
               title={t.actionDone}
               onClick={handleDoneCollapse}
             >
               <Check size={14} />
-              <span>{t.actionDone}</span>
             </button>
           </div>
         </div>

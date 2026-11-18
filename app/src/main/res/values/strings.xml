@@ -472,4 +472,5 @@
     <string name="topbar_tooltip_language">Language</string>
     <string name="topbar_tooltip_cloud_sync">Cloud Sync</string>
     <string name="topbar_tooltip_settings">Settings</string>
+    <string name="action_more_options">More Actions</string>
 </resources>

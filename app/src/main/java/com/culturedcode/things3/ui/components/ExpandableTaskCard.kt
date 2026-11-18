@@ -51,6 +51,7 @@ import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.CalendarToday
+import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.Checklist
@@ -1320,17 +1321,19 @@ private fun ExpandedTaskCardBody(
 
         DetectedNotesLinksRow(notes = editedNotesField.text)
 
-        TaskAttachmentsStrip(
-            attachments = task.attachments,
-            onDeleteAttachment = { attId -> onDeleteTaskAttachment?.invoke(attId) },
-            onAttachFileClick = if (onAddTaskAttachment != null) {
-                { filePickerLauncher.launch(arrayOf("image/*", "application/pdf")) }
-            } else null,
-            onTakePhotoClick = if (onAddTaskAttachment != null) {
-                { cameraLauncher.launch(null) }
-            } else null,
-            modifier = Modifier.padding(top = 6.dp)
-        )
+        if (task.attachments.isNotEmpty()) {
+            TaskAttachmentsStrip(
+                attachments = task.attachments,
+                onDeleteAttachment = { attId -> onDeleteTaskAttachment?.invoke(attId) },
+                onAttachFileClick = if (onAddTaskAttachment != null) {
+                    { filePickerLauncher.launch(arrayOf("image/*", "application/pdf")) }
+                } else null,
+                onTakePhotoClick = if (onAddTaskAttachment != null) {
+                    { cameraLauncher.launch(null) }
+                } else null,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+        }
 
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -1505,6 +1508,7 @@ private fun ExpandedTaskCardBody(
                     }
                 )
                 if (newChecklistField.text.isNotBlank()) {
+                    Spacer(modifier = Modifier.width(6.dp))
                     ThingsHoverTooltip(text = stringResource(R.string.placeholder_add_checklist_item)) {
                         Box(
                             modifier = Modifier
@@ -1523,319 +1527,184 @@ private fun ExpandedTaskCardBody(
                         }
                     }
                 }
+                Spacer(modifier = Modifier.width(6.dp))
+                ThingsHoverTooltip(text = stringResource(R.string.gemini_magic_breakdown_desc)) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(colors.thingsBlueSoft)
+                            .clickable(enabled = !isGeneratingMagicBreakdown) {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onTriggerGeminiMagicBreakdown()
+                            }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (isGeneratingMagicBreakdown) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(13.dp),
+                                strokeWidth = 1.8.dp,
+                                color = colors.thingsBlue
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Outlined.AutoAwesome,
+                                contentDescription = stringResource(R.string.gemini_magic_breakdown),
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(13.dp)
+                            )
+                        }
+                        Text(
+                            text = stringResource(R.string.gemini_magic_breakdown),
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.thingsBlue,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Interactive Metadata Badges Row: When, Quick This Evening (Today view), Repeat, Deadline, Project/Area, Tags
-        FlowRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            ThingsWhenBadge(
-                scheduleState = task.scheduleState,
-                whenDateEpochMillis = task.whenDate,
-                locale = locale,
-                onClick = onOpenWhenDialog
-            )
+        var showInlineMoreMenu by remember(task.id) { mutableStateOf(false) }
 
-            if (showQuickThisEveningPill && onQuickThisEveningAndClose != null) {
-                val eveningLabel = stringResource(R.string.view_this_evening)
-                ThingsHoverTooltip(text = eveningLabel) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(colors.eveningMoonIndigo.copy(alpha = 0.14f))
-                            .border(
-                                width = 0.75.dp,
-                                color = colors.eveningMoonIndigo.copy(alpha = 0.30f),
-                                shape = RoundedCornerShape(8.dp)
-                            )
-                            .clickable {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                flushPendingChecklistIfNeeded()
-                                onQuickThisEveningAndClose()
-                            }
-                            .padding(horizontal = 9.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Bedtime,
-                            contentDescription = eveningLabel,
-                            tint = colors.eveningMoonIndigo,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = eveningLabel,
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                            color = colors.eveningMoonIndigo
-                        )
-                    }
-                }
-            }
-
-            task.reminderTime?.let { rt ->
-                ThingsReminderBadge(
-                    reminderEpochMillis = rt,
-                    onClick = onOpenWhenDialog
-                )
-            }
-
-            if (task.scheduledStartMinutes != null) {
-                ThingsTagPill(
-                    title = TimeblockScheduleUtils.formatTimeblockBadge(
-                        task.scheduledStartMinutes,
-                        task.durationMinutes
-                    ),
-                    onClick = onOpenTimeblockDialog
-                )
-            } else if (onOpenTimeblockDialog != null) {
-                ThingsTagPill(
-                    title = if (task.durationMinutes != null) {
-                        "⏱️ ${stringResource(R.string.v2_timeblock_title)} (${task.durationMinutes}m)"
-                    } else {
-                        "⏱️ ${stringResource(R.string.v2_timeblock_title)}"
-                    },
-                    onClick = onOpenTimeblockDialog
-                )
-            }
-
-            if (task.recurrenceRule != null) {
-                ThingsRepeatBadge(
-                    rule = task.recurrenceRule,
-                    onClick = onOpenRepeatDialog
-                )
-            } else {
-                ThingsTagPill(
-                    title = "🔁 ${stringResource(R.string.action_repeat)}",
-                    onClick = onOpenRepeatDialog
-                )
-            }
-
-            if (task.deadline != null) {
-                ThingsDeadlineBadge(
-                    deadlineEpochMillis = task.deadline,
-                    locale = locale,
-                    onClick = onOpenDeadlineDialog
-                )
-            } else {
-                ThingsTagPill(
-                    title = "🏁 ${stringResource(R.string.action_deadline)}",
-                    onClick = onOpenDeadlineDialog
-                )
-            }
-
-            val containerLabel = when {
-                assignedProject != null -> "📁 ${assignedProject.title}"
-                assignedArea != null -> "📦 ${assignedArea.title}"
-                else -> "📁 ${stringResource(R.string.entity_project)} / ${stringResource(R.string.entity_area)}"
-            }
-            ThingsTagPill(
-                title = containerLabel,
-                onClick = onOpenMoveDialog
-            )
-
-            task.tags.forEach { tag ->
-                ThingsTagPill(
-                    title = tag.title,
-                    onClick = onOpenTagPickerDialog
-                )
-            }
-
-            ThingsTagPill(
-                title = "+ " + stringResource(R.string.action_tags),
-                onClick = onOpenTagPickerDialog
-            )
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-        HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
-        Spacer(modifier = Modifier.height(6.dp))
-
-        // Bottom Card Action Bar with Hover Tooltips
+        // v2.1 Unified Single Footer Row: Labeled Metadata Pills on Left + [Focus, ⋯ Menu, ✓ Done] on Right
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            ThingsHoverTooltip(text = stringResource(R.string.gemini_magic_breakdown_desc)) {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(colors.thingsBlueSoft)
-                        .clickable(enabled = !isGeneratingMagicBreakdown) {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onTriggerGeminiMagicBreakdown()
+            FlowRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                ThingsWhenBadge(
+                    scheduleState = task.scheduleState,
+                    whenDateEpochMillis = task.whenDate,
+                    locale = locale,
+                    onClick = onOpenWhenDialog
+                )
+
+                if (showQuickThisEveningPill && onQuickThisEveningAndClose != null) {
+                    val eveningLabel = stringResource(R.string.view_this_evening)
+                    ThingsHoverTooltip(text = eveningLabel) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(colors.eveningMoonIndigo.copy(alpha = 0.14f))
+                                .border(
+                                    width = 0.75.dp,
+                                    color = colors.eveningMoonIndigo.copy(alpha = 0.30f),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                                .clickable {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    flushPendingChecklistIfNeeded()
+                                    onQuickThisEveningAndClose()
+                                }
+                                .padding(horizontal = 9.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Bedtime,
+                                contentDescription = eveningLabel,
+                                tint = colors.eveningMoonIndigo,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = eveningLabel,
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.eveningMoonIndigo
+                            )
                         }
-                        .padding(horizontal = 9.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    if (isGeneratingMagicBreakdown) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(14.dp),
-                            strokeWidth = 2.dp,
-                            color = colors.thingsBlue
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Outlined.AutoAwesome,
-                            contentDescription = stringResource(R.string.gemini_magic_breakdown),
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(14.dp)
-                        )
                     }
-                    Text(
-                        text = stringResource(R.string.gemini_magic_breakdown),
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                        color = colors.thingsBlue
+                }
+
+                task.reminderTime?.let { rt ->
+                    ThingsReminderBadge(
+                        reminderEpochMillis = rt,
+                        onClick = onOpenWhenDialog
                     )
                 }
+
+                if (task.scheduledStartMinutes != null) {
+                    ThingsTagPill(
+                        title = TimeblockScheduleUtils.formatTimeblockBadge(
+                            task.scheduledStartMinutes,
+                            task.durationMinutes
+                        ),
+                        onClick = onOpenTimeblockDialog
+                    )
+                } else if (onOpenTimeblockDialog != null) {
+                    ThingsTagPill(
+                        title = if (task.durationMinutes != null) {
+                            "⏱️ ${stringResource(R.string.v2_timeblock_title)} (${task.durationMinutes}m)"
+                        } else {
+                            "⏱️ ${stringResource(R.string.v2_timeblock_title)}"
+                        },
+                        onClick = onOpenTimeblockDialog
+                    )
+                }
+
+                if (task.recurrenceRule != null) {
+                    ThingsRepeatBadge(
+                        rule = task.recurrenceRule,
+                        onClick = onOpenRepeatDialog
+                    )
+                } else {
+                    ThingsTagPill(
+                        title = "🔁 ${stringResource(R.string.action_repeat)}",
+                        onClick = onOpenRepeatDialog
+                    )
+                }
+
+                if (task.deadline != null) {
+                    ThingsDeadlineBadge(
+                        deadlineEpochMillis = task.deadline,
+                        locale = locale,
+                        onClick = onOpenDeadlineDialog
+                    )
+                } else {
+                    ThingsTagPill(
+                        title = "🏁 ${stringResource(R.string.action_deadline)}",
+                        onClick = onOpenDeadlineDialog
+                    )
+                }
+
+                val containerLabel = when {
+                    assignedProject != null -> "📁 ${assignedProject.title}"
+                    assignedArea != null -> "📦 ${assignedArea.title}"
+                    else -> "📁 ${stringResource(R.string.entity_project)} / ${stringResource(R.string.entity_area)}"
+                }
+                ThingsTagPill(
+                    title = containerLabel,
+                    onClick = onOpenMoveDialog
+                )
+
+                task.tags.forEach { tag ->
+                    ThingsTagPill(
+                        title = tag.title,
+                        onClick = onOpenTagPickerDialog
+                    )
+                }
+
+                ThingsTagPill(
+                    title = "+ " + stringResource(R.string.action_tags),
+                    onClick = onOpenTagPickerDialog
+                )
             }
+
+            Spacer(modifier = Modifier.width(8.dp))
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(0.dp)
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                ThingsHoverTooltip(text = stringResource(R.string.context_when_date_reminder)) {
-                    IconButton(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onOpenWhenDialog()
-                        },
-                        modifier = Modifier.size(30.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.CalendarToday,
-                            contentDescription = stringResource(R.string.action_when),
-                            tint = if (task.whenDate != null || task.reminderTime != null) colors.thingsBlue else colors.secondaryText,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-
-                if (onOpenTimeblockDialog != null) {
-                    ThingsHoverTooltip(text = stringResource(R.string.v2_timeblock_title)) {
-                        IconButton(
-                            onClick = {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onOpenTimeblockDialog()
-                            },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.AccessTime,
-                                contentDescription = stringResource(R.string.v2_timeblock_title),
-                                tint = if (task.scheduledStartMinutes != null || task.durationMinutes != null) colors.thingsBlue else colors.secondaryText,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                }
-
-                ThingsHoverTooltip(text = stringResource(R.string.context_configure_repeat)) {
-                    IconButton(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onOpenRepeatDialog()
-                        },
-                        modifier = Modifier.size(30.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Repeat,
-                            contentDescription = stringResource(R.string.action_repeat),
-                            tint = if (task.recurrenceRule != null) colors.thingsBlue else colors.secondaryText,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-
-                ThingsHoverTooltip(text = stringResource(R.string.move_dialog_title)) {
-                    IconButton(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onOpenMoveDialog()
-                        },
-                        modifier = Modifier.size(30.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Folder,
-                            contentDescription = stringResource(R.string.move_dialog_title),
-                            tint = if (task.projectId != null || task.areaId != null) colors.thingsBlue else colors.secondaryText,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-
-                ThingsHoverTooltip(text = stringResource(R.string.action_tags)) {
-                    IconButton(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onOpenTagPickerDialog()
-                        },
-                        modifier = Modifier.size(30.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.LocalOffer,
-                            contentDescription = stringResource(R.string.action_tags),
-                            tint = if (task.tags.isNotEmpty()) colors.thingsBlue else colors.secondaryText,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-
-                ThingsHoverTooltip(text = stringResource(R.string.action_deadline)) {
-                    IconButton(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onOpenDeadlineDialog()
-                        },
-                        modifier = Modifier.size(30.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Flag,
-                            contentDescription = stringResource(R.string.action_deadline),
-                            tint = if (task.deadline != null) colors.deadlineUrgentRed else colors.secondaryText,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-
-                if (onDictateTitleOrNotes != null) {
-                    ThingsHoverTooltip(text = stringResource(R.string.voice_capture_btn)) {
-                        IconButton(
-                            onClick = {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                val launched = runCatching {
-                                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                        putExtra(
-                                            RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                                            RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                                        )
-                                        putExtra(RecognizerIntent.EXTRA_PROMPT, voicePromptMsg)
-                                    }
-                                    speechLauncher.launch(intent)
-                                    true
-                                }.getOrDefault(false)
-                                if (!launched) {
-                                    onShowMessage?.invoke(voiceUnavailableMsg)
-                                }
-                            },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Mic,
-                                contentDescription = stringResource(R.string.voice_capture_btn),
-                                tint = colors.secondaryText,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                }
-
                 if (onStartFocusTimer != null) {
                     ThingsHoverTooltip(text = stringResource(R.string.action_focus_timer)) {
                         IconButton(
@@ -1855,55 +1724,191 @@ private fun ExpandedTaskCardBody(
                     }
                 }
 
-                if (onDuplicateTask != null) {
-                    ThingsHoverTooltip(text = stringResource(R.string.action_duplicate_todo)) {
-                        IconButton(
-                            onClick = {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onDuplicateTask()
-                            },
-                            modifier = Modifier.size(30.dp)
+                Box {
+                    ThingsHoverTooltip(text = stringResource(R.string.action_more_options)) {
+                        Box(
+                            modifier = Modifier
+                                .height(28.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(colors.tagPillBg)
+                                .border(
+                                    width = 0.75.dp,
+                                    color = colors.hairlineDivider,
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                                .clickable {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    showInlineMoreMenu = true
+                                }
+                                .padding(horizontal = 8.dp),
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.ContentCopy,
-                                contentDescription = stringResource(R.string.action_duplicate_todo),
-                                tint = colors.secondaryText,
-                                modifier = Modifier.size(15.dp)
+                                imageVector = Icons.Outlined.MoreHoriz,
+                                contentDescription = stringResource(R.string.action_more_options),
+                                tint = colors.primaryText,
+                                modifier = Modifier.size(17.dp)
                             )
                         }
                     }
-                }
 
-                ThingsHoverTooltip(text = stringResource(R.string.action_delete)) {
-                    IconButton(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onDeleteTask()
-                        },
-                        modifier = Modifier.size(30.dp)
+                    DropdownMenu(
+                        expanded = showInlineMoreMenu,
+                        onDismissRequest = { showInlineMoreMenu = false },
+                        modifier = Modifier.background(colors.cardElevatedSurface)
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.DeleteOutline,
-                            contentDescription = stringResource(R.string.action_delete),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(17.dp)
+                        if (onAddTaskAttachment != null) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = stringResource(R.string.action_attach_file),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colors.primaryText
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.AttachFile,
+                                        contentDescription = null,
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showInlineMoreMenu = false
+                                    filePickerLauncher.launch(arrayOf("image/*", "application/pdf"))
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = stringResource(R.string.action_take_photo),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colors.primaryText
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.CameraAlt,
+                                        contentDescription = null,
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showInlineMoreMenu = false
+                                    cameraLauncher.launch(null)
+                                }
+                            )
+                        }
+
+                        if (onDictateTitleOrNotes != null) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = stringResource(R.string.voice_capture_btn),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colors.primaryText
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Mic,
+                                        contentDescription = null,
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showInlineMoreMenu = false
+                                    val launched = runCatching {
+                                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                            putExtra(
+                                                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                                                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                                            )
+                                            putExtra(RecognizerIntent.EXTRA_PROMPT, voicePromptMsg)
+                                        }
+                                        speechLauncher.launch(intent)
+                                        true
+                                    }.getOrDefault(false)
+                                    if (!launched) {
+                                        onShowMessage?.invoke(voiceUnavailableMsg)
+                                    }
+                                }
+                            )
+                        }
+
+                        if (onDuplicateTask != null) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = stringResource(R.string.action_duplicate_todo),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colors.primaryText
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.ContentCopy,
+                                        contentDescription = null,
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showInlineMoreMenu = false
+                                    onDuplicateTask()
+                                }
+                            )
+                        }
+
+                        HorizontalDivider(color = colors.hairlineDivider)
+
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = stringResource(R.string.action_delete),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = colors.deadlineUrgentRed
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Outlined.DeleteOutline,
+                                    contentDescription = null,
+                                    tint = colors.deadlineUrgentRed,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            },
+                            onClick = {
+                                showInlineMoreMenu = false
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onDeleteTask()
+                            }
                         )
                     }
                 }
 
                 ThingsHoverTooltip(text = stringResource(R.string.action_done)) {
-                    IconButton(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onDoneCollapse()
-                        },
-                        modifier = Modifier.size(30.dp)
+                    Box(
+                        modifier = Modifier
+                            .height(28.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(colors.thingsBlue)
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                flushPendingChecklistIfNeeded()
+                                onDoneCollapse()
+                            }
+                            .padding(horizontal = 9.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Check,
                             contentDescription = stringResource(R.string.action_done),
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(17.dp)
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
                         )
                     }
                 }

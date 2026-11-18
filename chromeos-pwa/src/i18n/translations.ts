@@ -261,6 +261,8 @@ export interface TranslationStrings {
   attachmentsTitle: string;
   attachmentsAddBtn: string;
   attachmentsAddPhotoBtn: string;
+  actionTakePhoto: string;
+  actionMoreOptions: string;
   attachmentsTooLargeError: string;
   attachmentsPreviewTitle: string;
   attachmentsOpenExternal: string;
@@ -627,7 +629,9 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     copySuffix: 'Copy',
     attachmentsTitle: 'Attachments',
     attachmentsAddBtn: '+ Attach',
-    attachmentsAddPhotoBtn: 'Photo / File',
+    attachmentsAddPhotoBtn: 'Attach Photo or PDF',
+    actionTakePhoto: 'Take Photo',
+    actionMoreOptions: 'More Actions',
     attachmentsTooLargeError: 'Attachment exceeds the 5 MB size limit.',
     attachmentsPreviewTitle: 'Attachment Preview',
     attachmentsOpenExternal: 'Download / Open',
@@ -998,7 +1002,9 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     copySuffix: 'Kopie',
     attachmentsTitle: 'Anhänge',
     attachmentsAddBtn: '+ Anhang',
-    attachmentsAddPhotoBtn: 'Foto / Datei',
+    attachmentsAddPhotoBtn: 'Foto oder PDF anhängen',
+    actionTakePhoto: 'Foto aufnehmen',
+    actionMoreOptions: 'Weitere Aktionen',
     attachmentsTooLargeError: 'Anhang überschreitet das Limit von 5 MB.',
     attachmentsPreviewTitle: 'Anhang-Vorschau',
     attachmentsOpenExternal: 'Herunterladen / Öffnen',
@@ -1367,7 +1373,9 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     copySuffix: 'Copie',
     attachmentsTitle: 'Pièces jointes',
     attachmentsAddBtn: '+ Joindre',
-    attachmentsAddPhotoBtn: 'Photo / Fichier',
+    attachmentsAddPhotoBtn: 'Joindre photo ou PDF',
+    actionTakePhoto: 'Prendre une photo',
+    actionMoreOptions: 'Plus d’actions',
     attachmentsTooLargeError: 'La pièce jointe dépasse la limite de 5 Mo.',
     attachmentsPreviewTitle: 'Aperçu de la pièce jointe',
     attachmentsOpenExternal: 'Télécharger / Ouvrir',
@@ -1737,7 +1745,9 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     copySuffix: 'Copia',
     attachmentsTitle: 'Allegati',
     attachmentsAddBtn: '+ Allega',
-    attachmentsAddPhotoBtn: 'Foto / File',
+    attachmentsAddPhotoBtn: 'Allega foto o PDF',
+    actionTakePhoto: 'Scatta foto',
+    actionMoreOptions: 'Altre azioni',
     attachmentsTooLargeError: "L'allegato supera il limite di 5 MB.",
     attachmentsPreviewTitle: 'Anteprima allegato',
     attachmentsOpenExternal: 'Scarica / Apri',
@@ -2107,7 +2117,9 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     copySuffix: 'Copia',
     attachmentsTitle: 'Adjuntos',
     attachmentsAddBtn: '+ Adjuntar',
-    attachmentsAddPhotoBtn: 'Foto / Archivo',
+    attachmentsAddPhotoBtn: 'Adjuntar foto o PDF',
+    actionTakePhoto: 'Tomar foto',
+    actionMoreOptions: 'Más acciones',
     attachmentsTooLargeError: 'El archivo adjunto supera el límite de 5 MB.',
     attachmentsPreviewTitle: 'Vista previa del adjunto',
     attachmentsOpenExternal: 'Descargar / Abrir',

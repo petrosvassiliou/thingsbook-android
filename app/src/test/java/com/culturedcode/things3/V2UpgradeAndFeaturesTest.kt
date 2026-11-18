@@ -761,9 +761,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(72, BuildConfig.VERSION_CODE)
-        assertEquals("2.0.1", BuildConfig.VERSION_NAME)
-        assertFalse("Final 2.0.1 release must not contain pre-release hyphen", BuildConfig.VERSION_NAME.contains("-"))
+        assertEquals(73, BuildConfig.VERSION_CODE)
+        assertEquals("2.1.0", BuildConfig.VERSION_NAME)
+        assertFalse("Final 2.1.0 release must not contain pre-release hyphen", BuildConfig.VERSION_NAME.contains("-"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -1754,6 +1754,40 @@ class V2UpgradeAndFeaturesTest {
         assertTrue(upcomingNav.shouldResetScrollToTop(expandedTaskId = null))
         assertTrue(upcomingNav.shouldResetScrollToTop(expandedTaskId = ""))
         assertFalse(upcomingNav.shouldResetScrollToTop(expandedTaskId = "task-deep-link-42"))
+    }
+
+    @Test
+    fun `v2_1_0 Option B unified inline editor localizes action_more_options across all 5 languages and removes duplicate bottom toolbar`() {
+        val resRoot = sequenceOf(
+            File("src/main/res"),
+            File("app/src/main/res")
+        ).first { it.isDirectory }
+
+        val folders = listOf("values", "values-de", "values-fr", "values-it", "values-es")
+        for (folder in folders) {
+            val xmlFile = File(resRoot, "$folder/strings.xml")
+            val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(xmlFile)
+            val nodes = doc.getElementsByTagName("string")
+            val keysInFile = mutableMapOf<String, String>()
+            for (i in 0 until nodes.length) {
+                val elem = nodes.item(i)
+                val name = elem.attributes?.getNamedItem("name")?.nodeValue ?: continue
+                keysInFile[name] = elem.textContent.orEmpty()
+            }
+            val moreLabel = keysInFile["action_more_options"]
+            assertNotNull("Missing action_more_options in $folder/strings.xml", moreLabel)
+            assertTrue("Blank action_more_options in $folder/strings.xml", moreLabel!!.isNotBlank())
+        }
+
+        val cardSource = sequenceOf(
+            File("src/main/java/com/culturedcode/things3/ui/components/ExpandableTaskCard.kt"),
+            File("app/src/main/java/com/culturedcode/things3/ui/components/ExpandableTaskCard.kt")
+        ).first { it.isFile }.readText()
+
+        assertTrue(cardSource.contains("v2.1 Unified Single Footer Row"))
+        assertTrue(cardSource.contains("R.string.action_more_options"))
+        assertTrue(cardSource.contains("if (task.attachments.isNotEmpty())"))
+        assertFalse("Removed legacy BottomActionIcon helper", cardSource.contains("private fun BottomActionIcon("))
     }
 }
 

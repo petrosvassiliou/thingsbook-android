@@ -31,15 +31,16 @@ import {
   shouldShowQuickThisEveningPill
 } from '../src/domain/v2Utils.ts';
 
-test('v2.0.1 release build metadata constants are promoted to 2.0.1 (Build 72, non-prerelease)', () => {
-  assert.equal(APP_VERSION, '2.0.1');
-  assert.equal(APP_BUILD_CODE, 72);
-  assert.equal(versionFromUtils, '2.0.1');
-  assert.equal(buildFromUtils, 72);
+test('v2.1.0 release build metadata constants are promoted to 2.1.0 (Build 73, non-prerelease)', () => {
+  assert.equal(APP_VERSION, '2.1.0');
+  assert.equal(APP_BUILD_CODE, 73);
+  assert.equal(versionFromUtils, '2.1.0');
+  assert.equal(buildFromUtils, 73);
   assert.equal(isPrereleaseVersion(APP_VERSION), false);
   assert.equal(isPrereleaseVersion('1.8.1'), false);
   assert.equal(isPrereleaseVersion('2.0.0'), false);
   assert.equal(isPrereleaseVersion('2.0.0-beta.26'), true);
+  assert.equal(compareSemver('2.1.0', '2.0.1'), 1);
   assert.equal(compareSemver('2.0.1', '2.0.0'), 1);
   assert.equal(compareSemver('2.0.0', '2.0.0-beta.26'), 1);
   assert.equal(compareSemver, compareFromUtils);
@@ -532,5 +533,25 @@ test('v2.0.0-beta.25 suppresses auto-selection on existing tasks and scopes 1-cl
     false
   );
 });
+
+test('v2.1.0 Option B unified inline editor localizes actionMoreOptions & actionTakePhoto across all 5 languages', async () => {
+  const { TRANSLATIONS } = await import('../src/i18n/translations.ts');
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  for (const lang of ['en', 'de', 'fr', 'it', 'es'] as const) {
+    assert.equal(typeof TRANSLATIONS[lang].actionMoreOptions, 'string');
+    assert.ok(TRANSLATIONS[lang].actionMoreOptions.trim().length > 0);
+    assert.equal(typeof TRANSLATIONS[lang].actionTakePhoto, 'string');
+    assert.ok(TRANSLATIONS[lang].actionTakePhoto.trim().length > 0);
+  }
+  const taskItemSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../src/components/TaskItem.tsx'),
+    'utf8'
+  );
+  assert.ok(taskItemSrc.includes('task-card-unified-footer'));
+  assert.ok(taskItemSrc.includes('checklist-add-boxed'));
+  assert.ok(!taskItemSrc.includes('task-card-action-bar'));
+});
+
 
 

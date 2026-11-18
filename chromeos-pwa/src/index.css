@@ -1316,6 +1316,34 @@ button {
   margin-top: 5px;
 }
 
+.checklist-add-boxed {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px 4px 9px;
+}
+
+.checklist-magic-inline-btn {
+  flex-shrink: 0;
+  padding: 3.5px 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.task-card-unified-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 2px 31px;
+}
+
+.task-card-unified-footer .task-card-chips-row {
+  margin: 0;
+  flex: 1 1 320px;
+}
+
 .task-card-chips-row {
   display: flex;
   align-items: center;
@@ -1338,8 +1366,14 @@ button {
 .task-card-actions {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
+  flex-wrap: nowrap;
+  gap: 5px;
+  margin-left: auto;
+}
+
+.task-more-menu-trigger {
+  padding: 4.5px 8px;
+  border: 1px solid var(--border-subtle);
 }
 
 .chip-btn {

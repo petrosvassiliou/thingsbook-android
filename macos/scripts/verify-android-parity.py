@@ -17,7 +17,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GRADLE_FILE = REPO_ROOT / "app" / "build.gradle.kts"
-BACKUP_KT = REPO_ROOT / "app" / "src" / "main" / "java" / "com" / "culturedcode" / "things3" / "data" / "backup" / "ThingsBackupCodec.kt"
+BACKUP_KT = REPO_ROOT / "app" / "src" / "main" / "java" / "com" / "pv" / "thingsbook" / "data" / "backup" / "ThingsBackupCodec.kt"
 MANIFEST_FILE = REPO_ROOT / "macos" / "PARITY_MANIFEST.json"
 INFO_PLIST = REPO_ROOT / "macos" / "Resources" / "Info.plist"
 STRINGS_JSON = REPO_ROOT / "macos" / "Resources" / "Localization" / "strings.json"

@@ -9,8 +9,8 @@
         android:shortcutLongLabel="@string/shortcut_new_todo_short">
         <intent
             android:action="android.intent.action.VIEW"
-            android:targetPackage="com.culturedcode.things3"
-            android:targetClass="com.culturedcode.things3.MainActivity">
+            android:targetPackage="com.pv.thingsbook"
+            android:targetClass="com.pv.thingsbook.MainActivity">
             <extra android:name="extra_widget_smart_view" android:value="TODAY" />
             <extra android:name="extra_widget_quick_add" android:value="true" />
         </intent>
@@ -24,8 +24,8 @@
         android:shortcutLongLabel="@string/shortcut_voice_capture_short">
         <intent
             android:action="android.intent.action.VIEW"
-            android:targetPackage="com.culturedcode.things3"
-            android:targetClass="com.culturedcode.things3.MainActivity">
+            android:targetPackage="com.pv.thingsbook"
+            android:targetClass="com.pv.thingsbook.MainActivity">
             <extra android:name="extra_shortcut_action" android:value="VOICE_CAPTURE" />
         </intent>
     </shortcut>
@@ -38,8 +38,8 @@
         android:shortcutLongLabel="@string/shortcut_today_short">
         <intent
             android:action="android.intent.action.VIEW"
-            android:targetPackage="com.culturedcode.things3"
-            android:targetClass="com.culturedcode.things3.MainActivity">
+            android:targetPackage="com.pv.thingsbook"
+            android:targetClass="com.pv.thingsbook.MainActivity">
             <extra android:name="extra_widget_smart_view" android:value="TODAY" />
         </intent>
     </shortcut>
@@ -52,8 +52,8 @@
         android:shortcutLongLabel="@string/shortcut_inbox_short">
         <intent
             android:action="android.intent.action.VIEW"
-            android:targetPackage="com.culturedcode.things3"
-            android:targetClass="com.culturedcode.things3.MainActivity">
+            android:targetPackage="com.pv.thingsbook"
+            android:targetClass="com.pv.thingsbook.MainActivity">
             <extra android:name="extra_widget_smart_view" android:value="INBOX" />
         </intent>
     </shortcut>
@@ -66,8 +66,8 @@
         android:shortcutLongLabel="@string/shortcut_quick_find_short">
         <intent
             android:action="android.intent.action.VIEW"
-            android:targetPackage="com.culturedcode.things3"
-            android:targetClass="com.culturedcode.things3.MainActivity">
+            android:targetPackage="com.pv.thingsbook"
+            android:targetClass="com.pv.thingsbook.MainActivity">
             <extra android:name="extra_shortcut_action" android:value="QUICK_FIND" />
         </intent>
     </shortcut>

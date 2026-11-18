@@ -10,15 +10,15 @@ plugins {
 }
 
 android {
-    namespace = "com.culturedcode.things3"
+    namespace = "com.pv.thingsbook"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.culturedcode.things3"
+        applicationId = "com.pv.thingsbook"
         minSdk = 26
         targetSdk = 35
-        versionCode = 73
-        versionName = "2.1.0"
+        versionCode = 74
+        versionName = "3.0.0-alpha.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

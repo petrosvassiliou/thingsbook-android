@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - 'beta*'
+      - 'alpha*'
     tags:
       - 'v*'
     paths:
@@ -62,9 +63,18 @@ jobs:
         run: |
           npx --yes firebase-tools deploy --only hosting --project thingsbook-prod
 
+      - name: Deploy Alpha to Isolated Firebase Preview Channel (alpha-3-0)
+        if: >-
+          startsWith(github.ref, 'refs/heads/alpha') ||
+          contains(github.ref, 'alpha')
+        run: |
+          npx --yes firebase-tools hosting:channel:deploy alpha-3-0 --expires 30d --project thingsbook-prod
+
       - name: Deploy Beta to Isolated Firebase Preview Channel (beta)
         if: >-
           github.ref != 'refs/heads/main' &&
+          !startsWith(github.ref, 'refs/heads/alpha') &&
+          !contains(github.ref, 'alpha') &&
           (!startsWith(github.ref, 'refs/tags/v') || contains(github.ref, '-'))
         run: |
           npx --yes firebase-tools hosting:channel:deploy beta --expires 30d --project thingsbook-prod

@@ -1,23 +1,23 @@
 # Add project specific ProGuard rules here.
 -keepattributes *Annotation*,InnerClasses,Signature,RuntimeVisibleAnnotations
--keepnames class com.culturedcode.things3.data.remote.dto.** { *; }
--keepclassmembers class com.culturedcode.things3.data.remote.dto.** { *; }
+-keepnames class com.pv.thingsbook.data.remote.dto.** { *; }
+-keepclassmembers class com.pv.thingsbook.data.remote.dto.** { *; }
 
 # Keep domain models & enums used with Enum.valueOf and kotlinx.serialization
--keepnames class com.culturedcode.things3.domain.model.** { *; }
--keepclassmembers class com.culturedcode.things3.domain.model.** { *; }
--keepclassmembers enum com.culturedcode.things3.** {
+-keepnames class com.pv.thingsbook.domain.model.** { *; }
+-keepclassmembers class com.pv.thingsbook.domain.model.** { *; }
+-keepclassmembers enum com.pv.thingsbook.** {
     public static **[] values();
     public static ** valueOf(java.lang.String);
 }
 
 # Keep Gemini AI & Sync kotlinx.serialization DTOs and generated serializers
--keepnames class com.culturedcode.things3.data.ai.** { *; }
--keepclassmembers class com.culturedcode.things3.data.ai.** { *; }
--keepnames class com.culturedcode.things3.data.repository.** { *; }
--keepclassmembers class com.culturedcode.things3.data.repository.** { *; }
--keepnames class com.culturedcode.things3.data.update.** { *; }
--keepclassmembers class com.culturedcode.things3.data.update.** { *; }
+-keepnames class com.pv.thingsbook.data.ai.** { *; }
+-keepclassmembers class com.pv.thingsbook.data.ai.** { *; }
+-keepnames class com.pv.thingsbook.data.repository.** { *; }
+-keepclassmembers class com.pv.thingsbook.data.repository.** { *; }
+-keepnames class com.pv.thingsbook.data.update.** { *; }
+-keepclassmembers class com.pv.thingsbook.data.update.** { *; }
 
 -if @kotlinx.serialization.Serializable class **
 -keepclassmembers class <1> {

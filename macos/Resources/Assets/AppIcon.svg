@@ -1,53 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
   <defs>
-    <linearGradient id="macBg" x1="15%" y1="6%" x2="85%" y2="94%">
-      <stop offset="0%" stop-color="#3898FF"/>
-      <stop offset="48%" stop-color="#1967FA"/>
-      <stop offset="100%" stop-color="#0B348B"/>
+    <linearGradient id="glassBg" x1="12" y1="10" x2="116" y2="118" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1A7D98"/>
+      <stop offset="55%" stop-color="#0D576C"/>
+      <stop offset="100%" stop-color="#063442"/>
     </linearGradient>
-    <linearGradient id="glassRim" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.48"/>
-      <stop offset="35%" stop-color="#FFFFFF" stop-opacity="0.08"/>
-      <stop offset="100%" stop-color="#031235" stop-opacity="0.28"/>
+    <linearGradient id="glassRim" x1="10" y1="10" x2="118" y2="118" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#C8F5FF" stop-opacity="0.9"/>
+      <stop offset="50%" stop-color="#7FD9EE" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.55"/>
     </linearGradient>
-    <filter id="dropShadow" x="-8%" y="-6%" width="116%" height="118%">
-      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#04112E" flood-opacity="0.34"/>
-    </filter>
-    <filter id="cardShadow" x="-12%" y="-10%" width="124%" height="128%">
-      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#061947" flood-opacity="0.26"/>
-    </filter>
-    <clipPath id="higSquircle">
-      <rect x="100" y="100" width="824" height="824" rx="185.4" ry="185.4"/>
-    </clipPath>
   </defs>
-
-  <!-- Outer macOS Dock Shadow + Squircle Body -->
-  <g filter="url(#dropShadow)">
-    <rect x="100" y="100" width="824" height="824" rx="185.4" ry="185.4" fill="url(#macBg)"/>
-  </g>
-
-  <g clip-path="url(#higSquircle)">
-    <!-- Ambient Top-Left Liquid Glass Glow -->
-    <circle cx="330" cy="270" r="410" fill="#FFFFFF" fill-opacity="0.17"/>
-    <!-- Back Stacked Project Card -->
-    <rect x="292" y="226" width="440" height="492" rx="74" ry="74" fill="#DCEBFF" fill-opacity="0.82"/>
-    <!-- Main Pure White Elevated GTD Card -->
-    <g filter="url(#cardShadow)">
-      <rect x="256" y="264" width="512" height="504" rx="82" ry="82" fill="#FFFFFF"/>
-    </g>
-    <!-- Completed Things-Blue Checkbox Circle -->
-    <circle cx="418" cy="462" r="92" fill="#1A73F7"/>
-    <path d="M376,464 L406,494 L466,430" fill="none" stroke="#FFFFFF" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
-    <!-- Task Title & Project Subtitle -->
-    <rect x="538" y="422" width="166" height="38" rx="19" fill="#1C2434"/>
-    <rect x="538" y="482" width="112" height="30" rx="15" fill="#7D8EA8"/>
-    <!-- Secondary Open Checklist Item -->
-    <circle cx="364" cy="632" r="32" fill="none" stroke="#8DA1BE" stroke-width="16"/>
-    <rect x="426" y="616" width="232" height="32" rx="16" fill="#B2C2DA"/>
-    <!-- Golden Today Star Badge -->
-    <path fill="#FFC400" d="M704,210 L724,251 L770,258 L737,290 L745,335 L704,313 L663,335 L671,290 L638,258 L684,251 Z"/>
-  </g>
-
-  <!-- Specular Inner Rim Highlight (Apple Tahoe / Sequoia Material Polish) -->
-  <rect x="103" y="103" width="818" height="818" rx="182.4" ry="182.4" fill="none" stroke="url(#glassRim)" stroke-width="6"/>
+  <rect x="10" y="10" width="108" height="108" rx="26" fill="url(#glassBg)" stroke="url(#glassRim)" stroke-width="2.5"/>
+  <path d="M36 40C36 36.7 39 34.2 42.2 35L62 40V90L41.2 84.5C38.1 83.7 36 80.9 36 77.7V40Z" fill="#DDF8FF" fill-opacity="0.58"/>
+  <path d="M44 45C44 42 46.8 39.8 49.7 40.7L64 45V90L48.6 85.2C45.9 84.3 44 81.8 44 79V45Z" fill="#FFFFFF" fill-opacity="0.72"/>
+  <path d="M53 63L64 73L93 41" stroke="#A6F0FF" stroke-width="8.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M64 90L93 41L64 56V90Z" fill="#7CE4FA" fill-opacity="0.65"/>
 </svg>

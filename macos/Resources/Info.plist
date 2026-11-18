@@ -17,7 +17,7 @@
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
-    <string>com.thingsbook.macos</string>
+    <string>com.pv.thingsbook.mac</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -27,9 +27,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.1.0</string>
+    <string>3.0.0-alpha.1</string>
     <key>CFBundleVersion</key>
-    <string>73</string>
+    <string>74</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.productivity</string>
     <key>LSMinimumSystemVersion</key>
@@ -54,7 +54,7 @@
     <array>
         <dict>
             <key>CFBundleURLName</key>
-            <string>com.thingsbook.macos.url</string>
+            <string>com.pv.thingsbook.mac.url</string>
             <key>CFBundleURLSchemes</key>
             <array>
                 <string>thingsbook</string>

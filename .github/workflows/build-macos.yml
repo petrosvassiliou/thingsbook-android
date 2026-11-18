@@ -303,7 +303,12 @@ jobs:
 
           if [[ "$TAG" == *-* ]]; then
             echo "Publishing $TAG as an isolated PRE-RELEASE (stable latest remains untouched)..."
-            TITLE="Thingsbook ${TAG} Beta (Build ${VERSION_CODE}) — Android, ChromeOS & macOS"
+            if [[ "$TAG" == *alpha* ]]; then
+              PRE_LABEL="Alpha"
+            else
+              PRE_LABEL="Beta"
+            fi
+            TITLE="Thingsbook ${TAG} ${PRE_LABEL} (Build ${VERSION_CODE}) — Android, ChromeOS & macOS"
             if gh release view "$TAG" >/dev/null 2>&1; then
               gh release upload "$TAG" release-bundle/* --clobber
               if [ -f "$NOTES_FILE" ]; then

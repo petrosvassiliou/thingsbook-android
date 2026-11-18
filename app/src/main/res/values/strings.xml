@@ -407,7 +407,7 @@
     <string name="quick_find_results_for">%1$d results for “%2$s”</string>
     <string name="quick_find_badge_view">View</string>
     <string name="quick_find_subtasks_count">☑ %1$d/%2$d checklist items</string>
-    <string name="v2_beta_badge">2.0 BETA</string>
+    <string name="v2_beta_badge">3.0 ALPHA</string>
     <string name="v2_beta_channel_toggle">Receive Beta Updates</string>
     <string name="v2_beta_channel_desc">Include 2.0 beta pre-releases when checking for app updates.</string>
     <string name="v2_weekly_review_title">Weekly Review</string>

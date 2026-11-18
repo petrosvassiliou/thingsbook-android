@@ -1,30 +1,32 @@
 :root {
-  /* LightThingsPalette (exact match to Theme.kt) */
-  --bg-canvas: #F5F6F8;
-  --bg-sidebar: #ECEEF2;
-  --bg-sidebar-hover: rgba(29, 29, 31, 0.055);
-  --bg-sidebar-active: #DFE3EC;
+  /* Thingsbook 3.0 — Crisp Pure White & Sky Light Blue (Material 3 Expressive) */
+  --bg-canvas: #FFFFFF;
+  --bg-sidebar: #F4F5F8;
+  --bg-sidebar-hover: rgba(23, 26, 30, 0.05);
+  --bg-sidebar-active: #E5F3FF;
   --bg-card: #FFFFFF;
-  --bg-card-hover: rgba(255, 255, 255, 0.78);
-  --bg-row-selected: rgba(36, 139, 253, 0.11);
-  --bg-subtle: #EFF1F5;
-  --bg-chip: #F0F2F6;
-  --bg-chip-hover: #E4E8F0;
+  --bg-card-hover: #F7F9FC;
+  --bg-row-selected: #E5F3FF;
+  --bg-subtle: #F4F6FA;
+  --bg-chip: #EFF2F7;
+  --bg-chip-hover: #E3E8F1;
   --bg-overlay: rgba(15, 18, 25, 0.40);
 
-  --text-primary: #1D1D1F;
-  --text-secondary: #5E636E;
-  --text-muted: #8E939E;
+  --text-primary: #171A1E;
+  --text-secondary: #5B626E;
+  --text-muted: #8B93A1;
   --text-inverse: #FFFFFF;
 
-  --border-subtle: #E2E5EC;
-  --border-strong: #CBD0DC;
-  --checkbox-border: #B5BBC7;
+  --border-subtle: #E7EBF1;
+  --border-strong: #CFD6E2;
+  --checkbox-border: #B5BDCA;
 
-  /* Brand & GTD View Accents */
-  --things-blue: #248BFD;
-  --things-blue-hover: #1479EC;
-  --things-blue-soft: rgba(36, 139, 253, 0.12);
+  /* Brand & Expressive Sky Light Blue Accents */
+  --things-blue: #3898EC;
+  --things-blue-hover: #2484DA;
+  --things-blue-soft: #E5F3FF;
+  --active-pill-text: #0C4B86;
+  --focus-ring-blue: rgba(56, 152, 236, 0.38);
   --today-star: #F5B400;
   --today-star-bg: rgba(255, 196, 0, 0.16);
   --evening-moon: #5E5CE6;
@@ -32,51 +34,53 @@
   --upcoming-coral: #FF4F5E;
   --anytime-teal: #15A697;
   --someday-amber: #D69F3A;
-  --logbook-green: #34C759;
-  --deadline-red: #FF3B30;
-  --deadline-red-bg: rgba(255, 59, 48, 0.11);
+  --logbook-green: #2EAD5B;
+  --deadline-red: #E53935;
+  --deadline-red-bg: rgba(229, 57, 53, 0.11);
   --gemini-violet: #6E56CF;
   --gemini-violet-bg: rgba(110, 86, 207, 0.11);
 
-  --shadow-card: 0 8px 26px rgba(18, 22, 33, 0.08), 0 1px 3px rgba(18, 22, 33, 0.05);
+  --shadow-card: 0 10px 28px rgba(18, 26, 38, 0.08), 0 1px 3px rgba(18, 26, 38, 0.05);
   --shadow-modal: 0 22px 56px rgba(12, 16, 26, 0.22), 0 2px 8px rgba(12, 16, 26, 0.08);
-  --shadow-fab: 0 8px 24px rgba(36, 139, 253, 0.38);
+  --shadow-fab: 0 8px 24px rgba(56, 152, 236, 0.36);
 
   --radius-xs: 6px;
   --radius-sm: 8px;
   --radius-md: 12px;
-  --radius-lg: 16px;
+  --radius-lg: 18px;
   --radius-pill: 999px;
 
-  --sidebar-width: 264px;
+  --sidebar-width: 268px;
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Roboto', 'Segoe UI', sans-serif;
 }
 
 [data-theme="dark"] {
-  --bg-canvas: #1B1D22;
-  --bg-sidebar: #16181C;
+  --bg-canvas: #121417;
+  --bg-sidebar: #171A1E;
   --bg-sidebar-hover: rgba(255, 255, 255, 0.055);
-  --bg-sidebar-active: #252831;
-  --bg-card: #24262D;
-  --bg-card-hover: rgba(255, 255, 255, 0.038);
-  --bg-row-selected: rgba(59, 158, 255, 0.17);
-  --bg-subtle: #202229;
-  --bg-chip: #2C2F38;
-  --bg-chip-hover: #363A45;
-  --bg-overlay: rgba(5, 7, 11, 0.62);
+  --bg-sidebar-active: rgba(107, 192, 255, 0.16);
+  --bg-card: #1B1F25;
+  --bg-card-hover: #20252D;
+  --bg-row-selected: rgba(107, 192, 255, 0.16);
+  --bg-subtle: #181B20;
+  --bg-chip: #252A33;
+  --bg-chip-hover: #2F3540;
+  --bg-overlay: rgba(5, 7, 11, 0.64);
 
-  --text-primary: #F2F3F5;
-  --text-secondary: #9EA4B0;
-  --text-muted: #6E7482;
+  --text-primary: #F1F3F6;
+  --text-secondary: #9BA3B0;
+  --text-muted: #6C7482;
   --text-inverse: #111318;
 
-  --border-subtle: #2E313B;
-  --border-strong: #3F4452;
-  --checkbox-border: #5E6473;
+  --border-subtle: #272C35;
+  --border-strong: #39404D;
+  --checkbox-border: #5C6473;
 
-  --things-blue: #3B9EFF;
-  --things-blue-hover: #58ADFF;
-  --things-blue-soft: rgba(59, 158, 255, 0.16);
+  --things-blue: #6BC0FF;
+  --things-blue-hover: #85CCFF;
+  --things-blue-soft: rgba(107, 192, 255, 0.16);
+  --active-pill-text: #C4E5FF;
+  --focus-ring-blue: rgba(107, 192, 255, 0.38);
   --today-star: #FFD026;
   --today-star-bg: rgba(255, 208, 38, 0.16);
   --evening-moon: #848FF2;
@@ -84,9 +88,9 @@
   --gemini-violet: #9B85F7;
   --gemini-violet-bg: rgba(155, 133, 247, 0.15);
 
-  --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.34), 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-card: 0 12px 32px rgba(0, 0, 0, 0.38), 0 1px 2px rgba(0, 0, 0, 0.28);
   --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(255, 255, 255, 0.05);
-  --shadow-fab: 0 8px 24px rgba(59, 158, 255, 0.34);
+  --shadow-fab: 0 8px 24px rgba(107, 192, 255, 0.30);
 }
 
 *,
@@ -175,7 +179,7 @@ button {
   align-items: center;
   gap: 9px;
   padding: 4px 6px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-pill);
   transition: background 0.12s ease;
 }
 
@@ -184,15 +188,16 @@ button {
 }
 
 .brand-app-icon {
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  background: linear-gradient(145deg, #3597FF, #1D75EB);
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: linear-gradient(160deg, #98D6FF 0%, #5AB6FF 44%, #3898EC 100%);
+  border: 1px solid rgba(255, 255, 255, 0.55);
   color: #fff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 6px rgba(36, 139, 253, 0.28);
+  box-shadow: 0 2px 8px rgba(56, 152, 236, 0.28);
   flex-shrink: 0;
 }
 
@@ -228,6 +233,22 @@ button {
   gap: 2px;
 }
 
+.area-chevron-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.area-chevron-btn:hover {
+  background: var(--bg-sidebar-hover);
+  color: var(--text-primary);
+}
+
 .nav-item {
   flex: 1;
   min-width: 0;
@@ -235,13 +256,13 @@ button {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 6.5px 10px;
-  border-radius: var(--radius-sm);
+  padding: 6.5px 12px;
+  border-radius: var(--radius-pill);
   color: var(--text-primary);
   font-weight: 500;
   font-size: 13.6px;
   text-align: left;
-  transition: background-color 0.12s ease;
+  transition: background-color 0.14s ease, color 0.14s ease;
 }
 
 .nav-item:hover {
@@ -249,12 +270,14 @@ button {
 }
 
 .nav-item.active {
-  background: var(--bg-sidebar-active);
+  background: var(--things-blue-soft);
+  color: var(--active-pill-text);
   font-weight: 600;
 }
 
 .nav-item.area-row {
   font-weight: 650;
+  padding-left: 8px;
 }
 
 .nav-item.drag-over {
@@ -263,14 +286,14 @@ button {
 }
 
 .nav-item.indented {
-  padding-left: 26px;
+  padding-left: 34px;
   font-size: 13.2px;
 }
 
 .nav-inline-plus {
   width: 24px;
   height: 24px;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-pill);
   color: var(--text-muted);
   display: inline-flex;
   align-items: center;
@@ -308,12 +331,16 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+.nav-item.active .nav-item-count {
+  color: var(--things-blue);
+}
+
 .sidebar-install-card {
   margin: 4px 10px 6px;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  border-radius: var(--radius-pill);
   background: var(--things-blue-soft);
-  border: 1px solid rgba(36, 139, 253, 0.22);
+  border: 1px solid rgba(56, 152, 236, 0.24);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -324,7 +351,7 @@ button {
 }
 
 .sidebar-install-card:hover {
-  background: rgba(36, 139, 253, 0.2);
+  background: rgba(56, 152, 236, 0.22);
 }
 
 .sidebar-footer {
@@ -1056,13 +1083,13 @@ button {
   width: 20px;
   height: 20px;
   min-width: 20px;
-  border-radius: 5.5px;
+  border-radius: 6.5px;
   border: 1.7px solid var(--checkbox-border);
   background: transparent;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: transform 0.15s cubic-bezier(0.2, 1.3, 0.4, 1), background 0.14s ease, border-color 0.14s ease;
+  transition: transform 0.16s cubic-bezier(0.2, 1.3, 0.4, 1), border-radius 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), background 0.14s ease, border-color 0.14s ease;
   color: #fff;
 }
 
@@ -1078,10 +1105,17 @@ button {
   transform: scale(1.07);
 }
 
-.things-checkbox.completed,
-.things-checkbox.canceled {
+.things-checkbox.completed {
+  border-radius: 50%;
   background: var(--things-blue);
   border-color: var(--things-blue);
+  border-style: solid;
+}
+
+.things-checkbox.canceled {
+  border-radius: 6.5px;
+  background: var(--border-strong);
+  border-color: var(--border-strong);
   border-style: solid;
 }
 
@@ -1199,13 +1233,13 @@ button {
   font-weight: 600;
 }
 
-/* Expanded Card */
+/* Expanded Card (Material 3 Expressive 18px Surface + Sky Light Blue Focus Ring) */
 .task-card-expanded {
   background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border: 1.5px solid var(--focus-ring-blue);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
-  padding: 14px 16px 12px;
+  padding: 15px 17px 13px;
   margin: 8px 0 10px;
   animation: expandCardIn 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
@@ -1626,7 +1660,7 @@ button {
   bottom: 22px;
   width: 58px;
   height: 58px;
-  border-radius: 50%;
+  border-radius: 18px;
   background: var(--things-blue);
   color: #fff;
   display: inline-flex;
@@ -2793,9 +2827,9 @@ kbd {
   font-size: 9.8px;
   font-weight: 800;
   letter-spacing: 0.04em;
-  background: var(--gemini-violet-bg);
-  color: var(--gemini-violet);
-  border: 1px solid rgba(110, 86, 207, 0.28);
+  background: var(--things-blue-soft);
+  color: var(--things-blue);
+  border: 1px solid rgba(56, 152, 236, 0.30);
   margin-left: 4px;
 }
 

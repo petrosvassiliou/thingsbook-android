@@ -588,12 +588,12 @@ fun MagicPlusFab(
                 Box(
                     modifier = Modifier
                         .size(54.dp)
-                        .clip(CircleShape)
+                        .clip(RoundedCornerShape(18.dp))
                         .background(colors.thingsBlue.copy(alpha = 0.08f))
                         .border(
                             width = 1.5.dp,
                             color = colors.thingsBlue.copy(alpha = 0.30f),
-                            shape = CircleShape
+                            shape = RoundedCornerShape(18.dp)
                         )
                 )
             }
@@ -616,17 +616,17 @@ fun MagicPlusFab(
                             isFabHovered -> 12.dp
                             else -> 8.dp
                         },
-                        shape = CircleShape,
-                        ambientColor = colors.thingsBlue.copy(alpha = if (isFabHovered || isDragging) 0.46f else 0.38f),
-                        spotColor = colors.thingsBlue.copy(alpha = if (isFabHovered || isDragging) 0.58f else 0.48f)
+                        shape = RoundedCornerShape(18.dp),
+                        ambientColor = colors.thingsBlue.copy(alpha = if (isFabHovered || isDragging) 0.42f else 0.32f),
+                        spotColor = colors.thingsBlue.copy(alpha = if (isFabHovered || isDragging) 0.52f else 0.42f)
                     )
-                    .size(58.dp)
-                    .clip(CircleShape)
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(18.dp))
                     .background(fabBgColor)
                     .border(
                         width = 1.dp,
                         color = Color.White.copy(alpha = if (fabRingAlpha.isFinite()) fabRingAlpha.coerceIn(0f, 1f) else 0f),
-                        shape = CircleShape
+                        shape = RoundedCornerShape(18.dp)
                     ),
                 contentAlignment = Alignment.Center
             ) {

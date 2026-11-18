@@ -3852,30 +3852,30 @@ private fun SmartViewNavigationStrip(
         contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp)
     ) {
-        // 1. Smart Views
+        // 1. Smart Views (M3 Expressive capsule pills + monochrome-to-Sky-Blue icons)
         items(SmartViewType.entries) { viewType ->
             val selected = navTarget == ActiveNavigationTarget.SmartView(viewType)
             val viewTitle = stringResource(viewType.titleRes)
             ThingsHoverTooltip(text = viewTitle) {
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (selected) colors.cardSurface else Color.Transparent)
+                        .clip(RoundedCornerShape(50))
+                        .background(if (selected) colors.thingsBlueSoft else Color.Transparent)
                         .clickable {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onSelectSmartView(viewType)
                         }
-                        .padding(horizontal = 11.dp, vertical = 7.dp),
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    SmartViewIcon(viewType = viewType, modifier = Modifier.size(18.dp))
+                    SmartViewIcon(viewType = viewType, modifier = Modifier.size(18.dp), isSelected = selected)
                     Text(
                         text = viewTitle,
                         style = MaterialTheme.typography.labelMedium.copy(
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
                         ),
-                        color = if (selected) colors.primaryText else colors.secondaryText
+                        color = if (selected) colors.thingsBlue else colors.secondaryText
                     )
                 }
             }
@@ -3887,20 +3887,20 @@ private fun SmartViewNavigationStrip(
             ThingsHoverTooltip(text = reviewTitle) {
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(50))
                         .background(Color.Transparent)
                         .clickable {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onOpenWeeklyReview()
                         }
-                        .padding(horizontal = 11.dp, vertical = 7.dp),
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.Checklist,
                         contentDescription = reviewTitle,
-                        tint = colors.thingsBlue,
+                        tint = colors.secondaryText,
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
@@ -3917,20 +3917,20 @@ private fun SmartViewNavigationStrip(
             ThingsHoverTooltip(text = templatesTitle) {
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(50))
                         .background(Color.Transparent)
                         .clickable {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onOpenTemplatesAndImport()
                         }
-                        .padding(horizontal = 11.dp, vertical = 7.dp),
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.ContentCopy,
                         contentDescription = templatesTitle,
-                        tint = colors.anytimeTeal,
+                        tint = colors.secondaryText,
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
@@ -3942,47 +3942,88 @@ private fun SmartViewNavigationStrip(
             }
         }
 
-        // 2. Areas (Work, Home, ... up to 8)
-        items(areas, key = { "nav_area_${it.id}" }) { area ->
-            val selected = navTarget == ActiveNavigationTarget.AreaDetail(area.id)
-            ThingsHoverTooltip(text = "${stringResource(R.string.entity_area)}: ${area.title}") {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (selected) colors.cardSurface else colors.tagPillBg.copy(alpha = 0.6f))
-                        .clickable {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onSelectArea(area.id)
+        // 2. Areas -> Nested Projects Hierarchy (Projects live inside Areas in Thingsbook 3.0)
+        areas.forEach { area ->
+            item(key = "nav_area_${area.id}") {
+                val selected = navTarget == ActiveNavigationTarget.AreaDetail(area.id)
+                ThingsHoverTooltip(text = "${stringResource(R.string.entity_area)}: ${area.title}") {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(if (selected) colors.thingsBlueSoft else colors.tagPillBg.copy(alpha = 0.75f))
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSelectArea(area.id)
+                            }
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Inventory2,
+                            contentDescription = area.title,
+                            tint = if (selected) colors.thingsBlue else colors.secondaryText,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = area.title,
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold
+                            ),
+                            color = if (selected) colors.thingsBlue else colors.primaryText
+                        )
+                    }
+                }
+            }
+
+            val areaProjects = projects.filter { it.areaId == area.id }
+            items(areaProjects, key = { "nav_proj_${it.id}" }) { project ->
+                val selected = navTarget == ActiveNavigationTarget.ProjectDetail(project.id)
+                ThingsHoverTooltip(text = "${area.title} › $projectLabel: ${project.title}") {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(if (selected) colors.thingsBlueSoft else Color.Transparent)
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSelectProject(project.id)
+                            }
+                            .padding(horizontal = 11.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        ProjectProgressRing(progress = project.progress, size = 16.dp)
+                        Text(
+                            text = project.title,
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                            ),
+                            color = if (selected) colors.thingsBlue else colors.secondaryText
+                        )
+                        if (project.deadline != null) {
+                            Icon(
+                                imageVector = Icons.Outlined.Flag,
+                                contentDescription = null,
+                                tint = colors.deadlineUrgentRed,
+                                modifier = Modifier.size(12.dp)
+                            )
                         }
-                        .padding(horizontal = 11.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Inventory2,
-                        contentDescription = area.title,
-                        tint = colors.anytimeTeal,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = area.title,
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold
-                        ),
-                        color = if (selected) colors.primaryText else colors.secondaryText
-                    )
+                    }
                 }
             }
         }
 
-        // 3. Projects (with Progress Ring & Target Date Flag)
-        items(projects, key = { "nav_proj_${it.id}" }) { project ->
+        // 3. Legacy Unassigned Projects (preserving 2.x upgraded standalone projects)
+        val unassignedStripProjects = projects.filter { proj ->
+            proj.areaId == null || areas.none { it.id == proj.areaId }
+        }
+        items(unassignedStripProjects, key = { "nav_proj_unassigned_${it.id}" }) { project ->
             val selected = navTarget == ActiveNavigationTarget.ProjectDetail(project.id)
             ThingsHoverTooltip(text = "$projectLabel: ${project.title}") {
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (selected) colors.cardSurface else Color.Transparent)
+                        .clip(RoundedCornerShape(50))
+                        .background(if (selected) colors.thingsBlueSoft else Color.Transparent)
                         .clickable {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onSelectProject(project.id)
@@ -3997,7 +4038,7 @@ private fun SmartViewNavigationStrip(
                         style = MaterialTheme.typography.labelMedium.copy(
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
                         ),
-                        color = if (selected) colors.primaryText else colors.secondaryText
+                        color = if (selected) colors.thingsBlue else colors.secondaryText
                     )
                     if (project.deadline != null) {
                         Icon(
@@ -4016,13 +4057,13 @@ private fun SmartViewNavigationStrip(
             ThingsHoverTooltip(text = "${stringResource(R.string.entity_new_project)} (Ctrl+Shift+N)") {
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(50))
                         .background(colors.thingsBlueSoft)
                         .clickable {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onCreateNewProject()
                         }
-                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                        .padding(horizontal = 11.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
@@ -4228,7 +4269,11 @@ private fun ViewTitleHeader(
             ) {
                 when (navTarget) {
                     is ActiveNavigationTarget.SmartView -> {
-                        SmartViewIcon(viewType = navTarget.type, modifier = Modifier.size(28.dp))
+                        SmartViewIcon(
+                            viewType = navTarget.type,
+                            modifier = Modifier.size(28.dp),
+                            isSelected = true
+                        )
                         Text(
                             text = stringResource(navTarget.type.titleRes),
                             style = MaterialTheme.typography.headlineLarge,
@@ -4306,7 +4351,7 @@ private fun ViewTitleHeader(
                         Icon(
                             imageVector = Icons.Outlined.Inventory2,
                             contentDescription = null,
-                            tint = colors.anytimeTeal,
+                            tint = colors.thingsBlue,
                             modifier = Modifier.size(26.dp)
                         )
                         if (isRenamingAreaInline && currentArea != null) {
@@ -5606,16 +5651,22 @@ private fun ThingsChromebookSidebar(
         StalledProjectDetector.detectStalledProjects(projects)
     }
     val stalledCount = stalledStatuses.size
+    val collapsedAreaIds = remember { androidx.compose.runtime.mutableStateMapOf<String, Boolean>() }
+    val defaultNewProjectAreaId = when (navTarget) {
+        is ActiveNavigationTarget.AreaDetail -> navTarget.areaId
+        is ActiveNavigationTarget.ProjectDetail -> projects.firstOrNull { it.id == navTarget.projectId }?.areaId ?: areas.firstOrNull()?.id
+        else -> areas.firstOrNull()?.id
+    }
 
     Column(
         modifier = Modifier
-            .width(264.dp)
+            .width(268.dp)
             .fillMaxHeight()
             .background(colors.sidebarBackground)
             .padding(horizontal = 14.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        // Clean Sidebar Brand Header (no Today badge here — Heute count is shown in the Heute row below)
+        // Clean Sidebar Brand Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -5670,13 +5721,13 @@ private fun ThingsChromebookSidebar(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(if (selected) colors.thingsBlue.copy(alpha = 0.14f) else Color.Transparent)
+                        .clip(RoundedCornerShape(50))
+                        .background(if (selected) colors.thingsBlueSoft else Color.Transparent)
                         .clickable {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onSelectSmartView(viewType)
                         }
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -5684,7 +5735,11 @@ private fun ThingsChromebookSidebar(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        SmartViewIcon(viewType = viewType, modifier = Modifier.size(18.dp))
+                        SmartViewIcon(
+                            viewType = viewType,
+                            modifier = Modifier.size(18.dp),
+                            isSelected = selected
+                        )
                         Text(
                             text = viewLabel,
                             style = MaterialTheme.typography.bodyMedium.copy(
@@ -5704,7 +5759,7 @@ private fun ThingsChromebookSidebar(
             }
         }
 
-        // v2 GTD Weekly Review & Project Templates / Markdown Importer quick rows
+        // GTD Weekly Review & Project Templates / Markdown Importer quick rows (monochrome M3 Expressive style)
         ThingsHoverTooltip(
             text = stringResource(R.string.v2_weekly_review_title),
             modifier = Modifier.fillMaxWidth()
@@ -5712,13 +5767,13 @@ private fun ThingsChromebookSidebar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(9.dp))
+                    .clip(RoundedCornerShape(50))
                     .background(Color.Transparent)
                     .clickable {
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onOpenWeeklyReview()
                     }
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -5729,7 +5784,7 @@ private fun ThingsChromebookSidebar(
                     Icon(
                         imageVector = Icons.Outlined.Checklist,
                         contentDescription = stringResource(R.string.v2_weekly_review_title),
-                        tint = colors.thingsBlue,
+                        tint = colors.secondaryText,
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
@@ -5759,20 +5814,20 @@ private fun ThingsChromebookSidebar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(9.dp))
+                    .clip(RoundedCornerShape(50))
                     .background(Color.Transparent)
                     .clickable {
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onOpenTemplatesAndImport()
                     }
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Icon(
                     imageVector = Icons.Outlined.ContentCopy,
                     contentDescription = stringResource(R.string.v2_templates_title),
-                    tint = colors.anytimeTeal,
+                    tint = colors.secondaryText,
                     modifier = Modifier.size(18.dp)
                 )
                 Text(
@@ -5791,7 +5846,7 @@ private fun ThingsChromebookSidebar(
         HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
         Spacer(modifier = Modifier.height(4.dp))
 
-        // Areas & Projects Hierarchy (Things for Mac Sidebar style)
+        // Areas -> Projects Hierarchy (M3 Expressive Collapsible Area Sections)
         LazyColumn(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -5799,13 +5854,14 @@ private fun ThingsChromebookSidebar(
             items(areas, key = { "sidebar_area_${it.id}" }) { area ->
                 val isAreaSelected = navTarget == ActiveNavigationTarget.AreaDetail(area.id)
                 val areaProjects = projects.filter { it.areaId == area.id }
+                val isCollapsed = collapsedAreaIds[area.id] == true
 
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(9.dp))
-                            .background(if (isAreaSelected) colors.thingsBlue.copy(alpha = 0.14f) else Color.Transparent)
+                            .clip(RoundedCornerShape(50))
+                            .background(if (isAreaSelected) colors.thingsBlueSoft else Color.Transparent)
                             .clickable {
                                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 onSelectArea(area.id)
@@ -5815,21 +5871,35 @@ private fun ThingsChromebookSidebar(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(
+                            modifier = Modifier.weight(1f),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            IconButton(
+                                onClick = { collapsedAreaIds[area.id] = !isCollapsed },
+                                modifier = Modifier.size(20.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isCollapsed) Icons.Outlined.ExpandMore else Icons.Outlined.ExpandLess,
+                                    contentDescription = area.title,
+                                    tint = colors.tertiaryText,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
                             Icon(
                                 imageVector = Icons.Outlined.Inventory2,
                                 contentDescription = area.title,
-                                tint = colors.anytimeTeal,
+                                tint = if (isAreaSelected) colors.thingsBlue else colors.secondaryText,
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
                                 text = area.title,
                                 style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontWeight = FontWeight.Bold,
+                                    fontWeight = FontWeight.SemiBold,
                                     color = if (isAreaSelected) colors.thingsBlue else colors.primaryText
-                                )
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                         ThingsHoverTooltip(
@@ -5849,66 +5919,68 @@ private fun ThingsChromebookSidebar(
                         }
                     }
 
-                    // Indented Projects inside this Area
-                    areaProjects.forEach { project ->
-                        val selected = navTarget == ActiveNavigationTarget.ProjectDetail(project.id)
-                        val projStatus = StalledProjectDetector.evaluateProject(project)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 14.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (selected) colors.thingsBlue.copy(alpha = 0.14f) else Color.Transparent)
-                                .clickable {
-                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    onSelectProject(project.id)
-                                }
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
+                    // Nested Projects inside this Area
+                    if (!isCollapsed) {
+                        areaProjects.forEach { project ->
+                            val selected = navTarget == ActiveNavigationTarget.ProjectDetail(project.id)
+                            val projStatus = StalledProjectDetector.evaluateProject(project)
                             Row(
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 18.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(if (selected) colors.thingsBlueSoft else Color.Transparent)
+                                    .clickable {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onSelectProject(project.id)
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                ProjectProgressRing(progress = project.progress, size = 15.dp)
-                                Text(
-                                    text = project.title,
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                        color = if (selected) colors.thingsBlue else colors.primaryText
-                                    ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                if (projStatus?.hasNoNextAction == true) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.WarningAmber,
-                                        contentDescription = stringResource(R.string.v2_stalled_project_badge),
-                                        tint = colors.somedayWarmAmber,
-                                        modifier = Modifier.size(12.dp)
-                                    )
-                                } else if (projStatus?.isUnreviewed == true) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.Schedule,
-                                        contentDescription = stringResource(R.string.v2_requires_review_badge),
-                                        tint = colors.secondaryText,
-                                        modifier = Modifier.size(12.dp)
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    ProjectProgressRing(progress = project.progress, size = 15.dp)
+                                    Text(
+                                        text = project.title,
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                            color = if (selected) colors.thingsBlue else colors.primaryText
+                                        ),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
-                                if (project.deadline != null) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.Flag,
-                                        contentDescription = null,
-                                        tint = colors.deadlineUrgentRed,
-                                        modifier = Modifier.size(12.dp)
-                                    )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    if (projStatus?.hasNoNextAction == true) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.WarningAmber,
+                                            contentDescription = stringResource(R.string.v2_stalled_project_badge),
+                                            tint = colors.somedayWarmAmber,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                    } else if (projStatus?.isUnreviewed == true) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Schedule,
+                                            contentDescription = stringResource(R.string.v2_requires_review_badge),
+                                            tint = colors.secondaryText,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                    }
+                                    if (project.deadline != null) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Flag,
+                                            contentDescription = null,
+                                            tint = colors.deadlineUrgentRed,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -5916,7 +5988,7 @@ private fun ThingsChromebookSidebar(
                 }
             }
 
-            // Unassigned Projects (not in any Area)
+            // Legacy / Unassigned Projects (not yet assigned to an Area)
             val unassignedProjects = projects.filter { it.areaId == null }
             items(unassignedProjects, key = { "sidebar_proj_unassigned_${it.id}" }) { project ->
                 val selected = navTarget == ActiveNavigationTarget.ProjectDetail(project.id)
@@ -5924,13 +5996,13 @@ private fun ThingsChromebookSidebar(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(if (selected) colors.thingsBlue.copy(alpha = 0.14f) else Color.Transparent)
+                        .clip(RoundedCornerShape(50))
+                        .background(if (selected) colors.thingsBlueSoft else Color.Transparent)
                         .clickable {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onSelectProject(project.id)
                         }
-                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -5982,7 +6054,7 @@ private fun ThingsChromebookSidebar(
             }
         }
 
-        // Bottom Sidebar Actions: "+ New Project" & "Areas / Bereiche (X/8)" + App Version at Bottom-Left!
+        // Bottom Sidebar Actions: "+ New Project" (defaults into active/first Area) & "Areas (X/8)"
         HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
         Row(
             modifier = Modifier
@@ -5993,8 +6065,8 @@ private fun ThingsChromebookSidebar(
             ThingsHoverTooltip(text = "${stringResource(R.string.entity_new_project)} (Ctrl+Shift+N)") {
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { onCreateNewProject(null) }
+                        .clip(RoundedCornerShape(50))
+                        .clickable { onCreateNewProject(defaultNewProjectAreaId) }
                         .padding(horizontal = 8.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -6022,7 +6094,7 @@ private fun ThingsChromebookSidebar(
             ) {
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(50))
                         .clickable(onClick = onOpenAreaManager)
                         .padding(horizontal = 8.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -6031,7 +6103,7 @@ private fun ThingsChromebookSidebar(
                     Icon(
                         imageVector = Icons.Outlined.Inventory2,
                         contentDescription = null,
-                        tint = colors.anytimeTeal,
+                        tint = colors.secondaryText,
                         modifier = Modifier.size(14.dp)
                     )
                     Text(
@@ -6043,7 +6115,7 @@ private fun ThingsChromebookSidebar(
             }
         }
 
-        // App Version displayed at the bottom-left of the Sidebar (with BETA badge when running pre-release)
+        // App Version displayed at the bottom-left of the Sidebar (with Sky Light Blue 3.0 ALPHA badge)
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -6059,8 +6131,8 @@ private fun ThingsChromebookSidebar(
             )
             if (BuildConfig.VERSION_NAME.contains("-")) {
                 Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = colors.todayStarYellow.copy(alpha = 0.24f)
+                    shape = RoundedCornerShape(50),
+                    color = colors.thingsBlueSoft
                 ) {
                     Text(
                         text = stringResource(R.string.v2_beta_badge),
@@ -6068,8 +6140,8 @@ private fun ThingsChromebookSidebar(
                             fontSize = 9.sp,
                             fontWeight = FontWeight.ExtraBold
                         ),
-                        color = colors.somedayWarmAmber,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        color = colors.thingsBlue,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.5.dp)
                     )
                 }
             }

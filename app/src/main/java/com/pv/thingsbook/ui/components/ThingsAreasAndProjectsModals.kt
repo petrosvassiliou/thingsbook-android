@@ -539,8 +539,14 @@ fun CreateOrEditProjectDialog(
             )
         )
     }
-    var selectedAreaId by remember(existingProject, preselectedAreaId) {
-        mutableStateOf(existingProject?.areaId ?: preselectedAreaId)
+    var selectedAreaId by remember(existingProject, preselectedAreaId, areas) {
+        mutableStateOf(
+            if (existingProject != null) {
+                existingProject.areaId
+            } else {
+                preselectedAreaId ?: areas.firstOrNull()?.id
+            }
+        )
     }
     var deadlineEpochMillis by remember(existingProject) {
         mutableStateOf(existingProject?.deadline)

@@ -1,16 +1,47 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <linearGradient id="tbBg" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#157B96"/>
-      <stop offset="52%" stop-color="#0F657C"/>
-      <stop offset="100%" stop-color="#073B4A"/>
+    <linearGradient id="pwaBg" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#CBEBFF"/>
+      <stop offset="36%" stop-color="#75C4FF"/>
+      <stop offset="72%" stop-color="#3898EC"/>
+      <stop offset="100%" stop-color="#1C74C7"/>
     </linearGradient>
+    <linearGradient id="pwaDome" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.52"/>
+      <stop offset="65%" stop-color="#FFFFFF" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0"/>
+    </linearGradient>
+    <linearGradient id="pwaRim" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.90"/>
+      <stop offset="50%" stop-color="#E4F5FF" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#B9E3FF" stop-opacity="0.82"/>
+    </linearGradient>
+    <linearGradient id="pwaLeft" x1="15%" y1="10%" x2="95%" y2="92%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.96"/>
+      <stop offset="68%" stop-color="#DCF0FF" stop-opacity="0.88"/>
+      <stop offset="100%" stop-color="#FFEAD0" stop-opacity="0.92"/>
+    </linearGradient>
+    <linearGradient id="pwaRight" x1="85%" y1="10%" x2="5%" y2="92%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.96"/>
+      <stop offset="68%" stop-color="#DCF0FF" stop-opacity="0.88"/>
+      <stop offset="100%" stop-color="#FFEAD0" stop-opacity="0.92"/>
+    </linearGradient>
+    <clipPath id="pwaSquircle">
+      <rect x="16" y="16" width="480" height="480" rx="112" ry="112"/>
+    </clipPath>
   </defs>
-  <rect x="6" y="6" width="116" height="116" rx="30" fill="url(#tbBg)"/>
-  <path d="M26 36C26 30.8 30.4 26.8 35.6 27.5L64 31.2L92.4 27.5C97.6 26.8 102 30.8 102 36V86C102 91.2 97.6 95.2 92.4 94.5L64 90.8L35.6 94.5C30.4 95.2 26 91.2 26 86V36Z" fill="#B7ECF7"/>
-  <path d="M33 38C33 34.4 36.1 31.8 39.6 32.3L62 35.4V86.4L39.6 89C36.1 89.4 33 86.7 33 83.2V38Z" fill="#126E87"/>
-  <path d="M95 38C95 34.4 91.9 31.8 88.4 32.3L66 35.4V86.4L88.4 89C91.9 89.4 95 86.7 95 83.2V38Z" fill="#0D596E"/>
-  <path d="M77 29.2L86 28V46L81.5 42.2L77 46V29.2Z" fill="#F2B866"/>
-  <path d="M36 74C46 58 57 63 69 55C79 48.2 87 39.2 92 30.5" stroke="#E0FAFF" stroke-width="8.5" stroke-linecap="round"/>
-  <path d="M40 81.5C50 67.5 61 71 73 63C82 57 89 49 93.5 40.5" stroke="#52C5DE" stroke-width="5.5" stroke-linecap="round"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" ry="112" fill="url(#pwaBg)"/>
+  <g clip-path="url(#pwaSquircle)">
+    <path d="M16,16 L496,16 L496,210 C380,260 132,260 16,210 Z" fill="url(#pwaDome)"/>
+    <path d="M36,392 C125,338 205,360 256,410 C307,360 387,338 476,392" fill="none" stroke="#E4F6FF" stroke-opacity="0.28" stroke-width="8" stroke-linecap="round"/>
+    <path d="M126,178 C126,170 133,165 141,167 C190,179 228,205 251,239 L251,378 C226,348 187,328 138,321 C131,320 126,314 126,307 Z"
+          fill="#DFF2FF" fill-opacity="0.62" stroke="#FFFFFF" stroke-opacity="0.72" stroke-width="3"/>
+    <path d="M386,178 C386,170 379,165 371,167 C322,179 284,205 261,239 L261,378 C286,348 325,328 374,321 C381,320 386,314 386,307 Z"
+          fill="#DFF2FF" fill-opacity="0.62" stroke="#FFFFFF" stroke-opacity="0.72" stroke-width="3"/>
+    <path d="M146,158 C146,150 154,145 161,148 C204,167 236,196 252,232 L252,378 C233,342 200,314 156,298 C150,295 146,289 146,282 Z"
+          fill="url(#pwaLeft)" stroke="#FFFFFF" stroke-opacity="0.94" stroke-width="4"/>
+    <path d="M366,158 C366,150 358,145 351,148 C308,167 276,196 260,232 L260,378 C279,342 312,314 356,298 C362,295 366,289 366,282 Z"
+          fill="url(#pwaRight)" stroke="#FFFFFF" stroke-opacity="0.94" stroke-width="4"/>
+  </g>
+  <rect x="25" y="25" width="462" height="462" rx="104" ry="104" fill="none" stroke="url(#pwaRim)" stroke-width="4"/>
 </svg>

@@ -327,16 +327,15 @@ export const CreateOrEditProjectModal: React.FC<CreateOrEditProjectModalProps> =
   onOpenTemplates,
   onClose
 }) => {
+  const activeAreas = areas.filter((a) => !a.isDeleted);
   const [title, setTitle] = useState(project?.title || '');
   const [notes, setNotes] = useState(project?.notes || '');
   const [areaId, setAreaId] = useState<string | null>(
-    project ? project.areaId : (defaultAreaId ?? null)
+    project ? project.areaId : (defaultAreaId ?? activeAreas[0]?.id ?? null)
   );
   const [deadlineStr, setDeadlineStr] = useState(() =>
     toIsoDateInputValue(project?.deadline ?? null)
   );
-
-  const activeAreas = areas.filter((a) => !a.isDeleted);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();

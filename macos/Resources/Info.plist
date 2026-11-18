@@ -17,7 +17,7 @@
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
-    <string>com.pv.thingsbook.mac</string>
+    <string>com.thingsbook.macos</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -54,7 +54,7 @@
     <array>
         <dict>
             <key>CFBundleURLName</key>
-            <string>com.pv.thingsbook.mac.url</string>
+            <string>com.thingsbook.macos.url</string>
             <key>CFBundleURLSchemes</key>
             <array>
                 <string>thingsbook</string>

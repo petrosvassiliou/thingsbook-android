@@ -407,7 +407,7 @@
     <string name="quick_find_results_for">%1$d résultats pour « %2$s »</string>
     <string name="quick_find_badge_view">Vue</string>
     <string name="quick_find_subtasks_count">☑ %1$d/%2$d sous-tâches</string>
-    <string name="v2_beta_badge">BÊTA 2.0</string>
+    <string name="v2_beta_badge">ALPHA 3.0</string>
     <string name="v2_beta_channel_toggle">Recevoir les mises à jour bêta</string>
     <string name="v2_beta_channel_desc">Inclure les préversions 2.0 bêta lors de la recherche de mises à jour.</string>
     <string name="v2_weekly_review_title">Revue hebdomadaire</string>

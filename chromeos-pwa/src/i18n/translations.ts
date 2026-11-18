@@ -639,7 +639,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     voiceListeningHint: 'Listening… Speak your To-Do or brain dump',
     voiceSmartParseBtn: '✨ Smart Parse with Gemini',
     notesActionMap: 'Map',
-    betaChannelBadge: 'BETA',
+    betaChannelBadge: '3.0 ALPHA',
     settingsIncludeBetaTitle: 'Include 2.0 Beta Updates',
     settingsIncludeBetaDesc:
       'Receive pre-release 2.0 beta builds from GitHub Releases alongside stable updates.',
@@ -1012,7 +1012,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     voiceListeningHint: 'Höre zu… Sprich deine Aufgabe oder deinen Brain Dump',
     voiceSmartParseBtn: '✨ Mit Gemini aufteilen',
     notesActionMap: 'Karte',
-    betaChannelBadge: 'BETA',
+    betaChannelBadge: '3.0 ALPHA',
     settingsIncludeBetaTitle: '2.0-Beta-Updates einbeziehen',
     settingsIncludeBetaDesc:
       'Vorabversionen von Thingsbook 2.0 Beta aus GitHub Releases neben stabilen Updates erhalten.',
@@ -1383,7 +1383,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     voiceListeningHint: 'Écoute en cours… Dictez votre tâche ou vos idées',
     voiceSmartParseBtn: '✨ Analyser avec Gemini',
     notesActionMap: 'Carte',
-    betaChannelBadge: 'BÊTA',
+    betaChannelBadge: 'ALPHA 3.0',
     settingsIncludeBetaTitle: 'Inclure les mises à jour Bêta 2.0',
     settingsIncludeBetaDesc:
       'Recevoir les préversions Thingsbook 2.0 Bêta depuis GitHub Releases en plus des versions stables.',
@@ -1755,7 +1755,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     voiceListeningHint: 'In ascolto… Detta la tua attività o le tue idee',
     voiceSmartParseBtn: '✨ Analizza con Gemini',
     notesActionMap: 'Mappa',
-    betaChannelBadge: 'BETA',
+    betaChannelBadge: '3.0 ALPHA',
     settingsIncludeBetaTitle: 'Includi aggiornamenti Beta 2.0',
     settingsIncludeBetaDesc:
       'Ricevi le versioni preliminari di Thingsbook 2.0 Beta da GitHub Releases oltre agli aggiornamenti stabili.',
@@ -2127,7 +2127,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     voiceListeningHint: 'Escuchando… Dicta tu tarea o lluvia de ideas',
     voiceSmartParseBtn: '✨ Analizar con Gemini',
     notesActionMap: 'Mapa',
-    betaChannelBadge: 'BETA',
+    betaChannelBadge: '3.0 ALPHA',
     settingsIncludeBetaTitle: 'Incluir actualizaciones Beta 2.0',
     settingsIncludeBetaDesc:
       'Recibir versiones preliminares de Thingsbook 2.0 Beta desde GitHub Releases junto con versiones estables.',

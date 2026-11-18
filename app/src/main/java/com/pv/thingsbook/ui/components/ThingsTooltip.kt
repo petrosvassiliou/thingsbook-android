@@ -768,7 +768,7 @@ fun ThingsHoverTooltip(
 }
 
 /**
- * The Thingsbook in-app Brand Symbol (rounded macOS-style cobalt squircle with white checkmark).
+ * The Thingsbook 3.0 Glacier Liquid Glass Book Brand Symbol.
  */
 @Composable
 fun ThingsbookBrandSymbol(
@@ -801,35 +801,56 @@ fun ThingsbookBrandSymbol(
                 .size(size)
                 .shadow(
                     elevation = 2.dp,
-                    shape = RoundedCornerShape(size * 0.27f),
-                    ambientColor = colors.thingsBlue.copy(alpha = 0.28f),
-                    spotColor = colors.thingsBlue.copy(alpha = 0.36f)
+                    shape = RoundedCornerShape(size * 0.28f),
+                    ambientColor = colors.thingsBlue.copy(alpha = 0.26f),
+                    spotColor = colors.thingsBlue.copy(alpha = 0.34f)
                 )
         ) {
             val w = this.size.width
             val h = this.size.height
             if (w <= 0f || h <= 0f) return@Canvas
-            val corner = w * 0.27f
+            val corner = w * 0.28f
 
             drawRoundRect(
                 brush = Brush.verticalGradient(
-                    colors = listOf(Color(0xFF428BFF), Color(0xFF1E6BF1))
+                    colors = listOf(Color(0xFF74C4FF), Color(0xFF3898EC))
                 ),
                 topLeft = Offset.Zero,
                 size = Size(w, h),
                 cornerRadius = CornerRadius(corner, corner)
             )
 
-            val checkPath = Path().apply {
-                moveTo(w * 0.27f, h * 0.53f)
-                lineTo(w * 0.44f, h * 0.70f)
-                lineTo(w * 0.75f, h * 0.33f)
+            // Specular glacier glass rim
+            drawRoundRect(
+                color = Color.White.copy(alpha = 0.45f),
+                topLeft = Offset(0.6f, 0.6f),
+                size = Size((w - 1.2f).coerceAtLeast(0f), (h - 1.2f).coerceAtLeast(0f)),
+                cornerRadius = CornerRadius(corner, corner),
+                style = Stroke(width = (w * 0.045f).coerceAtLeast(1f))
+            )
+
+            // Sculpted open crystal book pages + spine
+            val strokeW = (w * 0.082f).coerceAtLeast(1.6f)
+            val bookPath = Path().apply {
+                // Left page
+                moveTo(w * 0.50f, h * 0.31f)
+                cubicTo(w * 0.41f, h * 0.26f, w * 0.27f, h * 0.27f, w * 0.21f, h * 0.32f)
+                lineTo(w * 0.21f, h * 0.69f)
+                cubicTo(w * 0.27f, h * 0.65f, w * 0.41f, h * 0.65f, w * 0.50f, h * 0.71f)
+                // Right page
+                moveTo(w * 0.50f, h * 0.31f)
+                cubicTo(w * 0.59f, h * 0.26f, w * 0.73f, h * 0.27f, w * 0.79f, h * 0.32f)
+                lineTo(w * 0.79f, h * 0.69f)
+                cubicTo(w * 0.73f, h * 0.65f, w * 0.59f, h * 0.65f, w * 0.50f, h * 0.71f)
+                // Center spine
+                moveTo(w * 0.50f, h * 0.31f)
+                lineTo(w * 0.50f, h * 0.71f)
             }
             drawPath(
-                path = checkPath,
+                path = bookPath,
                 color = Color.White,
                 style = Stroke(
-                    width = (w * 0.105f).coerceAtLeast(2f),
+                    width = strokeW,
                     cap = StrokeCap.Round,
                     join = StrokeJoin.Round
                 )

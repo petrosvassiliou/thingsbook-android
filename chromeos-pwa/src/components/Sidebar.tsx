@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import {
   Archive,
+  BookOpen,
   BookOpenCheck,
   CalendarDays,
-  CheckSquare,
+  ChevronDown,
+  ChevronRight,
   ClipboardList,
   Download,
   Flag,
@@ -63,6 +65,32 @@ interface SidebarProps {
   onTriggerInstallPwa: () => void;
 }
 
+function renderMonochromeSmartIcon(view: SmartViewType, size: number, isActive: boolean): React.ReactNode {
+  const color = isActive ? 'var(--things-blue)' : 'var(--text-secondary)';
+  switch (view) {
+    case 'INBOX':
+      return <Inbox size={size} style={{ color }} />;
+    case 'TODAY':
+      return (
+        <Star
+          size={size}
+          fill={isActive ? 'var(--things-blue)' : 'none'}
+          style={{ color }}
+        />
+      );
+    case 'UPCOMING':
+      return <CalendarDays size={size} style={{ color }} />;
+    case 'ANYTIME':
+      return <Layers size={size} style={{ color }} />;
+    case 'SOMEDAY':
+      return <Archive size={size} style={{ color }} />;
+    case 'LOGBOOK':
+      return <BookOpenCheck size={size} style={{ color }} />;
+    case 'TRASH':
+      return <Trash2 size={size} style={{ color }} />;
+  }
+}
+
 export const Sidebar: React.FC<SidebarProps> = ({
   visible,
   activeNav,
@@ -84,6 +112,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onTriggerInstallPwa
 }) => {
   const [dragTargetKey, setDragTargetKey] = useState<string | null>(null);
+  const [collapsedAreas, setCollapsedAreas] = useState<Record<string, boolean>>({});
 
   const activeAreas = areas.filter((a) => !a.isDeleted);
   const activeProjects = projects.filter((p) => !p.isDeleted && p.status === 'ACTIVE');
@@ -104,8 +133,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     activeNav.kind === 'area'
       ? activeNav.areaId
       : activeNav.kind === 'project'
-        ? (projects.find((p) => p.id === activeNav.projectId)?.areaId ?? null)
-        : null;
+        ? (projects.find((p) => p.id === activeNav.projectId)?.areaId ?? activeAreas[0]?.id ?? null)
+        : (activeAreas[0]?.id ?? null);
 
   const makeDropHandlers = (
     key: string,
@@ -137,51 +166,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const smartItems: Array<{
     view: SmartViewType;
     label: string;
-    icon: React.ReactNode;
     count?: number;
   }> = [
-    {
-      view: 'INBOX',
-      label: t.viewInbox,
-      icon: <Inbox size={17} style={{ color: 'var(--things-blue)' }} />,
-      count: counts.inbox
-    },
-    {
-      view: 'TODAY',
-      label: t.viewToday,
-      icon: <Star size={17} fill="var(--today-star)" style={{ color: 'var(--today-star)' }} />,
-      count: counts.today
-    },
-    {
-      view: 'UPCOMING',
-      label: t.viewUpcoming,
-      icon: <CalendarDays size={17} style={{ color: 'var(--upcoming-coral)' }} />,
-      count: counts.upcoming
-    },
-    {
-      view: 'ANYTIME',
-      label: t.viewAnytime,
-      icon: <Layers size={17} style={{ color: 'var(--anytime-teal)' }} />,
-      count: counts.anytime
-    },
-    {
-      view: 'SOMEDAY',
-      label: t.viewSomeday,
-      icon: <Archive size={17} style={{ color: 'var(--someday-amber)' }} />,
-      count: counts.someday
-    },
-    {
-      view: 'LOGBOOK',
-      label: t.viewLogbook,
-      icon: <BookOpenCheck size={17} style={{ color: 'var(--logbook-green)' }} />
-      // Never show count badge on Logbook (exact v1.6.16 rule)
-    },
-    {
-      view: 'TRASH',
-      label: t.viewTrash,
-      icon: <Trash2 size={17} style={{ color: 'var(--text-muted)' }} />,
-      count: counts.trash
-    }
+    { view: 'INBOX', label: t.viewInbox, count: counts.inbox },
+    { view: 'TODAY', label: t.viewToday, count: counts.today },
+    { view: 'UPCOMING', label: t.viewUpcoming, count: counts.upcoming },
+    { view: 'ANYTIME', label: t.viewAnytime, count: counts.anytime },
+    { view: 'SOMEDAY', label: t.viewSomeday, count: counts.someday },
+    { view: 'LOGBOOK', label: t.viewLogbook },
+    { view: 'TRASH', label: t.viewTrash, count: counts.trash }
   ];
 
   return (
@@ -199,7 +192,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             title={t.viewToday}
           >
             <span className="brand-app-icon">
-              <CheckSquare size={14} strokeWidth={2.6} />
+              <BookOpen size={14} strokeWidth={2.4} />
             </span>
             <span className="brand-name">{t.appName}</span>
             {isBetaBuild && <span className="v2-beta-pill">{t.betaChannelBadge}</span>}
@@ -230,7 +223,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onClick={() => onSelectNav({ kind: 'smart', view: item.view })}
                 {...makeDropHandlers(dKey, { kind: 'smart', view: item.view })}
               >
-                <span className="nav-item-icon">{item.icon}</span>
+                <span className="nav-item-icon">
+                  {renderMonochromeSmartIcon(item.view, 17, isActive)}
+                </span>
                 <span className="nav-item-label">{item.label}</span>
                 {item.count != null && item.count > 0 && (
                   <span className="nav-item-count">{item.count}</span>
@@ -250,7 +245,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 title={`${logItem.label} (Ctrl+6)`}
                 onClick={() => onSelectNav({ kind: 'smart', view: 'LOGBOOK' })}
               >
-                <span className="nav-item-icon">{logItem.icon}</span>
+                <span className="nav-item-icon">
+                  {renderMonochromeSmartIcon('LOGBOOK', 17, isActive)}
+                </span>
                 <span className="nav-item-label">{logItem.label}</span>
               </button>
             );
@@ -269,7 +266,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onClick={() => onSelectNav({ kind: 'smart', view: 'TRASH' })}
                 {...makeDropHandlers(dKey, { kind: 'smart', view: 'TRASH' })}
               >
-                <span className="nav-item-icon">{trashItem.icon}</span>
+                <span className="nav-item-icon">
+                  {renderMonochromeSmartIcon('TRASH', 17, isActive)}
+                </span>
                 <span className="nav-item-label">{trashItem.label}</span>
                 {trashItem.count != null && trashItem.count > 0 && (
                   <span className="nav-item-count">{trashItem.count}</span>
@@ -278,7 +277,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             );
           })()}
 
-          {/* v2.0 Guided GTD Weekly Review & Templates Launchers */}
+          {/* Guided GTD Weekly Review & Templates Launchers (monochrome M3 Expressive style) */}
           <div style={{ height: 6 }} />
           <button
             type="button"
@@ -291,7 +290,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             }}
           >
             <span className="nav-item-icon">
-              <ListChecks size={16.5} style={{ color: 'var(--things-blue)' }} />
+              <ListChecks size={16.5} style={{ color: 'var(--text-secondary)' }} />
             </span>
             <span className="nav-item-label">{t.weeklyReviewBtn}</span>
             {stalledProjectsCount > 0 && (
@@ -310,7 +309,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             }}
           >
             <span className="nav-item-icon">
-              <ClipboardList size={16.5} style={{ color: 'var(--gemini-violet)' }} />
+              <ClipboardList size={16.5} style={{ color: 'var(--text-secondary)' }} />
             </span>
             <span className="nav-item-label">{t.templatesBtn}</span>
           </button>
@@ -319,15 +318,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="sidebar-divider" />
           )}
 
-          {/* Areas + Indented Projects */}
+          {/* Areas -> Projects Collapsible Hierarchy */}
           {activeAreas.map((area) => {
             const isAreaActive = activeNav.kind === 'area' && activeNav.areaId === area.id;
             const areaProjects = activeProjects.filter((p) => p.areaId === area.id);
             const areaKey = `area-${area.id}`;
+            const isCollapsed = Boolean(collapsedAreas[area.id]);
 
             return (
               <div key={area.id} style={{ marginBottom: 4 }}>
                 <div className="nav-row-wrap">
+                  <button
+                    type="button"
+                    className="area-chevron-btn"
+                    aria-label={area.title}
+                    onClick={() =>
+                      setCollapsedAreas((prev) => ({
+                        ...prev,
+                        [area.id]: !prev[area.id]
+                      }))
+                    }
+                  >
+                    {isCollapsed ? <ChevronRight size={13.5} /> : <ChevronDown size={13.5} />}
+                  </button>
                   <button
                     type="button"
                     className={`nav-item area-row ${isAreaActive ? 'active' : ''} ${
@@ -338,7 +351,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     {...makeDropHandlers(areaKey, { kind: 'area', areaId: area.id })}
                   >
                     <span className="nav-item-icon">
-                      <Package size={15.5} style={{ color: 'var(--anytime-teal)' }} />
+                      <Package
+                        size={15.5}
+                        style={{
+                          color: isAreaActive ? 'var(--things-blue)' : 'var(--text-secondary)'
+                        }}
+                      />
                     </span>
                     <span className="nav-item-label">{area.title}</span>
                   </button>
@@ -352,38 +370,39 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </button>
                 </div>
 
-                {areaProjects.map((proj) => {
-                  const isProjActive =
-                    activeNav.kind === 'project' && activeNav.projectId === proj.id;
-                  const prog = projectProgress(proj.id);
-                  const projKey = `proj-${proj.id}`;
-                  return (
-                    <button
-                      key={proj.id}
-                      type="button"
-                      className={`nav-item indented ${isProjActive ? 'active' : ''} ${
-                        dragTargetKey === projKey ? 'drag-over' : ''
-                      }`}
-                      title={`${proj.title} (${prog.done}/${prog.total})`}
-                      onClick={() => onSelectNav({ kind: 'project', projectId: proj.id })}
-                      {...makeDropHandlers(projKey, { kind: 'project', projectId: proj.id })}
-                    >
-                      <ProjectProgressRing completed={prog.done} total={prog.total} size={15} />
-                      <span className="nav-item-label">{proj.title}</span>
-                      {proj.deadline != null && (
-                        <Flag
-                          size={12.5}
-                          style={{ color: 'var(--deadline-red)', flexShrink: 0 }}
-                        />
-                      )}
-                    </button>
-                  );
-                })}
+                {!isCollapsed &&
+                  areaProjects.map((proj) => {
+                    const isProjActive =
+                      activeNav.kind === 'project' && activeNav.projectId === proj.id;
+                    const prog = projectProgress(proj.id);
+                    const projKey = `proj-${proj.id}`;
+                    return (
+                      <button
+                        key={proj.id}
+                        type="button"
+                        className={`nav-item indented ${isProjActive ? 'active' : ''} ${
+                          dragTargetKey === projKey ? 'drag-over' : ''
+                        }`}
+                        title={`${proj.title} (${prog.done}/${prog.total})`}
+                        onClick={() => onSelectNav({ kind: 'project', projectId: proj.id })}
+                        {...makeDropHandlers(projKey, { kind: 'project', projectId: proj.id })}
+                      >
+                        <ProjectProgressRing completed={prog.done} total={prog.total} size={15} />
+                        <span className="nav-item-label">{proj.title}</span>
+                        {proj.deadline != null && (
+                          <Flag
+                            size={12.5}
+                            style={{ color: 'var(--deadline-red)', flexShrink: 0 }}
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
               </div>
             );
           })}
 
-          {/* Unassigned Projects */}
+          {/* Legacy / Unassigned Projects */}
           {unassignedProjects.length > 0 && (
             <div style={{ marginTop: activeAreas.length > 0 ? 6 : 0 }}>
               {unassignedProjects.map((proj) => {
@@ -430,7 +449,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         )}
 
-        {/* Sidebar Footer: + New Project (left) & Areas (X/8) (right) */}
+        {/* Sidebar Footer: + New Project (defaults into active/first Area) & Areas (X/8) */}
         <div className="sidebar-footer">
           <button
             type="button"
@@ -438,8 +457,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             title={`${t.entityNewProject} (Ctrl+Shift+N)`}
             onClick={() => onCreateProjectInArea(resolveCurrentAreaId())}
           >
-            <Plus size={14} />
-            <span>{t.entityNewProject}</span>
+            <Plus size={14} style={{ color: 'var(--things-blue)' }} />
+            <span style={{ color: 'var(--things-blue)', fontWeight: 600 }}>
+              {t.entityNewProject}
+            </span>
           </button>
           <button
             type="button"
@@ -501,6 +522,9 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
 }) => {
   const activeAreas = areas.filter((a) => !a.isDeleted);
   const activeProjects = projects.filter((p) => !p.isDeleted && p.status === 'ACTIVE');
+  const unassignedProjects = activeProjects.filter(
+    (p) => !p.areaId || !activeAreas.some((a) => a.id === p.areaId)
+  );
 
   const projectProgress = (projectId: string) => {
     const projTasks = tasks.filter(
@@ -513,50 +537,15 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
   const smartViews: Array<{
     view: SmartViewType;
     label: string;
-    icon: React.ReactNode;
     count?: number;
   }> = [
-    {
-      view: 'INBOX',
-      label: t.viewInbox,
-      icon: <Inbox size={13.5} style={{ color: 'var(--things-blue)' }} />,
-      count: counts.inbox
-    },
-    {
-      view: 'TODAY',
-      label: t.viewToday,
-      icon: <Star size={13.5} fill="var(--today-star)" style={{ color: 'var(--today-star)' }} />,
-      count: counts.today
-    },
-    {
-      view: 'UPCOMING',
-      label: t.viewUpcoming,
-      icon: <CalendarDays size={13.5} style={{ color: 'var(--upcoming-coral)' }} />,
-      count: counts.upcoming
-    },
-    {
-      view: 'ANYTIME',
-      label: t.viewAnytime,
-      icon: <Layers size={13.5} style={{ color: 'var(--anytime-teal)' }} />,
-      count: counts.anytime
-    },
-    {
-      view: 'SOMEDAY',
-      label: t.viewSomeday,
-      icon: <Archive size={13.5} style={{ color: 'var(--someday-amber)' }} />,
-      count: counts.someday
-    },
-    {
-      view: 'LOGBOOK',
-      label: t.viewLogbook,
-      icon: <BookOpenCheck size={13.5} style={{ color: 'var(--logbook-green)' }} />
-    },
-    {
-      view: 'TRASH',
-      label: t.viewTrash,
-      icon: <Trash2 size={13.5} style={{ color: 'var(--text-muted)' }} />,
-      count: counts.trash
-    }
+    { view: 'INBOX', label: t.viewInbox, count: counts.inbox },
+    { view: 'TODAY', label: t.viewToday, count: counts.today },
+    { view: 'UPCOMING', label: t.viewUpcoming, count: counts.upcoming },
+    { view: 'ANYTIME', label: t.viewAnytime, count: counts.anytime },
+    { view: 'SOMEDAY', label: t.viewSomeday, count: counts.someday },
+    { view: 'LOGBOOK', label: t.viewLogbook },
+    { view: 'TRASH', label: t.viewTrash, count: counts.trash }
   ];
 
   return (
@@ -572,7 +561,7 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
               title={`${sv.label} (Ctrl+${idx + 1})`}
               onClick={() => onSelectNav({ kind: 'smart', view: sv.view })}
             >
-              {sv.icon}
+              {renderMonochromeSmartIcon(sv.view, 13.5, isActive)}
               <span>{sv.label}</span>
               {sv.count != null && sv.count > 0 && (
                 <span style={{ opacity: 0.78, fontSize: 11.5 }}>{sv.count}</span>
@@ -588,7 +577,7 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
           title={`${t.weeklyReviewTitle} (Ctrl+Shift+R)`}
           onClick={onOpenWeeklyReview}
         >
-          <ListChecks size={13.5} style={{ color: 'var(--things-blue)' }} />
+          <ListChecks size={13.5} style={{ color: 'var(--text-secondary)' }} />
           <span>{t.weeklyReviewBtn}</span>
         </button>
         <button
@@ -597,29 +586,55 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
           title={t.templatesModalTitle}
           onClick={onOpenTemplates}
         >
-          <ClipboardList size={13.5} style={{ color: 'var(--gemini-violet)' }} />
+          <ClipboardList size={13.5} style={{ color: 'var(--text-secondary)' }} />
           <span>{t.templatesBtn}</span>
         </button>
 
+        {/* Areas with their nested Projects grouped immediately beside each Area */}
         {activeAreas.length > 0 && <span className="strip-divider" />}
         {activeAreas.map((area) => {
           const isActive = activeNav.kind === 'area' && activeNav.areaId === area.id;
+          const areaProjects = activeProjects.filter((p) => p.areaId === area.id);
           return (
-            <button
-              key={area.id}
-              type="button"
-              className={`strip-pill ${isActive ? 'active' : ''}`}
-              title={`${t.entityArea}: ${area.title}`}
-              onClick={() => onSelectNav({ kind: 'area', areaId: area.id })}
-            >
-              <Package size={13} style={{ color: 'var(--anytime-teal)' }} />
-              <span>{area.title}</span>
-            </button>
+            <React.Fragment key={area.id}>
+              <button
+                type="button"
+                className={`strip-pill ${isActive ? 'active' : ''}`}
+                title={`${t.entityArea}: ${area.title}`}
+                onClick={() => onSelectNav({ kind: 'area', areaId: area.id })}
+              >
+                <Package
+                  size={13}
+                  style={{ color: isActive ? 'var(--things-blue)' : 'var(--text-secondary)' }}
+                />
+                <span>{area.title}</span>
+              </button>
+              {areaProjects.map((proj) => {
+                const isProjActive =
+                  activeNav.kind === 'project' && activeNav.projectId === proj.id;
+                const prog = projectProgress(proj.id);
+                return (
+                  <button
+                    key={proj.id}
+                    type="button"
+                    className={`strip-pill ${isProjActive ? 'active' : ''}`}
+                    title={`${area.title} › ${proj.title} (${prog.done}/${prog.total})`}
+                    onClick={() => onSelectNav({ kind: 'project', projectId: proj.id })}
+                  >
+                    <ProjectProgressRing completed={prog.done} total={prog.total} size={14} />
+                    <span>{proj.title}</span>
+                    {proj.deadline != null && (
+                      <Flag size={11.5} style={{ color: 'var(--deadline-red)' }} />
+                    )}
+                  </button>
+                );
+              })}
+            </React.Fragment>
           );
         })}
 
-        {activeProjects.length > 0 && <span className="strip-divider" />}
-        {activeProjects.map((proj) => {
+        {unassignedProjects.length > 0 && <span className="strip-divider" />}
+        {unassignedProjects.map((proj) => {
           const isActive = activeNav.kind === 'project' && activeNav.projectId === proj.id;
           const prog = projectProgress(proj.id);
           return (
@@ -646,7 +661,7 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
           title={`${t.entityNewProject} (Ctrl+Shift+N)`}
           onClick={onCreateProject}
         >
-          <Plus size={13} />
+          <Plus size={13} style={{ color: 'var(--things-blue)' }} />
           <span>{t.entityProject}</span>
         </button>
         <button

@@ -1154,7 +1154,7 @@ public struct ProjectEditorSheetView: View {
         self.defaultAreaId = defaultAreaId
         _title = State(initialValue: existingProject?.title ?? "")
         _notes = State(initialValue: existingProject?.notes ?? "")
-        _areaId = State(initialValue: existingProject?.areaId ?? defaultAreaId)
+        _areaId = State(initialValue: existingProject != nil ? existingProject?.areaId : (defaultAreaId ?? store.areas.first?.id))
         _hasDeadline = State(initialValue: existingProject?.deadline != nil)
         _deadlineDate = State(
             initialValue: existingProject?.deadline.map { DateEpochConverter.date(fromMillis: $0) }

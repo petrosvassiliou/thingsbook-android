@@ -25,8 +25,8 @@ export default defineConfig({
         display: 'standalone',
         display_override: ['standalone', 'minimal-ui'],
         orientation: 'any',
-        background_color: '#F5F6F8',
-        theme_color: '#248BFD',
+        background_color: '#FFFFFF',
+        theme_color: '#3898EC',
         categories: ['productivity', 'utilities'],
         icons: [
           {

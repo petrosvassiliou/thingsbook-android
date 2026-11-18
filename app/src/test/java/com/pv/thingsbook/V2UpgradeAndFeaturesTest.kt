@@ -761,9 +761,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(73, BuildConfig.VERSION_CODE)
-        assertEquals("2.1.0", BuildConfig.VERSION_NAME)
-        assertFalse("Final 2.1.0 release must not contain pre-release hyphen", BuildConfig.VERSION_NAME.contains("-"))
+        assertEquals(74, BuildConfig.VERSION_CODE)
+        assertEquals("3.0.0-alpha.1", BuildConfig.VERSION_NAME)
+        assertTrue("3.0.0-alpha.1 pre-release contains -alpha", BuildConfig.VERSION_NAME.contains("-alpha"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -1727,20 +1727,20 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_1 Planned UPCOMING navigation isolates LazyColumn scroll scope and trailing gap keys so switching views always starts at top`() {
-        val todayNav = com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget.SmartView(
-            com.culturedcode.things3.ui.components.SmartViewType.TODAY
+        val todayNav = com.pv.thingsbook.ui.viewmodel.ActiveNavigationTarget.SmartView(
+            com.pv.thingsbook.ui.components.SmartViewType.TODAY
         )
-        val inboxNav = com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget.SmartView(
-            com.culturedcode.things3.ui.components.SmartViewType.INBOX
+        val inboxNav = com.pv.thingsbook.ui.viewmodel.ActiveNavigationTarget.SmartView(
+            com.pv.thingsbook.ui.components.SmartViewType.INBOX
         )
-        val upcomingNav = com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget.SmartView(
-            com.culturedcode.things3.ui.components.SmartViewType.UPCOMING
+        val upcomingNav = com.pv.thingsbook.ui.viewmodel.ActiveNavigationTarget.SmartView(
+            com.pv.thingsbook.ui.components.SmartViewType.UPCOMING
         )
-        val anytimeNav = com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget.SmartView(
-            com.culturedcode.things3.ui.components.SmartViewType.ANYTIME
+        val anytimeNav = com.pv.thingsbook.ui.viewmodel.ActiveNavigationTarget.SmartView(
+            com.pv.thingsbook.ui.components.SmartViewType.ANYTIME
         )
-        val areaNav = com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget.AreaDetail("area-work")
-        val projectNav = com.culturedcode.things3.ui.viewmodel.ActiveNavigationTarget.ProjectDetail("proj-q4")
+        val areaNav = com.pv.thingsbook.ui.viewmodel.ActiveNavigationTarget.AreaDetail("area-work")
+        val projectNav = com.pv.thingsbook.ui.viewmodel.ActiveNavigationTarget.ProjectDetail("proj-q4")
 
         val allTargets = listOf(todayNav, inboxNav, upcomingNav, anytimeNav, areaNav, projectNav)
 
@@ -1780,8 +1780,8 @@ class V2UpgradeAndFeaturesTest {
         }
 
         val cardSource = sequenceOf(
-            File("src/main/java/com/culturedcode/things3/ui/components/ExpandableTaskCard.kt"),
-            File("app/src/main/java/com/culturedcode/things3/ui/components/ExpandableTaskCard.kt")
+            File("src/main/java/com/pv/thingsbook/ui/components/ExpandableTaskCard.kt"),
+            File("app/src/main/java/com/pv/thingsbook/ui/components/ExpandableTaskCard.kt")
         ).first { it.isFile }.readText()
 
         assertTrue(cardSource.contains("v2.1 Unified Single Footer Row"))
@@ -1789,8 +1789,43 @@ class V2UpgradeAndFeaturesTest {
         assertTrue(cardSource.contains("if (task.attachments.isNotEmpty())"))
         assertFalse("Removed legacy BottomActionIcon helper", cardSource.contains("private fun BottomActionIcon("))
     }
+
+    @Test
+    fun `v3_0_0_alpha_1 Material 3 Expressive Crisp White and Neutral Dark palettes with Sky Light Blue accent and ALPHA badges`() {
+        val light = com.pv.thingsbook.ui.theme.LightThingsPalette
+        val dark = com.pv.thingsbook.ui.theme.DarkThingsPalette
+
+        // Crisp pure white Light surface & Sky Light Blue accent
+        assertEquals(androidx.compose.ui.graphics.Color(0xFFFFFFFF), light.canvasBackground)
+        assertEquals(androidx.compose.ui.graphics.Color(0xFFF4F5F8), light.sidebarBackground)
+        assertEquals(androidx.compose.ui.graphics.Color(0xFF3898EC), light.thingsBlue)
+        assertEquals(androidx.compose.ui.graphics.Color(0xFFE5F3FF), light.thingsBlueSoft)
+
+        // Deep neutral charcoal Dark surface & luminous Sky Light Blue accent
+        assertEquals(androidx.compose.ui.graphics.Color(0xFF121417), dark.canvasBackground)
+        assertEquals(androidx.compose.ui.graphics.Color(0xFF171A1E), dark.sidebarBackground)
+        assertEquals(androidx.compose.ui.graphics.Color(0xFF6BC0FF), dark.thingsBlue)
+
+        // Pre-release badge localized as ALPHA across all 5 languages
+        val resRoot = sequenceOf(
+            File("src/main/res"),
+            File("app/src/main/res")
+        ).first { it.isDirectory }
+        val folders = listOf("values", "values-de", "values-fr", "values-it", "values-es")
+        for (folder in folders) {
+            val xmlFile = File(resRoot, "$folder/strings.xml")
+            val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(xmlFile)
+            val nodes = doc.getElementsByTagName("string")
+            var badgeText: String? = null
+            for (i in 0 until nodes.length) {
+                val elem = nodes.item(i)
+                if (elem.attributes?.getNamedItem("name")?.nodeValue == "v2_beta_badge") {
+                    badgeText = elem.textContent
+                    break
+                }
+            }
+            assertNotNull("Missing v2_beta_badge in $folder/strings.xml", badgeText)
+            assertTrue("Expected ALPHA in $folder/strings.xml v2_beta_badge, got '$badgeText'", badgeText!!.contains("ALPHA"))
+        }
+    }
 }
-
-
-
-

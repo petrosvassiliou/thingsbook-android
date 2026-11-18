@@ -3,53 +3,58 @@ import AppKit
 import ThingsbookCore
 
 public enum ThingsMacPalette {
-    public static let accentBlue = Color(red: 0.11, green: 0.48, blue: 0.96)       // #1C7AF5
-    public static let inboxBlue = Color(red: 0.14, green: 0.55, blue: 0.98)        // #248CFA
-    public static let todayYellow = Color(red: 0.98, green: 0.73, blue: 0.08)      // #FAB914
-    public static let eveningPurple = Color(red: 0.47, green: 0.39, blue: 0.94)    // #7864F0
-    public static let geminiPurple = Color(red: 0.45, green: 0.35, blue: 0.93)     // #7359ED
-    public static let upcomingRed = Color(red: 0.94, green: 0.30, blue: 0.37)      // #F04D5E
-    public static let anytimeTeal = Color(red: 0.15, green: 0.66, blue: 0.64)      // #26A8A3
-    public static let somedayAmber = Color(red: 0.84, green: 0.61, blue: 0.22)     // #D69C38
-    public static let logbookGreen = Color(red: 0.18, green: 0.73, blue: 0.41)     // #2EBA69
+    /// Thingsbook 3.0 Sky Light Blue accent (#3898EC in Aqua, #6BC0FF in DarkAqua)
+    public static let accentBlue = Color(nsColor: NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return isDark
+            ? NSColor(srgbRed: 0.420, green: 0.753, blue: 1.000, alpha: 1.0)
+            : NSColor(srgbRed: 0.220, green: 0.596, blue: 0.925, alpha: 1.0)
+    })
+    /// Glacier Light Blue highlight (#74C4FF in Aqua, #9BD6FF in DarkAqua)
+    public static let inboxBlue = Color(nsColor: NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return isDark
+            ? NSColor(srgbRed: 0.608, green: 0.839, blue: 1.000, alpha: 1.0)
+            : NSColor(srgbRed: 0.455, green: 0.769, blue: 1.000, alpha: 1.0)
+    })
+    public static let todayYellow = Color(red: 0.96, green: 0.71, blue: 0.00)
+    public static let eveningPurple = Color(red: 0.47, green: 0.39, blue: 0.94)
+    public static let geminiPurple = Color(red: 0.45, green: 0.35, blue: 0.93)
+    public static let upcomingRed = Color(red: 0.94, green: 0.30, blue: 0.37)
+    public static let anytimeTeal = Color(red: 0.08, green: 0.65, blue: 0.59)
+    public static let somedayAmber = Color(red: 0.84, green: 0.61, blue: 0.22)
+    public static let logbookGreen = Color(red: 0.18, green: 0.68, blue: 0.36)
     public static let trashGray = Color(red: 0.53, green: 0.56, blue: 0.62)
-    public static let areaGreen = Color(red: 0.16, green: 0.69, blue: 0.46)
+    public static let areaGreen = accentBlue
     public static let deadlineCrimson = Color(red: 0.89, green: 0.22, blue: 0.28)
 
-    /// Crisp Things-for-Mac canvas background (#F8FAFC in Light, #11141B in Dark)
+    /// Crisp Pure White in Light Mode (#FFFFFF) & Deep Neutral Charcoal in Dark Mode (#121417)
     public static let canvasBackground = Color(nsColor: NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         return isDark
-            ? NSColor(srgbRed: 0.067, green: 0.078, blue: 0.106, alpha: 1.0)
-            : NSColor(srgbRed: 0.973, green: 0.980, blue: 0.990, alpha: 1.0)
-    })
-
-    /// Elevated white/charcoal card surface (#FFFFFF in Light, #1B1F29 in Dark)
-    public static let cardSurface = Color(nsColor: NSColor(name: nil) { appearance in
-        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        return isDark
-            ? NSColor(srgbRed: 0.106, green: 0.122, blue: 0.161, alpha: 1.0)
+            ? NSColor(srgbRed: 0.071, green: 0.078, blue: 0.090, alpha: 1.0)
             : NSColor(srgbRed: 1.000, green: 1.000, blue: 1.000, alpha: 1.0)
     })
 
-    /// Subtle inset surface for notes boxes & secondary containers (#F4F7FB in Light, #151922 in Dark)
+    /// Elevated Pure White (#FFFFFF) in Light Mode & Neutral Slate (#1B1F25) in Dark Mode
+    public static let cardSurface = Color(nsColor: NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return isDark
+            ? NSColor(srgbRed: 0.106, green: 0.122, blue: 0.145, alpha: 1.0)
+            : NSColor(srgbRed: 1.000, green: 1.000, blue: 1.000, alpha: 1.0)
+    })
+
+    /// Subtle inset container (#F4F6FA in Light, #171A1E in Dark)
     public static let subtleContainer = Color(nsColor: NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         return isDark
-            ? NSColor(srgbRed: 0.082, green: 0.098, blue: 0.133, alpha: 1.0)
-            : NSColor(srgbRed: 0.957, green: 0.969, blue: 0.986, alpha: 1.0)
+            ? NSColor(srgbRed: 0.090, green: 0.102, blue: 0.118, alpha: 1.0)
+            : NSColor(srgbRed: 0.957, green: 0.965, blue: 0.980, alpha: 1.0)
     })
 
-    public static func color(for view: SmartView) -> Color {
-        switch view {
-        case .inbox: return inboxBlue
-        case .today: return todayYellow
-        case .upcoming: return upcomingRed
-        case .anytime: return anytimeTeal
-        case .someday: return somedayAmber
-        case .logbook: return logbookGreen
-        case .trash: return trashGray
-        }
+    /// Cohesive monochrome slate icon tint when inactive; illuminates in Sky Light Blue when active.
+    public static func color(for view: SmartView, isSelected: Bool = false) -> Color {
+        isSelected ? accentBlue : Color.secondary
     }
 
     public static func colorFromArgb(_ argb: UInt32) -> Color {
@@ -94,7 +99,7 @@ public struct ThingsCheckboxButton: View {
             ZStack {
                 switch status {
                 case .open:
-                    RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                    RoundedRectangle(cornerRadius: 6.0, style: .continuous)
                         .strokeBorder(
                             isHovering ? ThingsMacPalette.accentBlue : Color.secondary.opacity(0.48),
                             style: StrokeStyle(
@@ -103,17 +108,17 @@ public struct ThingsCheckboxButton: View {
                             )
                         )
                         .background(
-                            RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                            RoundedRectangle(cornerRadius: 6.0, style: .continuous)
                                 .fill(isHovering ? ThingsMacPalette.accentBlue.opacity(0.10) : ThingsMacPalette.cardSurface)
                         )
                 case .completed:
-                    RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                    Circle()
                         .fill(ThingsMacPalette.accentBlue)
                     Image(systemName: "checkmark")
-                        .font(.system(size: 10.5, weight: .bold))
+                        .font(.system(size: 10.0, weight: .bold))
                         .foregroundStyle(.white)
                 case .canceled:
-                    RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                    RoundedRectangle(cornerRadius: 6.0, style: .continuous)
                         .fill(Color.secondary.opacity(0.28))
                     Image(systemName: "xmark")
                         .font(.system(size: 9.5, weight: .bold))
@@ -121,6 +126,7 @@ public struct ThingsCheckboxButton: View {
                 }
             }
             .frame(width: 18, height: 18)
+            .animation(.spring(response: 0.24, dampingFraction: 0.72), value: status)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -147,45 +153,32 @@ public struct ProjectProgressRing: View {
     }
 
     public var body: some View {
+        let strokeWidth = max(1.8, size * 0.14)
         ZStack {
-            if isCompleted {
+            if isCompleted || progress >= 0.999 {
                 Circle()
-                    .fill(ThingsMacPalette.logbookGreen)
+                    .fill(tint)
                 Image(systemName: "checkmark")
-                    .font(.system(size: size * 0.52, weight: .bold))
+                    .font(.system(size: size * 0.50, weight: .bold))
                     .foregroundStyle(.white)
             } else {
                 Circle()
-                    .strokeBorder(tint.opacity(0.55), lineWidth: 1.5)
+                    .stroke(tint.opacity(0.22), lineWidth: strokeWidth)
+                    .padding(strokeWidth * 0.5)
 
                 if progress > 0.001 {
-                    PieSliceShape(progress: progress)
-                        .fill(tint)
-                        .padding(2.3)
+                    Circle()
+                        .trim(from: 0.0, to: progress)
+                        .stroke(
+                            tint,
+                            style: StrokeStyle(lineWidth: strokeWidth, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                        .padding(strokeWidth * 0.5)
                 }
             }
         }
         .frame(width: size, height: size)
-    }
-}
-
-private struct PieSliceShape: Shape {
-    var progress: Double
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let radius = min(rect.width, rect.height) / 2.0
-        path.move(to: center)
-        path.addArc(
-            center: center,
-            radius: radius,
-            startAngle: .degrees(-90),
-            endAngle: .degrees(-90 + 360.0 * progress),
-            clockwise: false
-        )
-        path.closeSubpath()
-        return path
     }
 }
 

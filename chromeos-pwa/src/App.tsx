@@ -2476,24 +2476,24 @@ export const App: React.FC = () => {
                       {activeNav.view === 'TODAY' && (
                         <Star
                           size={26}
-                          fill="var(--today-star)"
-                          style={{ color: 'var(--today-star)' }}
+                          fill="var(--things-blue)"
+                          style={{ color: 'var(--things-blue)' }}
                         />
                       )}
                       {activeNav.view === 'UPCOMING' && (
-                        <CalendarDays size={26} style={{ color: 'var(--upcoming-coral)' }} />
+                        <CalendarDays size={26} style={{ color: 'var(--things-blue)' }} />
                       )}
                       {activeNav.view === 'ANYTIME' && (
-                        <Layers size={26} style={{ color: 'var(--anytime-teal)' }} />
+                        <Layers size={26} style={{ color: 'var(--things-blue)' }} />
                       )}
                       {activeNav.view === 'SOMEDAY' && (
-                        <Archive size={26} style={{ color: 'var(--someday-amber)' }} />
+                        <Archive size={26} style={{ color: 'var(--things-blue)' }} />
                       )}
                       {activeNav.view === 'LOGBOOK' && (
-                        <BookOpenCheck size={26} style={{ color: 'var(--logbook-green)' }} />
+                        <BookOpenCheck size={26} style={{ color: 'var(--things-blue)' }} />
                       )}
                       {activeNav.view === 'TRASH' && (
-                        <Trash2 size={26} style={{ color: 'var(--text-muted)' }} />
+                        <Trash2 size={26} style={{ color: 'var(--things-blue)' }} />
                       )}
                       <h1 className="view-title">{currentViewTitle}</h1>
                     </div>
@@ -2910,7 +2910,7 @@ export const App: React.FC = () => {
                   <div className="view-header" onClick={(e) => e.stopPropagation()}>
                     <div className="view-title-row">
                       <div className="view-title-left">
-                        <Package size={26} style={{ color: 'var(--anytime-teal)', flexShrink: 0 }} />
+                        <Package size={26} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
                         {editingAreaHeader ? (
                           <input
                             type="text"

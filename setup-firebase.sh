@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PACKAGE_NAME="com.culturedcode.things3"
-PROJECT_ID="${1:-things3-android-sync}"
+PACKAGE_NAME="com.pv.thingsbook"
+PROJECT_ID="${1:-thingsbook-prod}"
 
 echo "========================================================"
-echo " Things 3 Android – Automatisiertes Firebase Provisioning"
+echo " Thingsbook Android – Automatisiertes Firebase Provisioning"
 echo "========================================================"
 
 echo "[1/5] Authentifizierung via Firebase CLI..."

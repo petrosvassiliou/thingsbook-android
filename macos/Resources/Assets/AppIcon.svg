@@ -1,19 +1,80 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <defs>
-    <linearGradient id="glassBg" x1="12" y1="10" x2="116" y2="118" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#1A7D98"/>
-      <stop offset="55%" stop-color="#0D576C"/>
-      <stop offset="100%" stop-color="#063442"/>
+    <linearGradient id="glacierBg" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#CBEBFF"/>
+      <stop offset="36%" stop-color="#75C4FF"/>
+      <stop offset="72%" stop-color="#3898EC"/>
+      <stop offset="100%" stop-color="#1C74C7"/>
     </linearGradient>
-    <linearGradient id="glassRim" x1="10" y1="10" x2="118" y2="118" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#C8F5FF" stop-opacity="0.9"/>
-      <stop offset="50%" stop-color="#7FD9EE" stop-opacity="0.35"/>
-      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.55"/>
+    <linearGradient id="glassDome" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.56"/>
+      <stop offset="60%" stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0"/>
     </linearGradient>
+    <linearGradient id="glassRim" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.92"/>
+      <stop offset="45%" stop-color="#E4F5FF" stop-opacity="0.58"/>
+      <stop offset="100%" stop-color="#B9E3FF" stop-opacity="0.86"/>
+    </linearGradient>
+    <linearGradient id="leftPageFront" x1="15%" y1="10%" x2="95%" y2="92%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.96"/>
+      <stop offset="66%" stop-color="#DCF0FF" stop-opacity="0.88"/>
+      <stop offset="100%" stop-color="#FFEAD0" stop-opacity="0.92"/>
+    </linearGradient>
+    <linearGradient id="rightPageFront" x1="85%" y1="10%" x2="5%" y2="92%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.96"/>
+      <stop offset="66%" stop-color="#DCF0FF" stop-opacity="0.88"/>
+      <stop offset="100%" stop-color="#FFEAD0" stop-opacity="0.92"/>
+    </linearGradient>
+    <radialGradient id="spineWarmth" cx="50%" cy="62%" r="22%">
+      <stop offset="0%" stop-color="#FFE3B3" stop-opacity="0.72"/>
+      <stop offset="100%" stop-color="#FFE3B3" stop-opacity="0.0"/>
+    </radialGradient>
+    <filter id="dropShadow" x="-8%" y="-6%" width="116%" height="118%">
+      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#0B3B68" flood-opacity="0.28"/>
+    </filter>
+    <filter id="bookShadow" x="-12%" y="-10%" width="124%" height="128%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#0B477D" flood-opacity="0.24"/>
+    </filter>
+    <clipPath id="higSquircle">
+      <rect x="100" y="100" width="824" height="824" rx="185.4" ry="185.4"/>
+    </clipPath>
   </defs>
-  <rect x="10" y="10" width="108" height="108" rx="26" fill="url(#glassBg)" stroke="url(#glassRim)" stroke-width="2.5"/>
-  <path d="M36 40C36 36.7 39 34.2 42.2 35L62 40V90L41.2 84.5C38.1 83.7 36 80.9 36 77.7V40Z" fill="#DDF8FF" fill-opacity="0.58"/>
-  <path d="M44 45C44 42 46.8 39.8 49.7 40.7L64 45V90L48.6 85.2C45.9 84.3 44 81.8 44 79V45Z" fill="#FFFFFF" fill-opacity="0.72"/>
-  <path d="M53 63L64 73L93 41" stroke="#A6F0FF" stroke-width="8.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M64 90L93 41L64 56V90Z" fill="#7CE4FA" fill-opacity="0.65"/>
+
+  <!-- Outer macOS Dock Shadow + Glacier Squircle Body -->
+  <g filter="url(#dropShadow)">
+    <rect x="100" y="100" width="824" height="824" rx="185.4" ry="185.4" fill="url(#glacierBg)"/>
+  </g>
+
+  <g clip-path="url(#higSquircle)">
+    <!-- Liquid Glass Top Dome Specular Reflection -->
+    <path d="M100,100 L924,100 L924,430 C720,515 304,515 100,430 Z" fill="url(#glassDome)"/>
+
+    <!-- Crystalline Caustic Light Shimmer in Lower Basin -->
+    <path d="M130,740 C285,650 420,690 512,775 C604,690 739,650 894,740" fill="none" stroke="#E4F6FF" stroke-opacity="0.30" stroke-width="14" stroke-linecap="round"/>
+    <path d="M235,885 C345,760 445,735 512,702 C579,735 679,760 789,885" fill="none" stroke="#FFFFFF" stroke-opacity="0.24" stroke-width="11" stroke-linecap="round"/>
+    <path d="M350,915 C415,820 470,785 512,742 C554,785 609,820 674,915" fill="none" stroke="#DDF3FF" stroke-opacity="0.28" stroke-width="8" stroke-linecap="round"/>
+
+    <!-- Warm Golden-Ivory Spine Illumination -->
+    <circle cx="512" cy="590" r="195" fill="url(#spineWarmth)"/>
+
+    <!-- Sculpted Frosted-Crystal Open Book -->
+    <g filter="url(#bookShadow)">
+      <!-- Back Translucent Book Leaves -->
+      <path d="M294,376 C294,363 306,354 319,357 C402,377 466,421 505,479 L505,716 C462,666 396,632 314,620 C302,618 294,608 294,596 Z"
+            fill="#DFF2FF" fill-opacity="0.62" stroke="#FFFFFF" stroke-opacity="0.72" stroke-width="5"/>
+      <path d="M730,376 C730,363 718,354 705,357 C622,377 558,421 519,479 L519,716 C562,666 628,632 710,620 C722,618 730,608 730,596 Z"
+            fill="#DFF2FF" fill-opacity="0.62" stroke="#FFFFFF" stroke-opacity="0.72" stroke-width="5"/>
+
+      <!-- Front Frosted-Glass Book Pages -->
+      <path d="M328,342 C328,329 341,320 353,326 C426,357 479,406 506,468 L506,716 C474,655 419,608 345,580 C334,576 328,566 328,554 Z"
+            fill="url(#leftPageFront)" stroke="#FFFFFF" stroke-opacity="0.94" stroke-width="6.5"/>
+      <path d="M696,342 C696,329 683,320 671,326 C598,357 545,406 518,468 L518,716 C550,655 605,608 679,580 C690,576 696,566 696,554 Z"
+            fill="url(#rightPageFront)" stroke="#FFFFFF" stroke-opacity="0.94" stroke-width="6.5"/>
+    </g>
+  </g>
+
+  <!-- Outer & Inner Liquid Glass Specular Rim Highlights -->
+  <rect x="103" y="103" width="818" height="818" rx="182.4" ry="182.4" fill="none" stroke="#7AC5FF" stroke-opacity="0.55" stroke-width="5"/>
+  <rect x="116" y="116" width="792" height="792" rx="172" ry="172" fill="none" stroke="url(#glassRim)" stroke-width="6.5"/>
 </svg>

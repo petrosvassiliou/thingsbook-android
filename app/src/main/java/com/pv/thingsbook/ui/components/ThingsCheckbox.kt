@@ -168,10 +168,13 @@ fun ThingsCheckbox(
                 val rectHeight = (boxSizePx - strokePx).coerceAtLeast(0f)
                 if (rectWidth <= 0f || rectHeight <= 0f) return@Canvas
 
+                val squircleCornerPx = 6.5.dp.toPx()
+                val circleCornerPx = boxSizePx / 2f
+                val clampedMorph = (if (fillFraction.isFinite()) fillFraction else 0f).coerceIn(0f, 1f)
                 val cornerPx = if (shape == ThingsCheckboxShape.CIRCLE) {
-                    boxSizePx / 2f
+                    circleCornerPx
                 } else {
-                    5.5.dp.toPx()
+                    squircleCornerPx + (circleCornerPx - squircleCornerPx) * clampedMorph
                 }
 
                 val borderStroke = if (isDashedSomeday && status == TaskStatus.OPEN) {

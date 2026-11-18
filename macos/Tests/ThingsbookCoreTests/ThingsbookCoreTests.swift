@@ -408,10 +408,14 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.1.0")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.1.0")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 73)
-        XCTAssertFalse(AppUpdateService.currentVersionIsPrerelease)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-alpha.1")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-alpha.1")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 74)
+        XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.1", current: "2.1.0", includeBeta: false))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.1", current: "2.1.0", includeBeta: true))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.2", current: "3.0.0-alpha.1"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-alpha.1"))
         XCTAssertEqual(
             FirebaseCloudSyncService.deriveUidWakeTopic(uid: " user-abc-123 "),
             "tb_uid_9d8ecb07e35952112a013d4819b4"

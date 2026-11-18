@@ -338,12 +338,15 @@ public struct MainWorkspaceView: View {
 
         return ZStack {
             if isMagicPlusDragging {
-                Circle()
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
                     .strokeBorder(
                         ThingsMacPalette.accentBlue.opacity(0.28),
                         style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])
                     )
-                    .background(Circle().fill(ThingsMacPalette.accentBlue.opacity(0.06)))
+                    .background(
+                        RoundedRectangle(cornerRadius: 15, style: .continuous)
+                            .fill(ThingsMacPalette.accentBlue.opacity(0.06))
+                    )
                     .frame(width: 46, height: 46)
             }
 
@@ -375,7 +378,7 @@ public struct MainWorkspaceView: View {
                     .rotationEffect(.degrees((isMagicPlusMenuOpen && !isMagicPlusDragging) ? 45 : 0))
                     .frame(width: 46, height: 46)
                     .background(
-                        Circle()
+                        RoundedRectangle(cornerRadius: 15, style: .continuous)
                             .fill(
                                 LinearGradient(
                                     colors: isHeadingMode
@@ -387,15 +390,15 @@ public struct MainWorkspaceView: View {
                             )
                             .brightness((isMagicPlusHovered || isMagicPlusDragging) ? 0.06 : 0.0)
                             .overlay(
-                                Circle()
+                                RoundedRectangle(cornerRadius: 15, style: .continuous)
                                     .strokeBorder(
-                                        Color.white.opacity((isMagicPlusHovered || isMagicPlusDragging) ? 0.32 : 0.0),
+                                        Color.white.opacity((isMagicPlusHovered || isMagicPlusDragging) ? 0.50 : 0.28),
                                         lineWidth: 1
                                     )
                             )
                             .shadow(
                                 color: (isHeadingMode ? ThingsMacPalette.anytimeTeal : ThingsMacPalette.accentBlue)
-                                    .opacity(isMagicPlusDragging ? 0.52 : (isMagicPlusHovered ? 0.50 : 0.36)),
+                                    .opacity(isMagicPlusDragging ? 0.52 : (isMagicPlusHovered ? 0.48 : 0.34)),
                                 radius: isMagicPlusDragging ? 18 : (isMagicPlusHovered ? 15 : 12),
                                 x: 0,
                                 y: isMagicPlusDragging ? 9 : (isMagicPlusHovered ? 7 : 5)
@@ -411,7 +414,7 @@ public struct MainWorkspaceView: View {
             .offset(magicPlusDragOffset)
         }
         .frame(width: 46, height: 46)
-        .contentShape(Circle())
+        .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
         .zIndex(isMagicPlusDragging ? 50 : 1)
         .onHover { hovering in
             isMagicPlusHovered = hovering

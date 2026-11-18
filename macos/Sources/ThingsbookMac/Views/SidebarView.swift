@@ -3,16 +3,28 @@ import ThingsbookCore
 
 public struct SidebarView: View {
     @ObservedObject var store: ThingsbookStore
+    @State private var collapsedAreaIds: Set<String> = []
 
     public init(store: ThingsbookStore) {
         self.store = store
     }
 
+    private var defaultNewProjectAreaId: String? {
+        switch store.selectedDestination {
+        case .area(let areaId):
+            return areaId
+        case .project(let projId):
+            return store.projects.first(where: { $0.id == projId })?.areaId ?? store.areas.first?.id
+        default:
+            return store.areas.first?.id
+        }
+    }
+
     public var body: some View {
         VStack(spacing: 0) {
-            // Brand Header
+            // Brand Header (Icon B Glacier Liquid Glass Book Emblem)
             HStack(spacing: 9) {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
                     .fill(
                         LinearGradient(
                             colors: [ThingsMacPalette.inboxBlue, ThingsMacPalette.accentBlue],
@@ -20,12 +32,17 @@ public struct SidebarView: View {
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 24, height: 24)
+                    .frame(width: 26, height: 26)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.55), lineWidth: 0.9)
+                    )
                     .overlay {
-                        Image(systemName: "checkmark.square")
-                            .font(.system(size: 13, weight: .bold))
+                        Image(systemName: "book.pages.fill")
+                            .font(.system(size: 12.5, weight: .semibold))
                             .foregroundStyle(.white)
                     }
+                    .shadow(color: ThingsMacPalette.accentBlue.opacity(0.28), radius: 5, y: 2)
 
                 Text(store.tr("app_name"))
                     .font(.system(size: 15, weight: .bold))
@@ -35,9 +52,9 @@ public struct SidebarView: View {
                     Text(store.tr("v2_beta_badge"))
                         .font(.system(size: 9.5, weight: .bold, design: .rounded))
                         .foregroundStyle(ThingsMacPalette.accentBlue)
-                        .padding(.horizontal, 5.5)
+                        .padding(.horizontal, 6)
                         .padding(.vertical, 1.5)
-                        .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.14)))
+                        .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.16)))
                 }
 
                 Spacer()
@@ -66,18 +83,7 @@ public struct SidebarView: View {
                     smartViewRow(.logbook, count: 0)
                     smartViewRow(.trash, count: store.trashedTasks.count + store.trashedProjects.count)
 
-                    // Standalone Projects
-                    if !store.standaloneActiveProjects.isEmpty {
-                        Divider()
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 10)
-
-                        ForEach(store.standaloneActiveProjects) { proj in
-                            projectRow(proj)
-                        }
-                    }
-
-                    // Areas & Nested Projects
+                    // Areas -> Nested Projects Hierarchy (Primary 3.0 Structure)
                     if !store.areas.isEmpty {
                         Divider()
                             .padding(.vertical, 8)
@@ -88,6 +94,17 @@ public struct SidebarView: View {
                                 .padding(.bottom, 6)
                         }
                     }
+
+                    // Legacy / Unassigned Projects (not yet placed inside an Area)
+                    if !store.standaloneActiveProjects.isEmpty {
+                        Divider()
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 10)
+
+                        ForEach(store.standaloneActiveProjects) { proj in
+                            projectRow(proj)
+                        }
+                    }
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
@@ -95,11 +112,11 @@ public struct SidebarView: View {
 
             Divider()
 
-            // Bottom Sidebar Bar (+ New List, Areas X/8, Settings)
+            // Bottom Sidebar Bar (+ New Project defaults into active/first Area, Areas X/8)
             HStack(spacing: 10) {
                 Menu {
                     Button {
-                        store.newProjectDefaultAreaId = nil
+                        store.newProjectDefaultAreaId = defaultNewProjectAreaId
                         store.isNewProjectSheetPresented = true
                     } label: {
                         Label(store.tr("entity_new_project"), systemImage: "folder.badge.plus")
@@ -139,10 +156,10 @@ public struct SidebarView: View {
                         Image(systemName: "plus")
                             .font(.system(size: 11.5, weight: .semibold))
                         Text(store.tr("entity_new_project"))
-                            .font(.system(size: 12.5, weight: .medium))
+                            .font(.system(size: 12.5, weight: .semibold))
                             .lineLimit(1)
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
@@ -159,7 +176,7 @@ public struct SidebarView: View {
                         Text("\(store.areas.count)/\(ThingsSQLiteDatabase.maxAreas)")
                             .font(.system(size: 11, weight: .medium, design: .rounded))
                     }
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
                 .thingsTooltip(store.trf("areas_active_count", store.areas.count, ThingsSQLiteDatabase.maxAreas))
@@ -167,7 +184,17 @@ public struct SidebarView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
         }
-        .background(.ultraThinMaterial)
+        .background {
+            ZStack {
+                Rectangle().fill(.ultraThinMaterial)
+                Rectangle().fill(ThingsMacPalette.subtleContainer.opacity(0.55))
+            }
+        }
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.08))
+                .frame(width: 1)
+        }
     }
 
     private var weeklyReviewRow: some View {
@@ -178,7 +205,7 @@ public struct SidebarView: View {
             HStack(spacing: 10) {
                 Image(systemName: "checklist.checked")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                    .foregroundStyle(.secondary)
                     .frame(width: 20)
 
                 Text(store.tr("v2_weekly_review_title"))
@@ -196,9 +223,9 @@ public struct SidebarView: View {
                         .padding(.vertical, 1)
                 }
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 12)
             .padding(.vertical, 6.5)
-            .contentShape(Rectangle())
+            .contentShape(Capsule(style: .continuous))
         }
         .buttonStyle(.plain)
         .thingsTooltip(store.tr("v2_weekly_review_title") + " (⇧⌘R)")
@@ -225,12 +252,12 @@ public struct SidebarView: View {
             HStack(spacing: 10) {
                 Image(systemName: view.sfSymbol)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(ThingsMacPalette.color(for: view))
+                    .foregroundStyle(ThingsMacPalette.color(for: view, isSelected: selected))
                     .frame(width: 20)
 
                 Text(store.tr(view.titleKey))
                     .font(.system(size: 13.5, weight: selected ? .semibold : .regular))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .primary)
                     .lineLimit(1)
 
                 Spacer()
@@ -243,13 +270,17 @@ public struct SidebarView: View {
                         .padding(.vertical, 1)
                 }
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 12)
             .padding(.vertical, 6.5)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.12) : Color.clear)
+                Capsule(style: .continuous)
+                    .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.15) : Color.clear)
             )
-            .contentShape(Rectangle())
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(selected ? ThingsMacPalette.accentBlue.opacity(0.28) : Color.clear, lineWidth: 0.8)
+            )
+            .contentShape(Capsule(style: .continuous))
         }
         .buttonStyle(.plain)
         .thingsTooltip("\(store.tr(view.titleKey)) (\(smartViewShortcut(for: view)))")
@@ -259,21 +290,39 @@ public struct SidebarView: View {
         let dest = NavigationDestination.area(area.id)
         let selected = store.selectedDestination == dest
         let nestedProjects = store.projectsForArea(area.id)
+        let isCollapsed = collapsedAreaIds.contains(area.id)
 
         return VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Button {
+                    withAnimation(.easeOut(duration: 0.14)) {
+                        if isCollapsed {
+                            collapsedAreaIds.remove(area.id)
+                        } else {
+                            collapsedAreaIds.insert(area.id)
+                        }
+                    }
+                } label: {
+                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 16, height: 16)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
                 Button {
                     store.selectedDestination = dest
                 } label: {
-                    HStack(spacing: 9) {
-                        Image(systemName: "cube.fill")
+                    HStack(spacing: 8) {
+                        Image(systemName: "cube")
                             .font(.system(size: 12.5, weight: .semibold))
-                            .foregroundStyle(ThingsMacPalette.areaGreen)
-                            .frame(width: 20)
+                            .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .secondary)
+                            .frame(width: 18)
 
                         Text(area.title)
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .primary)
                             .lineLimit(1)
 
                         Spacer()
@@ -298,8 +347,12 @@ public struct SidebarView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 5.5)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.12) : Color.clear)
+                Capsule(style: .continuous)
+                    .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.15) : Color.clear)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(selected ? ThingsMacPalette.accentBlue.opacity(0.28) : Color.clear, lineWidth: 0.8)
             )
             .contextMenu {
                 Button(store.tr("entity_new_project")) {
@@ -320,8 +373,10 @@ public struct SidebarView: View {
                 }
             }
 
-            ForEach(nestedProjects) { proj in
-                projectRow(proj, indented: true)
+            if !isCollapsed {
+                ForEach(nestedProjects) { proj in
+                    projectRow(proj, indented: true)
+                }
             }
         }
     }
@@ -355,7 +410,7 @@ public struct SidebarView: View {
 
                 Text(proj.title)
                     .font(.system(size: 13, weight: selected ? .semibold : .regular))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .primary)
                     .lineLimit(1)
 
                 Spacer(minLength: 4)
@@ -376,17 +431,21 @@ public struct SidebarView: View {
                 if openCount > 0 {
                     Text("\(openCount)")
                         .font(.system(size: 11.5, weight: .medium, design: .rounded))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .secondary)
                 }
             }
-            .padding(.leading, indented ? 20 : 10)
-            .padding(.trailing, 10)
+            .padding(.leading, indented ? 26 : 12)
+            .padding(.trailing, 12)
             .padding(.vertical, 5.5)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.12) : Color.clear)
+                Capsule(style: .continuous)
+                    .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.15) : Color.clear)
             )
-            .contentShape(Rectangle())
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(selected ? ThingsMacPalette.accentBlue.opacity(0.28) : Color.clear, lineWidth: 0.8)
+            )
+            .contentShape(Capsule(style: .continuous))
         }
         .buttonStyle(.plain)
         .thingsTooltip(statusHelpText.map { "\(proj.title) — \($0)" } ?? proj.title)

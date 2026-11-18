@@ -6,31 +6,50 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Oceanic Teal Material 3 Expressive Diagonal Gradient -->
+    <!-- Glacier Liquid Glass Sky Light Blue Vertical Gradient (Icon B) -->
     <path android:pathData="M0,0h108v108h-108z">
         <aapt:attr name="android:fillColor">
             <gradient
-                android:endX="108"
+                android:endX="54"
                 android:endY="108"
-                android:startX="0"
+                android:startX="54"
                 android:startY="0"
                 android:type="linear">
                 <item
-                    android:color="#FF157B96"
+                    android:color="#FFC4E9FF"
                     android:offset="0.0" />
                 <item
-                    android:color="#FF0F657C"
-                    android:offset="0.52" />
+                    android:color="#FF74C4FF"
+                    android:offset="0.38" />
                 <item
-                    android:color="#FF073B4A"
+                    android:color="#FF3898EC"
+                    android:offset="0.72" />
+                <item
+                    android:color="#FF1C75C8"
                     android:offset="1.0" />
             </gradient>
         </aapt:attr>
     </path>
 
-    <!-- Soft Seafoam Expressive Tonal Ambient Glow -->
+    <!-- Soft Top Glass Dome Specular Sheen -->
     <path
-        android:fillAlpha="0.22"
-        android:fillColor="#FF9EE8F5"
-        android:pathData="M18,16 m-46,0 a46,46 0 1,0 92,0 a46,46 0 1,0 -92,0" />
+        android:fillAlpha="0.34"
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M0,0 L108,0 L108,42 C82,53 26,53 0,42 Z" />
+
+    <!-- Subtle Crystalline Caustic Light Arcs at Base -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M14,82 C32,70 46,74 54,84 C62,74 76,70 94,82"
+        android:strokeAlpha="0.24"
+        android:strokeColor="#FFDDF3FF"
+        android:strokeLineCap="round"
+        android:strokeWidth="2.2" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M26,94 C39,80 48,78 54,74 C60,78 69,80 82,94"
+        android:strokeAlpha="0.20"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="1.8" />
 </vector>

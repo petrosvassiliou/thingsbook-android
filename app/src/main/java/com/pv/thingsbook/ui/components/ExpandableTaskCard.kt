@@ -443,7 +443,7 @@ fun ExpandableTaskCard(
         label = "cardVerticalMargin"
     )
     val cornerRadius by animateDpAsState(
-        targetValue = if (isExpanded) 14.dp else 8.dp,
+        targetValue = if (isExpanded) 18.dp else 12.dp,
         animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
         label = "cardCornerRadius"
     )
@@ -466,8 +466,8 @@ fun ExpandableTaskCard(
     val surfaceColor by animateColorAsState(
         targetValue = when {
             isExpanded -> colors.cardElevatedSurface
-            isContextMenuTargeted -> colors.thingsBlue.copy(alpha = 0.18f)
-            isSelected -> colors.thingsBlue.copy(alpha = 0.14f)
+            isContextMenuTargeted -> colors.thingsBlue.copy(alpha = 0.16f)
+            isSelected -> colors.thingsBlueSoft
             else -> Color.Transparent
         },
         animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
@@ -507,19 +507,23 @@ fun ExpandableTaskCard(
                 .shadow(
                     elevation = shadowElevation,
                     shape = RoundedCornerShape(cornerRadius),
-                    ambientColor = Color.Black.copy(alpha = 0.14f),
-                    spotColor = Color.Black.copy(alpha = 0.18f)
+                    ambientColor = Color.Black.copy(alpha = 0.10f),
+                    spotColor = Color.Black.copy(alpha = 0.14f)
                 )
                 .clip(RoundedCornerShape(cornerRadius))
                 .then(
-                    if ((isSelected || isContextMenuTargeted) && !isExpanded) {
-                        Modifier.border(
+                    when {
+                        isExpanded -> Modifier.border(
+                            width = 1.25.dp,
+                            color = colors.thingsBlue.copy(alpha = 0.36f),
+                            shape = RoundedCornerShape(cornerRadius)
+                        )
+                        isSelected || isContextMenuTargeted -> Modifier.border(
                             width = if (isContextMenuTargeted) 1.25.dp else 1.dp,
                             color = colors.thingsBlue.copy(alpha = if (isContextMenuTargeted) 0.72f else 0.42f),
                             shape = RoundedCornerShape(cornerRadius)
                         )
-                    } else {
-                        Modifier
+                        else -> Modifier
                     }
                 )
                 .animateContentSize(

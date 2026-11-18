@@ -77,7 +77,7 @@ public struct SmartViewCanvas: View {
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: view.sfSymbol)
                 .font(.system(size: 25, weight: .bold))
-                .foregroundStyle(ThingsMacPalette.color(for: view))
+                .foregroundStyle(ThingsMacPalette.color(for: view, isSelected: true))
 
             Text(store.tr(view.titleKey))
                 .font(.system(size: 28, weight: .bold))

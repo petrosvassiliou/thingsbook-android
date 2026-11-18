@@ -58,18 +58,11 @@ enum class SmartViewType(
 @Composable
 fun SmartViewIcon(
     viewType: SmartViewType,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isSelected: Boolean = false
 ) {
     val colors = ThingsTheme.colors
-    val tint = when (viewType) {
-        SmartViewType.INBOX -> colors.inboxBlue
-        SmartViewType.TODAY -> colors.todayStarYellow
-        SmartViewType.UPCOMING -> colors.upcomingCoralRed
-        SmartViewType.ANYTIME -> colors.anytimeTeal
-        SmartViewType.SOMEDAY -> colors.somedayWarmAmber
-        SmartViewType.LOGBOOK -> colors.logbookGreen
-        SmartViewType.TRASH -> colors.secondaryText
-    }
+    val tint = if (isSelected) colors.thingsBlue else colors.secondaryText
 
     Icon(
         imageVector = viewType.icon,

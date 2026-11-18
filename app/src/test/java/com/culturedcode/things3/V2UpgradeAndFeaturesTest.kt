@@ -1652,7 +1652,10 @@ class V2UpgradeAndFeaturesTest {
             title = "Zahnarzt-Vorsorgetermin für nächsten Monat vereinbaren",
             notes = "",
             status = TaskStatus.OPEN,
-            scheduleState = ScheduleState.INBOX
+            scheduleState = ScheduleState.INBOX,
+            sortOrder = 100.0,
+            createdAt = 1_795_000_000_000L,
+            updatedAt = 1_795_000_000_000L
         )
         assertTrue(DatabaseSeeder.isActiveSampleTask(openGermanSample))
         assertTrue(DatabaseSeeder.isPurgeableSampleTask(openGermanSample))
@@ -1663,7 +1666,10 @@ class V2UpgradeAndFeaturesTest {
             title = "Schreibtisch aufgeräumt & Wochenfokus festgelegt",
             notes = "",
             status = TaskStatus.COMPLETED,
-            scheduleState = ScheduleState.TODAY
+            scheduleState = ScheduleState.TODAY,
+            sortOrder = 800.0,
+            createdAt = 1_795_000_000_000L,
+            updatedAt = 1_795_000_000_000L
         )
         assertFalse(DatabaseSeeder.isActiveSampleTask(logbookCompletedSample))
         assertTrue(DatabaseSeeder.isPurgeableSampleTask(logbookCompletedSample))

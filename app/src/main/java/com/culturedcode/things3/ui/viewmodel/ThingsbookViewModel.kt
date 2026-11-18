@@ -1723,7 +1723,10 @@ class ThingsbookViewModel @Inject constructor(
     fun deleteSampleTasksForLocalSetup() {
         safeVmScope.launch {
             runCatchingCancellable {
-                repository.purgeSampleDataLocally(markRemainingDirtyForMerge = false)
+                repository.purgeSampleDataLocally(
+                    markRemainingDirtyForMerge = false,
+                    emitCloudTombstonesIfSignedIn = true
+                )
             }.onSuccess {
                 dismissInitialSetupBanner()
                 runCatching {

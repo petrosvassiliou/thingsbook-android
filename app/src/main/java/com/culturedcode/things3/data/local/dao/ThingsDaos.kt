@@ -542,6 +542,15 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE isDeleted = 0 ORDER BY sortOrder ASC")
     suspend fun getAllActiveTasksWithDetails(): List<TaskWithDetails>
 
+    @Query("SELECT * FROM tasks WHERE id IN (:sampleIds) AND isDeleted = 0")
+    fun observeCandidateSampleTasks(sampleIds: List<String>): Flow<List<TaskEntity>>
+
+    @Query("SELECT * FROM tasks WHERE id IN (:sampleIds) AND isDeleted = 0")
+    suspend fun getCandidateSampleTasks(sampleIds: List<String>): List<TaskEntity>
+
+    @Query("SELECT * FROM tasks WHERE id IN (:ids)")
+    suspend fun getByIds(ids: List<String>): List<TaskEntity>
+
     @Query("SELECT COUNT(*) FROM tasks WHERE id IN (:sampleIds) AND isDeleted = 0")
     fun observeActiveSampleTaskCount(sampleIds: List<String>): Flow<Int>
 

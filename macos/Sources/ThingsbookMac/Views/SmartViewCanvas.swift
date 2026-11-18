@@ -1263,8 +1263,7 @@ public struct SmartViewCanvas: View {
             Spacer()
 
             Button(store.tr("setup_banner_delete_samples_btn")) {
-                try? store.database.purgeSampleDataLocally(preserveUsedContainers: true)
-                store.preferences.hideSampleSetupBanner = true
+                store.deleteSampleTasks()
             }
             .buttonStyle(.bordered)
             .controlSize(.small)

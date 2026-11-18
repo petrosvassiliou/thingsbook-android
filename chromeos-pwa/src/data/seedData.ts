@@ -458,3 +458,47 @@ export function buildLocalizedSeedBundle(lang: SupportedLang): SeedBundle {
     ]
   };
 }
+
+export function normalizeSampleTitle(title: string): string {
+  return title.trim().toLowerCase();
+}
+
+export const KNOWN_SAMPLE_TASK_TITLES: Set<string> = (() => {
+  const langs: SupportedLang[] = ['en', 'de', 'fr', 'it', 'es'];
+  const titles = new Set<string>();
+  for (const lang of langs) {
+    for (const task of buildLocalizedSeedBundle(lang).tasks) {
+      titles.add(normalizeSampleTitle(task.title));
+    }
+  }
+  return titles;
+})();
+
+/**
+ * Returns true strictly for OPEN, non-deleted pre-installed demo tasks whose title still matches
+ * one of the localized demo titles (so Logbook entries like `task-completed-008` and user-renamed tasks never trigger the Settings warning).
+ */
+export function isActiveSampleTask(
+  task: Pick<TaskRecord, 'id' | 'title' | 'status' | 'isDeleted'>
+): boolean {
+  if (task.isDeleted || task.status !== 'OPEN' || !SAMPLE_TASK_IDS.has(task.id)) {
+    return false;
+  }
+  const normalized = normalizeSampleTitle(task.title);
+  return normalized.length > 0 && KNOWN_SAMPLE_TASK_TITLES.has(normalized);
+}
+
+/**
+ * Returns true when `task` is an unmodified pre-installed demo task (including `task-completed-008` in Logbook)
+ * that is safe to purge without deleting a task the user renamed into their own personal task.
+ */
+export function isPurgeableSampleTask(
+  task: Pick<TaskRecord, 'id' | 'title'>
+): boolean {
+  if (!SAMPLE_TASK_IDS.has(task.id)) {
+    return false;
+  }
+  const normalized = normalizeSampleTitle(task.title);
+  return normalized.length === 0 || KNOWN_SAMPLE_TASK_TITLES.has(normalized);
+}
+

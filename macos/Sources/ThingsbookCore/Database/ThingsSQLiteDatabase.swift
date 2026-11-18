@@ -703,8 +703,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             trashed.sort { $0.updatedAt > $1.updatedAt }
 
             let activeTasksNonDeleted = allTasks.filter { !$0.isDeleted }
-            let hasSample = activeTasksNonDeleted.contains { DatabaseSeeder.sampleTaskIds.contains($0.id) }
-            let hasNonSample = activeTasksNonDeleted.contains { !DatabaseSeeder.sampleTaskIds.contains($0.id) }
+            let hasSample = activeTasksNonDeleted.contains { DatabaseSeeder.isActiveSampleTask($0) }
+            let hasNonSample = activeTasksNonDeleted.contains { !DatabaseSeeder.isPurgeableSampleTask($0) }
 
             let stats = try computeStatisticsLocked(endOfToday: endOfToday)
 
@@ -2921,44 +2921,108 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
     // MARK: - Sample Data Purge & Account Prep
 
-    public func purgeSampleDataLocally(preserveUsedContainers: Bool = true) throws {
+    public func purgeSampleDataLocally(
+        preserveUsedContainers: Bool = true,
+        emitCloudTombstones: Bool = false
+    ) throws {
         try queue.sync {
+            let now = nowMillis()
             try inTransactionLocked {
-                for id in DatabaseSeeder.sampleChecklistIds {
-                    try deleteByIdLocked(table: "checklist_items", id: id)
-                }
+                var preservedSampleTaskIds = Set<String>()
+                var purgeableTaskIds: [String] = []
                 for id in DatabaseSeeder.sampleTaskIds {
-                    try deleteByIdLocked(table: "tasks", id: id)
+                    if let existing = try fetchTaskByIdLocked(id) {
+                        if DatabaseSeeder.isPurgeableSampleTask(existing) {
+                            purgeableTaskIds.append(id)
+                        } else {
+                            preservedSampleTaskIds.insert(id)
+                        }
+                    }
                 }
+
+                for id in DatabaseSeeder.sampleChecklistIds {
+                    let parentTaskId: String? = {
+                        guard let stmt = try? prepareLocked("SELECT task_id FROM checklist_items WHERE id = ?;") else { return nil }
+                        defer { sqlite3_finalize(stmt) }
+                        bindText(stmt, 1, id)
+                        return sqlite3_step(stmt) == SQLITE_ROW ? colString(stmt, 0) : nil
+                    }()
+                    if let parentTaskId, preservedSampleTaskIds.contains(parentTaskId) {
+                        continue
+                    }
+                    if emitCloudTombstones {
+                        let chkStmt = try prepareLocked("UPDATE checklist_items SET title = '', is_deleted = 1, updated_at = MAX(updated_at + 1, ?), is_dirty = 1 WHERE id = ?;")
+                        defer { sqlite3_finalize(chkStmt) }
+                        bindInt64(chkStmt, 1, now)
+                        bindText(chkStmt, 2, id)
+                        _ = sqlite3_step(chkStmt)
+                    } else {
+                        try deleteByIdLocked(table: "checklist_items", id: id)
+                    }
+                }
+
+                for id in purgeableTaskIds {
+                    if emitCloudTombstones {
+                        try purgeTaskToTombstoneLocked(taskId: id, now: now)
+                    } else {
+                        try deleteByIdLocked(table: "tasks", id: id)
+                    }
+                }
+
                 for id in DatabaseSeeder.sampleHeadingIds {
-                    if preserveUsedContainers && countForeignRefsLocked("SELECT COUNT(*) FROM tasks WHERE heading_id = ?;", id) > 0 {
+                    if preserveUsedContainers && countForeignRefsLocked("SELECT COUNT(*) FROM tasks WHERE heading_id = ? AND is_deleted = 0;", id) > 0 {
                         continue
                     }
-                    try deleteByIdLocked(table: "headings", id: id)
+                    if emitCloudTombstones {
+                        let hdgStmt = try prepareLocked("UPDATE headings SET title = '', is_deleted = 1, updated_at = MAX(updated_at + 1, ?), is_dirty = 1 WHERE id = ?;")
+                        defer { sqlite3_finalize(hdgStmt) }
+                        bindInt64(hdgStmt, 1, now)
+                        bindText(hdgStmt, 2, id)
+                        _ = sqlite3_step(hdgStmt)
+                    } else {
+                        try deleteByIdLocked(table: "headings", id: id)
+                    }
                 }
+
                 for id in DatabaseSeeder.sampleProjectIds {
-                    if preserveUsedContainers && countForeignRefsLocked("SELECT COUNT(*) FROM tasks WHERE project_id = ?;", id) > 0 {
+                    if preserveUsedContainers && countForeignRefsLocked("SELECT COUNT(*) FROM tasks WHERE project_id = ? AND is_deleted = 0;", id) > 0 {
                         continue
                     }
-                    try deleteByIdLocked(table: "projects", id: id)
+                    if emitCloudTombstones {
+                        try purgeProjectToTombstoneLocked(projectId: id, now: now)
+                    } else {
+                        try deleteByIdLocked(table: "projects", id: id)
+                    }
                 }
+
                 for id in DatabaseSeeder.sampleAreaIds {
                     if preserveUsedContainers && (
-                        countForeignRefsLocked("SELECT COUNT(*) FROM tasks WHERE area_id = ?;", id) > 0 ||
-                        countForeignRefsLocked("SELECT COUNT(*) FROM projects WHERE area_id = ?;", id) > 0
+                        countForeignRefsLocked("SELECT COUNT(*) FROM tasks WHERE area_id = ? AND is_deleted = 0;", id) > 0 ||
+                        countForeignRefsLocked("SELECT COUNT(*) FROM projects WHERE area_id = ? AND is_deleted = 0;", id) > 0
                     ) {
                         continue
                     }
-                    try deleteByIdLocked(table: "areas", id: id)
+                    if !emitCloudTombstones {
+                        try deleteByIdLocked(table: "areas", id: id)
+                    }
                 }
+
                 for id in DatabaseSeeder.sampleTagIds {
                     if preserveUsedContainers && (
-                        countForeignRefsLocked("SELECT COUNT(*) FROM task_tags WHERE tag_id = ?;", id) > 0 ||
-                        countForeignRefsLocked("SELECT COUNT(*) FROM project_tags WHERE tag_id = ?;", id) > 0
+                        countForeignRefsLocked("SELECT COUNT(*) FROM task_tags tt JOIN tasks t ON t.id = tt.task_id WHERE tt.tag_id = ? AND t.is_deleted = 0;", id) > 0 ||
+                        countForeignRefsLocked("SELECT COUNT(*) FROM project_tags pt JOIN projects p ON p.id = pt.project_id WHERE pt.tag_id = ? AND p.is_deleted = 0;", id) > 0
                     ) {
                         continue
                     }
-                    try deleteByIdLocked(table: "tags", id: id)
+                    if emitCloudTombstones {
+                        let tagStmt = try prepareLocked("UPDATE tags SET title = '', is_deleted = 1, updated_at = MAX(updated_at + 1, ?), is_dirty = 1 WHERE id = ?;")
+                        defer { sqlite3_finalize(tagStmt) }
+                        bindInt64(tagStmt, 1, now)
+                        bindText(tagStmt, 2, id)
+                        _ = sqlite3_step(tagStmt)
+                    } else {
+                        try deleteByIdLocked(table: "tags", id: id)
+                    }
                 }
             }
         }

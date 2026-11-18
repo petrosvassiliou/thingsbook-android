@@ -1237,7 +1237,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 type="button"
                 className="btn-danger"
                 onClick={async () => {
-                  await localDb.purgeSampleDataLocally(false);
+                  const shouldTombstoneInCloud = Boolean(
+                    syncState.userId && !prefs.localOnlyDbMode
+                  );
+                  await localDb.purgeSampleDataLocally(false, shouldTombstoneInCloud);
                   onToast('✓ Sample tasks removed');
                 }}
               >

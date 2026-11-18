@@ -190,7 +190,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Encrypted roundtrip (AES-256-GCM + PBKDF2-HMAC-SHA256 120k)
         let encryptedBytes = try ThingsBackupCodec.encodeBackup(payload: payload, password: "CorrectHorseBatteryStaple!")
         let encInspected = try ThingsBackupCodec.inspectBackup(rawBytes: encryptedBytes)
-        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.23"))
+        XCTAssertEqual(encInspected, .passwordProtected(createdAt: payload.createdAt, appVersionName: "2.0.0-beta.24"))
 
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: nil))
         XCTAssertThrowsError(try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBytes, password: "WrongPassword"))
@@ -408,9 +408,9 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.23")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.23")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 67)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.0.0-beta.24")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.0.0-beta.24")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 68)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
         XCTAssertEqual(
             FirebaseCloudSyncService.deriveUidWakeTopic(uid: " user-abc-123 "),
@@ -455,6 +455,7 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.21", current: "2.0.0-beta.20"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.22", current: "2.0.0-beta.21"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.23", current: "2.0.0-beta.22"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.24", current: "2.0.0-beta.23"))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "2.0.0-beta.9", current: "2.0.0-beta.10"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.1"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "2.0.0", current: "2.0.0-beta.99"))
@@ -2945,6 +2946,64 @@ final class ThingsbookCoreTests: XCTestCase {
                 "All 6 Settings tabs in [\(lang.rawValue)] (\(titles.joined(separator: " | "))) must fit without truncation inside \(MacSettingsTabLayoutMetrics.recommendedWindowWidth)pt (got \(totalWidth)pt)"
             )
         }
+    }
+
+    // MARK: - 23. v2.0.0-beta.24 Sample Tasks Detection (Logbook Exclusion, User-Renamed Preservation & Purged Cloud Tombstones)
+
+    func testSampleTasksDetectionIgnoresLogbookCompletedAndPreservesRenamedAndEmitsPurgedCloudTombstonesV200Beta24() throws {
+        // 1. Fresh seeded DB has 7 open sample tasks + 1 completed Logbook sample task (task-completed-008)
+        let db1 = try ThingsSQLiteDatabase(path: ":memory:")
+        try db1.seedIfEmpty(languageCode: "de")
+        let initialSnap = try db1.loadWorkspaceSnapshot()
+        XCTAssertTrue(initialSnap.hasSampleTasks)
+        XCTAssertFalse(initialSnap.hasNonSampleUserTasks)
+        XCTAssertTrue(initialSnap.logbookTasks.contains(where: { $0.id == "task-completed-008" }))
+
+        // Completing or deleting the 7 open sample tasks leaves task-completed-008 in Logbook, which MUST NOT flag hasSampleTasks
+        for openSample in initialSnap.allOpenTasks {
+            try db1.setTaskStatus(taskId: openSample.id, status: .completed)
+        }
+        let allCompletedSnap = try db1.loadWorkspaceSnapshot()
+        XCTAssertEqual(allCompletedSnap.logbookTasks.count, 8)
+        XCTAssertFalse(
+            allCompletedSnap.hasSampleTasks,
+            "Completed Logbook sample tasks (including task-completed-008) must never trigger 'Beispielaufgaben noch vorhanden'"
+        )
+
+        // 2. Renaming task-inbox-001 into a personal task and purging sample data with emitCloudTombstones = true
+        let db2 = try ThingsSQLiteDatabase(path: ":memory:")
+        try db2.seedIfEmpty(languageCode: "de")
+        let seededSnap2 = try db2.loadWorkspaceSnapshot()
+        var renamedInbox = try XCTUnwrap(seededSnap2.allOpenTasks.first(where: { $0.id == "task-inbox-001" }))
+        renamedInbox.title = "Steuererklärung 2026 einreichen"
+        try db2.updateTask(renamedInbox)
+
+        for other in seededSnap2.allOpenTasks where other.id != "task-inbox-001" {
+            try db2.softDeleteTask(other.id)
+        }
+        let customizedSnap = try db2.loadWorkspaceSnapshot()
+        XCTAssertFalse(customizedSnap.hasSampleTasks, "Renamed sample task must not trigger sample task warning")
+        XCTAssertTrue(customizedSnap.hasNonSampleUserTasks, "Renamed sample task counts as a user task")
+
+        // Reset db3 to verify cloud tombstone purge preserves renamed task while scrubbing unmodified sample tasks without cluttering Trash
+        let db3 = try ThingsSQLiteDatabase(path: ":memory:")
+        try db3.seedIfEmpty(languageCode: "de")
+        var inboxToRename = try XCTUnwrap(try db3.loadWorkspaceSnapshot().allOpenTasks.first(where: { $0.id == "task-inbox-001" }))
+        inboxToRename.title = "Steuererklärung 2026 einreichen"
+        try db3.updateTask(inboxToRename)
+
+        try db3.purgeSampleDataLocally(preserveUsedContainers: true, emitCloudTombstones: true)
+        let afterPurgeSnap = try db3.loadWorkspaceSnapshot()
+        XCTAssertFalse(afterPurgeSnap.hasSampleTasks)
+        XCTAssertEqual(afterPurgeSnap.allOpenTasks.map(\.title), ["Steuererklärung 2026 einreichen"])
+        XCTAssertTrue(afterPurgeSnap.logbookTasks.isEmpty, "Unmodified Logbook sample task-completed-008 must be purged")
+        XCTAssertTrue(afterPurgeSnap.trashedTasks.isEmpty, "Purged cloud tombstones must never appear in Trash")
+
+        let dirty = try db3.fetchDirtyBatch()
+        let dirtyPurgedIds = Set(dirty.tasks.filter { $0.isDeleted && $0.title.isEmpty && $0.notes.isEmpty }.map(\.id))
+        XCTAssertTrue(dirtyPurgedIds.contains("task-completed-008"))
+        XCTAssertTrue(dirtyPurgedIds.contains("task-today-002"))
+        XCTAssertFalse(dirtyPurgedIds.contains("task-inbox-001"))
     }
 }
 

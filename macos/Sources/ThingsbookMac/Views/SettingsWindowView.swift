@@ -250,7 +250,7 @@ public struct SettingsWindowView: View {
                         }
                         Spacer()
                         Button(role: .destructive) {
-                            try? store.database.purgeSampleDataLocally(preserveUsedContainers: true)
+                            store.deleteSampleTasks()
                         } label: {
                             Text(store.tr("setup_banner_delete_samples_btn"))
                         }

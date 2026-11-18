@@ -59,6 +59,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -2951,51 +2952,127 @@ class ThingsRepository @Inject constructor(
 
     fun observeHasSampleTasks(): Flow<Boolean> =
         database.taskDao()
-            .observeActiveSampleTaskCount(DatabaseSeeder.SAMPLE_TASK_IDS.toList())
-            .map { count -> count > 0 }
+            .observeCandidateSampleTasks(DatabaseSeeder.SAMPLE_TASK_IDS.toList())
+            .map { tasks -> tasks.any { DatabaseSeeder.isActiveSampleTask(it) } }
+            .distinctUntilChanged()
             .catch { emit(false) }
 
     suspend fun hasSampleTasks(): Boolean = runCatchingCancellable {
-        database.taskDao().countActiveSampleTasks(DatabaseSeeder.SAMPLE_TASK_IDS.toList()) > 0
+        database.taskDao()
+            .getCandidateSampleTasks(DatabaseSeeder.SAMPLE_TASK_IDS.toList())
+            .any { DatabaseSeeder.isActiveSampleTask(it) }
     }.getOrDefault(false)
 
     suspend fun countNonSampleTasks(): Int = runCatchingCancellable {
-        database.taskDao().countActiveNonSampleTasks(DatabaseSeeder.SAMPLE_TASK_IDS.toList())
+        val sampleIds = DatabaseSeeder.SAMPLE_TASK_IDS.toList()
+        val nonSampleIdCount = database.taskDao().countActiveNonSampleTasks(sampleIds)
+        val customizedSampleCount = database.taskDao()
+            .getCandidateSampleTasks(sampleIds)
+            .count { !DatabaseSeeder.isPurgeableSampleTask(it) }
+        nonSampleIdCount + customizedSampleCount
     }.getOrDefault(0)
 
     suspend fun hasLocalUserCreatedTasks(): Boolean = countNonSampleTasks() > 0
 
     /**
-     * Hard-deletes all seeded initial sample tasks (and any sample checklists, headings, projects, or tags
-     * that do not contain user-created tasks) locally in Room without creating `isDeleted` cloud tombstones.
+     * Deletes seeded initial sample tasks (and any sample checklists, headings, projects, or tags
+     * that do not contain user-created tasks) while preserving any sample task whose title was
+     * customized by the user.
+     *
      * When [markRemainingDirtyForMerge] is true, marks remaining user-created items `isDirty = true` so they
      * merge cleanly with the user's cloud account without untouched seeded areas clobbering cloud areas.
+     * When [emitCloudTombstonesIfSignedIn] is true and Cloud Sync is active, emits compacted purged tombstones
+     * (`isDeleted = true`, empty title/notes, `isDirty = true`) so sample tasks previously synced to Firestore
+     * are permanently purged without appearing in Trash or resurrecting on full pull.
      */
-    suspend fun purgeSampleDataLocally(markRemainingDirtyForMerge: Boolean = false) {
+    suspend fun purgeSampleDataLocally(
+        markRemainingDirtyForMerge: Boolean = false,
+        emitCloudTombstonesIfSignedIn: Boolean = false
+    ) {
         val sampleTaskIds = DatabaseSeeder.SAMPLE_TASK_IDS.toList()
-        sampleTaskIds.forEach { id -> reminderScheduler.cancelReminder(id) }
+        val existingSampleTasks = database.taskDao().getByIds(sampleTaskIds)
+        val preservedSampleTaskIds = existingSampleTasks
+            .filterNot { DatabaseSeeder.isPurgeableSampleTask(it) }
+            .mapTo(HashSet()) { it.id }
+        val purgeableTasks = existingSampleTasks.filter { DatabaseSeeder.isPurgeableSampleTask(it) }
+        val purgeableTaskIds = sampleTaskIds.filterNot { it in preservedSampleTaskIds }
+        purgeableTaskIds.forEach { id -> reminderScheduler.cancelReminder(id) }
+
+        val keepSyncTombstones = emitCloudTombstonesIfSignedIn &&
+            !markRemainingDirtyForMerge &&
+            !syncRepository.isLocalOnlyDbModeEnabled() &&
+            syncRepository.hasActiveCloudAccount()
+        val now = System.currentTimeMillis()
 
         database.withTransaction {
-            database.checklistDao().hardDeleteForSampleTasks(
-                taskIds = sampleTaskIds,
-                itemIds = DatabaseSeeder.SAMPLE_CHECKLIST_IDS.toList()
-            )
-            database.taskDao().hardDeleteTaskTagsByTaskIds(sampleTaskIds)
-            database.taskDao().hardDeleteByIds(sampleTaskIds)
+            if (keepSyncTombstones) {
+                for (task in purgeableTasks) {
+                    purgeOrCompactTaskInternal(task, keepSyncTombstones = true, now = now)
+                }
+                for (chkId in DatabaseSeeder.SAMPLE_CHECKLIST_IDS) {
+                    val chk = database.checklistDao().getById(chkId)
+                    if (chk != null && chk.taskId !in preservedSampleTaskIds && (!chk.isDeleted || chk.title.isNotEmpty())) {
+                        database.checklistDao().upsert(
+                            chk.copy(
+                                title = "",
+                                isDeleted = true,
+                                isDirty = true,
+                                updatedAt = now
+                            )
+                        )
+                    }
+                }
+            } else if (purgeableTaskIds.isNotEmpty()) {
+                val orphanChecklistIds = DatabaseSeeder.SAMPLE_CHECKLIST_IDS.filter { chkId ->
+                    val chk = database.checklistDao().getById(chkId)
+                    chk == null || chk.taskId !in preservedSampleTaskIds
+                }
+                database.checklistDao().hardDeleteForSampleTasks(
+                    taskIds = purgeableTaskIds,
+                    itemIds = orphanChecklistIds
+                )
+                database.taskDao().hardDeleteTaskTagsByTaskIds(purgeableTaskIds)
+                database.taskDao().hardDeleteByIds(purgeableTaskIds)
+            }
 
             val emptySampleHeadings = DatabaseSeeder.SAMPLE_HEADING_IDS.filter { hId ->
                 database.headingDao().countActiveTasksInHeading(hId) == 0
             }
             if (emptySampleHeadings.isNotEmpty()) {
-                database.headingDao().hardDeleteByIds(emptySampleHeadings)
+                if (keepSyncTombstones) {
+                    for (hId in emptySampleHeadings) {
+                        val heading = database.headingDao().getById(hId)
+                        if (heading != null && (!heading.isDeleted || heading.title.isNotEmpty())) {
+                            database.headingDao().upsert(
+                                heading.copy(
+                                    title = "",
+                                    isDeleted = true,
+                                    isDirty = true,
+                                    updatedAt = now
+                                )
+                            )
+                        }
+                    }
+                } else {
+                    database.headingDao().hardDeleteByIds(emptySampleHeadings)
+                }
             }
 
             val emptySampleProjects = DatabaseSeeder.SAMPLE_PROJECT_IDS.filter { pId ->
                 database.projectDao().countActiveTasksInProject(pId) == 0
             }
             if (emptySampleProjects.isNotEmpty()) {
-                database.projectDao().hardDeleteProjectTagsByIds(emptySampleProjects)
-                database.projectDao().hardDeleteByIds(emptySampleProjects)
+                if (keepSyncTombstones) {
+                    for (pId in emptySampleProjects) {
+                        val proj = database.projectDao().getById(pId)
+                        if (proj != null) {
+                            purgeOrCompactProjectInternal(proj, keepSyncTombstones = true, now = now)
+                        }
+                    }
+                } else {
+                    database.projectDao().hardDeleteProjectTagsByIds(emptySampleProjects)
+                    database.projectDao().hardDeleteByIds(emptySampleProjects)
+                }
             }
 
             val unusedSampleTags = DatabaseSeeder.SAMPLE_TAG_IDS.filter { tId ->
@@ -3003,19 +3080,41 @@ class ThingsRepository @Inject constructor(
                     database.tagDao().countProjectsUsingTag(tId) == 0
             }
             if (unusedSampleTags.isNotEmpty()) {
-                database.tagDao().hardDeleteByIds(unusedSampleTags)
                 val purgedTagSet = unusedSampleTags.toHashSet()
                 val cleanedAreas = database.areaDao().getActiveAreasList().mapNotNull { area ->
                     val existingTagIds = decodeStringList(area.tagIdsJson)
                     val filteredTagIds = existingTagIds.filterNot { it in purgedTagSet }
                     if (filteredTagIds.size != existingTagIds.size) {
-                        area.copy(tagIdsJson = json.encodeToString(filteredTagIds))
+                        area.copy(
+                            tagIdsJson = json.encodeToString(filteredTagIds),
+                            updatedAt = if (keepSyncTombstones) now else area.updatedAt,
+                            isDirty = if (keepSyncTombstones) true else area.isDirty
+                        )
                     } else {
                         null
                     }
                 }
                 if (cleanedAreas.isNotEmpty()) {
                     database.areaDao().upsertAll(cleanedAreas)
+                }
+                if (keepSyncTombstones) {
+                    for (tId in unusedSampleTags) {
+                        val tag = database.tagDao().getById(tId)
+                        if (tag != null && (!tag.isDeleted || tag.title.isNotEmpty())) {
+                            database.tagDao().upsert(
+                                tag.copy(
+                                    title = "",
+                                    shortcut = null,
+                                    parentTagId = null,
+                                    isDeleted = true,
+                                    isDirty = true,
+                                    updatedAt = now
+                                )
+                            )
+                        }
+                    }
+                } else {
+                    database.tagDao().hardDeleteByIds(unusedSampleTags)
                 }
             }
 
@@ -3058,6 +3157,9 @@ class ThingsRepository @Inject constructor(
                 database.attachmentDao().markAllActiveDirty()
                 database.projectTemplateDao().markAllActiveDirty()
             }
+        }
+        if (keepSyncTombstones) {
+            syncRepository.triggerBackgroundSync()
         }
     }
 

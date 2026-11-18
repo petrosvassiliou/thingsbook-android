@@ -59,7 +59,9 @@ import {
   SAMPLE_PROJECT_IDS,
   SAMPLE_TAG_IDS,
   SAMPLE_TASK_IDS,
-  buildLocalizedSeedBundle
+  buildLocalizedSeedBundle,
+  isActiveSampleTask,
+  isPurgeableSampleTask
 } from './seedData.ts';
 import { resolveLanguage } from '../i18n/translations.ts';
 
@@ -604,7 +606,7 @@ export class ThingsLocalDb {
         db.getAll('projectTemplates') as Promise<ProjectTemplate[]>
       ]);
 
-    const hasSampleTasks = tasks.some((t) => !t.isDeleted && SAMPLE_TASK_IDS.has(t.id));
+    const hasSampleTasks = tasks.some((t) => isActiveSampleTask(t));
 
     this.cachedSnapshot = {
       areas: areas.sort((a, b) => a.sortOrder - b.sortOrder),
@@ -2847,9 +2849,13 @@ export class ThingsLocalDb {
     ).length;
   }
 
-  async purgeSampleDataLocally(markRemainingDirtyForMerge = false): Promise<void> {
+  async purgeSampleDataLocally(
+    markRemainingDirtyForMerge = false,
+    emitCloudTombstones = false
+  ): Promise<void> {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
+      const now = Date.now();
       const tx = db.transaction(
         [
           'tasks',
@@ -2864,15 +2870,50 @@ export class ThingsLocalDb {
         'readwrite'
       );
 
+      const preservedSampleTaskIds = new Set<string>();
+      const purgedSampleTaskIds = new Set<string>();
       for (const id of SAMPLE_TASK_IDS) {
-        await tx.objectStore('tasks').delete(id);
+        const existing = (await tx.objectStore('tasks').get(id)) as TaskRecord | undefined;
+        if (!existing) continue;
+        if (!isPurgeableSampleTask(existing)) {
+          preservedSampleTaskIds.add(id);
+          continue;
+        }
+        purgedSampleTaskIds.add(id);
+        if (emitCloudTombstones) {
+          await tx.objectStore('tasks').put({
+            ...existing,
+            title: '',
+            notes: '',
+            reminderTime: null,
+            scheduledStartMinutes: null,
+            durationMinutes: null,
+            recurrenceRule: null,
+            tagIds: [],
+            isDeleted: true,
+            purgedFromTrash: true,
+            updatedAt: Math.max(now, existing.updatedAt + 1),
+            isDirty: true
+          });
+        } else {
+          await tx.objectStore('tasks').delete(id);
+        }
       }
-      for (const id of SAMPLE_CHECKLIST_IDS) {
-        await tx.objectStore('checklist_items').delete(id);
-      }
+
       const allChk = (await tx.objectStore('checklist_items').getAll()) as ChecklistItemRecord[];
       for (const c of allChk) {
-        if (SAMPLE_TASK_IDS.has(c.taskId)) {
+        const isSampleChk = SAMPLE_CHECKLIST_IDS.has(c.id) || purgedSampleTaskIds.has(c.taskId);
+        if (!isSampleChk || preservedSampleTaskIds.has(c.taskId)) continue;
+        if (emitCloudTombstones) {
+          await tx.objectStore('checklist_items').put({
+            ...c,
+            title: '',
+            isDeleted: true,
+            purgedFromTrash: true,
+            updatedAt: Math.max(now, c.updatedAt + 1),
+            isDirty: true
+          });
+        } else {
           await tx.objectStore('checklist_items').delete(c.id);
         }
       }
@@ -2883,12 +2924,42 @@ export class ThingsLocalDb {
 
       for (const hId of SAMPLE_HEADING_IDS) {
         if (!remainingTasks.some((t) => t.headingId === hId)) {
-          await tx.objectStore('headings').delete(hId);
+          const existingHdg = (await tx.objectStore('headings').get(hId)) as HeadingRecord | undefined;
+          if (!existingHdg) continue;
+          if (emitCloudTombstones) {
+            await tx.objectStore('headings').put({
+              ...existingHdg,
+              title: '',
+              isDeleted: true,
+              purgedFromTrash: true,
+              updatedAt: Math.max(now, existingHdg.updatedAt + 1),
+              isDirty: true
+            });
+          } else {
+            await tx.objectStore('headings').delete(hId);
+          }
         }
       }
       for (const pId of SAMPLE_PROJECT_IDS) {
         if (!remainingTasks.some((t) => t.projectId === pId)) {
-          await tx.objectStore('projects').delete(pId);
+          const existingProj = (await tx.objectStore('projects').get(pId)) as ProjectRecord | undefined;
+          if (!existingProj) continue;
+          if (emitCloudTombstones) {
+            await tx.objectStore('projects').put({
+              ...existingProj,
+              title: '',
+              notes: '',
+              tagIds: [],
+              detachedTaskSnapshots: undefined,
+              deletedTaskIds: undefined,
+              isDeleted: true,
+              purgedFromTrash: true,
+              updatedAt: Math.max(now, existingProj.updatedAt + 1),
+              isDirty: true
+            });
+          } else {
+            await tx.objectStore('projects').delete(pId);
+          }
         }
       }
       const remainingProjects = ((await tx.objectStore('projects').getAll()) as ProjectRecord[]).filter(
@@ -2903,7 +2974,21 @@ export class ThingsLocalDb {
         const usedByTask = remainingTasks.some((t) => t.tagIds.includes(tagId));
         const usedByProj = remainingProjects.some((p) => p.tagIds.includes(tagId));
         if (!usedByTask && !usedByProj) {
-          await tx.objectStore('tags').delete(tagId);
+          const existingTag = (await tx.objectStore('tags').get(tagId)) as TagRecord | undefined;
+          if (existingTag) {
+            if (emitCloudTombstones) {
+              await tx.objectStore('tags').put({
+                ...existingTag,
+                title: '',
+                isDeleted: true,
+                purgedFromTrash: true,
+                updatedAt: Math.max(now, existingTag.updatedAt + 1),
+                isDirty: true
+              });
+            } else {
+              await tx.objectStore('tags').delete(tagId);
+            }
+          }
           deletedSampleTagIds.add(tagId);
         }
       }
@@ -2952,6 +3037,9 @@ export class ThingsLocalDb {
 
       await tx.done;
       await this.refreshSnapshot();
+      if (emitCloudTombstones) {
+        this.triggerSync();
+      }
     });
   }
 

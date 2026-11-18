@@ -51,6 +51,42 @@ public enum DatabaseSeeder {
         "tag-quick-005"
     ]
 
+    public static let knownSampleTaskTitles: Set<String> = {
+        let langs = ["en", "de", "fr", "it", "es"]
+        var titles = Set<String>()
+        for lang in langs {
+            let bundle = buildBundle(languageCode: lang)
+            for task in bundle.tasks {
+                titles.insert(normalizeSampleTitle(task.title))
+            }
+        }
+        return titles
+    }()
+
+    public static func normalizeSampleTitle(_ title: String) -> String {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    /// Returns `true` strictly for OPEN, non-deleted pre-installed demo tasks whose title still matches
+    /// one of the localized demo titles (so Logbook entries like `task-completed-008` and user-renamed tasks never trigger the Settings warning).
+    public static func isActiveSampleTask(_ task: TaskItem) -> Bool {
+        guard !task.isDeleted, task.status == .open, sampleTaskIds.contains(task.id) else {
+            return false
+        }
+        let normalized = normalizeSampleTitle(task.title)
+        return !normalized.isEmpty && knownSampleTaskTitles.contains(normalized)
+    }
+
+    /// Returns `true` when `task` is an unmodified pre-installed demo task (including `task-completed-008` in Logbook)
+    /// that is safe to purge without deleting a task the user renamed into their own personal task.
+    public static func isPurgeableSampleTask(_ task: TaskItem) -> Bool {
+        guard sampleTaskIds.contains(task.id) else {
+            return false
+        }
+        let normalized = normalizeSampleTitle(task.title)
+        return normalized.isEmpty || knownSampleTaskTitles.contains(normalized)
+    }
+
     private struct SeedStrings {
         let tagImportant: String
         let tagHome: String

@@ -269,6 +269,19 @@ public final class ThingsbookStore: ObservableObject {
         )
     }
 
+    public func deleteSampleTasks() {
+        let shouldTombstoneInCloud = syncSnapshot.userId != nil && !preferences.localOnlyDbMode
+        try? database.purgeSampleDataLocally(
+            preserveUsedContainers: true,
+            emitCloudTombstones: shouldTombstoneInCloud
+        )
+        preferences.hideSampleSetupBanner = true
+        reloadSnapshot()
+        if shouldTombstoneInCloud {
+            scheduleCloudSyncDebounced()
+        }
+    }
+
     public var todayTotalBadgeCount: Int {
         todayDaytimeTasks.count + thisEveningTasks.count
     }

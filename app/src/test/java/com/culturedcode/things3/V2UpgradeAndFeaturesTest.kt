@@ -11,6 +11,7 @@ import com.culturedcode.things3.data.backup.BackupTaskDto
 import com.culturedcode.things3.data.backup.ThingsBackupCodec
 import com.culturedcode.things3.data.backup.ThingsbookBackupEnvelope
 import com.culturedcode.things3.data.backup.ThingsbookBackupPayload
+import com.culturedcode.things3.data.local.DatabaseSeeder
 import com.culturedcode.things3.data.local.ThingsDatabase
 import com.culturedcode.things3.data.local.entity.ProjectEntity
 import com.culturedcode.things3.data.local.entity.TaskEntity
@@ -759,9 +760,9 @@ class V2UpgradeAndFeaturesTest {
     }
 
     @Test
-    fun `v2_0_0_beta_23 BuildConfig and all 5 localized strings_xml files verify project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(67, BuildConfig.VERSION_CODE)
-        assertEquals("2.0.0-beta.23", BuildConfig.VERSION_NAME)
+    fun `v2_0_0_beta_24 BuildConfig and all 5 localized strings_xml files verify project deletion prompt and topbar_tooltip keys`() {
+        assertEquals(68, BuildConfig.VERSION_CODE)
+        assertEquals("2.0.0-beta.24", BuildConfig.VERSION_NAME)
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -1639,6 +1640,46 @@ class V2UpgradeAndFeaturesTest {
         assertTrue(v20PurgedEntity.isDeleted)
         assertEquals("", v20PurgedEntity.title)
         assertEquals("", v20PurgedEntity.notes)
+    }
+
+    @Test
+    fun `v2_0_0_beta_24 sample task detection ignores Logbook completed items and preserves user_renamed tasks across all 5 languages`() {
+        // 8 distinct localized demo titles per language (40 total across EN/DE/FR/IT/ES)
+        assertEquals(40, DatabaseSeeder.KNOWN_SAMPLE_TASK_TITLES.size)
+
+        val openGermanSample = TaskEntity(
+            id = "task-inbox-001",
+            title = "Zahnarzt-Vorsorgetermin für nächsten Monat vereinbaren",
+            notes = "",
+            status = TaskStatus.OPEN,
+            scheduleState = ScheduleState.INBOX
+        )
+        assertTrue(DatabaseSeeder.isActiveSampleTask(openGermanSample))
+        assertTrue(DatabaseSeeder.isPurgeableSampleTask(openGermanSample))
+
+        // Logbook pre-seeded completed task-completed-008 MUST NOT trigger "Beispielaufgaben noch vorhanden"
+        val logbookCompletedSample = TaskEntity(
+            id = "task-completed-008",
+            title = "Schreibtisch aufgeräumt & Wochenfokus festgelegt",
+            notes = "",
+            status = TaskStatus.COMPLETED,
+            scheduleState = ScheduleState.TODAY
+        )
+        assertFalse(DatabaseSeeder.isActiveSampleTask(logbookCompletedSample))
+        assertTrue(DatabaseSeeder.isPurgeableSampleTask(logbookCompletedSample))
+
+        // Deleted sample task is inactive
+        assertFalse(DatabaseSeeder.isActiveSampleTask(openGermanSample.copy(isDeleted = true)))
+
+        // User-renamed sample task is neither flagged as active demo task nor purgeable during sample cleanup
+        val userRenamedTask = openGermanSample.copy(title = "Steuererklärung für 2026 abgeben")
+        assertFalse(DatabaseSeeder.isActiveSampleTask(userRenamedTask))
+        assertFalse(DatabaseSeeder.isPurgeableSampleTask(userRenamedTask))
+
+        // Regular user-created UUID task with coincidentally similar or custom title is never a sample task
+        val normalUserTask = openGermanSample.copy(id = "user-uuid-999")
+        assertFalse(DatabaseSeeder.isActiveSampleTask(normalUserTask))
+        assertFalse(DatabaseSeeder.isPurgeableSampleTask(normalUserTask))
     }
 }
 

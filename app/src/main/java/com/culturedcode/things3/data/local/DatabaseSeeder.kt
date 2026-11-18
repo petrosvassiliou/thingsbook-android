@@ -150,178 +150,7 @@ class DatabaseSeeder(
         val taskSomeday1Id = "task-someday-007"
         val taskCompleted1Id = "task-completed-008"
 
-        val strings = when (lang) {
-            "de" -> SeedStrings(
-                tagImportant = "Wichtig",
-                tagHome = "Zuhause",
-                tagOffice = "Büro",
-                tagErrands = "Unterwegs",
-                tagQuick = "5 Min.",
-                areaPersonal = "Home",
-                areaWork = "Work",
-                projVacationTitle = "Urlaub & Reiseplanung",
-                projVacationNotes = "Unterkunft, Anreise, Ausflüge und Packliste entspannt im Voraus vorbereiten.",
-                projHomeTitle = "Quartalsziele & Team-Organisation",
-                projHomeNotes = "Wichtige Meilensteine, Präsentationen und wöchentliche Routinen im Blick behalten.",
-                headBooking = "Buchung & Dokumente",
-                headPacking = "Packliste & Vorbereitung",
-                headEveryday = "Wochenfokus & Meilensteine",
-                taskInboxTitle = "Zahnarzt-Vorsorgetermin für nächsten Monat vereinbaren",
-                taskInboxNotes = "Kurz anrufen und Termin vormittags auswählen.",
-                taskToday1Title = "Hotel am Meer & Zugverbindung buchen",
-                taskToday1Notes = "Frühbucher-Option mit kostenloser Stornierung wählen.",
-                taskToday2Title = "Wochenplanung & Projektstatus für das Team vorbereiten",
-                taskToday2Notes = "Kurzpräsentation und nächste Schritte abstimmen.",
-                taskEveningTitle = "Zimmerpflanzen gießen & 30 Min. Buch lesen",
-                taskEveningNotes = "Wiederholt sich automatisch 4 Tage nach Erledigung.",
-                taskUpcomingTitle = "Reisepass-Gültigkeit & Reiseapotheke prüfen",
-                taskUpcomingNotes = "Rechtzeitig vor der Abreise kontrollieren.",
-                taskAnytimeTitle = "Kamera, Ladegeräte & Sonnenbrille bereitlegen",
-                taskAnytimeNotes = "SD-Karte leeren und Powerbank aufladen.",
-                taskSomedayTitle = "Schönste Panorama-Wanderrouten & Restaurants vor Ort sammeln",
-                taskSomedayNotes = "Empfehlungen von Freunden notieren.",
-                taskCompletedTitle = "Schreibtisch aufgeräumt & Wochenfokus festgelegt",
-                check1 = "Reisedaten im Kalender bestätigen",
-                check2 = "Zugsitzplätze am Fenster reservieren",
-                check3 = "Buchungsbestätigung offline speichern"
-            )
-            "it" -> SeedStrings(
-                tagImportant = "Importante",
-                tagHome = "Casa",
-                tagOffice = "Ufficio",
-                tagErrands = "Commissioni",
-                tagQuick = "5 min",
-                areaPersonal = "Home",
-                areaWork = "Work",
-                projVacationTitle = "Vacanze e Viaggio",
-                projVacationNotes = "Alloggio, treni, escursioni e valigia organizzati con calma.",
-                projHomeTitle = "Obiettivi e Organizzazione Lavoro",
-                projHomeNotes = "Traguardi principali, presentazioni e routine settimanali.",
-                headBooking = "Prenotazioni e Documenti",
-                headPacking = "Valigia e Preparativi",
-                headEveryday = "Focus Settimanale",
-                taskInboxTitle = "Prenotare visita di controllo dal dentista",
-                taskInboxNotes = "Scegliere un orario al mattino.",
-                taskToday1Title = "Prenotare hotel sul mare e biglietti del treno",
-                taskToday1Notes = "Verificare l'opzione di cancellazione gratuita.",
-                taskToday2Title = "Preparare piano settimanale e aggiornamento progetti",
-                taskToday2Notes = "Definire i prossimi passi con il team.",
-                taskEveningTitle = "Annaffiare le piante e 30 minuti di lettura",
-                taskEveningNotes = "Si ripete automaticamente 4 giorni dopo il completamento.",
-                taskUpcomingTitle = "Controllare validità documenti e kit da viaggio",
-                taskUpcomingNotes = "Da verificare prima della partenza.",
-                taskAnytimeTitle = "Preparare fotocamera, caricabatterie e occhiali da sole",
-                taskAnytimeNotes = "Ricaricare la powerbank.",
-                taskSomedayTitle = "Raccogliere consigli su ristoranti e sentieri panoramici",
-                taskSomedayNotes = "Idee per le prossime escursioni.",
-                taskCompletedTitle = "Scrivania riordinata e priorità della settimana definite",
-                check1 = "Confermare le date nel calendario",
-                check2 = "Prenotare i posti sul treno",
-                check3 = "Salvare la conferma di prenotazione"
-            )
-            "fr" -> SeedStrings(
-                tagImportant = "Important",
-                tagHome = "Maison",
-                tagOffice = "Bureau",
-                tagErrands = "Courses",
-                tagQuick = "5 min",
-                areaPersonal = "Home",
-                areaWork = "Work",
-                projVacationTitle = "Vacances & Planification de voyage",
-                projVacationNotes = "Hébergement, billets de train, excursions et bagages en toute sérénité.",
-                projHomeTitle = "Objectifs & Organisation Travail",
-                projHomeNotes = "Étapes clés, présentations et routines hebdomadaires.",
-                headBooking = "Réservations & Documents",
-                headPacking = "Bagages & Préparatifs",
-                headEveryday = "Focus de la Semaine",
-                taskInboxTitle = "Prendre rendez-vous chez le dentiste pour le mois prochain",
-                taskInboxNotes = "Privilégier un créneau le matin.",
-                taskToday1Title = "Réserver l'hôtel en bord de mer et les billets de train",
-                taskToday1Notes = "Choisir le tarif avec annulation flexible.",
-                taskToday2Title = "Préparer le point hebdomadaire et les priorités d'équipe",
-                taskToday2Notes = "Synthétiser les prochaines étapes.",
-                taskEveningTitle = "Arroser les plantes & 30 minutes de lecture",
-                taskEveningNotes = "Se répète automatiquement 4 jours après achèvement.",
-                taskUpcomingTitle = "Vérifier les pièces d'identité et la trousse de voyage",
-                taskUpcomingNotes = "Contrôler avant le départ.",
-                taskAnytimeTitle = "Préparer appareil photo, chargeurs et lunettes de soleil",
-                taskAnytimeNotes = "Charger la batterie externe.",
-                taskSomedayTitle = "Noter les bonnes adresses de restaurants et randonnées",
-                taskSomedayNotes = "Inspirations pour les vacances.",
-                taskCompletedTitle = "Bureau rangé et priorités de la semaine définies",
-                check1 = "Confirmer les dates dans le calendrier",
-                check2 = "Réserver les places côté fenêtre",
-                check3 = "Enregistrer la confirmation hors ligne"
-            )
-            "es" -> SeedStrings(
-                tagImportant = "Importante",
-                tagHome = "Casa",
-                tagOffice = "Oficina",
-                tagErrands = "Recados",
-                tagQuick = "5 min",
-                areaPersonal = "Home",
-                areaWork = "Work",
-                projVacationTitle = "Vacaciones y Plan de Viaje",
-                projVacationNotes = "Alojamiento, trenes, rutas y equipaje organizados con tranquilidad.",
-                projHomeTitle = "Objetivos y Organización del Trabajo",
-                projHomeNotes = "Hitos principales, presentaciones y rutinas semanales.",
-                headBooking = "Reservas y Documentos",
-                headPacking = "Equipaje y Preparativos",
-                headEveryday = "Enfoque Semanal",
-                taskInboxTitle = "Pedir cita de revisión con el dentista",
-                taskInboxNotes = "Elegir horario por la mañana.",
-                taskToday1Title = "Reservar hotel junto al mar y billetes de tren",
-                taskToday1Notes = "Seleccionar tarifa con cancelación flexible.",
-                taskToday2Title = "Preparar planificación semanal y estado del proyecto",
-                taskToday2Notes = "Alinear próximos pasos con el equipo.",
-                taskEveningTitle = "Regar las plantas y 30 minutos de lectura",
-                taskEveningNotes = "Se repite automáticamente 4 días después de completarse.",
-                taskUpcomingTitle = "Revisar pasaporte y botiquín de viaje",
-                taskUpcomingNotes = "Comprobar con antelación.",
-                taskAnytimeTitle = "Preparar cámara, cargadores y gafas de sol",
-                taskAnytimeNotes = "Cargar la batería portátil.",
-                taskSomedayTitle = "Guardar recomendaciones de restaurantes y miradores",
-                taskSomedayNotes = "Ideas para próximas escapadas.",
-                taskCompletedTitle = "Escritorio ordenado y objetivos semanales listos",
-                check1 = "Confirmar fechas en el calendario",
-                check2 = "Reservar asientos junto a la ventana",
-                check3 = "Guardar confirmación de reserva"
-            )
-            else -> SeedStrings(
-                tagImportant = "Important",
-                tagHome = "Home",
-                tagOffice = "Office",
-                tagErrands = "Errands",
-                tagQuick = "5 min",
-                areaPersonal = "Home",
-                areaWork = "Work",
-                projVacationTitle = "Summer Vacation & Travel Plan",
-                projVacationNotes = "Hotel, train tickets, local sights, and packing checklist organized calmly.",
-                projHomeTitle = "Quarterly Goals & Team Organization",
-                projHomeNotes = "Key milestones, presentations, and weekly focus routines.",
-                headBooking = "Bookings & Documents",
-                headPacking = "Packing & Preparation",
-                headEveryday = "Weekly Focus & Milestones",
-                taskInboxTitle = "Book dental checkup appointment for next month",
-                taskInboxNotes = "Pick a morning slot.",
-                taskToday1Title = "Book seaside hotel & train tickets",
-                taskToday1Notes = "Choose flexible rate with free cancellation.",
-                taskToday2Title = "Prepare weekly planning & project status update",
-                taskToday2Notes = "Align next steps and priorities.",
-                taskEveningTitle = "Water indoor plants & 30-minute book reading",
-                taskEveningNotes = "Repeats automatically 4 days after completion.",
-                taskUpcomingTitle = "Check passport validity & travel kit",
-                taskUpcomingNotes = "Review ahead of departure.",
-                taskAnytimeTitle = "Pack camera, chargers & sunglasses",
-                taskAnytimeNotes = "Charge power bank and clear SD card.",
-                taskSomedayTitle = "Collect favorite local restaurants & scenic hiking trails",
-                taskSomedayNotes = "Saved ideas for the trip.",
-                taskCompletedTitle = "Tidy desk & set weekly focus priorities",
-                check1 = "Confirm travel dates in calendar",
-                check2 = "Reserve window seats on the train",
-                check3 = "Save booking confirmation offline"
-            )
-        }
+        val strings = seedStringsFor(lang)
 
         val tags = listOf(
             TagEntity(
@@ -777,5 +606,224 @@ class DatabaseSeeder(
             "tag-errands-004",
             "tag-quick-005"
         )
+
+        fun normalizeSampleTitle(title: String): String =
+            title.trim().lowercase(Locale.ROOT)
+
+        val KNOWN_SAMPLE_TASK_TITLES: Set<String> by lazy(LazyThreadSafetyMode.PUBLICATION) {
+            listOf("en", "de", "fr", "it", "es")
+                .flatMap { lang ->
+                    val s = seedStringsFor(lang)
+                    listOf(
+                        s.taskInboxTitle,
+                        s.taskToday1Title,
+                        s.taskToday2Title,
+                        s.taskEveningTitle,
+                        s.taskUpcomingTitle,
+                        s.taskAnytimeTitle,
+                        s.taskSomedayTitle,
+                        s.taskCompletedTitle
+                    )
+                }
+                .map(::normalizeSampleTitle)
+                .filter { it.isNotEmpty() }
+                .toSet()
+        }
+
+        /**
+         * Returns true only when an open, non-deleted task still carries both a seeded sample ID
+         * and one of the localized preinstalled demo titles. Completed/canceled Logbook entries
+         * (such as `task-completed-008`) and sample tasks renamed by the user do not trigger the
+         * "Sample tasks still present" indicator.
+         */
+        fun isActiveSampleTask(task: TaskEntity): Boolean {
+            if (task.isDeleted || task.status != TaskStatus.OPEN) return false
+            if (task.id !in SAMPLE_TASK_IDS) return false
+            val normalized = normalizeSampleTitle(task.title)
+            return normalized.isNotEmpty() && normalized in KNOWN_SAMPLE_TASK_TITLES
+        }
+
+        /**
+         * Returns true when a sample-ID row may be safely deleted during sample cleanup without
+         * losing a task whose title was customized by the user.
+         */
+        fun isPurgeableSampleTask(task: TaskEntity): Boolean {
+            if (task.id !in SAMPLE_TASK_IDS) return false
+            val normalized = normalizeSampleTitle(task.title)
+            return normalized.isEmpty() || normalized in KNOWN_SAMPLE_TASK_TITLES
+        }
+
+        private fun seedStringsFor(lang: String): SeedStrings = when (lang) {
+            "de" -> SeedStrings(
+                tagImportant = "Wichtig",
+                tagHome = "Zuhause",
+                tagOffice = "Büro",
+                tagErrands = "Unterwegs",
+                tagQuick = "5 Min.",
+                areaPersonal = "Home",
+                areaWork = "Work",
+                projVacationTitle = "Urlaub & Reiseplanung",
+                projVacationNotes = "Unterkunft, Anreise, Ausflüge und Packliste entspannt im Voraus vorbereiten.",
+                projHomeTitle = "Quartalsziele & Team-Organisation",
+                projHomeNotes = "Wichtige Meilensteine, Präsentationen und wöchentliche Routinen im Blick behalten.",
+                headBooking = "Buchung & Dokumente",
+                headPacking = "Packliste & Vorbereitung",
+                headEveryday = "Wochenfokus & Meilensteine",
+                taskInboxTitle = "Zahnarzt-Vorsorgetermin für nächsten Monat vereinbaren",
+                taskInboxNotes = "Kurz anrufen und Termin vormittags auswählen.",
+                taskToday1Title = "Hotel am Meer & Zugverbindung buchen",
+                taskToday1Notes = "Frühbucher-Option mit kostenloser Stornierung wählen.",
+                taskToday2Title = "Wochenplanung & Projektstatus für das Team vorbereiten",
+                taskToday2Notes = "Kurzpräsentation und nächste Schritte abstimmen.",
+                taskEveningTitle = "Zimmerpflanzen gießen & 30 Min. Buch lesen",
+                taskEveningNotes = "Wiederholt sich automatisch 4 Tage nach Erledigung.",
+                taskUpcomingTitle = "Reisepass-Gültigkeit & Reiseapotheke prüfen",
+                taskUpcomingNotes = "Rechtzeitig vor der Abreise kontrollieren.",
+                taskAnytimeTitle = "Kamera, Ladegeräte & Sonnenbrille bereitlegen",
+                taskAnytimeNotes = "SD-Karte leeren und Powerbank aufladen.",
+                taskSomedayTitle = "Schönste Panorama-Wanderrouten & Restaurants vor Ort sammeln",
+                taskSomedayNotes = "Empfehlungen von Freunden notieren.",
+                taskCompletedTitle = "Schreibtisch aufgeräumt & Wochenfokus festgelegt",
+                check1 = "Reisedaten im Kalender bestätigen",
+                check2 = "Zugsitzplätze am Fenster reservieren",
+                check3 = "Buchungsbestätigung offline speichern"
+            )
+            "it" -> SeedStrings(
+                tagImportant = "Importante",
+                tagHome = "Casa",
+                tagOffice = "Ufficio",
+                tagErrands = "Commissioni",
+                tagQuick = "5 min",
+                areaPersonal = "Home",
+                areaWork = "Work",
+                projVacationTitle = "Vacanze e Viaggio",
+                projVacationNotes = "Alloggio, treni, escursioni e valigia organizzati con calma.",
+                projHomeTitle = "Obiettivi e Organizzazione Lavoro",
+                projHomeNotes = "Traguardi principali, presentazioni e routine settimanali.",
+                headBooking = "Prenotazioni e Documenti",
+                headPacking = "Valigia e Preparativi",
+                headEveryday = "Focus Settimanale",
+                taskInboxTitle = "Prenotare visita di controllo dal dentista",
+                taskInboxNotes = "Scegliere un orario al mattino.",
+                taskToday1Title = "Prenotare hotel sul mare e biglietti del treno",
+                taskToday1Notes = "Verificare l'opzione di cancellazione gratuita.",
+                taskToday2Title = "Preparare piano settimanale e aggiornamento progetti",
+                taskToday2Notes = "Definire i prossimi passi con il team.",
+                taskEveningTitle = "Annaffiare le piante e 30 minuti di lettura",
+                taskEveningNotes = "Si ripete automaticamente 4 giorni dopo il completamento.",
+                taskUpcomingTitle = "Controllare validità documenti e kit da viaggio",
+                taskUpcomingNotes = "Da verificare prima della partenza.",
+                taskAnytimeTitle = "Preparare fotocamera, caricabatterie e occhiali da sole",
+                taskAnytimeNotes = "Ricaricare la powerbank.",
+                taskSomedayTitle = "Raccogliere consigli su ristoranti e sentieri panoramici",
+                taskSomedayNotes = "Idee per le prossime escursioni.",
+                taskCompletedTitle = "Scrivania riordinata e priorità della settimana definite",
+                check1 = "Confermare le date nel calendario",
+                check2 = "Prenotare i posti sul treno",
+                check3 = "Salvare la conferma di prenotazione"
+            )
+            "fr" -> SeedStrings(
+                tagImportant = "Important",
+                tagHome = "Maison",
+                tagOffice = "Bureau",
+                tagErrands = "Courses",
+                tagQuick = "5 min",
+                areaPersonal = "Home",
+                areaWork = "Work",
+                projVacationTitle = "Vacances & Planification de voyage",
+                projVacationNotes = "Hébergement, billets de train, excursions et bagages en toute sérénité.",
+                projHomeTitle = "Objectifs & Organisation Travail",
+                projHomeNotes = "Étapes clés, présentations et routines hebdomadaires.",
+                headBooking = "Réservations & Documents",
+                headPacking = "Bagages & Préparatifs",
+                headEveryday = "Focus de la Semaine",
+                taskInboxTitle = "Prendre rendez-vous chez le dentiste pour le mois prochain",
+                taskInboxNotes = "Privilégier un créneau le matin.",
+                taskToday1Title = "Réserver l'hôtel en bord de mer et les billets de train",
+                taskToday1Notes = "Choisir le tarif avec annulation flexible.",
+                taskToday2Title = "Préparer le point hebdomadaire et les priorités d'équipe",
+                taskToday2Notes = "Synthétiser les prochaines étapes.",
+                taskEveningTitle = "Arroser les plantes & 30 minutes de lecture",
+                taskEveningNotes = "Se répète automatiquement 4 jours après achèvement.",
+                taskUpcomingTitle = "Vérifier les pièces d'identité et la trousse de voyage",
+                taskUpcomingNotes = "Contrôler avant le départ.",
+                taskAnytimeTitle = "Préparer appareil photo, chargeurs et lunettes de soleil",
+                taskAnytimeNotes = "Charger la batterie externe.",
+                taskSomedayTitle = "Noter les bonnes adresses de restaurants et randonnées",
+                taskSomedayNotes = "Inspirations pour les vacances.",
+                taskCompletedTitle = "Bureau rangé et priorités de la semaine définies",
+                check1 = "Confirmer les dates dans le calendrier",
+                check2 = "Réserver les places côté fenêtre",
+                check3 = "Enregistrer la confirmation hors ligne"
+            )
+            "es" -> SeedStrings(
+                tagImportant = "Importante",
+                tagHome = "Casa",
+                tagOffice = "Oficina",
+                tagErrands = "Recados",
+                tagQuick = "5 min",
+                areaPersonal = "Home",
+                areaWork = "Work",
+                projVacationTitle = "Vacaciones y Plan de Viaje",
+                projVacationNotes = "Alojamiento, trenes, rutas y equipaje organizados con tranquilidad.",
+                projHomeTitle = "Objetivos y Organización del Trabajo",
+                projHomeNotes = "Hitos principales, presentaciones y rutinas semanales.",
+                headBooking = "Reservas y Documentos",
+                headPacking = "Equipaje y Preparativos",
+                headEveryday = "Enfoque Semanal",
+                taskInboxTitle = "Pedir cita de revisión con el dentista",
+                taskInboxNotes = "Elegir horario por la mañana.",
+                taskToday1Title = "Reservar hotel junto al mar y billetes de tren",
+                taskToday1Notes = "Seleccionar tarifa con cancelación flexible.",
+                taskToday2Title = "Preparar planificación semanal y estado del proyecto",
+                taskToday2Notes = "Alinear próximos pasos con el equipo.",
+                taskEveningTitle = "Regar las plantas y 30 minutos de lectura",
+                taskEveningNotes = "Se repite automáticamente 4 días después de completarse.",
+                taskUpcomingTitle = "Revisar pasaporte y botiquín de viaje",
+                taskUpcomingNotes = "Comprobar con antelación.",
+                taskAnytimeTitle = "Preparar cámara, cargadores y gafas de sol",
+                taskAnytimeNotes = "Cargar la batería portátil.",
+                taskSomedayTitle = "Guardar recomendaciones de restaurantes y miradores",
+                taskSomedayNotes = "Ideas para próximas escapadas.",
+                taskCompletedTitle = "Escritorio ordenado y objetivos semanales listos",
+                check1 = "Confirmar fechas en el calendario",
+                check2 = "Reservar asientos junto a la ventana",
+                check3 = "Guardar confirmación de reserva"
+            )
+            else -> SeedStrings(
+                tagImportant = "Important",
+                tagHome = "Home",
+                tagOffice = "Office",
+                tagErrands = "Errands",
+                tagQuick = "5 min",
+                areaPersonal = "Home",
+                areaWork = "Work",
+                projVacationTitle = "Summer Vacation & Travel Plan",
+                projVacationNotes = "Hotel, train tickets, local sights, and packing checklist organized calmly.",
+                projHomeTitle = "Quarterly Goals & Team Organization",
+                projHomeNotes = "Key milestones, presentations, and weekly focus routines.",
+                headBooking = "Bookings & Documents",
+                headPacking = "Packing & Preparation",
+                headEveryday = "Weekly Focus & Milestones",
+                taskInboxTitle = "Book dental checkup appointment for next month",
+                taskInboxNotes = "Pick a morning slot.",
+                taskToday1Title = "Book seaside hotel & train tickets",
+                taskToday1Notes = "Choose flexible rate with free cancellation.",
+                taskToday2Title = "Prepare weekly planning & project status update",
+                taskToday2Notes = "Align next steps and priorities.",
+                taskEveningTitle = "Water indoor plants & 30-minute book reading",
+                taskEveningNotes = "Repeats automatically 4 days after completion.",
+                taskUpcomingTitle = "Check passport validity & travel kit",
+                taskUpcomingNotes = "Review ahead of departure.",
+                taskAnytimeTitle = "Pack camera, chargers & sunglasses",
+                taskAnytimeNotes = "Charge power bank and clear SD card.",
+                taskSomedayTitle = "Collect favorite local restaurants & scenic hiking trails",
+                taskSomedayNotes = "Saved ideas for the trip.",
+                taskCompletedTitle = "Tidy desk & set weekly focus priorities",
+                check1 = "Confirm travel dates in calendar",
+                check2 = "Reserve window seats on the train",
+                check3 = "Save booking confirmation offline"
+            )
+        }
     }
 }

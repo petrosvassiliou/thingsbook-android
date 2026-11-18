@@ -2407,7 +2407,12 @@ export const App: React.FC = () => {
                     <button
                       type="button"
                       className="btn-secondary"
-                      onClick={() => void localDb.purgeSampleDataLocally(false)}
+                      onClick={() =>
+                        void localDb.purgeSampleDataLocally(
+                          false,
+                          Boolean(syncState.userId && !prefs.localOnlyDbMode)
+                        )
+                      }
                     >
                       <Trash2 size={14} />
                       <span>{t.setupBannerDeleteSamplesBtn}</span>

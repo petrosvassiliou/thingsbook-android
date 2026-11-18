@@ -21,12 +21,17 @@ import {
   selectLatestEligibleRelease
 } from '../src/data/pwaUpdater.ts';
 import { resolveMagicPlusDrop } from '../src/domain/magicPlusDrop.ts';
+import {
+  buildLocalizedSeedBundle,
+  isActiveSampleTask,
+  isPurgeableSampleTask
+} from '../src/data/seedData.ts';
 
-test('v2.0.0-beta.23 build metadata constants are bumped to 2.0.0-beta.23 (Build 67)', () => {
-  assert.equal(APP_VERSION, '2.0.0-beta.23');
-  assert.equal(APP_BUILD_CODE, 67);
-  assert.equal(versionFromUtils, '2.0.0-beta.23');
-  assert.equal(buildFromUtils, 67);
+test('v2.0.0-beta.24 build metadata constants are bumped to 2.0.0-beta.24 (Build 68)', () => {
+  assert.equal(APP_VERSION, '2.0.0-beta.24');
+  assert.equal(APP_BUILD_CODE, 68);
+  assert.equal(versionFromUtils, '2.0.0-beta.24');
+  assert.equal(buildFromUtils, 68);
   assert.equal(isPrereleaseVersion(APP_VERSION), true);
   assert.equal(isPrereleaseVersion('1.8.1'), false);
   assert.equal(isPrereleaseVersion('2.0.0'), false);
@@ -458,3 +463,27 @@ test('v2.0.0-beta.19 filterActiveOrUpcomingCalendarEvents removes past timed and
     ['ev-tomorrow']
   );
 });
+
+test('v2.0.0-beta.24 sample task detection ignores Logbook completed items and preserves user-renamed tasks across all 5 languages', () => {
+  for (const lang of ['en', 'de', 'fr', 'it', 'es'] as const) {
+    const bundle = buildLocalizedSeedBundle(lang);
+    assert.equal(bundle.tasks.length, 8);
+    assert.equal(bundle.tasks.some((t) => isActiveSampleTask(t)), true);
+
+    const logbookSample = bundle.tasks.find((t) => t.id === 'task-completed-008')!;
+    assert.equal(logbookSample.status, 'COMPLETED');
+    assert.equal(isActiveSampleTask(logbookSample), false);
+    assert.equal(isPurgeableSampleTask(logbookSample), true);
+
+    // When all 7 open sample tasks are completed or deleted and only Logbook sample task remains, hasSampleTasks is false
+    const allCompleted = bundle.tasks.map((t) => ({ ...t, status: 'COMPLETED' as const }));
+    assert.equal(allCompleted.some((t) => isActiveSampleTask(t)), false);
+
+    // Renaming a sample task into a personal task removes it from both active sample detection and sample purge
+    const inboxSample = bundle.tasks.find((t) => t.id === 'task-inbox-001')!;
+    const renamedTask = { ...inboxSample, title: 'Steuererklärung für 2026 einreichen' };
+    assert.equal(isActiveSampleTask(renamedTask), false);
+    assert.equal(isPurgeableSampleTask(renamedTask), false);
+  }
+});
+

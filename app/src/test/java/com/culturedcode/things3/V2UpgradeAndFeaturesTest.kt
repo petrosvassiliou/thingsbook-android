@@ -761,9 +761,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(74, BuildConfig.VERSION_CODE)
-        assertEquals("2.1.1", BuildConfig.VERSION_NAME)
-        assertFalse("Final 2.1.1 release must not contain pre-release hyphen", BuildConfig.VERSION_NAME.contains("-"))
+        assertEquals(79, BuildConfig.VERSION_CODE)
+        assertEquals("2.1.2", BuildConfig.VERSION_NAME)
+        assertFalse("Final 2.1.2 release must not contain pre-release hyphen", BuildConfig.VERSION_NAME.contains("-"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -821,6 +821,11 @@ class V2UpgradeAndFeaturesTest {
 
             assertTrue(keepTasksBtn!!.isNotBlank())
             assertFalse(keepTasksBtn.contains("%"))
+
+            assertFalse(
+                "v2_beta_channel_desc in $folder/strings.xml must not hardcode version 2.0",
+                keysInFile["v2_beta_channel_desc"].orEmpty().contains("2.0")
+            )
 
             for (tooltipKey in requiredTopbarTooltipKeys) {
                 val tooltipVal = keysInFile[tooltipKey]

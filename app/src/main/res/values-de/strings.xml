@@ -407,9 +407,9 @@
     <string name="quick_find_results_for">%1$d Ergebnisse für „%2$s“</string>
     <string name="quick_find_badge_view">Ansicht</string>
     <string name="quick_find_subtasks_count">☑ %1$d/%2$d Unteraufgaben</string>
-    <string name="v2_beta_badge">2.0 BETA</string>
+    <string name="v2_beta_badge">BETA</string>
     <string name="v2_beta_channel_toggle">Beta-Updates erhalten</string>
-    <string name="v2_beta_channel_desc">2.0-Beta-Vorabversionen bei der Suche nach App-Updates einbeziehen.</string>
+    <string name="v2_beta_channel_desc">Beta-Vorabversionen bei der Suche nach App-Updates einbeziehen.</string>
     <string name="v2_weekly_review_title">Wochenrückblick</string>
     <string name="v2_weekly_review_subtitle">Geführter GTD-Rückblick in 4 Schritten</string>
     <string name="v2_review_step_inbox">1. Eingang leeren</string>

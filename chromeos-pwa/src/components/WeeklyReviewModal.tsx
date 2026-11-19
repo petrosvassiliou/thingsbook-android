@@ -198,30 +198,35 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
     title: string;
     desc: string;
     badgeCount: number;
+    icon: React.ReactNode;
   }> = [
     {
       num: 1,
       title: t.weeklyReviewStep1Title,
       desc: t.weeklyReviewStep1Desc,
-      badgeCount: inboxTasks.length
+      badgeCount: inboxTasks.length,
+      icon: <Inbox size={14} style={{ color: 'var(--things-blue)' }} />
     },
     {
       num: 2,
       title: t.weeklyReviewStep2Title,
       desc: t.weeklyReviewStep2Desc,
-      badgeCount: urgentTasks.length
+      badgeCount: urgentTasks.length,
+      icon: <Sun size={14} style={{ color: 'var(--today-star)' }} />
     },
     {
       num: 3,
       title: t.weeklyReviewStep3Title,
       desc: t.weeklyReviewStep3Desc,
-      badgeCount: stalledProjects.length
+      badgeCount: stalledProjects.length,
+      icon: <ListChecks size={14} style={{ color: 'var(--someday-amber)' }} />
     },
     {
       num: 4,
       title: t.weeklyReviewStep4Title,
       desc: t.weeklyReviewStep4Desc,
-      badgeCount: somedayTasks.length + somedayProjects.length
+      badgeCount: somedayTasks.length + somedayProjects.length,
+      icon: <Cloud size={14} style={{ color: 'var(--logbook-green)' }} />
     }
   ];
 
@@ -314,7 +319,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
           </button>
         </div>
 
-        {/* 4-Step Stepper Tabs */}
+        {/* 4-Step Stepper Cards (2-row layout — full untruncated labels across all 5 languages) */}
         <div className="v2-review-stepper" role="tablist">
           {stepsMeta.map((sm) => {
             const isActive = step === sm.num;
@@ -329,10 +334,13 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                 className={`v2-review-step-tab ${isActive ? 'active' : ''}`}
                 onClick={() => setStep(sm.num)}
               >
+                <div className="v2-review-step-top">
+                  <span className="v2-review-step-icon">{sm.icon}</span>
+                  <span className={`v2-review-step-count ${isClear ? 'clear' : ''}`}>
+                    {isClear ? '✓' : sm.badgeCount}
+                  </span>
+                </div>
                 <span className="v2-review-step-label">{sm.title}</span>
-                <span className={`v2-review-step-count ${isClear ? 'clear' : ''}`}>
-                  {isClear ? '✓' : sm.badgeCount}
-                </span>
               </button>
             );
           })}

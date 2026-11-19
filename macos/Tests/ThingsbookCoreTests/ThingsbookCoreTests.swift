@@ -408,14 +408,14 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-alpha.4")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-alpha.4")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 77)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-alpha.5")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-alpha.5")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 78)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.4", current: "2.1.1", includeBeta: false))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.4", current: "2.1.1", includeBeta: true))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.5", current: "3.0.0-alpha.4"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-alpha.4"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.5", current: "2.1.1", includeBeta: false))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.5", current: "2.1.1", includeBeta: true))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.6", current: "3.0.0-alpha.5"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-alpha.5"))
         XCTAssertEqual(
             FirebaseCloudSyncService.deriveUidWakeTopic(uid: " user-abc-123 "),
             "tb_uid_9d8ecb07e35952112a013d4819b4"

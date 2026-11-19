@@ -262,4 +262,11 @@ test('v3.0.0-alpha.4 sidebar Bento and Micro-Bento cards use 2-row layout and ne
   assert.ok(miniLabelBlock.length > 0, 'Missing .bento-mini-label rule');
   assert.ok(!miniLabelBlock.includes('ellipsis'), '.bento-mini-label must not truncate with ellipsis');
   assert.ok(!miniLabelBlock.includes('nowrap'), '.bento-mini-label must allow full-width wrapping');
+
+  const reviewTabBlock = css.match(/\.v2-review-step-tab\s*\{([^}]*)\}/)?.[1] ?? '';
+  const reviewLabelBlock = css.match(/\.v2-review-step-label\s*\{([^}]*)\}/)?.[1] ?? '';
+  assert.ok(reviewTabBlock.includes('flex-direction: column'), '.v2-review-step-tab must use 2-row column layout');
+  assert.ok(reviewLabelBlock.length > 0, 'Missing .v2-review-step-label rule');
+  assert.ok(!reviewLabelBlock.includes('ellipsis'), '.v2-review-step-label must never truncate with ellipsis');
+  assert.ok(!reviewLabelBlock.includes('nowrap'), '.v2-review-step-label must allow full-width wrapping');
 });

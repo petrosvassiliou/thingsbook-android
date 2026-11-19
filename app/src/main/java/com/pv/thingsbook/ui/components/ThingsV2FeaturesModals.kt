@@ -310,9 +310,9 @@ fun ThingsWeeklyReviewModal(
         ThingsTooltipHostBox {
         Surface(
             modifier = Modifier
-                .widthIn(max = 580.dp)
+                .widthIn(max = 680.dp)
                 .fillMaxWidth(0.95f)
-                .heightIn(max = 700.dp)
+                .heightIn(max = 720.dp)
                 .clip(RoundedCornerShape(22.dp)),
             color = colors.cardSurface,
             shape = RoundedCornerShape(22.dp),
@@ -419,7 +419,8 @@ fun ThingsWeeklyReviewModal(
                                     style = MaterialTheme.typography.labelMedium.copy(
                                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
                                     ),
-                                    color = if (selected) Color.White else colors.primaryText
+                                    color = if (selected) Color.White else colors.primaryText,
+                                    softWrap = false
                                 )
                                 Surface(
                                     shape = RoundedCornerShape(50),
@@ -463,8 +464,7 @@ fun ThingsWeeklyReviewModal(
                                 text = reviewFeedback.orEmpty(),
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                                 color = colors.logbookGreen,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                softWrap = true
                             )
                         }
                     }
@@ -654,8 +654,7 @@ fun ThingsWeeklyReviewModal(
                                                                     text = projectName,
                                                                     style = MaterialTheme.typography.labelSmall,
                                                                     color = colors.secondaryText,
-                                                                    maxLines = 1,
-                                                                    overflow = TextOverflow.Ellipsis
+                                                                    softWrap = true
                                                                 )
                                                             }
                                                         }
@@ -764,8 +763,7 @@ fun ThingsWeeklyReviewModal(
                                                             text = proj.title,
                                                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                                             color = colors.primaryText,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
+                                                            softWrap = true
                                                         )
                                                     }
                                                     if (status.hasNoNextAction) {
@@ -1051,14 +1049,14 @@ fun ThingsWeeklyReviewModal(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 // Bottom Step Navigation
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     if (currentStep > 0) {
                         TextButton(onClick = { currentStep -= 1 }) {
-                            Text("← ${stepTitles[currentStep - 1]}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("← ${stepTitles[currentStep - 1]}", softWrap = true)
                         }
                     } else {
                         Spacer(modifier = Modifier.width(4.dp))
@@ -1073,7 +1071,7 @@ fun ThingsWeeklyReviewModal(
                             colors = ButtonDefaults.buttonColors(containerColor = colors.thingsBlue),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Text("${stepTitles[currentStep + 1]} →", color = Color.White)
+                            Text("${stepTitles[currentStep + 1]} →", color = Color.White, softWrap = true)
                         }
                     } else {
                         Button(

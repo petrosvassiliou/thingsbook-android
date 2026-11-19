@@ -75,7 +75,7 @@ public struct WeeklyReviewSheetView: View {
             Divider()
             footerBar
         }
-        .frame(width: 740, height: 590)
+        .frame(minWidth: 820, idealWidth: 860, maxWidth: 940, minHeight: 580, idealHeight: 620)
         .background(ThingsMacPalette.cardSurface)
     }
 
@@ -97,8 +97,9 @@ public struct WeeklyReviewSheetView: View {
                     .font(.system(size: 12.5))
                     .foregroundStyle(.secondary)
             }
+            .fixedSize(horizontal: true, vertical: false)
 
-            Spacer()
+            Spacer(minLength: 8)
 
             if let feedbackMessage {
                 HStack(spacing: 5) {
@@ -106,7 +107,8 @@ public struct WeeklyReviewSheetView: View {
                         .font(.system(size: 11.5, weight: .semibold))
                     Text(feedbackMessage)
                         .font(.system(size: 11.5, weight: .semibold))
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.86)
                 }
                 .foregroundStyle(ThingsMacPalette.logbookGreen)
                 .padding(.horizontal, 10)
@@ -135,7 +137,7 @@ public struct WeeklyReviewSheetView: View {
     }
 
     private var stepSelectorBar: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
             ForEach(stepSpecs, id: \.index) { spec in
                 let isSelected = currentStep == spec.index
                 Button {
@@ -143,31 +145,47 @@ public struct WeeklyReviewSheetView: View {
                         currentStep = spec.index
                     }
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: spec.icon)
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .foregroundStyle(isSelected ? Color.white : spec.tint)
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(alignment: .center, spacing: 6) {
+                            Image(systemName: spec.icon)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(isSelected ? Color.white : spec.tint)
+
+                            Spacer(minLength: 4)
+
+                            Text("\(spec.count)")
+                                .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                                .padding(.horizontal, 6.5)
+                                .padding(.vertical, 1.5)
+                                .background(
+                                    Capsule(style: .continuous)
+                                        .fill(isSelected ? Color.white.opacity(0.22) : Color.primary.opacity(0.08))
+                                )
+                        }
+
                         Text(spec.title)
-                            .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
-                            .lineLimit(1)
-                        Text("\(spec.count)")
-                            .font(.system(size: 10.5, weight: .bold, design: .rounded))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 1.5)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(isSelected ? Color.white.opacity(0.22) : Color.primary.opacity(0.08))
-                            )
+                            .font(.system(size: 12.5, weight: isSelected ? .bold : .semibold))
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.85)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .foregroundStyle(isSelected ? Color.white : Color.primary)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .fill(isSelected ? ThingsMacPalette.accentBlue : ThingsMacPalette.subtleContainer)
                     )
-                    .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(
+                                isSelected ? ThingsMacPalette.accentBlue.opacity(0.45) : Color.primary.opacity(0.06),
+                                lineWidth: 0.75
+                            )
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
@@ -665,7 +683,9 @@ public struct WeeklyReviewSheetView: View {
                     .font(.system(size: 9))
                 Text(spec.text)
                     .font(.system(size: 10.5, weight: .semibold))
+                    .lineLimit(1)
             }
+            .fixedSize(horizontal: true, vertical: false)
             .foregroundStyle(spec.tint)
             .padding(.horizontal, 6.5)
             .padding(.vertical, 2)
@@ -688,7 +708,9 @@ public struct WeeklyReviewSheetView: View {
                 .font(.system(size: 9.5))
             Text(text)
                 .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
         }
+        .fixedSize(horizontal: true, vertical: false)
         .foregroundStyle(tint)
         .padding(.horizontal, 7)
         .padding(.vertical, 2)
@@ -698,6 +720,8 @@ public struct WeeklyReviewSheetView: View {
     private func reasonPill(_ label: String, color: Color) -> some View {
         Text(label)
             .font(.system(size: 10.5, weight: .semibold))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .foregroundStyle(color)
             .padding(.horizontal, 8)
             .padding(.vertical, 2.5)
@@ -719,7 +743,9 @@ public struct WeeklyReviewSheetView: View {
                 Text(label)
                     .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
                     .foregroundStyle(isSelected ? tint : .primary)
+                    .lineLimit(1)
             }
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 8.5)
             .padding(.vertical, 4.5)
             .background(

@@ -3301,8 +3301,8 @@ final class ThingsbookCoreTests: XCTestCase {
         let archiveBytes = try ThingsBackupCodec.encodeBackup(payload: exportedPayload, password: nil)
         let decodedPayload = try ThingsBackupCodec.decodeBackup(rawBytes: archiveBytes, password: nil)
 
-        XCTAssertEqual(decodedPayload.preferences?.tagSortMode, "most_used")
-        XCTAssertEqual(decodedPayload.preferences?.viewSortMode, "deadline")
+        XCTAssertEqual(decodedPayload.preferences.tagSortMode, "most_used")
+        XCTAssertEqual(decodedPayload.preferences.viewSortMode, "deadline")
 
         let targetDb = try ThingsSQLiteDatabase(path: ":memory:")
         try targetDb.restoreBackupPayload(decodedPayload)

@@ -3,12 +3,11 @@ import {
   Share2,
   X,
   Inbox,
-  Star,
+  Sun,
   Moon,
-  Layers,
-  Archive,
+  Compass,
+  Cloud,
   Folder,
-  Package,
   Timer,
   Pause,
   Play,
@@ -195,7 +194,7 @@ export const QuickShareModal: React.FC<{
     {
       state: 'TODAY',
       label: t.viewToday,
-      icon: <Star size={14} fill="var(--today-star)" style={{ color: 'var(--today-star)' }} />
+      icon: <Sun size={14} style={{ color: 'var(--today-star)' }} />
     },
     {
       state: 'THIS_EVENING',
@@ -205,12 +204,12 @@ export const QuickShareModal: React.FC<{
     {
       state: 'ANYTIME',
       label: t.viewAnytime,
-      icon: <Layers size={14} style={{ color: 'var(--anytime-teal)' }} />
+      icon: <Compass size={14} style={{ color: 'var(--anytime-teal)' }} />
     },
     {
       state: 'SOMEDAY',
       label: t.viewSomeday,
-      icon: <Archive size={14} style={{ color: 'var(--someday-amber)' }} />
+      icon: <Cloud size={14} style={{ color: 'var(--someday-amber)' }} />
     }
   ];
 
@@ -402,7 +401,7 @@ export const QuickShareModal: React.FC<{
                         if (scheduleState === 'INBOX') setScheduleState('ANYTIME');
                       }}
                     >
-                      <Package size={12.5} style={{ color: 'var(--anytime-teal)' }} />
+                      <Folder size={12.5} style={{ color: 'var(--things-blue)' }} />
                       <span>{area.title}</span>
                     </button>
                   );

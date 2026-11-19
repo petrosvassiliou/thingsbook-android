@@ -585,6 +585,10 @@ public final class ThingsbookStore: ObservableObject {
         }
     }
 
+    public func updateHeadingEndDate(_ headingId: String, endDate: Int64?) {
+        try? database.updateHeadingEndDate(headingId, endDate: endDate)
+    }
+
     public func updateMagicPlusDrag(locationInDetail: CGPoint) {
         let isProjectView: Bool
         if case .project = selectedDestination {

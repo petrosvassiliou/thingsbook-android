@@ -95,6 +95,7 @@ data class BackupHeadingDto(
     val id: String,
     val projectId: String,
     val title: String,
+    val endDate: Long? = null,
     val sortOrder: Double = 0.0,
     val isArchived: Boolean = false,
     val createdAt: Long = 0L,

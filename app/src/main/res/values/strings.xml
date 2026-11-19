@@ -18,8 +18,8 @@
     <string name="entity_project">Project</string>
     <string name="entity_projects">Projects</string>
     <string name="entity_new_project">New Project</string>
-    <string name="entity_heading">Heading</string>
-    <string name="entity_new_heading">New Heading</string>
+    <string name="entity_heading">Phase</string>
+    <string name="entity_new_heading">New Phase</string>
     <string name="entity_todo">To-Do</string>
     <string name="entity_todos">To-Dos</string>
     <string name="entity_new_todo">New To-Do</string>
@@ -47,7 +47,7 @@
     <string name="action_done">Done</string>
     <string name="action_save">Save</string>
     <string name="action_cancel">Cancel</string>
-    <string name="action_collapse_heading">Toggle Heading</string>
+    <string name="action_collapse_heading">Toggle Phase</string>
 
     <!-- Quick Find & Search -->
     <string name="quick_find_title">Quick Find</string>
@@ -96,9 +96,9 @@
     <string name="empty_today">No To-Dos scheduled for Today.</string>
     <string name="empty_view">No items in this view right now.</string>
     <string name="magic_plus_drop_todo">Drop to create a new To-Do here</string>
-    <string name="magic_plus_drop_heading">Drop at left edge to create Heading</string>
+    <string name="magic_plus_drop_heading">Drop at left edge to create Phase</string>
     <string name="magic_plus_insertion_label">Release to insert To-Do here</string>
-    <string name="magic_plus_heading_label">Release at left edge to insert Heading</string>
+    <string name="magic_plus_heading_label">Release at left edge to insert Phase</string>
 
     <!-- Gemini AI Features in Thingsbook (Multilingual) -->
     <string name="gemini_hub_title">Thingsbook Intelligence (Gemini)</string>
@@ -109,7 +109,7 @@
     <string name="gemini_brain_dump_action">Extract &amp; Schedule To-Dos</string>
     <string name="gemini_project_architect_title">AI Project Architect</string>
     <string name="gemini_project_architect_placeholder">Describe your project goal (e.g. \"Relocate to Munich in autumn\" or \"Launch Android 120Hz app\")…</string>
-    <string name="gemini_project_architect_action">Generate Project with Headings &amp; To-Dos</string>
+    <string name="gemini_project_architect_action">Generate Project with Phases &amp; To-Dos</string>
     <string name="gemini_logbook_review_title">Thingsbook AI Reflection</string>
     <string name="gemini_logbook_review_action">Summarize Logbook &amp; Suggest Focus</string>
     <string name="gemini_generating">Gemini is thinking calmly…</string>
@@ -170,7 +170,7 @@
     <string name="magic_plus_todo_sub_project">Create in current project</string>
     <string name="magic_plus_todo_sub_area">Create in current area</string>
     <string name="magic_plus_todo_sub_inbox">Create in Inbox</string>
-    <string name="magic_plus_heading_sub">Insert section in project</string>
+    <string name="magic_plus_heading_sub">Insert phase with optional end date</string>
     <string name="magic_plus_project_sub_default">With steps &amp; target date</string>
     <string name="magic_plus_project_sub_area">Project in this area</string>
     <string name="magic_plus_project_sub_another">Create another project</string>
@@ -218,7 +218,7 @@
 
     <!-- Backup & Restore -->
     <string name="backup_section_title">Backup &amp; Restore (Full Backup)</string>
-    <string name="backup_section_desc">Backs up all To-Dos, Areas, Projects, Headings, Tags, checklist items, and settings in a single file (.tbbackup) — optionally with AES-256 password protection — and restores the complete state.</string>
+    <string name="backup_section_desc">Backs up all To-Dos, Areas, Projects, Phases, Tags, checklist items, and settings in a single file (.tbbackup) — optionally with AES-256 password protection — and restores the complete state.</string>
     <string name="backup_create_button">Create Backup</string>
     <string name="backup_restore_button">Restore from File</string>
     <string name="backup_create_dialog_title">Create Full Backup</string>
@@ -242,7 +242,7 @@
     <string name="backup_restore_encrypted_desc">This backup file is encrypted. Please enter the password to restore all To-Dos, Areas, Projects, and Tags.</string>
     <string name="backup_restore_enter_password">Enter backup password</string>
     <string name="backup_preview_header">Backup file contents:</string>
-    <string name="backup_preview_details">• %1$d To-Dos &amp; %2$d checklist items\n• %3$d Projects &amp; %4$d Headings\n• %5$d Areas &amp; %6$d Tags</string>
+    <string name="backup_preview_details">• %1$d To-Dos &amp; %2$d checklist items\n• %3$d Projects &amp; %4$d Phases\n• %5$d Areas &amp; %6$d Tags</string>
     <string name="backup_restore_replace_notice">Note: Full restore replaces all current local entries with the contents of this backup file.</string>
     <string name="backup_restore_confirm_decrypt">Decrypt &amp; Restore Everything</string>
     <string name="backup_restore_confirm_plain">Restore Everything Now</string>
@@ -278,10 +278,10 @@
     <string name="subtask_move_up">Move checklist item up</string>
     <string name="subtask_move_down">Move checklist item down</string>
     <string name="subtask_delete">Delete checklist item</string>
-    <string name="heading_add_task">Add to-do under this heading</string>
+    <string name="heading_add_task">Add to-do under this phase</string>
     <string name="task_drag_handle">Drag to move</string>
     <string name="drop_move_here">Move here</string>
-    <string name="drop_heading_here">Release to insert Heading here</string>
+    <string name="drop_heading_here">Release to insert Phase here</string>
 
     <!-- App Auto-Update & Manual Update Check -->
     <string name="settings_updates_section">App Updates</string>
@@ -315,10 +315,10 @@
     <string name="context_adjust_deadline">Adjust Deadline</string>
     <string name="context_configure_repeat">Configure Repeat</string>
     <string name="context_assign_tags">Assign Tags</string>
-    <string name="repeat_dialog_title">Repeat (Things Mode)</string>
+    <string name="repeat_dialog_title">Repeat Schedule</string>
     <string name="repeat_mode_fixed">Regularly</string>
     <string name="repeat_mode_after">After Completion</string>
-    <string name="repeat_mode_fixed_desc">Fixed calendar schedule (like \"Regularly\" in Things for Mac).</string>
+    <string name="repeat_mode_fixed_desc">Fixed calendar schedule on exact recurring dates.</string>
     <string name="repeat_mode_after_desc">Next To-Do is created only after this one is completed.</string>
     <string name="repeat_unit_days">Days</string>
     <string name="repeat_unit_weeks">Weeks</string>
@@ -368,7 +368,7 @@
     <string name="quick_share_destination_label">Save in:</string>
     <string name="settings_workflow_security_section">Workflow, Today Grouping &amp; App Lock</string>
     <string name="settings_group_today_title">Group Today by Project or Area</string>
-    <string name="settings_group_today_desc">Organize Today tasks under their Project or Area headers (Things 3 style).</string>
+    <string name="settings_group_today_desc">Organize Today tasks under their Project or Area section cards.</string>
     <string name="settings_biometric_lock_title">Biometric / PIN App Lock</string>
     <string name="settings_biometric_lock_desc">Require fingerprint, face unlock, or device PIN when opening Thingsbook (off by default).</string>
     <string name="app_lock_title">Thingsbook is Locked</string>
@@ -431,7 +431,7 @@
     <string name="v2_starter_templates">Starter GTD Templates</string>
     <string name="v2_my_templates">My Saved Templates</string>
     <string name="v2_import_markdown_title">Import Markdown / Outline</string>
-    <string name="v2_import_markdown_hint">Paste Markdown (# Project, ## Heading, - [ ] Task, indented subtasks) or a JSON outline…</string>
+    <string name="v2_import_markdown_hint">Paste Markdown (# Project, ## Phase, - [ ] Task, indented subtasks) or a JSON outline…</string>
     <string name="v2_import_create_project">Create Project from Outline</string>
     <string name="v2_timeblock_title">Timeblock</string>
     <string name="v2_timeblock_start">Start Time</string>
@@ -473,4 +473,8 @@
     <string name="topbar_tooltip_cloud_sync">Cloud Sync</string>
     <string name="topbar_tooltip_settings">Settings</string>
     <string name="action_more_options">More Actions</string>
+    <string name="phase_set_end_date">End Date</string>
+    <string name="phase_clear_end_date">Clear End Date</string>
+    <string name="phase_ends_on">Ends %1$s</string>
+    <string name="phase_milestone_badge">Phase Milestone</string>
 </resources>

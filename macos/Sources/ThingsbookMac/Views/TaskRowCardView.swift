@@ -546,7 +546,7 @@ public struct TaskRowCardView: View {
                         title: whenSummaryLabel ?? store.tr("action_when"),
                         systemImage: latestTask.scheduleState == .thisEvening
                             ? "moon.stars.fill"
-                            : (latestTask.scheduleState == .today ? "star.fill" : "calendar"),
+                            : (latestTask.scheduleState == .today ? "sun.max.fill" : "calendar"),
                         isActive: whenSummaryLabel != nil || latestTask.reminderTime != nil,
                         activeTint: latestTask.scheduleState == .thisEvening ? ThingsMacPalette.eveningPurple : ThingsMacPalette.accentBlue,
                         helpText: whenButtonTooltip

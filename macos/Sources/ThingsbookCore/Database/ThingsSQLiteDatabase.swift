@@ -66,6 +66,7 @@ public struct RemoteDeltaBatch: Sendable {
     public var areas: [Area]
     public var projects: [Project]
     public var headings: [Heading]
+    public var headingOmittedEndDateIds: Set<String>
     public var tasks: [TaskItem]
     public var taskTagIdsByTaskId: [String: [String]]
     public var taskOmittedTimeblockTaskIds: Set<String>
@@ -78,6 +79,7 @@ public struct RemoteDeltaBatch: Sendable {
         areas: [Area] = [],
         projects: [Project] = [],
         headings: [Heading] = [],
+        headingOmittedEndDateIds: Set<String> = [],
         tasks: [TaskItem] = [],
         taskTagIdsByTaskId: [String: [String]] = [:],
         taskOmittedTimeblockTaskIds: Set<String> = [],
@@ -89,6 +91,7 @@ public struct RemoteDeltaBatch: Sendable {
         self.areas = areas
         self.projects = projects
         self.headings = headings
+        self.headingOmittedEndDateIds = headingOmittedEndDateIds
         self.tasks = tasks
         self.taskTagIdsByTaskId = taskTagIdsByTaskId
         self.taskOmittedTimeblockTaskIds = taskOmittedTimeblockTaskIds
@@ -273,6 +276,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             title TEXT NOT NULL,
             sort_order REAL NOT NULL DEFAULT 0.0,
             is_archived INTEGER NOT NULL DEFAULT 0,
+            end_date INTEGER DEFAULT NULL,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             is_deleted INTEGER NOT NULL DEFAULT 0,
@@ -402,6 +406,9 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         try? execLocked("ALTER TABLE tasks ADD COLUMN scheduled_start_minutes INTEGER DEFAULT NULL;")
         try? execLocked("ALTER TABLE tasks ADD COLUMN duration_minutes INTEGER DEFAULT NULL;")
         try? execLocked("ALTER TABLE projects ADD COLUMN last_reviewed_at INTEGER DEFAULT NULL;")
+
+        // Safe non-destructive v3.0.0 column migration for project Phase end dates
+        try? execLocked("ALTER TABLE headings ADD COLUMN end_date INTEGER DEFAULT NULL;")
 
         try installFts5Locked()
     }
@@ -2211,6 +2218,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         title: h.title,
                         sortOrder: h.sortOrder,
                         isArchived: h.isArchived,
+                        endDate: h.endDate,
                         createdAt: now,
                         updatedAt: now
                     )
@@ -2393,9 +2401,12 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 }
                 .map(toSpec)
 
+            let todayDay = DateEpochConverter.epochDay(forMillis: now)
             let headingSpecs = allHeadings.map { h in
-                TemplateHeadingSpec(
+                let offset = h.endDate.map { max(0, Int(DateEpochConverter.epochDay(forMillis: $0) - todayDay)) }
+                return TemplateHeadingSpec(
                     title: h.title,
+                    endDateDayOffset: offset,
                     tasks: openTasks.filter { $0.headingId == h.id }.map(toSpec)
                 )
             }
@@ -2556,6 +2567,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 try insertTaskSpec(spec, headingId: nil)
             }
 
+            let baseSod = Calendar.current.startOfDay(for: Date(timeIntervalSince1970: Double(now) / 1000.0))
             for (hIdx, hSpec) in blueprint.headings.enumerated() {
                 let cleanHTitle = hSpec.title.trimmingCharacters(in: .whitespacesAndNewlines)
                 let hid: String?
@@ -2563,11 +2575,16 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     hid = nil
                 } else {
                     let newHid = UUID().uuidString
+                    let phaseEndDate: Int64? = hSpec.endDateDayOffset.flatMap { offset in
+                        Calendar.current.date(byAdding: .day, value: max(0, offset), to: baseSod)
+                            .map { DateEpochConverter.startOfDayMillis(for: $0) }
+                    }
                     let heading = Heading(
                         id: newHid,
                         projectId: newProjId,
                         title: cleanHTitle,
                         sortOrder: Double((hIdx + 1) * 1000),
+                        endDate: phaseEndDate,
                         createdAt: now,
                         updatedAt: now
                     )
@@ -2758,7 +2775,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     }
 
     @discardableResult
-    public func createHeading(projectId: String, title: String, sortOrder: Double? = nil) throws -> Heading {
+    public func createHeading(projectId: String, title: String, sortOrder: Double? = nil, endDate: Int64? = nil) throws -> Heading {
         let heading = try queue.sync { () -> Heading in
             let now = nowMillis()
             let resolvedOrder: Double
@@ -2774,6 +2791,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 projectId: projectId,
                 title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                 sortOrder: resolvedOrder,
+                endDate: endDate,
                 createdAt: now,
                 updatedAt: now
             )
@@ -2791,6 +2809,20 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             try upsertHeadingLocked(copy, isDirty: true)
         }
         notifyMutation()
+    }
+
+    public func updateHeadingEndDate(_ headingId: String, endDate: Int64?) throws {
+        var didMutate = false
+        try queue.sync {
+            guard var existing = try fetchHeadingsWhereLocked("id = '\(headingId.replacingOccurrences(of: "'", with: "''"))' AND is_deleted = 0").first else { return }
+            existing.endDate = endDate
+            existing.updatedAt = nowMillis()
+            try upsertHeadingLocked(existing, isDirty: true)
+            didMutate = true
+        }
+        if didMutate {
+            notifyMutation()
+        }
     }
 
     public func deleteHeading(_ headingId: String) throws {
@@ -3234,6 +3266,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     title: $0.title,
                     sortOrder: $0.sortOrder,
                     isArchived: $0.isArchived,
+                    endDate: $0.endDate,
                     createdAt: $0.createdAt,
                     updatedAt: $0.updatedAt
                 )
@@ -3473,6 +3506,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         title: dto.title,
                         sortOrder: dto.sortOrder,
                         isArchived: dto.isArchived,
+                        endDate: dto.endDate,
                         createdAt: dto.createdAt,
                         updatedAt: dto.updatedAt
                     )
@@ -3814,6 +3848,13 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     if shouldApplyRemoteLocked(table: "headings", id: remote.id, remoteUpdatedAt: remote.updatedAt) {
                         var toSave = remote
                         toSave.updatedAt = min(remote.updatedAt, maxAllowed)
+                        if !toSave.isDeleted && deltas.headingOmittedEndDateIds.contains(remote.id) {
+                            let safeId = remote.id.replacingOccurrences(of: "'", with: "''")
+                            if let existingLocal = try? fetchHeadingsWhereLocked("id = '\(safeId)'").first,
+                               !existingLocal.isDeleted {
+                                toSave.endDate = existingLocal.endDate
+                            }
+                        }
                         try upsertHeadingLocked(toSave, isDirty: false)
                         appliedCount += 1
                         if toSave.isDeleted {
@@ -4838,13 +4879,14 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
     private func upsertHeadingLocked(_ heading: Heading, isDirty: Bool) throws {
         let stmt = try prepareLocked("""
-            INSERT INTO headings (id, project_id, title, sort_order, is_archived, created_at, updated_at, is_deleted, is_dirty)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO headings (id, project_id, title, sort_order, is_archived, end_date, created_at, updated_at, is_deleted, is_dirty)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 project_id = excluded.project_id,
                 title = excluded.title,
                 sort_order = excluded.sort_order,
                 is_archived = excluded.is_archived,
+                end_date = excluded.end_date,
                 updated_at = excluded.updated_at,
                 is_deleted = excluded.is_deleted,
                 is_dirty = excluded.is_dirty;
@@ -4855,10 +4897,11 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         bindText(stmt, 3, heading.title)
         sqlite3_bind_double(stmt, 4, heading.sortOrder)
         bindBool(stmt, 5, heading.isArchived)
-        bindInt64(stmt, 6, heading.createdAt)
-        bindInt64(stmt, 7, heading.updatedAt)
-        bindBool(stmt, 8, heading.isDeleted)
-        bindBool(stmt, 9, isDirty)
+        bindInt64(stmt, 6, heading.endDate)
+        bindInt64(stmt, 7, heading.createdAt)
+        bindInt64(stmt, 8, heading.updatedAt)
+        bindBool(stmt, 9, heading.isDeleted)
+        bindBool(stmt, 10, isDirty)
         if sqlite3_step(stmt) != SQLITE_DONE {
             throw ThingsDatabaseError.sqlError(currentErrorMessageLocked())
         }
@@ -5176,7 +5219,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
     private func fetchHeadingsWhereLocked(_ whereClause: String) throws -> [Heading] {
         let stmt = try prepareLocked("""
-            SELECT id, project_id, title, sort_order, is_archived, created_at, updated_at, is_deleted
+            SELECT id, project_id, title, sort_order, is_archived, created_at, updated_at, is_deleted, end_date
             FROM headings WHERE \(whereClause) ORDER BY sort_order ASC;
         """)
         defer { sqlite3_finalize(stmt) }
@@ -5189,6 +5232,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     title: colString(stmt, 2) ?? "",
                     sortOrder: sqlite3_column_double(stmt, 3),
                     isArchived: colBool(stmt, 4),
+                    endDate: colInt64(stmt, 8),
                     createdAt: sqlite3_column_int64(stmt, 5),
                     updatedAt: sqlite3_column_int64(stmt, 6),
                     isDeleted: colBool(stmt, 7)

@@ -352,6 +352,10 @@ export interface TranslationStrings {
   topbarTooltipLanguage: string;
   topbarTooltipCloudSync: string;
   topbarTooltipSettings: string;
+  phaseSetEndDate: string;
+  phaseClearEndDate: string;
+  phaseEndsOn: (date: string) => string;
+  phaseMilestoneBadge: string;
 }
 
 export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
@@ -370,8 +374,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     entityProject: 'Project',
     entityProjects: 'Projects',
     entityNewProject: 'New Project',
-    entityHeading: 'Heading',
-    entityNewHeading: 'New Heading',
+    entityHeading: 'Phase',
+    entityNewHeading: 'New Phase',
     entityTodo: 'To-Do',
     entityTodos: 'To-Dos',
     entityNewTodo: 'New To-Do',
@@ -483,7 +487,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     statTotalRecords: '🗄️ Total Records',
     backupSectionTitle: 'Backup & Restore (.tbbackup)',
     backupSectionDesc:
-      'Full backup of all To-Dos, Areas, Projects, Headings, Tags & Checklists — 100% compatible with Android Thingsbook and optional AES-256-GCM password encryption.',
+      'Full backup of all To-Dos, Areas, Projects, Phases, Tags & Checklists — 100% compatible with Android Thingsbook and optional AES-256-GCM password encryption.',
     backupCreateBtn: 'Create Backup',
     backupRestoreBtn: 'Restore from File',
     backupPasswordProtect: 'Protect with AES-256-GCM password',
@@ -493,7 +497,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     backupShareBtn: 'Share Backup',
     backupRestoreConfirm: 'Restore Everything Now',
     backupOverwriteWarning:
-      'Restoring replaces all current local To-Dos, Projects, Areas, Headings, and Tags on this device.',
+      'Restoring replaces all current local To-Dos, Projects, Areas, Phases, and Tags on this device.',
     backupSyncAfterRestore: 'Push restored items to Cloud Sync immediately',
     csvSectionTitle: 'Import & Export (CSV)',
     csvSectionDesc:
@@ -513,7 +517,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     geminiArchitectTitle: 'AI Project Architect',
     geminiArchitectPlaceholder:
       'Describe your project goal (e.g. "Relocate to Munich in autumn" or "Plan summer trip to Italy")…',
-    geminiArchitectAction: 'Generate Project with Headings & To-Dos',
+    geminiArchitectAction: 'Generate Project with Phases & To-Dos',
     geminiReflectionTitle: 'Thingsbook AI Reflection',
     geminiReflectionAction: 'Generate Review',
     geminiGenerating: 'Gemini is thinking calmly…',
@@ -551,8 +555,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     notificationsTestBtn: 'Send Test Notification',
     shortcutCancelHint: 'Tip: Right-Click or Alt+Click a checkbox to cancel or reopen a To-Do',
     magicTodoSubDefault: 'Create in current view',
-    magicHeadingSub: 'Add a section heading inside this project',
-    magicProjectSub: 'Multi-step goal with progress ring & headings',
+    magicHeadingSub: 'Add a phase with optional end date inside this project',
+    magicProjectSub: 'Multi-step goal with linear progress & phases',
     magicAreaSub: 'Group related projects & responsibilities',
     ctxSelect: 'Select To-Do (Multi-select)',
     ctxDeselect: 'Clear selection',
@@ -563,8 +567,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     multiSelectCount: (n) => `${n} selected`,
     multiSelectSelectAllTooltip: 'Select all in this view (Ctrl+A)',
     multiSelectClearTooltip: 'Clear selection (Esc)',
-    repeatDialogTitle: 'Repeat (Things Mode)',
-    repeatModeFixedDesc: 'Fixed calendar schedule (like "Regularly" in Things for Mac).',
+    repeatDialogTitle: 'Repeat Schedule',
+    repeatModeFixedDesc: 'Fixed calendar schedule on exact recurring dates.',
     repeatModeAfterDesc: 'Next To-Do is created only after this one is completed.',
     repeatWeekdaysLabel: 'On these weekdays:',
     repeatMonthDayLabel: 'Day of month:',
@@ -617,7 +621,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     quickShareDestinationLabel: 'Save in:',
     settingsWorkflowSecuritySection: 'Workflow, Today Grouping & App Lock',
     settingsGroupTodayTitle: 'Group Today by Project or Area',
-    settingsGroupTodayDesc: 'Organize Today tasks under their Project or Area headers (Things 3 style).',
+    settingsGroupTodayDesc: 'Organize Today tasks under their Project or Area section cards.',
     settingsBiometricLockTitle: 'Biometric / PIN App Lock',
     settingsBiometricLockDesc:
       'Require fingerprint, face unlock, or device PIN when opening Thingsbook (off by default).',
@@ -695,7 +699,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     starterTplSprintTitle: 'Weekly Sprint',
     starterTplSprintDesc: 'Focused 5-day execution sprint with top outcomes, deep work, and retro.',
     templatesImportLabel:
-      'Paste Markdown (# Project, ## Heading, - [ ] Task, indented - [ ] Subtask) or JSON outline:',
+      'Paste Markdown (# Project, ## Phase, - [ ] Task, indented - [ ] Subtask) or JSON outline:',
     templatesImportSampleBtn: 'Load Sample Outline',
     templatesImportCreateBtn: 'Create Project from Outline',
     templatesTargetAreaLabel: 'Assign to Area',
@@ -724,7 +728,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     topbarTooltipNotifications: 'Notifications',
     topbarTooltipLanguage: 'Language',
     topbarTooltipCloudSync: 'Cloud Sync',
-    topbarTooltipSettings: 'Settings'
+    topbarTooltipSettings: 'Settings',
+    phaseSetEndDate: 'End Date',
+    phaseClearEndDate: 'Clear End Date',
+    phaseEndsOn: (d) => `Ends ${d}`,
+    phaseMilestoneBadge: 'Phase Milestone'
   },
   de: {
     appName: 'Thingsbook',
@@ -741,8 +749,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     entityProject: 'Projekt',
     entityProjects: 'Projekte',
     entityNewProject: 'Neues Projekt',
-    entityHeading: 'Überschrift',
-    entityNewHeading: 'Neue Überschrift',
+    entityHeading: 'Phase',
+    entityNewHeading: 'Neue Phase',
     entityTodo: 'Aufgabe',
     entityTodos: 'Aufgaben',
     entityNewTodo: 'Neue Aufgabe',
@@ -854,7 +862,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     statTotalRecords: '🗄️ Einträge gesamt',
     backupSectionTitle: 'Backup & Restore (.tbbackup)',
     backupSectionDesc:
-      'Sichert alle Aufgaben, Bereiche, Projekte, Überschriften, Tags & Checklisten in einer .tbbackup-Datei — 100 % kompatibel mit Android Thingsbook inkl. AES-256-GCM Passwortschutz.',
+      'Sichert alle Aufgaben, Bereiche, Projekte, Phasen, Tags & Checklisten in einer .tbbackup-Datei — 100 % kompatibel mit Android Thingsbook inkl. AES-256-GCM Passwortschutz.',
     backupCreateBtn: 'Backup erstellen',
     backupRestoreBtn: 'Restore aus Datei',
     backupPasswordProtect: 'Mit AES-256-GCM Passwort schützen',
@@ -884,7 +892,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     geminiArchitectTitle: 'KI-Projekt-Architekt',
     geminiArchitectPlaceholder:
       'Beschreibe dein Ziel (z. B. „Umzug nach München im Herbst“ oder „Sommerurlaub in Italien planen“)…',
-    geminiArchitectAction: 'Projekt mit Überschriften & Aufgaben erstellen',
+    geminiArchitectAction: 'Projekt mit Phasen & Aufgaben erstellen',
     geminiReflectionTitle: 'Thingsbook KI-Rückblick',
     geminiReflectionAction: 'Rückblick erstellen',
     geminiGenerating: 'Gemini strukturiert deine Gedanken…',
@@ -922,8 +930,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     notificationsTestBtn: 'Test-Benachrichtigung senden',
     shortcutCancelHint: 'Tipp: Rechtsklick oder Alt+Klick auf eine Checkbox öffnet das Statusmenü',
     magicTodoSubDefault: 'In aktueller Ansicht erstellen',
-    magicHeadingSub: 'Abschnitts-Überschrift im Projekt anlegen',
-    magicProjectSub: 'Mehrstufiges Ziel mit Fortschrittsring & Abschnitten',
+    magicHeadingSub: 'Phase mit optionalem Enddatum im Projekt anlegen',
+    magicProjectSub: 'Mehrstufiges Ziel mit Fortschrittsbalken & Phasen',
     magicAreaSub: 'Verwandte Projekte & Verantwortungsbereiche bündeln',
     ctxSelect: 'Aufgabe auswählen (Mehrfachauswahl)',
     ctxDeselect: 'Auswahl aufheben',
@@ -934,8 +942,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     multiSelectCount: (n) => `${n} ausgewählt`,
     multiSelectSelectAllTooltip: 'Alle Aufgaben in dieser Ansicht auswählen (Strg+A)',
     multiSelectClearTooltip: 'Auswahl aufheben (Esc)',
-    repeatDialogTitle: 'Wiederholen (Things-Modus)',
-    repeatModeFixedDesc: 'Fester Kalender-Rhythmus (wie „Regularly“ in Things for Mac).',
+    repeatDialogTitle: 'Wiederholung planen',
+    repeatModeFixedDesc: 'Fester Kalender-Rhythmus an wiederkehrenden Terminen.',
     repeatModeAfterDesc: 'Nächste Aufgabe wird erst erstellt, nachdem diese abgehakt wurde.',
     repeatWeekdaysLabel: 'An diesen Wochentagen:',
     repeatMonthDayLabel: 'Tag des Monats:',
@@ -990,7 +998,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     settingsWorkflowSecuritySection: 'Workflow, Heute-Gruppierung & App-Sperre',
     settingsGroupTodayTitle: '„Heute“ nach Projekt oder Bereich gruppieren',
     settingsGroupTodayDesc:
-      'Aufgaben in „Heute“ übersichtlich unter ihren Projekt- oder Bereichsüberschriften gruppieren (Things-3-Stil).',
+      'Aufgaben in „Heute“ übersichtlich unter ihren Projekt- oder Bereichskarten gruppieren.',
     settingsBiometricLockTitle: 'Biometrische App-Sperre (Fingerabdruck / PIN)',
     settingsBiometricLockDesc:
       'Beim Öffnen von Thingsbook Fingerabdruck, Gesichtserkennung oder Geräte-PIN anfordern (standardmäßig deaktiviert).',
@@ -1069,7 +1077,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     starterTplSprintTitle: 'Wochen-Sprint',
     starterTplSprintDesc: 'Fokussierter 5-Tage-Sprint mit Top-Zielen, Deep Work und Retrospektive.',
     templatesImportLabel:
-      'Markdown (# Projekt, ## Überschrift, - [ ] Aufgabe, eingerückt - [ ] Unteraufgabe) oder JSON einfügen:',
+      'Markdown (# Projekt, ## Phase, - [ ] Aufgabe, eingerückt - [ ] Unteraufgabe) oder JSON einfügen:',
     templatesImportSampleBtn: 'Beispiel laden',
     templatesImportCreateBtn: 'Projekt aus Gliederung erstellen',
     templatesTargetAreaLabel: 'Bereich zuweisen',
@@ -1098,7 +1106,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     topbarTooltipNotifications: 'Benachrichtigungen',
     topbarTooltipLanguage: 'Sprache',
     topbarTooltipCloudSync: 'Cloud-Sync',
-    topbarTooltipSettings: 'Einstellungen'
+    topbarTooltipSettings: 'Einstellungen',
+    phaseSetEndDate: 'Enddatum',
+    phaseClearEndDate: 'Enddatum löschen',
+    phaseEndsOn: (d) => `Endet ${d}`,
+    phaseMilestoneBadge: 'Phasen-Meilenstein'
   },
   fr: {
     appName: 'Thingsbook',
@@ -1115,8 +1127,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     entityProject: 'Projet',
     entityProjects: 'Projets',
     entityNewProject: 'Nouveau projet',
-    entityHeading: 'Titre',
-    entityNewHeading: 'Nouveau titre',
+    entityHeading: 'Phase',
+    entityNewHeading: 'Nouvelle phase',
     entityTodo: 'Tâche',
     entityTodos: 'Tâches',
     entityNewTodo: 'Nouvelle tâche',
@@ -1255,7 +1267,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     geminiBrainDumpAction: 'Extraire et planifier les tâches',
     geminiArchitectTitle: 'Architecte de projet IA',
     geminiArchitectPlaceholder: 'Décrivez votre objectif de projet…',
-    geminiArchitectAction: 'Générer le projet avec titres et tâches',
+    geminiArchitectAction: 'Générer le projet avec phases et tâches',
     geminiReflectionTitle: 'Bilan IA du Journal',
     geminiReflectionAction: 'Générer le bilan',
     geminiGenerating: 'Gemini structure vos idées avec calme…',
@@ -1293,8 +1305,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     notificationsTestBtn: 'Notification test',
     shortcutCancelHint: 'Astuce : Clic droit ou Alt+Clic sur une case ouvre le menu de statut',
     magicTodoSubDefault: 'Créer dans la vue actuelle',
-    magicHeadingSub: 'Ajouter une section dans ce projet',
-    magicProjectSub: 'Objectif à étapes avec anneau de progression',
+    magicHeadingSub: 'Ajouter une phase avec date de fin optionnelle',
+    magicProjectSub: 'Objectif à étapes avec barre de progression et phases',
     magicAreaSub: 'Regrouper projets et responsabilités',
     ctxSelect: 'Sélectionner la tâche (Sélection multiple)',
     ctxDeselect: 'Effacer la sélection',
@@ -1305,8 +1317,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     multiSelectCount: (n) => `${n} sélectionnée(s)`,
     multiSelectSelectAllTooltip: 'Tout sélectionner dans cette vue (Ctrl+A)',
     multiSelectClearTooltip: 'Effacer la sélection (Échap)',
-    repeatDialogTitle: 'Répéter (Mode Things)',
-    repeatModeFixedDesc: 'Rythme fixe du calendrier (comme « Regularly » dans Things pour Mac).',
+    repeatDialogTitle: 'Planifier la répétition',
+    repeatModeFixedDesc: 'Rythme fixe du calendrier aux dates prévues.',
     repeatModeAfterDesc: 'La prochaine tâche est créée uniquement une fois celle-ci terminée.',
     repeatWeekdaysLabel: 'Ces jours de la semaine :',
     repeatMonthDayLabel: 'Jour du mois :',
@@ -1361,7 +1373,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     settingsWorkflowSecuritySection: 'Flux de travail, Regroupement & Verrouillage',
     settingsGroupTodayTitle: "Regrouper Aujourd'hui par projet ou domaine",
     settingsGroupTodayDesc:
-      "Organiser les tâches d'Aujourd'hui sous leurs en-têtes de projet ou de domaine (style Things 3).",
+      "Organiser les tâches d'Aujourd'hui sous leurs cartes de projet ou de domaine.",
     settingsBiometricLockTitle: 'Verrouillage biométrique / PIN',
     settingsBiometricLockDesc:
       "Exiger l'empreinte digitale, la reconnaissance faciale ou le code PIN à l'ouverture (désactivé par défaut).",
@@ -1441,7 +1453,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     starterTplSprintTitle: 'Sprint hebdomadaire',
     starterTplSprintDesc: 'Sprint ciblé de 5 jours avec objectifs clés, travail profond et rétro.',
     templatesImportLabel:
-      'Collez un plan Markdown (# Projet, ## Section, - [ ] Tâche, indenté - [ ] Sous-tâche) ou JSON :',
+      'Collez un plan Markdown (# Projet, ## Phase, - [ ] Tâche, indenté - [ ] Sous-tâche) ou JSON :',
     templatesImportSampleBtn: 'Charger un exemple',
     templatesImportCreateBtn: 'Créer le projet depuis le plan',
     templatesTargetAreaLabel: 'Attribuer au domaine',
@@ -1470,7 +1482,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     topbarTooltipNotifications: 'Notifications',
     topbarTooltipLanguage: 'Langue',
     topbarTooltipCloudSync: 'Synchronisation Cloud',
-    topbarTooltipSettings: 'Paramètres'
+    topbarTooltipSettings: 'Paramètres',
+    phaseSetEndDate: 'Date de fin',
+    phaseClearEndDate: 'Effacer la date de fin',
+    phaseEndsOn: (d) => `Fin le ${d}`,
+    phaseMilestoneBadge: 'Jalon de phase'
   },
   it: {
     appName: 'Thingsbook',
@@ -1487,8 +1503,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     entityProject: 'Progetto',
     entityProjects: 'Progetti',
     entityNewProject: 'Nuovo progetto',
-    entityHeading: 'Intestazione',
-    entityNewHeading: 'Nuova intestazione',
+    entityHeading: 'Fase',
+    entityNewHeading: 'Nuova fase',
     entityTodo: 'Attività',
     entityTodos: 'Attività',
     entityNewTodo: 'Nuova attività',
@@ -1627,7 +1643,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     geminiBrainDumpAction: 'Estrai e pianifica attività',
     geminiArchitectTitle: 'Architetto di progetti IA',
     geminiArchitectPlaceholder: 'Descrivi il tuo obiettivo…',
-    geminiArchitectAction: 'Genera progetto con intestazioni e attività',
+    geminiArchitectAction: 'Genera progetto con fasi e attività',
     geminiReflectionTitle: 'Riflessione IA del Registro',
     geminiReflectionAction: 'Genera riepilogo',
     geminiGenerating: 'Gemini sta elaborando con calma…',
@@ -1665,8 +1681,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     notificationsTestBtn: 'Invia notifica di prova',
     shortcutCancelHint: 'Suggerimento: Clic destro o Alt+Clic sulla casella apre il menu stato',
     magicTodoSubDefault: 'Crea nella vista attuale',
-    magicHeadingSub: 'Aggiungi una sezione in questo progetto',
-    magicProjectSub: 'Obiettivo strutturato con progresso e sezioni',
+    magicHeadingSub: 'Aggiungi una fase con data di fine opzionale',
+    magicProjectSub: 'Obiettivo strutturato con avanzamento e fasi',
     magicAreaSub: 'Raggruppa progetti e responsabilità correlate',
     ctxSelect: 'Seleziona attività (Selezione multipla)',
     ctxDeselect: 'Annulla selezione',
@@ -1677,8 +1693,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     multiSelectCount: (n) => `${n} selezionate`,
     multiSelectSelectAllTooltip: 'Seleziona tutto in questa vista (Ctrl+A)',
     multiSelectClearTooltip: 'Annulla selezione (Esc)',
-    repeatDialogTitle: 'Ripeti (Modalità Things)',
-    repeatModeFixedDesc: 'Pianificazione fissa del calendario (come "Regularly" in Things per Mac).',
+    repeatDialogTitle: 'Pianifica ripetizione',
+    repeatModeFixedDesc: 'Pianificazione fissa del calendario a scadenze regolari.',
     repeatModeAfterDesc: 'La prossima attività viene creata solo dopo il completamento di questa.',
     repeatWeekdaysLabel: 'In questi giorni della settimana:',
     repeatMonthDayLabel: 'Giorno del mese:',
@@ -1733,7 +1749,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     settingsWorkflowSecuritySection: 'Flusso di lavoro, Raggruppamento & Blocco app',
     settingsGroupTodayTitle: 'Raggruppa Oggi per progetto o area',
     settingsGroupTodayDesc:
-      'Organizza le attività di Oggi sotto le intestazioni di progetto o area (stile Things 3).',
+      'Organizza le attività di Oggi sotto le schede di progetto o area.',
     settingsBiometricLockTitle: 'Blocco app biometrico / PIN',
     settingsBiometricLockDesc:
       "Richiedi impronta digitale, sblocco facciale o PIN all'apertura (disattivato per impostazione predefinita).",
@@ -1813,7 +1829,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     starterTplSprintTitle: 'Sprint settimanale',
     starterTplSprintDesc: 'Sprint focalizzato di 5 giorni con obiettivi chiave, deep work e retro.',
     templatesImportLabel:
-      'Incolla scaletta Markdown (# Progetto, ## Sezione, - [ ] Attività, indentato - [ ] Sottoattività) o JSON:',
+      'Incolla scaletta Markdown (# Progetto, ## Fase, - [ ] Attività, indentato - [ ] Sottoattività) o JSON:',
     templatesImportSampleBtn: 'Carica esempio',
     templatesImportCreateBtn: 'Crea progetto dalla scaletta',
     templatesTargetAreaLabel: 'Assegna all’area',
@@ -1842,7 +1858,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     topbarTooltipNotifications: 'Notifiche',
     topbarTooltipLanguage: 'Lingua',
     topbarTooltipCloudSync: 'Sincronizzazione Cloud',
-    topbarTooltipSettings: 'Impostazioni'
+    topbarTooltipSettings: 'Impostazioni',
+    phaseSetEndDate: 'Data di fine',
+    phaseClearEndDate: 'Rimuovi data di fine',
+    phaseEndsOn: (d) => `Fine ${d}`,
+    phaseMilestoneBadge: 'Traguardo di fase'
   },
   es: {
     appName: 'Thingsbook',
@@ -1859,8 +1879,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     entityProject: 'Proyecto',
     entityProjects: 'Proyectos',
     entityNewProject: 'Nuevo proyecto',
-    entityHeading: 'Encabezado',
-    entityNewHeading: 'Nuevo encabezado',
+    entityHeading: 'Fase',
+    entityNewHeading: 'Nueva fase',
     entityTodo: 'Tarea',
     entityTodos: 'Tareas',
     entityNewTodo: 'Nueva tarea',
@@ -1999,7 +2019,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     geminiBrainDumpAction: 'Extraer y programar tareas',
     geminiArchitectTitle: 'Arquitecto de proyectos IA',
     geminiArchitectPlaceholder: 'Describe tu objetivo…',
-    geminiArchitectAction: 'Generar proyecto con encabezados y tareas',
+    geminiArchitectAction: 'Generar proyecto con fases y tareas',
     geminiReflectionTitle: 'Reflexión IA del Registro',
     geminiReflectionAction: 'Generar resumen',
     geminiGenerating: 'Gemini está estructurando tus ideas con calma…',
@@ -2037,8 +2057,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     notificationsTestBtn: 'Enviar notificación de prueba',
     shortcutCancelHint: 'Consejo: Clic derecho o Alt+Clic en la casilla abre el menú de estado',
     magicTodoSubDefault: 'Crear en la vista actual',
-    magicHeadingSub: 'Añadir encabezado de sección al proyecto',
-    magicProjectSub: 'Objetivo con anillo de progreso y secciones',
+    magicHeadingSub: 'Añadir fase con fecha de fin opcional al proyecto',
+    magicProjectSub: 'Objetivo con barra de progreso y fases',
     magicAreaSub: 'Agrupar proyectos y responsabilidades',
     ctxSelect: 'Seleccionar tarea (Selección múltiple)',
     ctxDeselect: 'Quitar selección',
@@ -2049,8 +2069,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     multiSelectCount: (n) => `${n} seleccionada(s)`,
     multiSelectSelectAllTooltip: 'Seleccionar todo en esta vista (Ctrl+A)',
     multiSelectClearTooltip: 'Quitar selección (Esc)',
-    repeatDialogTitle: 'Repetir (Modo Things)',
-    repeatModeFixedDesc: 'Calendario fijo (como «Regularly» en Things para Mac).',
+    repeatDialogTitle: 'Programar repetición',
+    repeatModeFixedDesc: 'Calendario fijo en fechas periódicas exactas.',
     repeatModeAfterDesc: 'La siguiente tarea se crea solo después de completar esta.',
     repeatWeekdaysLabel: 'En estos días de la semana:',
     repeatMonthDayLabel: 'Día del mes:',
@@ -2105,7 +2125,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     settingsWorkflowSecuritySection: 'Flujo de trabajo, Agrupación y Bloqueo',
     settingsGroupTodayTitle: 'Agrupar Hoy por proyecto o área',
     settingsGroupTodayDesc:
-      'Organizar las tareas de Hoy bajo sus encabezados de proyecto o área (estilo Things 3).',
+      'Organizar las tareas de Hoy bajo sus tarjetas de proyecto o área.',
     settingsBiometricLockTitle: 'Bloqueo biométrico / PIN',
     settingsBiometricLockDesc:
       'Requerir huella digital, desbloqueo facial o PIN al abrir Thingsbook (desactivado por defecto).',
@@ -2185,7 +2205,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     starterTplSprintTitle: 'Sprint semanal',
     starterTplSprintDesc: 'Sprint enfocado de 5 días con resultados clave, trabajo profundo y retro.',
     templatesImportLabel:
-      'Pega un esquema Markdown (# Proyecto, ## Sección, - [ ] Tarea, sangrado - [ ] Subtarea) o JSON:',
+      'Pega un esquema Markdown (# Proyecto, ## Fase, - [ ] Tarea, sangrado - [ ] Subtarea) o JSON:',
     templatesImportSampleBtn: 'Cargar ejemplo',
     templatesImportCreateBtn: 'Crear proyecto desde esquema',
     templatesTargetAreaLabel: 'Asignar al área',
@@ -2214,7 +2234,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     topbarTooltipNotifications: 'Notificaciones',
     topbarTooltipLanguage: 'Idioma',
     topbarTooltipCloudSync: 'Sincronización Cloud',
-    topbarTooltipSettings: 'Ajustes'
+    topbarTooltipSettings: 'Ajustes',
+    phaseSetEndDate: 'Fecha de fin',
+    phaseClearEndDate: 'Borrar fecha de fin',
+    phaseEndsOn: (d) => `Fin el ${d}`,
+    phaseMilestoneBadge: 'Hito de fase'
   }
 };
 

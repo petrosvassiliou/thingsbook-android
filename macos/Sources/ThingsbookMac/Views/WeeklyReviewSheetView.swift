@@ -40,9 +40,9 @@ public struct WeeklyReviewSheetView: View {
     private var stepSpecs: [(index: Int, title: String, icon: String, count: Int, tint: Color)] {
         [
             (0, store.tr("v2_review_step_inbox"), "tray.fill", store.inboxTasks.count, ThingsMacPalette.inboxBlue),
-            (1, store.tr("v2_review_step_today"), "star.fill", todayAndDeadlineTasks.count, ThingsMacPalette.todayYellow),
+            (1, store.tr("v2_review_step_today"), "sun.max.fill", todayAndDeadlineTasks.count, ThingsMacPalette.todayYellow),
             (2, store.tr("v2_review_step_projects"), "checklist", store.stalledProjects.count, ThingsMacPalette.somedayAmber),
-            (3, store.tr("v2_review_step_someday"), "archivebox.fill", store.somedayTasks.count, ThingsMacPalette.logbookGreen)
+            (3, store.tr("v2_review_step_someday"), "cloud.fill", store.somedayTasks.count, ThingsMacPalette.logbookGreen)
         ]
     }
 
@@ -185,7 +185,7 @@ public struct WeeklyReviewSheetView: View {
                     }
 
                     HStack(spacing: 6) {
-                        reviewActionChip(icon: "star.fill", tint: ThingsMacPalette.todayYellow, label: store.tr("view_today")) {
+                        reviewActionChip(icon: "sun.max.fill", tint: ThingsMacPalette.todayYellow, label: store.tr("view_today")) {
                             scheduleTask(task, to: .today, daysOffset: 0)
                         }
                         reviewActionChip(icon: "moon.stars.fill", tint: ThingsMacPalette.eveningPurple, label: store.tr("view_this_evening")) {
@@ -194,7 +194,7 @@ public struct WeeklyReviewSheetView: View {
                         reviewActionChip(icon: "sun.horizon.fill", tint: ThingsMacPalette.upcomingRed, label: store.tr("date_tomorrow")) {
                             scheduleTask(task, to: .upcoming, daysOffset: 1)
                         }
-                        reviewActionChip(icon: "archivebox.fill", tint: ThingsMacPalette.somedayAmber, label: store.tr("view_someday")) {
+                        reviewActionChip(icon: "cloud.fill", tint: ThingsMacPalette.somedayAmber, label: store.tr("view_someday")) {
                             scheduleTask(task, to: .someday, daysOffset: nil)
                         }
                         Spacer()
@@ -229,7 +229,7 @@ public struct WeeklyReviewSheetView: View {
     private var todayAndDeadlinesStepContent: some View {
         let items = todayAndDeadlineTasks
         if items.isEmpty {
-            calmEmptyState(icon: "star.circle.fill", color: ThingsMacPalette.todayYellow, message: store.tr("empty_today"))
+            calmEmptyState(icon: "sun.max.circle.fill", color: ThingsMacPalette.todayYellow, message: store.tr("empty_today"))
         } else {
             ForEach(items) { task in
                 HStack(spacing: 10) {
@@ -259,7 +259,7 @@ public struct WeeklyReviewSheetView: View {
                     Spacer()
 
                     HStack(spacing: 6) {
-                        reviewActionChip(icon: "star.fill", tint: ThingsMacPalette.todayYellow, label: store.tr("view_today")) {
+                        reviewActionChip(icon: "sun.max.fill", tint: ThingsMacPalette.todayYellow, label: store.tr("view_today")) {
                             scheduleTask(task, to: .today, daysOffset: 0)
                         }
                         reviewActionChip(icon: "sun.horizon.fill", tint: ThingsMacPalette.upcomingRed, label: store.tr("date_tomorrow")) {
@@ -391,7 +391,7 @@ public struct WeeklyReviewSheetView: View {
         .thingsCardSurface(cornerRadius: 11)
 
         if store.somedayTasks.isEmpty {
-            calmEmptyState(icon: "archivebox.circle.fill", color: ThingsMacPalette.somedayAmber, message: store.tr("empty_view"))
+            calmEmptyState(icon: "cloud.circle.fill", color: ThingsMacPalette.somedayAmber, message: store.tr("empty_view"))
         } else {
             ForEach(store.somedayTasks) { task in
                 HStack(spacing: 10) {
@@ -408,10 +408,10 @@ public struct WeeklyReviewSheetView: View {
 
                     Spacer()
 
-                    reviewActionChip(icon: "star.fill", tint: ThingsMacPalette.todayYellow, label: store.tr("view_today")) {
+                    reviewActionChip(icon: "sun.max.fill", tint: ThingsMacPalette.todayYellow, label: store.tr("view_today")) {
                         scheduleTask(task, to: .today, daysOffset: 0)
                     }
-                    reviewActionChip(icon: "square.stack.3d.up.fill", tint: ThingsMacPalette.anytimeTeal, label: store.tr("view_anytime")) {
+                    reviewActionChip(icon: "safari.fill", tint: ThingsMacPalette.anytimeTeal, label: store.tr("view_anytime")) {
                         scheduleTask(task, to: .anytime, daysOffset: nil)
                     }
                     Button(role: .destructive) {

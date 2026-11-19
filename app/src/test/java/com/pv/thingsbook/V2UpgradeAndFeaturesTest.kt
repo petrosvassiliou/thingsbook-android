@@ -761,9 +761,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(74, BuildConfig.VERSION_CODE)
-        assertEquals("3.0.0-alpha.1", BuildConfig.VERSION_NAME)
-        assertTrue("3.0.0-alpha.1 pre-release contains -alpha", BuildConfig.VERSION_NAME.contains("-alpha"))
+        assertEquals(75, BuildConfig.VERSION_CODE)
+        assertEquals("3.0.0-alpha.2", BuildConfig.VERSION_NAME)
+        assertTrue("3.0.0-alpha.2 pre-release contains -alpha", BuildConfig.VERSION_NAME.contains("-alpha"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -1826,6 +1826,163 @@ class V2UpgradeAndFeaturesTest {
             }
             assertNotNull("Missing v2_beta_badge in $folder/strings.xml", badgeText)
             assertTrue("Expected ALPHA in $folder/strings.xml v2_beta_badge, got '$badgeText'", badgeText!!.contains("ALPHA"))
+        }
+    }
+
+    @Test
+    fun `v3_0_0_alpha_2 Project Phases endDate preserves 100 percent v2_x backup sync and template compatibility`() {
+        val phaseEndMs = 1_780_000_000_000L
+
+        // 1. v2.x backup JSON without endDate on headings decodes cleanly to endDate = null
+        val v2HeadingJson = """
+            {
+              "schemaVersion": 1,
+              "createdAt": 1770000000000,
+              "appVersionName": "2.1.0",
+              "headings": [
+                {
+                  "id": "phase-v2",
+                  "projectId": "proj-1",
+                  "title": "Design",
+                  "sortOrder": 1.0,
+                  "isArchived": false,
+                  "createdAt": 1770000000000,
+                  "updatedAt": 1770000000000
+                }
+              ]
+            }
+        """.trimIndent()
+        val gzipOut = ByteArrayOutputStream()
+        GZIPOutputStream(gzipOut).use { it.write(v2HeadingJson.toByteArray(StandardCharsets.UTF_8)) }
+        val v2Env = ThingsbookBackupEnvelope(
+            magic = ThingsBackupCodec.BACKUP_MAGIC,
+            formatVersion = ThingsBackupCodec.FORMAT_VERSION,
+            appVersionName = "2.1.0",
+            appVersionCode = 73,
+            createdAt = 1_770_000_000_000L,
+            encrypted = false,
+            payloadGzipBase64 = Base64.getEncoder().encodeToString(gzipOut.toByteArray())
+        )
+        val decodedV2 = ThingsBackupCodec.decodeBackup(
+            lenientJson.encodeToString(v2Env).toByteArray(StandardCharsets.UTF_8),
+            password = null
+        )
+        assertEquals(1, decodedV2.headings.size)
+        assertEquals("Design", decodedV2.headings.single().title)
+        assertNull(decodedV2.headings.single().endDate)
+
+        // 2. v3.0.0-alpha.2 backup roundtrips Phase endDate under unchanged "headings" key
+        val v3Payload = ThingsbookBackupPayload(
+            schemaVersion = ThingsBackupCodec.FORMAT_VERSION,
+            createdAt = 1_775_000_000_000L,
+            appVersionName = "3.0.0-alpha.2",
+            headings = listOf(
+                BackupHeadingDto(
+                    id = "phase-v3",
+                    projectId = "proj-1",
+                    title = "Alpha Milestone",
+                    endDate = phaseEndMs,
+                    sortOrder = 2.0
+                )
+            )
+        )
+        val encodedV3 = ThingsBackupCodec.encodeBackup(
+            payload = v3Payload,
+            password = null,
+            appVersionName = "3.0.0-alpha.2",
+            appVersionCode = 75
+        )
+        val decodedV3 = ThingsBackupCodec.decodeBackup(encodedV3, password = null)
+        assertEquals(phaseEndMs, decodedV3.headings.single().endDate)
+
+        // 3. Firestore wire DTO: v2.x map omitting endDate flags omittedEndDate = true; explicit null clears it
+        val v2FirestoreHeading = com.pv.thingsbook.data.remote.dto.HeadingFirestoreDto.fromFirestoreMap(
+            mapOf(
+                "id" to "phase-sync-1",
+                "projectId" to "proj-1",
+                "title" to "Renamed on v2.1",
+                "sortOrder" to 3.0,
+                "updatedAt" to 1_776_000_000_000L
+            )
+        )!!
+        assertTrue(v2FirestoreHeading.omittedEndDate)
+        assertNull(v2FirestoreHeading.endDate)
+
+        val v3ClearedHeading = com.pv.thingsbook.data.remote.dto.HeadingFirestoreDto.fromFirestoreMap(
+            mapOf(
+                "id" to "phase-sync-1",
+                "projectId" to "proj-1",
+                "title" to "Cleared on v3.0",
+                "endDate" to null,
+                "sortOrder" to 3.0,
+                "updatedAt" to 1_776_000_001_000L
+            )
+        )!!
+        assertFalse(v3ClearedHeading.omittedEndDate)
+        assertNull(v3ClearedHeading.endDate)
+
+        val v3MilestoneHeading = com.pv.thingsbook.data.remote.dto.HeadingFirestoreDto(
+            id = "phase-sync-2",
+            projectId = "proj-1",
+            title = "Beta Freeze",
+            endDate = phaseEndMs,
+            sortOrder = 4.0,
+            updatedAt = 1_776_000_002_000L
+        )
+        val roundtripHeadingDto = com.pv.thingsbook.data.remote.dto.HeadingFirestoreDto.fromFirestoreMap(
+            v3MilestoneHeading.toFirestoreMap()
+        )!!
+        assertFalse(roundtripHeadingDto.omittedEndDate)
+        assertEquals(phaseEndMs, roundtripHeadingDto.endDate)
+
+        // 4. ProjectTemplateCodec preserves endDateDayOffset and accepts "phases" JSON alias
+        val bpWithPhaseOffset = ProjectTemplateBlueprint(
+            title = "Phased Launch",
+            headings = listOf(
+                TemplateHeadingBlueprint(
+                    title = "Discovery Phase",
+                    endDateDayOffset = 7,
+                    tasks = listOf(TemplateTaskBlueprint(title = "Interview users"))
+                )
+            )
+        )
+        val encodedBp = ProjectTemplateCodec.encodeBlueprint(bpWithPhaseOffset)
+        assertTrue("Encoded JSON keeps headings key for v2.x compatibility", encodedBp.contains("\"headings\""))
+        val decodedBp = ProjectTemplateCodec.decodeBlueprint(encodedBp)
+        assertEquals(7, decodedBp.headings.single().endDateDayOffset)
+
+        val phasesAliasJson = """
+            {
+              "title": "Alias Project",
+              "phases": [
+                {
+                  "title": "Phase One",
+                  "endDateDayOffset": 14,
+                  "tasks": [{"title": "Kickoff"}]
+                }
+              ]
+            }
+        """.trimIndent()
+        val decodedAlias = ProjectTemplateCodec.decodeBlueprint(phasesAliasJson)
+        assertEquals("Phase One", decodedAlias.headings.single().title)
+        assertEquals(14, decodedAlias.headings.single().endDateDayOffset)
+
+        // 5. Verify all 5 languages include the new phase_* keys and keep classic GTD Smart View labels
+        val resRoot = sequenceOf(File("src/main/res"), File("app/src/main/res")).first { it.isDirectory }
+        val phaseKeys = listOf("phase_set_end_date", "phase_clear_end_date", "phase_ends_on", "phase_milestone_badge")
+        for (folder in listOf("values", "values-de", "values-fr", "values-it", "values-es")) {
+            val xmlFile = File(resRoot, "$folder/strings.xml")
+            val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(xmlFile)
+            val nodes = doc.getElementsByTagName("string")
+            val map = mutableMapOf<String, String>()
+            for (i in 0 until nodes.length) {
+                val elem = nodes.item(i)
+                val name = elem.attributes?.getNamedItem("name")?.nodeValue ?: continue
+                map[name] = elem.textContent ?: ""
+            }
+            for (pk in phaseKeys) {
+                assertTrue("Missing or blank $pk in $folder/strings.xml", !map[pk].isNullOrBlank())
+            }
         }
     }
 }

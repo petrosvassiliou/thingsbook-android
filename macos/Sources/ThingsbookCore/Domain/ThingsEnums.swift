@@ -209,13 +209,13 @@ public enum SmartView: String, CaseIterable, Hashable, Codable, Sendable, Identi
 
     public var sfSymbol: String {
         switch self {
-        case .inbox: return "tray.fill"
-        case .today: return "star.fill"
+        case .inbox: return "tray.and.arrow.down.fill"
+        case .today: return "sun.max.fill"
         case .upcoming: return "calendar"
-        case .anytime: return "square.stack.3d.up.fill"
-        case .someday: return "archivebox.fill"
-        case .logbook: return "checkmark.square.fill"
-        case .trash: return "trash.fill"
+        case .anytime: return "safari.fill"
+        case .someday: return "cloud.fill"
+        case .logbook: return "clock.arrow.circlepath"
+        case .trash: return "trash"
         }
     }
 }

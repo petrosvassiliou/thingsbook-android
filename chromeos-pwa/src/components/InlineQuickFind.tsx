@@ -1,21 +1,20 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Archive,
   Bell,
-  BookOpenCheck,
   CalendarDays,
   CheckSquare,
+  Cloud,
+  Compass,
   EyeOff,
   Flag,
   Folder,
+  History,
   Inbox,
-  Layers,
   Moon,
-  Package,
   Repeat,
   RotateCcw,
   Search,
-  Star,
+  Sun,
   Tag,
   Trash2,
   X
@@ -100,11 +99,11 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
   const smartViews: Array<{ view: SmartViewType; label: string; icon: React.ReactNode }> = useMemo(
     () => [
       { view: 'INBOX', label: t.viewInbox, icon: <Inbox size={15} style={{ color: 'var(--things-blue)' }} /> },
-      { view: 'TODAY', label: t.viewToday, icon: <Star size={15} fill="var(--today-star)" style={{ color: 'var(--today-star)' }} /> },
+      { view: 'TODAY', label: t.viewToday, icon: <Sun size={15} style={{ color: 'var(--today-star)' }} /> },
       { view: 'UPCOMING', label: t.viewUpcoming, icon: <CalendarDays size={15} style={{ color: 'var(--upcoming-coral)' }} /> },
-      { view: 'ANYTIME', label: t.viewAnytime, icon: <Layers size={15} style={{ color: 'var(--anytime-teal)' }} /> },
-      { view: 'SOMEDAY', label: t.viewSomeday, icon: <Archive size={15} style={{ color: 'var(--someday-amber)' }} /> },
-      { view: 'LOGBOOK', label: t.viewLogbook, icon: <BookOpenCheck size={15} style={{ color: 'var(--logbook-green)' }} /> },
+      { view: 'ANYTIME', label: t.viewAnytime, icon: <Compass size={15} style={{ color: 'var(--anytime-teal)' }} /> },
+      { view: 'SOMEDAY', label: t.viewSomeday, icon: <Cloud size={15} style={{ color: 'var(--someday-amber)' }} /> },
+      { view: 'LOGBOOK', label: t.viewLogbook, icon: <History size={15} style={{ color: 'var(--logbook-green)' }} /> },
       { view: 'TRASH', label: t.viewTrash, icon: <Trash2 size={15} style={{ color: 'var(--text-muted)' }} /> }
     ],
     [t]
@@ -405,7 +404,7 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
                 >
                   <div className="inline-qf-row-top">
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
-                      <Package size={15} style={{ color: 'var(--anytime-teal)' }} />
+                      <Folder size={15} style={{ color: 'var(--things-blue)' }} />
                       <span>{area.title}</span>
                     </span>
                   </div>

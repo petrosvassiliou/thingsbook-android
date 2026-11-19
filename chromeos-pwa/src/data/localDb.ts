@@ -50,7 +50,8 @@ import {
   formatLocalYyyyMmDd,
   mergeMonotonicReviewTimestamp,
   normalizeRecurringTitleKey,
-  planRecurringDeduplication
+  planRecurringDeduplication,
+  resolveMergedHeadingEndDate
 } from './syncUtils.ts';
 import {
   SAMPLE_AREA_IDS,
@@ -2169,10 +2170,15 @@ export class ThingsLocalDb {
       for (let hIdx = 0; hIdx < params.blueprint.headings.length; hIdx++) {
         const h = params.blueprint.headings[hIdx];
         const headingId = crypto.randomUUID();
+        const phaseEndDate =
+          h.endDateDayOffset != null && Number.isFinite(h.endDateDayOffset)
+            ? addDaysLocal(todayEpoch, Math.max(0, Math.trunc(h.endDateDayOffset)))
+            : null;
         await tx.objectStore('headings').put({
           id: headingId,
           projectId,
-          title: h.title.trim() || `Section ${hIdx + 1}`,
+          title: h.title.trim() || `Phase ${hIdx + 1}`,
+          endDate: phaseEndDate,
           sortOrder: (hIdx + 1) * 1000,
           isArchived: false,
           createdAt: now,
@@ -2541,6 +2547,7 @@ export class ThingsLocalDb {
     id?: string;
     projectId: string;
     title: string;
+    endDate?: number | null;
     sortOrder?: number;
   }): Promise<HeadingRecord> {
     return this.enqueueWrite(async () => {
@@ -2549,10 +2556,13 @@ export class ThingsLocalDb {
       const id = params.id || crypto.randomUUID();
       const tx = db.transaction('headings', 'readwrite');
       const existing = (await tx.store.get(id)) as HeadingRecord | undefined;
+      const resolvedEndDate =
+        params.endDate !== undefined ? params.endDate : (existing?.endDate ?? null);
       const record: HeadingRecord = {
         id,
         projectId: params.projectId,
         title: params.title,
+        endDate: resolvedEndDate,
         sortOrder: params.sortOrder ?? existing?.sortOrder ?? now,
         isArchived: existing?.isArchived ?? false,
         createdAt: existing?.createdAt ?? now,
@@ -2565,6 +2575,28 @@ export class ThingsLocalDb {
       await this.refreshSnapshot();
       this.triggerSync();
       return record;
+    });
+  }
+
+  async updateHeadingEndDate(headingId: string, endDate: number | null): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const tx = db.transaction('headings', 'readwrite');
+      const existing = (await tx.store.get(headingId)) as HeadingRecord | undefined;
+      if (!existing || existing.isDeleted) {
+        await tx.done;
+        return;
+      }
+      await tx.store.put({
+        ...existing,
+        endDate,
+        updatedAt: now,
+        isDirty: true
+      });
+      await tx.done;
+      await this.refreshSnapshot();
+      this.triggerSync();
     });
   }
 
@@ -3227,7 +3259,7 @@ export class ThingsLocalDb {
     tags?: TagRecord[];
     areas?: AreaRecord[];
     projects?: ProjectRecord[];
-    headings?: HeadingRecord[];
+    headings?: Array<HeadingRecord & { omittedEndDate?: boolean }>;
     tasks?: Array<TaskRecord & { omittedTimeblockFields?: boolean }>;
     checklistItems?: ChecklistItemRecord[];
     attachments?: AttachmentRecord[];
@@ -3328,7 +3360,25 @@ export class ThingsLocalDb {
         }
       }
 
-      await applyList('headings', batch.headings);
+      if (batch.headings && batch.headings.length > 0) {
+        const headingStore = tx.objectStore('headings');
+        for (const remoteWithHint of batch.headings) {
+          if (!remoteWithHint.id) continue;
+          const { omittedEndDate: _omittedEndDate, ...remote } = remoteWithHint;
+          const clampedTs = clampUpdatedAt(remote.updatedAt);
+          const local = (await headingStore.get(remote.id)) as HeadingRecord | undefined;
+          if (shouldRemoteWin(local, remote.updatedAt)) {
+            await headingStore.put({
+              ...remote,
+              endDate: resolveMergedHeadingEndDate(local, remoteWithHint),
+              updatedAt: clampedTs
+            });
+          }
+          if (clampedTs > maxUpdatedAt) {
+            maxUpdatedAt = clampedTs;
+          }
+        }
+      }
 
       if (batch.tasks && batch.tasks.length > 0) {
         const taskStore = tx.objectStore('tasks');

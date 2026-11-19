@@ -8,7 +8,10 @@ import {
   normalizeBackupPayloadToEntities,
   type ThingsbookBackupPayload
 } from '../src/data/backupCodec.ts';
-import { mergeMonotonicReviewTimestamp } from '../src/data/syncUtils.ts';
+import {
+  mergeMonotonicReviewTimestamp,
+  resolveMergedHeadingEndDate
+} from '../src/data/syncUtils.ts';
 import {
   DEFAULT_QUICK_FIND_FILTER,
   STARTER_GTD_TEMPLATES,
@@ -1018,5 +1021,182 @@ test('Quick Find search filters accurately filter tasks, projects, dates, deadli
     }
   }
 });
+
+test('v3.0.0-alpha.2 Project Phases endDate preserves 100% v2.x backup, sync, and template compatibility', async () => {
+  const refDay = new Date(2026, 10, 19, 0, 0, 0, 0).getTime();
+  const phaseEndMillis = new Date(2026, 10, 26, 0, 0, 0, 0).getTime();
+
+  const project: ProjectRecord = {
+    id: 'proj-alpha2',
+    areaId: null,
+    title: 'Alpha 2 Rollout',
+    notes: 'Phase milestone verification',
+    status: 'ACTIVE',
+    scheduleState: 'ANYTIME',
+    whenDate: null,
+    deadline: null,
+    completedAt: null,
+    lastReviewedAt: null,
+    sortOrder: 1000,
+    tagIds: [],
+    createdAt: refDay,
+    updatedAt: refDay,
+    isDeleted: false,
+    isDirty: false
+  };
+
+  // 1. Legacy v2.x .tbbackup headings without endDate normalize cleanly to endDate: null
+  const legacyV2Payload = {
+    schemaVersion: 1,
+    createdAt: refDay,
+    appVersionName: '2.1.0-chromeos',
+    projects: [
+      {
+        id: 'proj-alpha2',
+        areaId: null,
+        title: 'Alpha 2 Rollout',
+        notes: 'Phase milestone verification',
+        status: 'ACTIVE',
+        scheduleState: 'ANYTIME',
+        whenDate: null,
+        deadline: null,
+        completedAt: null,
+        sortOrder: 1000,
+        tagIdsJson: '[]',
+        createdAt: refDay,
+        updatedAt: refDay
+      }
+    ],
+    headings: [
+      {
+        id: 'phase-v2-legacy',
+        projectId: 'proj-alpha2',
+        title: 'Legacy Heading',
+        sortOrder: 1000,
+        isArchived: false,
+        createdAt: refDay,
+        updatedAt: refDay
+      }
+    ]
+  } as unknown as ThingsbookBackupPayload;
+  const legacyBytes = await encodeThingsBackup(legacyV2Payload, null, '2.1.0-chromeos', 73);
+  const decodedLegacyPayload = await decodeThingsBackup(legacyBytes, null);
+  const decodedLegacy = normalizeBackupPayloadToEntities(decodedLegacyPayload, false, refDay);
+  assert.equal(decodedLegacy.headings.length, 1);
+  assert.equal(decodedLegacy.headings[0].id, 'phase-v2-legacy');
+  assert.equal(decodedLegacy.headings[0].endDate, null);
+
+  // 2. v3.0 .tbbackup headings keep wire key `headings` and roundtrip `endDate` losslessly
+  const v3Heading: HeadingRecord = {
+    id: 'phase-v3-1',
+    projectId: 'proj-alpha2',
+    title: 'Design Freeze',
+    endDate: phaseEndMillis,
+    sortOrder: 1000,
+    isArchived: false,
+    createdAt: refDay,
+    updatedAt: refDay,
+    isDeleted: false,
+    isDirty: false
+  };
+  const v3Payload = buildBackupPayloadFromEntities({
+    appVersionName: '3.0.0-alpha.2-chromeos',
+    areas: [],
+    projects: [project],
+    headings: [v3Heading],
+    tasks: [],
+    checklistItems: [],
+    tags: [],
+    attachments: [],
+    projectTemplates: []
+  });
+  const rawV3Obj = v3Payload as unknown as Record<string, unknown>;
+  assert.ok(Array.isArray(rawV3Obj.headings), 'Backup wire format must retain `headings` key for v2.x compatibility');
+  assert.equal('phases' in rawV3Obj, false);
+  const v3Bytes = await encodeThingsBackup(v3Payload, null, '3.0.0-alpha.2-chromeos', 75);
+  const decodedV3Payload = await decodeThingsBackup(v3Bytes, null);
+  const roundtrippedV3 = normalizeBackupPayloadToEntities(decodedV3Payload, false, refDay);
+  assert.equal(roundtrippedV3.headings[0].endDate, phaseEndMillis);
+
+  // 3. Cloud sync delta guard preserves local endDate when a v2.x client omits `endDate`
+  assert.equal(
+    resolveMergedHeadingEndDate(
+      { endDate: phaseEndMillis },
+      { endDate: null, isDeleted: false, omittedEndDate: true }
+    ),
+    phaseEndMillis
+  );
+  // Explicit v3.0 clear (`omittedEndDate: false` / undefined with `endDate: null`) clears `endDate`
+  assert.equal(
+    resolveMergedHeadingEndDate(
+      { endDate: phaseEndMillis },
+      { endDate: null, isDeleted: false, omittedEndDate: false }
+    ),
+    null
+  );
+  // Explicit v3.0 update applies new timestamp
+  const updatedEndMillis = phaseEndMillis + 86_400_000 * 3;
+  assert.equal(
+    resolveMergedHeadingEndDate(
+      { endDate: phaseEndMillis },
+      { endDate: updatedEndMillis, isDeleted: false, omittedEndDate: false }
+    ),
+    updatedEndMillis
+  );
+  // Deleted remote heading does not resurrect stale endDate
+  assert.equal(
+    resolveMergedHeadingEndDate(
+      { endDate: phaseEndMillis },
+      { endDate: null, isDeleted: true, omittedEndDate: true }
+    ),
+    null
+  );
+
+  // 4. Project template blueprints capture `endDateDayOffset`, serialize under `headings`, and accept `phases` alias
+  const blueprint = buildProjectTemplateBlueprint(project, [v3Heading], [], [], refDay);
+  assert.equal(blueprint.headings.length, 1);
+  assert.equal(blueprint.headings[0].title, 'Design Freeze');
+  assert.equal(blueprint.headings[0].endDateDayOffset, 7);
+
+  const parsedFromPhasesAlias = parseTemplateBlueprintJson(
+    JSON.stringify({
+      version: 1,
+      phases: [
+        {
+          title: 'QA Sign-off',
+          endDateDayOffset: 14,
+          tasks: [{ title: 'Verify v2.x sync roundtrip' }]
+        }
+      ]
+    })
+  );
+  assert.equal(parsedFromPhasesAlias.headings.length, 1);
+  assert.equal(parsedFromPhasesAlias.headings[0].title, 'QA Sign-off');
+  assert.equal(parsedFromPhasesAlias.headings[0].endDateDayOffset, 14);
+  assert.equal(parsedFromPhasesAlias.headings[0].tasks[0].title, 'Verify v2.x sync roundtrip');
+
+  // 5. Classic GTD Smart View labels + Phase i18n strings exist across EN, DE, FR, IT, ES
+  assert.equal(TRANSLATIONS.en.viewInbox, 'Inbox');
+  assert.equal(TRANSLATIONS.en.viewToday, 'Today');
+  assert.equal(TRANSLATIONS.en.viewUpcoming, 'Upcoming');
+  assert.equal(TRANSLATIONS.en.viewAnytime, 'Anytime');
+  assert.equal(TRANSLATIONS.en.viewSomeday, 'Someday');
+  assert.equal(TRANSLATIONS.en.viewLogbook, 'Logbook');
+  assert.equal(TRANSLATIONS.de.viewInbox, 'Eingang');
+  assert.equal(TRANSLATIONS.de.viewToday, 'Heute');
+  assert.equal(TRANSLATIONS.de.viewUpcoming, 'Geplant');
+  assert.equal(TRANSLATIONS.de.viewAnytime, 'Jederzeit');
+  assert.equal(TRANSLATIONS.de.viewSomeday, 'Irgendwann');
+
+  for (const lang of ['en', 'de', 'fr', 'it', 'es'] as const) {
+    assert.ok(TRANSLATIONS[lang].entityHeading.trim().length > 0, `Missing entityHeading in ${lang}`);
+    assert.ok(TRANSLATIONS[lang].entityNewHeading.trim().length > 0, `Missing entityNewHeading in ${lang}`);
+    assert.ok(TRANSLATIONS[lang].phaseSetEndDate.trim().length > 0, `Missing phaseSetEndDate in ${lang}`);
+    assert.ok(TRANSLATIONS[lang].phaseClearEndDate.trim().length > 0, `Missing phaseClearEndDate in ${lang}`);
+    assert.ok(TRANSLATIONS[lang].phaseEndsOn('2026-11-26').includes('2026-11-26'), `Invalid phaseEndsOn in ${lang}`);
+    assert.ok(TRANSLATIONS[lang].phaseMilestoneBadge.trim().length > 0, `Missing phaseMilestoneBadge in ${lang}`);
+  }
+});
+
 
 

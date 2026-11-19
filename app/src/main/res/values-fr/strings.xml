@@ -18,8 +18,8 @@
     <string name="entity_project">Projet</string>
     <string name="entity_projects">Projets</string>
     <string name="entity_new_project">Nouveau projet</string>
-    <string name="entity_heading">Titre</string>
-    <string name="entity_new_heading">Nouveau titre</string>
+    <string name="entity_heading">Phase</string>
+    <string name="entity_new_heading">Nouvelle phase</string>
     <string name="entity_todo">Tâche</string>
     <string name="entity_todos">Tâches</string>
     <string name="entity_new_todo">Nouvelle tâche</string>
@@ -47,7 +47,7 @@
     <string name="action_done">OK</string>
     <string name="action_save">Enregistrer</string>
     <string name="action_cancel">Annuler</string>
-    <string name="action_collapse_heading">Replier/Déplier le titre</string>
+    <string name="action_collapse_heading">Replier/Déplier la phase</string>
 
     <!-- Quick Find & Search -->
     <string name="quick_find_title">Recherche rapide</string>
@@ -96,9 +96,9 @@
     <string name="empty_today">Aucune tâche prévue pour aujourd\'hui.</string>
     <string name="empty_view">Aucun élément dans cette vue.</string>
     <string name="magic_plus_drop_todo">Déposer pour créer une nouvelle tâche ici</string>
-    <string name="magic_plus_drop_heading">Déposer sur le bord gauche pour créer un titre</string>
+    <string name="magic_plus_drop_heading">Déposer sur le bord gauche pour créer une phase</string>
     <string name="magic_plus_insertion_label">Relâcher pour insérer la tâche ici</string>
-    <string name="magic_plus_heading_label">Relâcher à gauche pour créer un titre</string>
+    <string name="magic_plus_heading_label">Relâcher à gauche pour créer une phase</string>
 
     <!-- Gemini AI Features in Thingsbook (Multilingual) -->
     <string name="gemini_hub_title">Thingsbook Intelligence (Gemini)</string>
@@ -109,7 +109,7 @@
     <string name="gemini_brain_dump_action">Extraire et planifier les tâches</string>
     <string name="gemini_project_architect_title">Architecte de projet IA</string>
     <string name="gemini_project_architect_placeholder">Décrivez votre objectif (ex. « Déménagement à Lyon en automne » ou « Lancer l\'application Android 120Hz »)…</string>
-    <string name="gemini_project_architect_action">Générer le projet avec titres et tâches</string>
+    <string name="gemini_project_architect_action">Générer le projet avec phases et tâches</string>
     <string name="gemini_logbook_review_title">Bilan IA du Journal</string>
     <string name="gemini_logbook_review_action">Résumer le Journal et suggérer les priorités</string>
     <string name="gemini_generating">Gemini structure vos idées avec calme…</string>
@@ -170,7 +170,7 @@
     <string name="magic_plus_todo_sub_project">Créer dans le projet actuel</string>
     <string name="magic_plus_todo_sub_area">Créer dans le domaine actuel</string>
     <string name="magic_plus_todo_sub_inbox">Créer dans la Boîte de réception</string>
-    <string name="magic_plus_heading_sub">Insérer une section dans le projet</string>
+    <string name="magic_plus_heading_sub">Insérer une phase avec date de fin optionnelle</string>
     <string name="magic_plus_project_sub_default">Avec étapes et date cible</string>
     <string name="magic_plus_project_sub_area">Projet dans ce domaine</string>
     <string name="magic_plus_project_sub_another">Créer un autre projet</string>
@@ -218,7 +218,7 @@
 
     <!-- Backup & Restore -->
     <string name="backup_section_title">Sauvegarde et restauration (Complète)</string>
-    <string name="backup_section_desc">Sauvegarde toutes les tâches, domaines, projets, titres, tags, sous-tâches et paramètres dans un fichier (.tbbackup) — avec protection par mot de passe AES-256 en option — et restaure l\'état complet.</string>
+    <string name="backup_section_desc">Sauvegarde toutes les tâches, domaines, projets, phases, tags, sous-tâches et paramètres dans un fichier (.tbbackup) — avec protection par mot de passe AES-256 en option — et restaure l\'état complet.</string>
     <string name="backup_create_button">Créer une sauvegarde</string>
     <string name="backup_restore_button">Restaurer un fichier</string>
     <string name="backup_create_dialog_title">Créer une sauvegarde complète</string>
@@ -242,7 +242,7 @@
     <string name="backup_restore_encrypted_desc">Ce fichier de sauvegarde est chiffré. Veuillez saisir le mot de passe pour restaurer toutes les tâches, domaines, projets et tags.</string>
     <string name="backup_restore_enter_password">Saisir le mot de passe</string>
     <string name="backup_preview_header">Contenu du fichier de sauvegarde :</string>
-    <string name="backup_preview_details">• %1$d tâches et %2$d sous-tâches\n• %3$d projets et %4$d titres\n• %5$d domaines et %6$d tags</string>
+    <string name="backup_preview_details">• %1$d tâches et %2$d sous-tâches\n• %3$d projets et %4$d phases\n• %5$d domaines et %6$d tags</string>
     <string name="backup_restore_replace_notice">Remarque : la restauration complète remplace toutes les entrées locales actuelles par le contenu de cette sauvegarde.</string>
     <string name="backup_restore_confirm_decrypt">Déchiffrer et tout restaurer</string>
     <string name="backup_restore_confirm_plain">Tout restaurer maintenant</string>
@@ -278,10 +278,10 @@
     <string name="subtask_move_up">Monter l\'élément</string>
     <string name="subtask_move_down">Descendre l\'élément</string>
     <string name="subtask_delete">Supprimer l\'élément</string>
-    <string name="heading_add_task">Ajouter une tâche sous ce titre</string>
+    <string name="heading_add_task">Ajouter une tâche sous cette phase</string>
     <string name="task_drag_handle">Faire glisser pour déplacer</string>
     <string name="drop_move_here">Déplacer ici</string>
-    <string name="drop_heading_here">Relâcher pour insérer le titre ici</string>
+    <string name="drop_heading_here">Relâcher pour insérer la phase ici</string>
 
     <!-- App Auto-Update & Manual Update Check -->
     <string name="settings_updates_section">Mises à jour</string>
@@ -315,10 +315,10 @@
     <string name="context_adjust_deadline">Ajuster l\'échéance</string>
     <string name="context_configure_repeat">Configurer la répétition</string>
     <string name="context_assign_tags">Attribuer des tags</string>
-    <string name="repeat_dialog_title">Répéter (Mode Things)</string>
+    <string name="repeat_dialog_title">Planifier la répétition</string>
     <string name="repeat_mode_fixed">Régulièrement</string>
     <string name="repeat_mode_after">Après achèvement</string>
-    <string name="repeat_mode_fixed_desc">Rythme fixe du calendrier (comme « Regularly » dans Things pour Mac).</string>
+    <string name="repeat_mode_fixed_desc">Rythme fixe du calendrier aux dates prévues.</string>
     <string name="repeat_mode_after_desc">La prochaine tâche est créée uniquement une fois celle-ci terminée.</string>
     <string name="repeat_unit_days">Jours</string>
     <string name="repeat_unit_weeks">Semaines</string>
@@ -368,7 +368,7 @@
     <string name="quick_share_destination_label">Enregistrer dans :</string>
     <string name="settings_workflow_security_section">Flux de travail, Regroupement &amp; Verrouillage</string>
     <string name="settings_group_today_title">Regrouper Aujourd\'hui par projet ou domaine</string>
-    <string name="settings_group_today_desc">Organiser les tâches d\'Aujourd\'hui sous leurs en-têtes de projet ou de domaine (style Things 3).</string>
+    <string name="settings_group_today_desc">Organiser les tâches d\'Aujourd\'hui sous leurs cartes de projet ou de domaine.</string>
     <string name="settings_biometric_lock_title">Verrouillage biométrique / PIN</string>
     <string name="settings_biometric_lock_desc">Exiger l\'empreinte digitale, la reconnaissance faciale ou le code PIN à l\'ouverture (désactivé par défaut).</string>
     <string name="app_lock_title">Thingsbook est verrouillé</string>
@@ -431,7 +431,7 @@
     <string name="v2_starter_templates">Modèles de démarrage GTD</string>
     <string name="v2_my_templates">Mes modèles enregistrés</string>
     <string name="v2_import_markdown_title">Importer un plan Markdown / JSON</string>
-    <string name="v2_import_markdown_hint">Collez du Markdown (# Projet, ## Section, - [ ] Tâche, sous-tâches indentées) ou un plan JSON…</string>
+    <string name="v2_import_markdown_hint">Collez du Markdown (# Projet, ## Phase, - [ ] Tâche, sous-tâches indentées) ou un plan JSON…</string>
     <string name="v2_import_create_project">Créer le projet depuis le plan</string>
     <string name="v2_timeblock_title">Créneau horaire</string>
     <string name="v2_timeblock_start">Heure de début</string>
@@ -473,4 +473,8 @@
     <string name="topbar_tooltip_cloud_sync">Synchronisation Cloud</string>
     <string name="topbar_tooltip_settings">Paramètres</string>
     <string name="action_more_options">Plus d’actions</string>
+    <string name="phase_set_end_date">Date de fin</string>
+    <string name="phase_clear_end_date">Effacer la date de fin</string>
+    <string name="phase_ends_on">Fin le %1$s</string>
+    <string name="phase_milestone_badge">Jalon de phase</string>
 </resources>

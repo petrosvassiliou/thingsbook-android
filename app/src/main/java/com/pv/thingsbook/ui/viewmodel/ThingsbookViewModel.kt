@@ -342,6 +342,14 @@ class ThingsbookViewModel @Inject constructor(
         .catch { emit(emptyList()) }
         .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val headingTaskCounts: StateFlow<Map<String, Pair<Int, Int>>> = database.headingDao()
+        .observeHeadingTaskCounts()
+        .map { rows ->
+            rows.associate { row -> row.headingId to (row.completedTaskCount to row.totalTaskCount) }
+        }
+        .catch { emit(emptyMap()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
     val allTags: StateFlow<List<Tag>> = repository.observeAllTags()
         .catch { emit(emptyList()) }
         .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -364,6 +372,7 @@ class ThingsbookViewModel @Inject constructor(
                                     id = it.id,
                                     projectId = it.projectId,
                                     title = it.title,
+                                    endDate = it.endDate,
                                     sortOrder = it.sortOrder,
                                     isArchived = it.isArchived,
                                     createdAt = it.createdAt,
@@ -908,6 +917,12 @@ class ThingsbookViewModel @Inject constructor(
     fun renameHeading(headingId: String, newTitle: String) {
         safeVmScope.launch {
             repository.renameHeading(headingId, newTitle)
+        }
+    }
+
+    fun updateHeadingEndDate(headingId: String, endDate: Long?) {
+        safeVmScope.launch {
+            repository.updateHeadingEndDate(headingId, endDate)
         }
     }
 

@@ -30,6 +30,7 @@ data class TemplateTaskBlueprint(
 @Serializable
 data class TemplateHeadingBlueprint(
     val title: String,
+    val endDateDayOffset: Int? = null,
     val tasks: List<TemplateTaskBlueprint> = emptyList()
 )
 
@@ -118,6 +119,7 @@ object ProjectTemplateCodec {
                 val unheadedTasks = unheadedArray?.mapNotNull { parseTaskElement(it) }.orEmpty()
 
                 val headingsArray = (element["headings"] as? JsonArray)
+                    ?: (element["phases"] as? JsonArray)
                     ?: (element["sections"] as? JsonArray)
                 val headings = headingsArray?.mapNotNull { headingElem ->
                     val obj = headingElem as? JsonObject ?: return@mapNotNull null
@@ -125,9 +127,10 @@ object ProjectTemplateCodec {
                         ?: (obj["name"] as? JsonPrimitive)?.contentOrNull
                         ?: return@mapNotNull null
                     if (hTitle.isBlank()) return@mapNotNull null
+                    val hEndDateOffset = (obj["endDateDayOffset"] as? JsonPrimitive)?.intOrNull
                     val hTasksArray = (obj["tasks"] as? JsonArray) ?: (obj["items"] as? JsonArray)
                     val hTasks = hTasksArray?.mapNotNull { parseTaskElement(it) }.orEmpty()
-                    TemplateHeadingBlueprint(title = hTitle.trim(), tasks = hTasks)
+                    TemplateHeadingBlueprint(title = hTitle.trim(), endDateDayOffset = hEndDateOffset, tasks = hTasks)
                 }.orEmpty()
 
                 val tagIds = (element["tagIds"] as? JsonArray)

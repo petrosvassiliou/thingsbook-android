@@ -86,7 +86,6 @@ import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.LocalOffer
 import androidx.compose.material.icons.outlined.Menu
@@ -404,10 +403,24 @@ fun ThingsSmartViewScreen(
         isMobileDrawerOpen = false
     }
 
+    val allHeadingsTop by viewModel.allHeadings.collectAsState()
+    val currentEpochDayTop by viewModel.currentEpochDay.collectAsState()
+    val upcomingPhaseMilestoneCount = remember(allHeadingsTop, activeProjects, currentEpochDayTop) {
+        val zone = ZoneId.systemDefault()
+        val todayDate = LocalDate.ofEpochDay(currentEpochDayTop)
+        val activeProjectIds = activeProjects.mapTo(HashSet()) { it.id }
+        allHeadingsTop.count { h ->
+            !h.isDeleted && !h.isArchived && h.projectId in activeProjectIds && h.endDate?.let { ms ->
+                val d = runCatching { Instant.ofEpochMilli(ms).atZone(zone).toLocalDate() }.getOrNull()
+                d != null && !d.isBefore(todayDate)
+            } == true
+        }
+    }
+
     val smartViewCounts = mapOf(
         SmartViewType.INBOX to inboxTasks.size,
         SmartViewType.TODAY to (todayTasks.size + eveningTasks.size),
-        SmartViewType.UPCOMING to upcomingTasks.size,
+        SmartViewType.UPCOMING to (upcomingTasks.size + upcomingPhaseMilestoneCount),
         SmartViewType.ANYTIME to anytimeTasks.size,
         SmartViewType.SOMEDAY to somedayTasks.size,
         SmartViewType.LOGBOOK to logbookTasks.size,
@@ -1722,6 +1735,8 @@ private fun ThingsMainTaskLazyList(
     val currentEpochDay by viewModel.currentEpochDay.collectAsState()
     val collapsedHeadingIds by viewModel.collapsedHeadingIds.collectAsState()
     val allHeadings by viewModel.allHeadings.collectAsState()
+    val headingTaskCounts by viewModel.headingTaskCounts.collectAsState()
+    val selectedFilterTagId by viewModel.selectedFilterTagId.collectAsState()
     val magicBreakdownTaskId by viewModel.magicBreakdownTaskId.collectAsState()
     val logbookAiReview by viewModel.logbookAiReview.collectAsState()
     val isGeminiBusy by viewModel.isGeminiBusy.collectAsState()
@@ -1821,6 +1836,7 @@ private fun ThingsMainTaskLazyList(
                 keyStr.startsWith("today_calendar_") ||
                 keyStr.startsWith("upcoming_cal_events_") ||
                 keyStr.startsWith("upcoming_day_header_") ||
+                keyStr.startsWith("upcoming_phase_milestone_") ||
                 keyStr.startsWith("top_scroll_anchor_") ||
                 keyStr.startsWith("trailing_magic_plus_gap")
             ) return@forEach
@@ -2213,12 +2229,19 @@ private fun ThingsMainTaskLazyList(
 
             projectHeadings.forEach { heading ->
                 val tasksInHeading = projectSections[heading.id].orEmpty()
+                val counts = headingTaskCounts[heading.id]
+                val completedInPhase = counts?.first ?: 0
+                val totalInPhase = counts?.second ?: tasksInHeading.size
                 item(key = "heading_${heading.id}") {
                     ProjectHeadingSectionHeader(
                         heading = heading,
                         isCollapsed = heading.id in collapsedHeadingIds,
+                        completedTaskCount = completedInPhase,
+                        totalTaskCount = totalInPhase,
+                        locale = activeLocale,
                         onToggleCollapse = { viewModel.toggleHeadingCollapsed(heading.id) },
                         onRenameHeading = { newTitle -> viewModel.renameHeading(heading.id, newTitle) },
+                        onUpdateEndDate = { newEndDate -> viewModel.updateHeadingEndDate(heading.id, newEndDate) },
                         onDeleteHeading = { viewModel.deleteHeading(heading.id) },
                         onAddTaskUnderHeading = {
                             viewModel.createTaskInProjectSection(heading.id, tasksInHeading, tasksInHeading.size)
@@ -2254,16 +2277,34 @@ private fun ThingsMainTaskLazyList(
                 }
             }
         } else if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.UPCOMING)) {
-            // Upcoming Smart View ("Geplant"): Group tasks chronologically by day and only show calendar events on dates that have tasks
+            // Upcoming Smart View: Group tasks & Phase Milestones chronologically by day
             val zone = ZoneId.systemDefault()
             val todayDate = LocalDate.ofEpochDay(currentEpochDay)
             val groupedUpcoming = primaryTasks
                 .groupBy { task -> computeUpcomingTargetDate(task, todayDate, zone) }
-                .toSortedMap()
+            val activeProjectById = activeProjects.associateBy { it.id }
+            val upcomingMilestonesByDate = allHeadings
+                .mapNotNull { heading ->
+                    if (heading.isDeleted || heading.isArchived || heading.title.isBlank()) return@mapNotNull null
+                    val endMillis = heading.endDate ?: return@mapNotNull null
+                    val project = activeProjectById[heading.projectId] ?: return@mapNotNull null
+                    val filterTag = selectedFilterTagId
+                    if (filterTag != null && project.tags.none { it.id == filterTag }) return@mapNotNull null
+                    val endLocalDate = runCatching {
+                        Instant.ofEpochMilli(endMillis).atZone(zone).toLocalDate()
+                    }.getOrNull() ?: return@mapNotNull null
+                    if (endLocalDate.isBefore(todayDate)) return@mapNotNull null
+                    Triple(endLocalDate, heading, project)
+                }
+                .groupBy({ it.first }, { it.second to it.third })
+
+            val allUpcomingDates = (groupedUpcoming.keys + upcomingMilestonesByDate.keys).toSortedSet()
 
             var cumulativeTaskOffset = 0
-            groupedUpcoming.entries.forEachIndexed { groupIdx, (targetDate, dayTasks) ->
-                val dayEvents = if (calendarEventsEnabled && dayTasks.isNotEmpty()) {
+            allUpcomingDates.forEachIndexed { groupIdx, targetDate ->
+                val dayTasks = groupedUpcoming[targetDate].orEmpty()
+                val dayMilestones = upcomingMilestonesByDate[targetDate].orEmpty()
+                val dayEvents = if (calendarEventsEnabled && (dayTasks.isNotEmpty() || dayMilestones.isNotEmpty())) {
                     DeviceCalendarRepository.filterActiveOrUpcomingEvents(
                         events = upcomingCalendarEventsByDate[targetDate].orEmpty(),
                         forDate = targetDate,
@@ -2292,6 +2333,21 @@ private fun ThingsMainTaskLazyList(
                             compactTopPadding = true
                         )
                     }
+                }
+                items(
+                    items = dayMilestones,
+                    key = { (heading, _) -> "upcoming_phase_milestone_${targetDate.toEpochDay()}_${heading.id}" }
+                ) { (heading, project) ->
+                    val counts = headingTaskCounts[heading.id]
+                    val completedInPhase = counts?.first ?: 0
+                    val totalInPhase = counts?.second ?: 0
+                    PhaseMilestoneCard(
+                        heading = heading,
+                        project = project,
+                        completedCount = completedInPhase,
+                        totalCount = totalInPhase,
+                        onOpenProject = { viewModel.selectProject(project.id) }
+                    )
                 }
                 itemsIndexed(
                     items = dayTasks,
@@ -2430,7 +2486,7 @@ private fun ThingsMainTaskLazyList(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.Inventory2,
+                                imageVector = Icons.Outlined.Folder,
                                 contentDescription = area.title,
                                 tint = colors.anytimeTeal,
                                 modifier = Modifier.size(16.dp)
@@ -3609,7 +3665,7 @@ private fun TopThingsbookBar(
                             modifier = Modifier.size(iconButtonSize)
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.Inventory2,
+                                imageVector = Icons.Outlined.Folder,
                                 contentDescription = stringResource(R.string.topbar_tooltip_areas),
                                 tint = colors.anytimeTeal,
                                 modifier = Modifier.size(iconGlyphSize)
@@ -3960,7 +4016,7 @@ private fun SmartViewNavigationStrip(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.Inventory2,
+                            imageVector = Icons.Outlined.Folder,
                             contentDescription = area.title,
                             tint = if (selected) colors.thingsBlue else colors.secondaryText,
                             modifier = Modifier.size(16.dp)
@@ -4104,7 +4160,7 @@ private fun SmartViewNavigationStrip(
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Outlined.Inventory2,
+                        imageVector = Icons.Outlined.Folder,
                         contentDescription = null,
                         tint = colors.anytimeTeal,
                         modifier = Modifier.size(14.dp)
@@ -4349,7 +4405,7 @@ private fun ViewTitleHeader(
                     }
                     is ActiveNavigationTarget.AreaDetail -> {
                         Icon(
-                            imageVector = Icons.Outlined.Inventory2,
+                            imageVector = Icons.Outlined.Folder,
                             contentDescription = null,
                             tint = colors.thingsBlue,
                             modifier = Modifier.size(26.dp)
@@ -4810,16 +4866,24 @@ private fun ViewTitleHeader(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ProjectHeadingSectionHeader(
     heading: Heading,
     isCollapsed: Boolean,
+    completedTaskCount: Int = 0,
+    totalTaskCount: Int = 0,
+    locale: Locale = Locale.getDefault(),
     onToggleCollapse: () -> Unit,
     onRenameHeading: (String) -> Unit,
+    onUpdateEndDate: (Long?) -> Unit = {},
     onDeleteHeading: () -> Unit,
     onAddTaskUnderHeading: () -> Unit
 ) {
     val colors = ThingsTheme.colors
+    val zone = ZoneId.systemDefault()
+    val today = LocalDate.now(zone)
+    var showEndDatePicker by remember(heading.id) { mutableStateOf(false) }
     var isEditing by remember(heading.id) { mutableStateOf(heading.title.isEmpty()) }
     var editedTitleField by remember(heading.id) {
         mutableStateOf(
@@ -4838,159 +4902,355 @@ private fun ProjectHeadingSectionHeader(
         }
     }
 
-    Column(
+    val endLocalDate = remember(heading.endDate, zone) {
+        heading.endDate?.let { ms ->
+            runCatching { Instant.ofEpochMilli(ms).atZone(zone).toLocalDate() }.getOrNull()
+        }
+    }
+    val formattedEndDate = remember(endLocalDate, locale) {
+        endLocalDate?.let { d ->
+            val pattern = if (locale.language == "de") "d. MMM" else "MMM d"
+            runCatching { d.format(DateTimeFormatter.ofPattern(pattern, locale)) }.getOrNull()
+        }
+    }
+    val openCount = (totalTaskCount - completedTaskCount).coerceAtLeast(0)
+    val isOverduePhase = endLocalDate != null && endLocalDate.isBefore(today) && openCount > 0
+    val phaseProgress = if (totalTaskCount > 0) completedTaskCount.toFloat() / totalTaskCount.toFloat() else 0f
+
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 8.dp)
+            .padding(horizontal = 16.dp, vertical = 7.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = colors.tagPillBg.copy(alpha = 0.55f),
+        border = BorderStroke(0.75.dp, colors.thingsBlue.copy(alpha = 0.20f))
     ) {
-        if (isEditing) {
-            val commitHeadingRename = {
-                if (editedTitleField.text.isNotBlank()) {
-                    onRenameHeading(editedTitleField.text.trim())
-                    isEditing = false
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                OutlinedTextField(
-                    value = editedTitleField,
-                    onValueChange = { editedTitleField = it },
-                    placeholder = {
-                        Text(
-                            text = stringResource(R.string.entity_new_heading),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { commitHeadingRename() }),
-                    modifier = Modifier
-                        .weight(1f)
-                        .focusRequester(headingFocusRequester)
-                        .onPreviewKeyEvent { keyEvent ->
-                            if (keyEvent.type == KeyEventType.KeyDown &&
-                                (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
-                            ) {
-                                commitHeadingRename()
-                                true
-                            } else {
-                                false
-                            }
-                        }
-                        .onFocusChanged { focusState ->
-                            if (focusState.isFocused) {
-                                val txt = editedTitleField.text
-                                editedTitleField = editedTitleField.copy(
-                                    selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
-                                )
-                            }
-                        }
-                )
-                IconButton(onClick = commitHeadingRename) {
-                    Icon(
-                        imageVector = Icons.Outlined.Check,
-                        contentDescription = stringResource(R.string.action_save),
-                        tint = colors.thingsBlue
-                    )
-                }
-                IconButton(
-                    onClick = {
-                        if (heading.title.isEmpty() && editedTitleField.text.isBlank()) {
-                            onDeleteHeading()
-                        } else {
-                            isEditing = false
-                        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 9.dp)
+        ) {
+            if (isEditing) {
+                val commitHeadingRename = {
+                    if (editedTitleField.text.isNotBlank()) {
+                        onRenameHeading(editedTitleField.text.trim())
+                        isEditing = false
                     }
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Close,
-                        contentDescription = stringResource(R.string.action_cancel),
-                        tint = colors.secondaryText
-                    )
                 }
-            }
-        } else {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onToggleCollapse)
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = heading.title,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        color = colors.thingsBlue,
-                        fontWeight = FontWeight.Bold
-                    ),
-                    modifier = Modifier.weight(1f)
-                )
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // Mini "+": create a To-Do directly under this heading
-                    ThingsHoverTooltip(text = stringResource(R.string.heading_add_task)) {
-                        IconButton(
-                            onClick = onAddTaskUnderHeading,
-                            modifier = Modifier.size(26.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Add,
-                                contentDescription = stringResource(R.string.heading_add_task),
-                                tint = colors.thingsBlue,
-                                modifier = Modifier.size(17.dp)
+                    OutlinedTextField(
+                        value = editedTitleField,
+                        onValueChange = { editedTitleField = it },
+                        placeholder = {
+                            Text(
+                                text = stringResource(R.string.entity_new_heading),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-                        }
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { commitHeadingRename() }),
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(headingFocusRequester)
+                            .onPreviewKeyEvent { keyEvent ->
+                                if (keyEvent.type == KeyEventType.KeyDown &&
+                                    (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
+                                ) {
+                                    commitHeadingRename()
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                            .onFocusChanged { focusState ->
+                                if (focusState.isFocused) {
+                                    val txt = editedTitleField.text
+                                    editedTitleField = editedTitleField.copy(
+                                        selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                    )
+                                }
+                            }
+                    )
+                    IconButton(onClick = commitHeadingRename) {
+                        Icon(
+                            imageVector = Icons.Outlined.Check,
+                            contentDescription = stringResource(R.string.action_save),
+                            tint = colors.thingsBlue
+                        )
                     }
                     IconButton(
                         onClick = {
-                            editedTitleField = TextFieldValue(
-                                text = heading.title,
-                                selection = if (heading.title.isEmpty()) TextRange(0) else TextRange(0, heading.title.length)
+                            if (heading.title.isEmpty() && editedTitleField.text.isBlank()) {
+                                onDeleteHeading()
+                            } else {
+                                isEditing = false
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Close,
+                            contentDescription = stringResource(R.string.action_cancel),
+                            tint = colors.secondaryText
+                        )
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onToggleCollapse),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(3.5.dp)
+                                .height(18.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(colors.thingsBlue)
+                        )
+                        Text(
+                            text = heading.title,
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                color = colors.primaryText,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        ThingsHoverTooltip(text = stringResource(R.string.heading_add_task)) {
+                            IconButton(
+                                onClick = onAddTaskUnderHeading,
+                                modifier = Modifier.size(26.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Add,
+                                    contentDescription = stringResource(R.string.heading_add_task),
+                                    tint = colors.thingsBlue,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = {
+                                editedTitleField = TextFieldValue(
+                                    text = heading.title,
+                                    selection = if (heading.title.isEmpty()) TextRange(0) else TextRange(0, heading.title.length)
+                                )
+                                isEditing = true
+                            },
+                            modifier = Modifier.size(26.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Edit,
+                                contentDescription = stringResource(R.string.entity_heading),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(14.dp)
                             )
-                            isEditing = true
-                        },
-                        modifier = Modifier.size(26.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Edit,
-                            contentDescription = stringResource(R.string.entity_heading),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(14.dp)
+                        }
+                        IconButton(
+                            onClick = onDeleteHeading,
+                            modifier = Modifier.size(26.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.DeleteOutline,
+                                contentDescription = stringResource(R.string.action_delete),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = onToggleCollapse,
+                            modifier = Modifier.size(26.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isCollapsed) Icons.Outlined.ExpandMore else Icons.Outlined.ExpandLess,
+                                contentDescription = stringResource(R.string.action_collapse_heading),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                FlowRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 11.5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    if (totalTaskCount > 0) {
+                        ProjectProgressRing(
+                            progress = phaseProgress,
+                            size = 16.dp,
+                            showFraction = true,
+                            completedCount = completedTaskCount,
+                            totalCount = totalTaskCount,
+                            modifier = Modifier.align(Alignment.CenterVertically)
                         )
                     }
-                    IconButton(
-                        onClick = onDeleteHeading,
-                        modifier = Modifier.size(26.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.DeleteOutline,
-                            contentDescription = stringResource(R.string.action_delete),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(15.dp)
-                        )
+
+                    val pillLabel = if (formattedEndDate != null) {
+                        stringResource(R.string.phase_ends_on, formattedEndDate)
+                    } else {
+                        "+ ${stringResource(R.string.phase_set_end_date)}"
                     }
-                    IconButton(
-                        onClick = onToggleCollapse,
-                        modifier = Modifier.size(26.dp)
+                    val pillBg = when {
+                        isOverduePhase -> colors.deadlineSoftBg
+                        formattedEndDate != null -> colors.thingsBlueSoft
+                        else -> colors.cardSurface.copy(alpha = 0.72f)
+                    }
+                    val pillFg = when {
+                        isOverduePhase -> colors.deadlineUrgentRed
+                        formattedEndDate != null -> colors.thingsBlue
+                        else -> colors.secondaryText
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(pillBg)
+                            .clickable { showEndDatePicker = true }
+                            .padding(horizontal = 9.dp, vertical = 3.5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(
-                            imageVector = if (isCollapsed) Icons.Outlined.ExpandMore else Icons.Outlined.ExpandLess,
-                            contentDescription = stringResource(R.string.action_collapse_heading),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(18.dp)
+                            imageVector = Icons.Outlined.CalendarToday,
+                            contentDescription = null,
+                            tint = pillFg,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(
+                            text = pillLabel,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = if (formattedEndDate != null) FontWeight.SemiBold else FontWeight.Medium
+                            ),
+                            color = pillFg
                         )
                     }
                 }
             }
         }
-        HorizontalDivider(color = colors.thingsBlue.copy(alpha = 0.28f), thickness = 1.dp)
+    }
+
+    if (showEndDatePicker) {
+        DeadlineDatePickerDialog(
+            currentDeadline = heading.endDate,
+            locale = locale,
+            onApplyDeadline = onUpdateEndDate,
+            onDismiss = { showEndDatePicker = false },
+            titleText = stringResource(R.string.phase_set_end_date),
+            clearButtonText = stringResource(R.string.phase_clear_end_date)
+        )
+    }
+}
+
+@Composable
+private fun PhaseMilestoneCard(
+    heading: Heading,
+    project: Project,
+    completedCount: Int,
+    totalCount: Int,
+    onOpenProject: () -> Unit
+) {
+    val colors = ThingsTheme.colors
+    val progress = if (totalCount > 0) completedCount.toFloat() / totalCount.toFloat() else project.progress
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onOpenProject),
+        shape = RoundedCornerShape(14.dp),
+        color = colors.thingsBlueSoft.copy(alpha = 0.52f),
+        border = BorderStroke(0.75.dp, colors.thingsBlue.copy(alpha = 0.28f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(3.5.dp)
+                        .height(26.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(colors.thingsBlue)
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = colors.thingsBlue.copy(alpha = 0.16f)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.phase_milestone_badge),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = colors.thingsBlue,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 1.5.dp)
+                            )
+                        }
+                        Text(
+                            text = project.title,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.secondaryText,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Text(
+                        text = heading.title,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.primaryText,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            ProjectProgressRing(
+                progress = progress,
+                size = 16.dp,
+                showFraction = totalCount > 0,
+                completedCount = completedCount,
+                totalCount = totalCount
+            )
+        }
     }
 }
 
@@ -5379,7 +5639,7 @@ private fun InlineQuickFindSection(
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Outlined.Inventory2,
+                                    imageVector = Icons.Outlined.Folder,
                                     contentDescription = null,
                                     tint = colors.anytimeTeal,
                                     modifier = Modifier.size(18.dp)
@@ -5628,6 +5888,7 @@ private fun QuickFindFilterChip(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ThingsChromebookSidebar(
     viewModel: ThingsbookViewModel,
@@ -5660,11 +5921,11 @@ private fun ThingsChromebookSidebar(
 
     Column(
         modifier = Modifier
-            .width(268.dp)
+            .width(276.dp)
             .fillMaxHeight()
             .background(colors.sidebarBackground)
             .padding(horizontal = 14.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         // Clean Sidebar Brand Header
         Row(
@@ -5707,146 +5968,199 @@ private fun ThingsChromebookSidebar(
             }
         }
 
-        Spacer(modifier = Modifier.height(2.dp))
-
-        SmartViewType.entries.forEachIndexed { idx, viewType ->
-            val selected = navTarget == ActiveNavigationTarget.SmartView(viewType)
-            val count = smartViewCounts[viewType] ?: 0
-            val viewLabel = stringResource(viewType.titleRes)
-            val shortcutHint = if (idx < 7) " (Ctrl+${idx + 1})" else ""
-            ThingsHoverTooltip(
-                text = "$viewLabel$shortcutHint",
-                modifier = Modifier.fillMaxWidth()
-            ) {
+        // 1. 2x2 Bento Focus Grid (Inbox, Today, Upcoming, Anytime)
+        val bentoRows = listOf(
+            listOf(SmartViewType.INBOX to 1, SmartViewType.TODAY to 2),
+            listOf(SmartViewType.UPCOMING to 3, SmartViewType.ANYTIME to 4)
+        )
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            bentoRows.forEach { rowItems ->
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(50))
-                        .background(if (selected) colors.thingsBlueSoft else Color.Transparent)
-                        .clickable {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onSelectSmartView(viewType)
-                        }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
                 ) {
+                    rowItems.forEach { (viewType, shortcutNum) ->
+                        val selected = navTarget == ActiveNavigationTarget.SmartView(viewType)
+                        val count = smartViewCounts[viewType] ?: 0
+                        val viewLabel = stringResource(viewType.titleRes)
+                        ThingsHoverTooltip(
+                            text = "$viewLabel (Ctrl+$shortcutNum)",
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onSelectSmartView(viewType)
+                                    },
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (selected) colors.thingsBlueSoft else colors.cardSurface.copy(alpha = 0.86f),
+                                border = BorderStroke(
+                                    width = if (selected) 1.2.dp else 0.75.dp,
+                                    color = if (selected) colors.thingsBlue.copy(alpha = 0.48f) else colors.hairlineDivider
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 11.dp, vertical = 9.dp),
+                                    verticalArrangement = Arrangement.spacedBy(7.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        SmartViewIcon(
+                                            viewType = viewType,
+                                            modifier = Modifier.size(19.dp),
+                                            isSelected = selected
+                                        )
+                                        Text(
+                                            text = if (count > 0) count.toString() else "",
+                                            style = MaterialTheme.typography.labelLarge.copy(
+                                                fontWeight = FontWeight.Bold
+                                            ),
+                                            color = if (selected) colors.thingsBlue else colors.primaryText
+                                        )
+                                    }
+                                    Text(
+                                        text = viewLabel,
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                                            color = if (selected) colors.thingsBlue else colors.primaryText
+                                        ),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Compact Secondary Utility Pills (Someday, Weekly Review, Logbook, Trash, Templates)
+        FlowRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            val utilitySmartViews = listOf(
+                SmartViewType.SOMEDAY to 5,
+                SmartViewType.LOGBOOK to 6,
+                SmartViewType.TRASH to 7
+            )
+            utilitySmartViews.forEach { (viewType, shortcutNum) ->
+                val selected = navTarget == ActiveNavigationTarget.SmartView(viewType)
+                val count = smartViewCounts[viewType] ?: 0
+                val label = stringResource(viewType.titleRes)
+                val badgeText = if (count > 0 && viewType != SmartViewType.LOGBOOK) " · $count" else ""
+                ThingsHoverTooltip(text = "$label (Ctrl+$shortcutNum)") {
                     Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(if (selected) colors.thingsBlueSoft else colors.tagPillBg.copy(alpha = 0.72f))
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSelectSmartView(viewType)
+                            }
+                            .padding(horizontal = 9.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         SmartViewIcon(
                             viewType = viewType,
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(14.dp),
                             isSelected = selected
                         )
                         Text(
-                            text = viewLabel,
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                color = if (selected) colors.thingsBlue else colors.primaryText
-                            )
-                        )
-                    }
-                    if (count > 0 && viewType != SmartViewType.LOGBOOK) {
-                        Text(
-                            text = count.toString(),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (selected) colors.thingsBlue else colors.secondaryText
+                            text = "$label$badgeText",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                            ),
+                            color = if (selected) colors.thingsBlue else colors.secondaryText,
+                            maxLines = 1
                         )
                     }
                 }
             }
-        }
 
-        // GTD Weekly Review & Project Templates / Markdown Importer quick rows (monochrome M3 Expressive style)
-        ThingsHoverTooltip(
-            text = stringResource(R.string.v2_weekly_review_title),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.Transparent)
-                    .clickable {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onOpenWeeklyReview()
-                    }
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
+            // Weekly Review utility pill
+            val reviewTitle = stringResource(R.string.v2_weekly_review_title)
+            val reviewBadge = if (stalledCount > 0) " · $stalledCount" else ""
+            ThingsHoverTooltip(text = reviewTitle) {
                 Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(colors.tagPillBg.copy(alpha = 0.72f))
+                        .clickable {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onOpenWeeklyReview()
+                        }
+                        .padding(horizontal = 9.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.Checklist,
-                        contentDescription = stringResource(R.string.v2_weekly_review_title),
+                        contentDescription = reviewTitle,
                         tint = colors.secondaryText,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(14.dp)
                     )
                     Text(
-                        text = stringResource(R.string.v2_weekly_review_title),
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = FontWeight.Normal,
-                            color = colors.primaryText
-                        ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        text = "$reviewTitle$reviewBadge",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                        color = colors.secondaryText,
+                        maxLines = 1
                     )
                 }
-                if (stalledCount > 0) {
+            }
+
+            // Templates utility pill
+            val templatesTitle = stringResource(R.string.v2_templates_title)
+            ThingsHoverTooltip(text = templatesTitle) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(colors.tagPillBg.copy(alpha = 0.72f))
+                        .clickable {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onOpenTemplatesAndImport()
+                        }
+                        .padding(horizontal = 9.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.ContentCopy,
+                        contentDescription = templatesTitle,
+                        tint = colors.secondaryText,
+                        modifier = Modifier.size(13.dp)
+                    )
                     Text(
-                        text = stalledCount.toString(),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.secondaryText
+                        text = templatesTitle,
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                        color = colors.secondaryText,
+                        maxLines = 1
                     )
                 }
             }
         }
 
-        ThingsHoverTooltip(
-            text = stringResource(R.string.v2_templates_title),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.Transparent)
-                    .clickable {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onOpenTemplatesAndImport()
-                    }
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.ContentCopy,
-                    contentDescription = stringResource(R.string.v2_templates_title),
-                    tint = colors.secondaryText,
-                    modifier = Modifier.size(18.dp)
-                )
-                Text(
-                    text = stringResource(R.string.v2_templates_title),
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = FontWeight.Normal,
-                        color = colors.primaryText
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(2.dp))
         HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(2.dp))
 
-        // Areas -> Projects Hierarchy (M3 Expressive Collapsible Area Sections)
+        // Areas -> Projects Hierarchy (Collapsible Workspace Folders + Linear Project Progress Bars)
         LazyColumn(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -5887,7 +6201,7 @@ private fun ThingsChromebookSidebar(
                                 )
                             }
                             Icon(
-                                imageVector = Icons.Outlined.Inventory2,
+                                imageVector = Icons.Outlined.Folder,
                                 contentDescription = area.title,
                                 tint = if (isAreaSelected) colors.thingsBlue else colors.secondaryText,
                                 modifier = Modifier.size(16.dp)
@@ -5938,25 +6252,21 @@ private fun ThingsChromebookSidebar(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Row(
-                                    modifier = Modifier.weight(1f),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    ProjectProgressRing(progress = project.progress, size = 15.dp)
-                                    Text(
-                                        text = project.title,
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                            color = if (selected) colors.thingsBlue else colors.primaryText
-                                        ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
+                                Text(
+                                    text = project.title,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (selected) colors.thingsBlue else colors.primaryText
+                                    ),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 8.dp)
+                                )
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                                 ) {
                                     if (projStatus?.hasNoNextAction == true) {
                                         Icon(
@@ -5981,6 +6291,7 @@ private fun ThingsChromebookSidebar(
                                             modifier = Modifier.size(12.dp)
                                         )
                                     }
+                                    ProjectProgressRing(progress = project.progress, size = 16.dp)
                                 }
                             }
                         }
@@ -6006,25 +6317,21 @@ private fun ThingsChromebookSidebar(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Row(
-                        modifier = Modifier.weight(1f),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        ProjectProgressRing(progress = project.progress, size = 16.dp)
-                        Text(
-                            text = project.title,
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                color = if (selected) colors.thingsBlue else colors.primaryText
-                            ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                    Text(
+                        text = project.title,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (selected) colors.thingsBlue else colors.primaryText
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp)
+                    )
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         if (projStatus?.hasNoNextAction == true) {
                             Icon(
@@ -6049,6 +6356,7 @@ private fun ThingsChromebookSidebar(
                                 modifier = Modifier.size(12.dp)
                             )
                         }
+                        ProjectProgressRing(progress = project.progress, size = 16.dp)
                     }
                 }
             }
@@ -6101,7 +6409,7 @@ private fun ThingsChromebookSidebar(
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Outlined.Inventory2,
+                        imageVector = Icons.Outlined.Folder,
                         contentDescription = null,
                         tint = colors.secondaryText,
                         modifier = Modifier.size(14.dp)

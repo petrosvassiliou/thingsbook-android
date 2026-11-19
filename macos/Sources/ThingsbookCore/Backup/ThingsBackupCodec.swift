@@ -188,6 +188,7 @@ public struct BackupHeadingDto: Codable, Equatable, Sendable {
     public var title: String
     public var sortOrder: Double
     public var isArchived: Bool
+    public var endDate: Int64?
     public var createdAt: Int64
     public var updatedAt: Int64
 
@@ -197,6 +198,7 @@ public struct BackupHeadingDto: Codable, Equatable, Sendable {
         title: String,
         sortOrder: Double = 0,
         isArchived: Bool = false,
+        endDate: Int64? = nil,
         createdAt: Int64 = 0,
         updatedAt: Int64 = 0
     ) {
@@ -205,6 +207,7 @@ public struct BackupHeadingDto: Codable, Equatable, Sendable {
         self.title = title
         self.sortOrder = sortOrder
         self.isArchived = isArchived
+        self.endDate = endDate
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -216,6 +219,7 @@ public struct BackupHeadingDto: Codable, Equatable, Sendable {
         self.title = (try? c.decode(String.self, forKey: .title)) ?? ""
         self.sortOrder = (try? c.decode(Double.self, forKey: .sortOrder)) ?? 0
         self.isArchived = (try? c.decode(Bool.self, forKey: .isArchived)) ?? false
+        self.endDate = try? c.decodeIfPresent(Int64.self, forKey: .endDate)
         self.createdAt = (try? c.decode(Int64.self, forKey: .createdAt)) ?? 0
         self.updatedAt = (try? c.decode(Int64.self, forKey: .updatedAt)) ?? 0
     }

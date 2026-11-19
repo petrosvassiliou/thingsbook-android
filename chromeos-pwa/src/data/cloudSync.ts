@@ -279,11 +279,14 @@ function projectFromFirestoreMap(map: Record<string, unknown>): ProjectRecord | 
   };
 }
 
+type RemoteHeadingWithHints = HeadingRecord & { omittedEndDate?: boolean };
+
 function headingToFirestoreMap(heading: HeadingRecord): Record<string, unknown> {
   return {
     id: heading.id,
     projectId: heading.projectId,
     title: heading.title,
+    endDate: heading.endDate != null ? Math.trunc(heading.endDate) : null,
     sortOrder: finiteNumber(heading.sortOrder),
     isArchived: Boolean(heading.isArchived),
     createdAt: Math.trunc(finiteNumber(heading.createdAt)),
@@ -292,20 +295,23 @@ function headingToFirestoreMap(heading: HeadingRecord): Record<string, unknown> 
   };
 }
 
-function headingFromFirestoreMap(map: Record<string, unknown>): HeadingRecord | null {
+function headingFromFirestoreMap(map: Record<string, unknown>): RemoteHeadingWithHints | null {
   const id = nullableString(map.id);
   const projectId = nullableString(map.projectId);
   if (!id || !projectId) return null;
+  const omittedEndDate = !Object.prototype.hasOwnProperty.call(map, 'endDate');
   return {
     id,
     projectId,
     title: typeof map.title === 'string' ? map.title : '',
+    endDate: nullableNumber(map.endDate),
     sortOrder: finiteNumber(map.sortOrder),
     isArchived: Boolean(map.isArchived),
     createdAt: Math.trunc(finiteNumber(map.createdAt)),
     updatedAt: Math.trunc(finiteNumber(map.updatedAt)),
     isDeleted: Boolean(map.isDeleted),
-    isDirty: false
+    isDirty: false,
+    ...(omittedEndDate ? { omittedEndDate: true } : {})
   };
 }
 
@@ -1528,7 +1534,7 @@ class ThingsCloudSyncService {
       .filter((x): x is ProjectRecord => x !== null);
     const headings = rawHeadings
       .map(headingFromFirestoreMap)
-      .filter((x): x is HeadingRecord => x !== null);
+      .filter((x): x is RemoteHeadingWithHints => x !== null);
     const tasks = rawTasks
       .map(taskFromFirestoreMap)
       .filter((x): x is RemoteTaskWithHints => x !== null);
@@ -1684,7 +1690,9 @@ class ThingsCloudSyncService {
             });
           } else if (colName === 'headings') {
             await localDb.applyRemoteDeltas({
-              headings: docs.map(headingFromFirestoreMap).filter((x): x is HeadingRecord => x !== null)
+              headings: docs
+                .map(headingFromFirestoreMap)
+                .filter((x): x is RemoteHeadingWithHints => x !== null)
             });
           } else if (colName === 'tasks') {
             await localDb.applyRemoteDeltas({
@@ -1872,7 +1880,7 @@ class ThingsCloudSyncService {
       headings: Array.isArray(batch.headings)
         ? batch.headings
             .map(headingFromFirestoreMap)
-            .filter((x: HeadingRecord | null): x is HeadingRecord => x !== null)
+            .filter((x: RemoteHeadingWithHints | null): x is RemoteHeadingWithHints => x !== null)
         : undefined,
       tasks: Array.isArray(batch.tasks)
         ? batch.tasks

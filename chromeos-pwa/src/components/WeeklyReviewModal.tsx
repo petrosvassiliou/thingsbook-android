@@ -1,21 +1,21 @@
 import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
-  Archive,
   ArrowLeft,
   ArrowRight,
   CalendarDays,
   Check,
   CheckCircle2,
+  Cloud,
+  Compass,
   Flag,
   Folder,
   Inbox,
-  Layers,
   ListChecks,
   Moon,
   Plus,
   Sparkles,
-  Star,
+  Sun,
   Trash2,
   X
 } from 'lucide-react';
@@ -293,9 +293,8 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                             })
                           }
                         >
-                          <Star
+                          <Sun
                             size={11.5}
-                            fill="var(--today-star)"
                             style={{ color: 'var(--today-star)' }}
                           />
                           <span>{t.viewToday}</span>
@@ -339,7 +338,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                             })
                           }
                         >
-                          <Archive size={11.5} />
+                          <Cloud size={11.5} />
                           <span>{t.viewSomeday}</span>
                         </button>
                         <button
@@ -443,9 +442,8 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                               })
                             }
                           >
-                            <Star
+                            <Sun
                               size={11.5}
-                              fill="var(--today-star)"
                               style={{ color: 'var(--today-star)' }}
                             />
                             <span>{t.viewToday}</span>
@@ -589,7 +587,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                                 })
                               }
                             >
-                              <Archive size={11.5} />
+                              <Cloud size={11.5} />
                               <span>{t.weeklyReviewMoveSomeday}</span>
                             </button>
                           </div>
@@ -658,7 +656,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
 
               {somedayProjects.length === 0 && somedayTasks.length === 0 ? (
                 <div className="v2-review-empty-card">
-                  <Archive size={24} style={{ color: 'var(--someday-amber)' }} />
+                  <Cloud size={24} style={{ color: 'var(--someday-amber)' }} />
                   <div>{t.weeklyReviewNoSomedayItems}</div>
                 </div>
               ) : (
@@ -681,7 +679,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                             })
                           }
                         >
-                          <Layers size={11.5} />
+                          <Compass size={11.5} />
                           <span>{t.weeklyReviewActivateAnytime}</span>
                         </button>
                       </div>
@@ -705,9 +703,8 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                             })
                           }
                         >
-                          <Star
+                          <Sun
                             size={11.5}
-                            fill="var(--today-star)"
                             style={{ color: 'var(--today-star)' }}
                           />
                           <span>{t.weeklyReviewActivateToday}</span>
@@ -723,7 +720,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                             })
                           }
                         >
-                          <Layers size={11.5} />
+                          <Compass size={11.5} />
                           <span>{t.weeklyReviewActivateAnytime}</span>
                         </button>
                       </div>

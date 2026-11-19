@@ -9,7 +9,6 @@ import {
   Folder,
   FolderInput,
   Inbox,
-  Package,
   Plus,
   Tag,
   Trash2,
@@ -68,7 +67,7 @@ export const AreaManagerModal: React.FC<AreaManagerModalProps> = ({
       <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Package size={18} style={{ color: 'var(--anytime-teal)' }} />
+            <Folder size={18} style={{ color: 'var(--things-blue)' }} />
             <span>
               {t.areasManageTitle} ({activeAreas.length} / {MAX_AREAS})
             </span>
@@ -95,7 +94,7 @@ export const AreaManagerModal: React.FC<AreaManagerModalProps> = ({
                   border: '1px solid var(--border-subtle)'
                 }}
               >
-                <Package size={15} style={{ color: 'var(--anytime-teal)', flexShrink: 0 }} />
+                <Folder size={15} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
                 {isEditing ? (
                   <input
                     type="text"
@@ -417,7 +416,7 @@ export const CreateOrEditProjectModal: React.FC<CreateOrEditProjectModalProps> =
                   className={`chip-btn ${areaId === a.id ? 'active' : ''}`}
                   onClick={() => setAreaId(a.id)}
                 >
-                  <Package size={12} />
+                  <Folder size={12} />
                   <span>{a.title}</span>
                 </button>
               ))}
@@ -571,7 +570,7 @@ export const MoveTaskModal: React.FC<MoveTaskModalProps> = ({
                   onClick={() => moveTo({ projectId: null, headingId: null, areaId: area.id })}
                 >
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                    <Package size={15} style={{ color: 'var(--anytime-teal)' }} />
+                    <Folder size={15} style={{ color: 'var(--things-blue)' }} />
                     <span>{area.title}</span>
                   </span>
                 </button>

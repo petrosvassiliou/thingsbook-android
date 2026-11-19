@@ -1,17 +1,17 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Archive,
   Bell,
   Calendar,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  Cloud,
   Flag,
   Inbox,
   Moon,
   Repeat,
   Sparkles,
-  Star,
+  Sun,
   X
 } from 'lucide-react';
 import { parseNaturalDate } from '../domain/naturalDateParser';
@@ -279,7 +279,7 @@ export const WhenModal: React.FC<WhenModalProps> = ({
             style={{ justifyContent: 'flex-start' }}
             onClick={() => applyPreset('TODAY')}
           >
-            <Star size={15} fill="var(--today-star)" style={{ color: 'var(--today-star)' }} />
+            <Sun size={15} style={{ color: 'var(--today-star)' }} />
             <span>{t.viewToday}</span>
           </button>
           <button
@@ -315,7 +315,7 @@ export const WhenModal: React.FC<WhenModalProps> = ({
             style={{ justifyContent: 'flex-start' }}
             onClick={() => applyPreset('SOMEDAY')}
           >
-            <Archive size={15} style={{ color: 'var(--someday-amber)' }} />
+            <Cloud size={15} style={{ color: 'var(--someday-amber)' }} />
             <span>{t.viewSomeday}</span>
           </button>
           <button

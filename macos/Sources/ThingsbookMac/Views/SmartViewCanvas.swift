@@ -41,7 +41,7 @@ public struct SmartViewCanvas: View {
                     if let area = store.area(byId: areaId) {
                         areaCanvas(area)
                     } else {
-                        emptyPlaceholder(icon: "cube", text: store.tr("empty_view"))
+                        emptyPlaceholder(icon: "folder", text: store.tr("empty_view"))
                     }
                 }
             }
@@ -182,7 +182,7 @@ public struct SmartViewCanvas: View {
         case .anytime:
             let list = store.filterTasksByActiveTag(store.anytimeTasks)
             if list.isEmpty {
-                emptyPlaceholder(icon: "square.stack.3d.up", text: store.tr("empty_view"))
+                emptyPlaceholder(icon: "safari", text: store.tr("empty_view"))
             } else {
                 groupedByContainerStack(list)
             }
@@ -190,7 +190,7 @@ public struct SmartViewCanvas: View {
         case .someday:
             let list = store.filterTasksByActiveTag(store.somedayTasks)
             if list.isEmpty {
-                emptyPlaceholder(icon: "archivebox", text: store.tr("empty_view"))
+                emptyPlaceholder(icon: "cloud", text: store.tr("empty_view"))
             } else {
                 reorderableTaskStack(list)
             }
@@ -221,7 +221,7 @@ public struct SmartViewCanvas: View {
             }
 
             if !hasTasksToday {
-                emptyPlaceholder(icon: "star", text: store.tr("empty_today"))
+                emptyPlaceholder(icon: "sun.max", text: store.tr("empty_today"))
             } else {
                 if !daytime.isEmpty {
                     if store.preferences.groupTodayByProjectOrArea {
@@ -264,61 +264,189 @@ public struct SmartViewCanvas: View {
         }
     }
 
-    // MARK: - Upcoming Timeline View
+    // MARK: - Upcoming Timeline View (Tasks + Phase Milestones)
+
+    private struct UpcomingPhaseMilestone: Identifiable {
+        var id: String { heading.id }
+        let heading: Heading
+        let project: Project
+        let epochDay: Int
+        let completedCount: Int
+        let totalCount: Int
+
+        var progress: Double {
+            guard totalCount > 0 else { return 0.0 }
+            return min(1.0, max(0.0, Double(completedCount) / Double(totalCount)))
+        }
+    }
+
+    private var upcomingPhaseMilestones: [UpcomingPhaseMilestone] {
+        let todayEpochDay = DateEpochConverter.epochDay(for: Date())
+        let activeTagId = store.selectedFilterTagId
+        var items: [UpcomingPhaseMilestone] = []
+
+        for project in store.projects where project.status == .active && !project.isDeleted {
+            let headings = store.headingsByProject[project.id] ?? []
+            guard !headings.isEmpty else { continue }
+            let projOpen = store.allOpenTasks.filter { $0.projectId == project.id }
+            let projLogged = store.completedTasksForProject(project.id)
+
+            for heading in headings where !heading.isDeleted && !heading.isArchived && !heading.title.isEmpty {
+                guard let endMs = heading.endDate else { continue }
+                let epochDay = DateEpochConverter.epochDay(forMillis: endMs)
+                guard epochDay >= todayEpochDay else { continue }
+
+                let openInPhase = projOpen.filter { $0.headingId == heading.id }
+                let doneInPhase = projLogged.filter { $0.headingId == heading.id }
+
+                if let tagId = activeTagId {
+                    let matchesTag = project.tagIds.contains(tagId)
+                        || openInPhase.contains(where: { $0.tagIds.contains(tagId) })
+                        || doneInPhase.contains(where: { $0.tagIds.contains(tagId) })
+                    if !matchesTag { continue }
+                }
+
+                items.append(
+                    UpcomingPhaseMilestone(
+                        heading: heading,
+                        project: project,
+                        epochDay: epochDay,
+                        completedCount: doneInPhase.count,
+                        totalCount: openInPhase.count + doneInPhase.count
+                    )
+                )
+            }
+        }
+        return items.sorted { lhs, rhs in
+            if lhs.epochDay != rhs.epochDay { return lhs.epochDay < rhs.epochDay }
+            return lhs.heading.sortOrder < rhs.heading.sortOrder
+        }
+    }
 
     @ViewBuilder
     private var upcomingCanvas: some View {
         let filtered = store.filterTasksByActiveTag(store.upcomingTasks)
-        if filtered.isEmpty {
+        let milestones = upcomingPhaseMilestones
+        if filtered.isEmpty && milestones.isEmpty {
             emptyPlaceholder(icon: "calendar", text: store.tr("empty_view"))
         } else {
             let todayEpochDay = DateEpochConverter.epochDay(for: Date())
-            let grouped = Dictionary(grouping: filtered) { task -> Int in
+            let groupedTasks = Dictionary(grouping: filtered) { task -> Int in
                 guard let w = task.whenDate else { return Int.max }
                 return max(todayEpochDay + 1, DateEpochConverter.epochDay(forMillis: w))
             }
-            let sortedDays = grouped.keys.sorted()
+            let groupedMilestones = Dictionary(grouping: milestones, by: \.epochDay)
+            let sortedDays = Set(groupedTasks.keys).union(groupedMilestones.keys).sorted()
 
             VStack(alignment: .leading, spacing: 22) {
                 ForEach(sortedDays, id: \.self) { epochDay in
-                    let dayTasks = grouped[epochDay] ?? []
-                    let sampleMillis = dayTasks.first?.whenDate
+                    let dayTasks = groupedTasks[epochDay] ?? []
+                    let dayMilestones = groupedMilestones[epochDay] ?? []
+                    let sampleMillis = dayTasks.first?.whenDate ?? dayMilestones.first?.heading.endDate
                     VStack(alignment: .leading, spacing: 8) {
                         upcomingDayHeader(sampleMillis: sampleMillis)
 
                         let events = store.calendarEventsForEpochDay(
                             epochDay,
-                            hasScheduledTasksOnDay: !dayTasks.isEmpty,
-                            upcomingOnly: true
+                            hasScheduledTasksOnDay: !dayTasks.isEmpty || !dayMilestones.isEmpty,
+                            upcomingOnly: epochDay > todayEpochDay
                         )
                         if !events.isEmpty {
                             calendarEventsCard(events)
                         }
 
-                        VStack(spacing: 3) {
-                            ForEach(Array(dayTasks.enumerated()), id: \.element.id) { idx, task in
-                                TaskRowCardView(store: store, task: task)
-                                    .magicPlusDropSlot(
-                                        id: "utask_\(task.id)",
-                                        kind: .task(
-                                            taskId: task.id,
-                                            headingId: nil,
-                                            prevOrder: idx > 0 ? dayTasks[idx - 1].sortOrder : nil,
-                                            taskOrder: task.sortOrder,
-                                            nextOrder: (idx + 1 < dayTasks.count) ? dayTasks[idx + 1].sortOrder : nil,
-                                            epochDayOverride: epochDay == Int.max ? nil : epochDay,
-                                            evening: false
-                                        ),
-                                        activeDrop: store.magicPlusActiveDrop,
-                                        newTodoLabel: store.tr("entity_new_todo"),
-                                        newHeadingLabel: store.tr("entity_new_heading")
-                                    )
+                        if !dayMilestones.isEmpty {
+                            VStack(spacing: 6) {
+                                ForEach(dayMilestones) { milestone in
+                                    upcomingPhaseMilestoneCard(milestone)
+                                }
+                            }
+                        }
+
+                        if !dayTasks.isEmpty {
+                            VStack(spacing: 3) {
+                                ForEach(Array(dayTasks.enumerated()), id: \.element.id) { idx, task in
+                                    TaskRowCardView(store: store, task: task)
+                                        .magicPlusDropSlot(
+                                            id: "utask_\(task.id)",
+                                            kind: .task(
+                                                taskId: task.id,
+                                                headingId: nil,
+                                                prevOrder: idx > 0 ? dayTasks[idx - 1].sortOrder : nil,
+                                                taskOrder: task.sortOrder,
+                                                nextOrder: (idx + 1 < dayTasks.count) ? dayTasks[idx + 1].sortOrder : nil,
+                                                epochDayOverride: epochDay == Int.max ? nil : epochDay,
+                                                evening: false
+                                            ),
+                                            activeDrop: store.magicPlusActiveDrop,
+                                            newTodoLabel: store.tr("entity_new_todo"),
+                                            newHeadingLabel: store.tr("entity_new_heading")
+                                        )
+                                }
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    private func upcomingPhaseMilestoneCard(_ milestone: UpcomingPhaseMilestone) -> some View {
+        Button {
+            store.selectedDestination = .project(milestone.project.id)
+        } label: {
+            HStack(spacing: 11) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(ThingsMacPalette.accentBlue.opacity(0.14))
+                        .frame(width: 28, height: 28)
+                    Image(systemName: "flag.checkered")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(ThingsMacPalette.accentBlue)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(milestone.heading.title)
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text("\(store.tr("phase_milestone_badge")) · \(milestone.project.title)")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(ThingsMacPalette.accentBlue)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                if milestone.totalCount > 0 {
+                    ProjectProgressRing(
+                        progress: milestone.progress,
+                        size: 15,
+                        tint: ThingsMacPalette.accentBlue,
+                        isCompleted: milestone.completedCount == milestone.totalCount,
+                        showFraction: true,
+                        completedCount: milestone.completedCount,
+                        totalCount: milestone.totalCount
+                    )
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(ThingsMacPalette.accentBlue.opacity(0.06))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.22), lineWidth: 0.85)
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     private func upcomingDayHeader(sampleMillis: Int64?) -> some View {
@@ -342,7 +470,7 @@ public struct SmartViewCanvas: View {
         }
     }
 
-    // MARK: - Project View (Progress Ring, Markdown Notes, Action Pills, Headings, Drag & Drop)
+    // MARK: - Project View (Linear Progress Bar, Markdown Notes, Action Pills, Phases, Drag & Drop)
 
     @ViewBuilder
     private func projectCanvas(_ project: Project) -> some View {
@@ -351,9 +479,12 @@ public struct SmartViewCanvas: View {
             HStack(alignment: .center, spacing: 12) {
                 ProjectProgressRing(
                     progress: project.progress,
-                    size: 26,
+                    size: 22,
                     tint: ThingsMacPalette.accentBlue,
-                    isCompleted: project.status == .completed
+                    isCompleted: project.status == .completed,
+                    showFraction: project.totalTaskCount > 0,
+                    completedCount: project.completedTaskCount,
+                    totalCount: project.totalTaskCount
                 )
 
                 Text(project.title)
@@ -507,10 +638,10 @@ public struct SmartViewCanvas: View {
                         }
                         .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(diff <= 0 ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.accentBlue)
-                        .padding(.horizontal, 10)
+                        .padding(.horizontal, 11)
                         .padding(.vertical, 5)
                         .background(
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            Capsule(style: .continuous)
                                 .fill((diff <= 0 ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.accentBlue).opacity(0.12))
                         )
                     }
@@ -524,7 +655,7 @@ public struct SmartViewCanvas: View {
                         store.selectedDestination = .area(area.id)
                     } label: {
                         HStack(spacing: 5) {
-                            Image(systemName: "cube")
+                            Image(systemName: "folder")
                                 .font(.system(size: 11, weight: .semibold))
                             Text("\(store.tr("entity_area")): \(area.title)")
                                 .font(.system(size: 12, weight: .semibold))
@@ -532,10 +663,10 @@ public struct SmartViewCanvas: View {
                         }
                         .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(ThingsMacPalette.accentBlue)
-                        .padding(.horizontal, 10)
+                        .padding(.horizontal, 11)
                         .padding(.vertical, 5)
                         .background(
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            Capsule(style: .continuous)
                                 .fill(ThingsMacPalette.accentBlue.opacity(0.12))
                         )
                     }
@@ -554,7 +685,7 @@ public struct SmartViewCanvas: View {
 
                 ThingsActionChipButton(
                     title: store.tr("entity_heading"),
-                    systemImage: "text.insert",
+                    systemImage: "flag.checkered",
                     helpText: store.tr("entity_new_heading")
                 ) {
                     isAddingHeading = true
@@ -671,87 +802,35 @@ public struct SmartViewCanvas: View {
     ) -> some View {
         let isCollapsed = store.collapsedHeadingIds.contains(heading.id)
         let isRenaming = renamingHeadingId == heading.id
+        let rawOpenCount = store.allOpenTasks.filter { $0.projectId == project.id && $0.headingId == heading.id }.count
+        let doneCount = store.completedTasksForProject(project.id).filter { $0.headingId == heading.id }.count
+        let totalPhaseCount = rawOpenCount + doneCount
+        let phaseProgress = totalPhaseCount > 0 ? Double(doneCount) / Double(totalPhaseCount) : 0.0
 
-        return VStack(alignment: .leading, spacing: 6) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    if isRenaming {
-                        TextField(store.tr("entity_new_heading"), text: $renameHeadingText)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(maxWidth: 260)
-                            .focused($isRenameHeadingFocused)
-                            .onSubmit {
-                                commitHeadingRename(heading)
-                            }
-                        Button(store.tr("action_save")) {
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Capsule(style: .continuous)
+                    .fill(ThingsMacPalette.accentBlue)
+                    .frame(width: 3.5, height: 17)
+
+                if isRenaming {
+                    TextField(store.tr("entity_new_heading"), text: $renameHeadingText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 260)
+                        .focused($isRenameHeadingFocused)
+                        .onSubmit {
                             commitHeadingRename(heading)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                        Button(store.tr("action_cancel")) {
-                            renamingHeadingId = nil
-                        }
-                        .controlSize(.small)
-                    } else {
-                        Button {
-                            withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                                if isCollapsed {
-                                    store.collapsedHeadingIds.remove(heading.id)
-                                } else {
-                                    store.collapsedHeadingIds.insert(heading.id)
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text(heading.title)
-                                    .font(.system(size: 15, weight: .bold))
-                                    .foregroundStyle(ThingsMacPalette.accentBlue)
-                                if isCollapsed && !tasks.isEmpty {
-                                    Text("(\(tasks.count))")
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
+                    Button(store.tr("action_save")) {
+                        commitHeadingRename(heading)
                     }
-
-                    Spacer()
-
-                    Button {
-                        store.createNewTaskInCurrentContext(preferredHeadingId: heading.id)
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.secondary)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    Button(store.tr("action_cancel")) {
+                        renamingHeadingId = nil
                     }
-                    .buttonStyle(.plain)
-                    .thingsTooltip(store.tr("heading_add_task"))
-
-                    Button {
-                        renameHeadingText = heading.title
-                        renamingHeadingId = heading.id
-                        DispatchQueue.main.async {
-                            isRenameHeadingFocused = true
-                        }
-                    } label: {
-                        Image(systemName: "pencil")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .thingsTooltip(store.tr("macos_rename_heading"))
-
-                    Button {
-                        try? store.database.deleteHeading(heading.id)
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(ThingsMacPalette.deadlineCrimson.opacity(0.85))
-                    }
-                    .buttonStyle(.plain)
-                    .thingsTooltip(store.tr("action_delete"))
-
+                    .controlSize(.small)
+                } else {
                     Button {
                         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
                             if isCollapsed {
@@ -761,18 +840,89 @@ public struct SmartViewCanvas: View {
                             }
                         }
                     } label: {
-                        Image(systemName: isCollapsed ? "chevron.down" : "chevron.up")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
+                        HStack(spacing: 6) {
+                            Text(heading.title)
+                                .font(.system(size: 14.5, weight: .bold))
+                                .foregroundStyle(.primary)
+                            if isCollapsed && !tasks.isEmpty {
+                                Text("(\(tasks.count))")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                     .buttonStyle(.plain)
-                    .thingsTooltip(store.tr("action_collapse_heading"))
-                }
-                .padding(.top, 14)
 
-                Rectangle()
-                    .fill(ThingsMacPalette.accentBlue.opacity(0.28))
-                    .frame(height: 1)
+                    if totalPhaseCount > 0 {
+                        ProjectProgressRing(
+                            progress: phaseProgress,
+                            size: 13.5,
+                            tint: ThingsMacPalette.accentBlue,
+                            isCompleted: rawOpenCount == 0 && doneCount > 0,
+                            showFraction: true,
+                            completedCount: doneCount,
+                            totalCount: totalPhaseCount
+                        )
+                    }
+
+                    PhaseEndDatePillButton(
+                        store: store,
+                        heading: heading,
+                        hasOpenTasks: rawOpenCount > 0
+                    )
+                }
+
+                Spacer()
+
+                Button {
+                    store.createNewTaskInCurrentContext(preferredHeadingId: heading.id)
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .thingsTooltip(store.tr("heading_add_task"))
+
+                Button {
+                    renameHeadingText = heading.title
+                    renamingHeadingId = heading.id
+                    DispatchQueue.main.async {
+                        isRenameHeadingFocused = true
+                    }
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .thingsTooltip(store.tr("macos_rename_heading"))
+
+                Button {
+                    try? store.database.deleteHeading(heading.id)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(ThingsMacPalette.deadlineCrimson.opacity(0.85))
+                }
+                .buttonStyle(.plain)
+                .thingsTooltip(store.tr("action_delete"))
+
+                Button {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                        if isCollapsed {
+                            store.collapsedHeadingIds.remove(heading.id)
+                        } else {
+                            store.collapsedHeadingIds.insert(heading.id)
+                        }
+                    }
+                } label: {
+                    Image(systemName: isCollapsed ? "chevron.down" : "chevron.up")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .thingsTooltip(store.tr("action_collapse_heading"))
             }
             .magicPlusDropSlot(
                 id: "heading_\(heading.id)",
@@ -789,10 +939,21 @@ public struct SmartViewCanvas: View {
                 newHeadingLabel: store.tr("entity_new_heading")
             )
 
-            if !isCollapsed {
+            if !isCollapsed && !tasks.isEmpty {
                 reorderableTaskStack(tasks, showSubtitle: false, targetHeadingId: .some(heading.id))
             }
         }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 11)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(ThingsMacPalette.subtleContainer.opacity(0.68))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.065), lineWidth: 0.8)
+                )
+        )
+        .padding(.top, 4)
         .dropDestination(for: String.self) { droppedIds, _ in
             guard let draggedId = droppedIds.first else { return false }
             try? store.database.reorderTask(taskId: draggedId, prevOrder: tasks.last?.sortOrder, nextOrder: nil, newHeadingId: .some(heading.id))
@@ -823,7 +984,7 @@ public struct SmartViewCanvas: View {
     private func areaCanvas(_ area: Area) -> some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 12) {
-                Image(systemName: "cube.fill")
+                Image(systemName: "folder.fill")
                     .font(.system(size: 25))
                     .foregroundStyle(ThingsMacPalette.areaGreen)
                 Text(area.title)
@@ -862,7 +1023,13 @@ public struct SmartViewCanvas: View {
                             store.selectedDestination = .project(proj.id)
                         } label: {
                             HStack(spacing: 12) {
-                                ProjectProgressRing(progress: proj.progress, size: 18)
+                                ProjectProgressRing(
+                                    progress: proj.progress,
+                                    size: 18,
+                                    showFraction: proj.totalTaskCount > 0,
+                                    completedCount: proj.completedTaskCount,
+                                    totalCount: proj.totalTaskCount
+                                )
                                 Text(proj.title)
                                     .font(.system(size: 14.5, weight: .semibold))
                                 Spacer()
@@ -880,7 +1047,7 @@ public struct SmartViewCanvas: View {
                             }
                             .padding(.horizontal, 14)
                             .padding(.vertical, 11)
-                            .thingsCardSurface(cornerRadius: 10)
+                            .thingsCardSurface(cornerRadius: 12)
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
@@ -916,7 +1083,7 @@ public struct SmartViewCanvas: View {
                 Divider()
                 reorderableTaskStack(looseTasks, showSubtitle: false)
             } else if areaProjects.isEmpty {
-                emptyPlaceholder(icon: "cube", text: store.tr("empty_view"))
+                emptyPlaceholder(icon: "folder", text: store.tr("empty_view"))
             }
         }
     }
@@ -927,7 +1094,7 @@ public struct SmartViewCanvas: View {
     private var logbookCanvas: some View {
         let filtered = store.filterTasksByActiveTag(store.logbookTasks)
         if filtered.isEmpty {
-            emptyPlaceholder(icon: "checkmark.square", text: store.tr("empty_view"))
+            emptyPlaceholder(icon: "clock.arrow.circlepath", text: store.tr("empty_view"))
         } else {
             let grouped = Dictionary(grouping: filtered) { t -> String in
                 let ms = t.completedAt ?? t.updatedAt
@@ -975,7 +1142,7 @@ public struct SmartViewCanvas: View {
 
                         ForEach(store.trashedProjects) { proj in
                             HStack(spacing: 12) {
-                                Image(systemName: "chart.pie")
+                                Image(systemName: "list.bullet.rectangle")
                                     .foregroundStyle(ThingsMacPalette.accentBlue)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(proj.title.isEmpty ? store.tr("entity_new_project") : proj.title)
@@ -1132,16 +1299,19 @@ public struct SmartViewCanvas: View {
         }
         let sortedKeys = grouped.keys.sorted()
 
-        return VStack(alignment: .leading, spacing: 16) {
+        return VStack(alignment: .leading, spacing: 14) {
             ForEach(sortedKeys, id: \.self) { groupName in
                 let groupTasks = grouped[groupName] ?? []
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(groupName)
-                        .font(.system(size: 13.5, weight: .bold))
-                        .foregroundStyle(ThingsMacPalette.accentBlue)
-                    Rectangle()
-                        .fill(ThingsMacPalette.accentBlue.opacity(0.22))
-                        .frame(height: 1)
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(spacing: 7) {
+                        Capsule(style: .continuous)
+                            .fill(ThingsMacPalette.accentBlue)
+                            .frame(width: 3, height: 14)
+                        Text(groupName)
+                            .font(.system(size: 13.5, weight: .bold))
+                            .foregroundStyle(.primary)
+                        Spacer()
+                    }
                     ForEach(Array(groupTasks.enumerated()), id: \.element.id) { idx, task in
                         TaskRowCardView(store: store, task: task, showContextSubtitle: false)
                             .magicPlusDropSlot(
@@ -1161,6 +1331,16 @@ public struct SmartViewCanvas: View {
                             )
                     }
                 }
+                .padding(.horizontal, 13)
+                .padding(.vertical, 11)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(ThingsMacPalette.subtleContainer.opacity(0.65))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(Color.primary.opacity(0.065), lineWidth: 0.8)
+                        )
+                )
             }
         }
     }
@@ -2040,4 +2220,76 @@ private struct MacCompactCalendarEventRow: View {
     }
 }
 
+private struct PhaseEndDatePillButton: View {
+    @ObservedObject var store: ThingsbookStore
+    let heading: Heading
+    let hasOpenTasks: Bool
 
+    @State private var isPopoverOpen = false
+    @State private var isHovering = false
+
+    private var formattedEndDate: String? {
+        guard let endMs = heading.endDate else { return nil }
+        let df = DateFormatter()
+        df.locale = store.preferences.language.locale
+        df.setLocalizedDateFormatFromTemplate("dMMM")
+        return df.string(from: DateEpochConverter.date(fromMillis: endMs))
+    }
+
+    private var isOverdue: Bool {
+        guard hasOpenTasks, let endMs = heading.endDate else { return false }
+        let todayEpochDay = DateEpochConverter.epochDay(for: Date())
+        return DateEpochConverter.epochDay(forMillis: endMs) < todayEpochDay
+    }
+
+    var body: some View {
+        let activeTint = isOverdue ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.accentBlue
+        let hasEndDate = heading.endDate != nil
+
+        Button {
+            isPopoverOpen = true
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: hasEndDate ? "calendar.badge.clock" : "calendar.badge.plus")
+                    .font(.system(size: 10, weight: .semibold))
+                if let formattedEndDate {
+                    Text(store.trf("phase_ends_on", formattedEndDate))
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                } else {
+                    Text(store.tr("phase_set_end_date"))
+                        .font(.system(size: 11, weight: .medium))
+                        .lineLimit(1)
+                }
+            }
+            .foregroundStyle(hasEndDate ? activeTint : (isHovering ? ThingsMacPalette.accentBlue : .secondary))
+            .padding(.horizontal, 8.5)
+            .padding(.vertical, 3)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(
+                        hasEndDate
+                            ? activeTint.opacity(isHovering ? 0.18 : 0.12)
+                            : Color.primary.opacity(isHovering ? 0.08 : 0.045)
+                    )
+            )
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .thingsTooltip(store.tr("phase_set_end_date"))
+        .popover(isPresented: $isPopoverOpen) {
+            DeadlinePopoverView(
+                store: store,
+                currentDeadlineMillis: heading.endDate,
+                customTitle: store.tr("phase_set_end_date"),
+                customClearTitle: store.tr("phase_clear_end_date"),
+                accentTint: ThingsMacPalette.accentBlue
+            ) { newEndMs in
+                store.updateHeadingEndDate(heading.id, endDate: newEndMs)
+            }
+        }
+    }
+}

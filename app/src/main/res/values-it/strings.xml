@@ -18,8 +18,8 @@
     <string name="entity_project">Progetto</string>
     <string name="entity_projects">Progetti</string>
     <string name="entity_new_project">Nuovo progetto</string>
-    <string name="entity_heading">Intestazione</string>
-    <string name="entity_new_heading">Nuova intestazione</string>
+    <string name="entity_heading">Fase</string>
+    <string name="entity_new_heading">Nuova fase</string>
     <string name="entity_todo">Attività</string>
     <string name="entity_todos">Attività</string>
     <string name="entity_new_todo">Nuova attività</string>
@@ -47,7 +47,7 @@
     <string name="action_done">Fine</string>
     <string name="action_save">Salva</string>
     <string name="action_cancel">Annulla</string>
-    <string name="action_collapse_heading">Comprimi/Espandi intestazione</string>
+    <string name="action_collapse_heading">Comprimi/Espandi fase</string>
 
     <!-- Quick Find & Search -->
     <string name="quick_find_title">Ricerca rapida</string>
@@ -96,9 +96,9 @@
     <string name="empty_today">Nessuna attività programmata per Oggi.</string>
     <string name="empty_view">Nessun elemento in questa vista.</string>
     <string name="magic_plus_drop_todo">Rilascia per creare una nuova attività qui</string>
-    <string name="magic_plus_drop_heading">Rilascia sul bordo sinistro per creare un\'intestazione</string>
+    <string name="magic_plus_drop_heading">Rilascia sul bordo sinistro per creare una fase</string>
     <string name="magic_plus_insertion_label">Rilascia per inserire l\'attività qui</string>
-    <string name="magic_plus_heading_label">Rilascia a sinistra per creare un\'intestazione</string>
+    <string name="magic_plus_heading_label">Rilascia a sinistra per creare una fase</string>
 
     <!-- Gemini AI Features in Thingsbook (Multilingual) -->
     <string name="gemini_hub_title">Thingsbook Intelligence (Gemini)</string>
@@ -109,7 +109,7 @@
     <string name="gemini_brain_dump_action">Estrai e pianifica attività</string>
     <string name="gemini_project_architect_title">Architetto di progetti IA</string>
     <string name="gemini_project_architect_placeholder">Descrivi il tuo obiettivo (es. \"Trasloco a Milano in autunno\" o \"Lancio app Android 120Hz\")…</string>
-    <string name="gemini_project_architect_action">Genera progetto con intestazioni e attività</string>
+    <string name="gemini_project_architect_action">Genera progetto con fasi e attività</string>
     <string name="gemini_logbook_review_title">Riflessione IA del Registro</string>
     <string name="gemini_logbook_review_action">Riassumi il Registro e suggerisci il focus</string>
     <string name="gemini_generating">Gemini sta elaborando con calma…</string>
@@ -170,7 +170,7 @@
     <string name="magic_plus_todo_sub_project">Crea nel progetto attuale</string>
     <string name="magic_plus_todo_sub_area">Crea nell\'area attuale</string>
     <string name="magic_plus_todo_sub_inbox">Crea in Entrata</string>
-    <string name="magic_plus_heading_sub">Inserisci sezione nel progetto</string>
+    <string name="magic_plus_heading_sub">Inserisci una fase con data di fine opzionale</string>
     <string name="magic_plus_project_sub_default">Con passaggi e data obiettivo</string>
     <string name="magic_plus_project_sub_area">Progetto in quest\'area</string>
     <string name="magic_plus_project_sub_another">Crea un altro progetto</string>
@@ -218,7 +218,7 @@
 
     <!-- Backup & Restore -->
     <string name="backup_section_title">Backup e ripristino (Backup completo)</string>
-    <string name="backup_section_desc">Salva tutte le attività, aree, progetti, intestazioni, tag, sotto-attività e impostazioni in un unico file (.tbbackup) — opzionalmente protetto da password AES-256 — e ripristina lo stato completo.</string>
+    <string name="backup_section_desc">Salva tutte le attività, aree, progetti, fasi, tag, sotto-attività e impostazioni in un unico file (.tbbackup) — opzionalmente protetto da password AES-256 — e ripristina lo stato completo.</string>
     <string name="backup_create_button">Crea backup</string>
     <string name="backup_restore_button">Ripristina da file</string>
     <string name="backup_create_dialog_title">Crea backup completo</string>
@@ -242,7 +242,7 @@
     <string name="backup_restore_encrypted_desc">Questo file di backup è crittografato. Inserisci la password per ripristinare tutte le attività, aree, progetti e tag.</string>
     <string name="backup_restore_enter_password">Inserisci password di backup</string>
     <string name="backup_preview_header">Contenuto del file di backup:</string>
-    <string name="backup_preview_details">• %1$d attività e %2$d sotto-attività\n• %3$d progetti e %4$d intestazioni\n• %5$d aree e %6$d tag</string>
+    <string name="backup_preview_details">• %1$d attività e %2$d sotto-attività\n• %3$d progetti e %4$d fasi\n• %5$d aree e %6$d tag</string>
     <string name="backup_restore_replace_notice">Nota: il ripristino completo sostituisce tutte le voci locali attuali con il contenuto di questo file di backup.</string>
     <string name="backup_restore_confirm_decrypt">Decrittografa e ripristina tutto</string>
     <string name="backup_restore_confirm_plain">Ripristina tutto ora</string>
@@ -278,10 +278,10 @@
     <string name="subtask_move_up">Sposta voce in alto</string>
     <string name="subtask_move_down">Sposta voce in basso</string>
     <string name="subtask_delete">Elimina voce</string>
-    <string name="heading_add_task">Aggiungi attività sotto questa intestazione</string>
+    <string name="heading_add_task">Aggiungi attività sotto questa fase</string>
     <string name="task_drag_handle">Trascina per spostare</string>
     <string name="drop_move_here">Sposta qui</string>
-    <string name="drop_heading_here">Rilascia per inserire l\'intestazione qui</string>
+    <string name="drop_heading_here">Rilascia per inserire la fase qui</string>
 
     <!-- App Auto-Update & Manual Update Check -->
     <string name="settings_updates_section">Aggiornamenti app</string>
@@ -315,10 +315,10 @@
     <string name="context_adjust_deadline">Modifica scadenza</string>
     <string name="context_configure_repeat">Configura ripetizione</string>
     <string name="context_assign_tags">Assegna tag</string>
-    <string name="repeat_dialog_title">Ripeti (Modalità Things)</string>
+    <string name="repeat_dialog_title">Pianifica ripetizione</string>
     <string name="repeat_mode_fixed">Regolarmente</string>
     <string name="repeat_mode_after">Dopo il completamento</string>
-    <string name="repeat_mode_fixed_desc">Pianificazione fissa del calendario (come \"Regularly\" in Things per Mac).</string>
+    <string name="repeat_mode_fixed_desc">Pianificazione fissa del calendario a scadenze regolari.</string>
     <string name="repeat_mode_after_desc">La prossima attività viene creata solo dopo il completamento di questa.</string>
     <string name="repeat_unit_days">Giorni</string>
     <string name="repeat_unit_weeks">Settimane</string>
@@ -368,7 +368,7 @@
     <string name="quick_share_destination_label">Salva in:</string>
     <string name="settings_workflow_security_section">Flusso di lavoro, Raggruppamento &amp; Blocco app</string>
     <string name="settings_group_today_title">Raggruppa Oggi per progetto o area</string>
-    <string name="settings_group_today_desc">Organizza le attività di Oggi sotto le intestazioni di progetto o area (stile Things 3).</string>
+    <string name="settings_group_today_desc">Organizza le attività di Oggi sotto le schede di progetto o area.</string>
     <string name="settings_biometric_lock_title">Blocco app biometrico / PIN</string>
     <string name="settings_biometric_lock_desc">Richiedi impronta digitale, sblocco facciale o PIN all\'apertura (disattivato per impostazione predefinita).</string>
     <string name="app_lock_title">Thingsbook è bloccato</string>
@@ -431,7 +431,7 @@
     <string name="v2_starter_templates">Modelli iniziali GTD</string>
     <string name="v2_my_templates">I miei modelli salvati</string>
     <string name="v2_import_markdown_title">Importa schema Markdown / JSON</string>
-    <string name="v2_import_markdown_hint">Incolla Markdown (# Progetto, ## Sezione, - [ ] Attività, sotto-attività indentate) o uno schema JSON…</string>
+    <string name="v2_import_markdown_hint">Incolla Markdown (# Progetto, ## Fase, - [ ] Attività, sotto-attività indentate) o uno schema JSON…</string>
     <string name="v2_import_create_project">Crea progetto dallo schema</string>
     <string name="v2_timeblock_title">Blocco orario</string>
     <string name="v2_timeblock_start">Ora di inizio</string>
@@ -473,4 +473,8 @@
     <string name="topbar_tooltip_cloud_sync">Sincronizzazione Cloud</string>
     <string name="topbar_tooltip_settings">Impostazioni</string>
     <string name="action_more_options">Altre azioni</string>
+    <string name="phase_set_end_date">Data di fine</string>
+    <string name="phase_clear_end_date">Rimuovi data di fine</string>
+    <string name="phase_ends_on">Fine %1$s</string>
+    <string name="phase_milestone_badge">Traguardo di fase</string>
 </resources>

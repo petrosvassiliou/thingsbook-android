@@ -1,5 +1,5 @@
-export const APP_VERSION = '3.0.0-alpha.1';
-export const APP_BUILD_CODE = 74;
+export const APP_VERSION = '3.0.0-alpha.2';
+export const APP_BUILD_CODE = 75;
 export const MAX_AREAS = 8;
 
 export type ScheduleState =
@@ -85,6 +85,7 @@ export interface HeadingRecord {
   id: string;
   projectId: string;
   title: string;
+  endDate?: number | null;
   sortOrder: number;
   isArchived: boolean;
   createdAt: number;
@@ -133,6 +134,7 @@ export interface ProjectTemplateTaskBlueprint {
 
 export interface ProjectTemplateHeadingBlueprint {
   title: string;
+  endDateDayOffset?: number | null;
   tasks: ProjectTemplateTaskBlueprint[];
 }
 

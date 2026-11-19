@@ -1709,10 +1709,14 @@ export function buildProjectTemplateBlueprint(
     .filter((t) => !t.headingId || !validHeadingIds.has(t.headingId))
     .map(mapTask);
 
-  const headingBlueprints: ProjectTemplateHeadingBlueprint[] = activeHeadings.map((h) => ({
-    title: h.title,
-    tasks: openProjectTasks.filter((t) => t.headingId === h.id).map(mapTask)
-  }));
+  const headingBlueprints: ProjectTemplateHeadingBlueprint[] = activeHeadings.map((h) => {
+    const endOff = toOffset(h.endDate ?? null);
+    return {
+      title: h.title,
+      ...(endOff != null ? { endDateDayOffset: endOff } : {}),
+      tasks: openProjectTasks.filter((t) => t.headingId === h.id).map(mapTask)
+    };
+  });
 
   return {
     version: 1,
@@ -1811,17 +1815,31 @@ export function parseTemplateBlueprintJson(blueprintJson: string): ProjectTempla
       .map(normalizeBlueprintTask)
       .filter((t): t is ProjectTemplateTaskBlueprint => t !== null);
 
-    const rawHeadings = Array.isArray(obj.headings) ? obj.headings : [];
+    const rawHeadings = Array.isArray(obj.headings)
+      ? obj.headings
+      : Array.isArray(obj.phases)
+        ? obj.phases
+        : Array.isArray(obj.sections)
+          ? obj.sections
+          : [];
     const headings: ProjectTemplateHeadingBlueprint[] = [];
     for (const h of rawHeadings) {
       if (!h || typeof h !== 'object') continue;
       const rec = h as Record<string, unknown>;
       const title = typeof rec.title === 'string' ? rec.title.trim() : '';
       if (!title) continue;
+      const endDateDayOffset =
+        typeof rec.endDateDayOffset === 'number' && Number.isFinite(rec.endDateDayOffset)
+          ? Math.trunc(rec.endDateDayOffset)
+          : null;
       const hTasks = (Array.isArray(rec.tasks) ? rec.tasks : [])
         .map(normalizeBlueprintTask)
         .filter((t): t is ProjectTemplateTaskBlueprint => t !== null);
-      headings.push({ title, tasks: hTasks });
+      headings.push({
+        title,
+        ...(endDateDayOffset != null ? { endDateDayOffset } : {}),
+        tasks: hTasks
+      });
     }
 
     return {

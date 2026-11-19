@@ -9,16 +9,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.material.icons.outlined.CheckCircleOutline
+import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Inbox
-import androidx.compose.material.icons.outlined.Layers
-import androidx.compose.material.icons.outlined.LocalOffer
-import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.WbSunny
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -47,11 +46,11 @@ enum class SmartViewType(
     val icon: ImageVector
 ) {
     INBOX(R.string.view_inbox, Icons.Outlined.Inbox),
-    TODAY(R.string.view_today, Icons.Outlined.Star),
+    TODAY(R.string.view_today, Icons.Outlined.WbSunny),
     UPCOMING(R.string.view_upcoming, Icons.Outlined.CalendarMonth),
-    ANYTIME(R.string.view_anytime, Icons.Outlined.Layers),
-    SOMEDAY(R.string.view_someday, Icons.Outlined.Archive),
-    LOGBOOK(R.string.view_logbook, Icons.Outlined.CheckCircleOutline),
+    ANYTIME(R.string.view_anytime, Icons.Outlined.Explore),
+    SOMEDAY(R.string.view_someday, Icons.Outlined.Cloud),
+    LOGBOOK(R.string.view_logbook, Icons.Outlined.History),
     TRASH(R.string.view_trash, Icons.Outlined.DeleteOutline)
 }
 
@@ -109,10 +108,10 @@ fun ThingsTagPill(
     ) {
         Box(
             modifier = Modifier
-                .clip(RoundedCornerShape(6.dp))
+                .clip(RoundedCornerShape(50))
                 .background(colors.tagPillBg)
                 .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-                .padding(horizontal = 7.dp, vertical = 2.dp),
+                .padding(horizontal = 8.dp, vertical = 2.5.dp),
             contentAlignment = Alignment.Center
         ) {
             Text(
@@ -157,10 +156,10 @@ fun ThingsDeadlineBadge(
     ) {
         Row(
             modifier = Modifier
-                .clip(RoundedCornerShape(6.dp))
+                .clip(RoundedCornerShape(50))
                 .background(bgColor)
                 .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-                .padding(horizontal = 7.dp, vertical = 3.dp),
+                .padding(horizontal = 8.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
@@ -196,7 +195,7 @@ fun ThingsWhenBadge(
 
     val (icon, tint, label) = when (scheduleState) {
         ScheduleState.TODAY -> Triple(
-            Icons.Outlined.Star,
+            Icons.Outlined.WbSunny,
             colors.todayStarYellow,
             stringResource(R.string.view_today)
         )
@@ -214,12 +213,12 @@ fun ThingsWhenBadge(
             Triple(Icons.Outlined.CalendarMonth, colors.upcomingCoralRed, formattedDate)
         }
         ScheduleState.SOMEDAY -> Triple(
-            Icons.Outlined.Archive,
+            Icons.Outlined.Cloud,
             colors.somedayWarmAmber,
             stringResource(R.string.view_someday)
         )
         ScheduleState.ANYTIME -> Triple(
-            Icons.Outlined.Layers,
+            Icons.Outlined.Explore,
             colors.anytimeTeal,
             stringResource(R.string.view_anytime)
         )
@@ -236,10 +235,10 @@ fun ThingsWhenBadge(
     ) {
         Row(
             modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(50))
                 .background(colors.tagPillBg)
                 .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-                .padding(horizontal = 9.dp, vertical = 5.dp),
+                .padding(horizontal = 10.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
@@ -280,10 +279,10 @@ fun ThingsReminderBadge(
     ) {
         Row(
             modifier = Modifier
-                .clip(RoundedCornerShape(6.dp))
+                .clip(RoundedCornerShape(50))
                 .background(colors.thingsBlueSoft)
                 .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-                .padding(horizontal = 7.dp, vertical = 3.dp),
+                .padding(horizontal = 8.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {

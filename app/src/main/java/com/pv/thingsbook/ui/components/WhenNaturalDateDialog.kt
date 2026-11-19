@@ -21,16 +21,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccessTime
-import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Flag
-import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.NotificationsActive
-import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.WbSunny
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -214,7 +214,7 @@ fun WhenNaturalDateDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     CompactPresetChip(
-                        icon = Icons.Outlined.Star,
+                        icon = Icons.Outlined.WbSunny,
                         tint = colors.todayStarYellow,
                         label = stringResource(R.string.view_today),
                         selected = currentScheduleState == ScheduleState.TODAY && selectedDate == today,
@@ -293,7 +293,7 @@ fun WhenNaturalDateDialog(
                         }
                     )
                     CompactPresetChip(
-                        icon = Icons.Outlined.Layers,
+                        icon = Icons.Outlined.Explore,
                         tint = colors.anytimeTeal,
                         label = stringResource(R.string.view_anytime),
                         selected = currentScheduleState == ScheduleState.ANYTIME,
@@ -316,7 +316,7 @@ fun WhenNaturalDateDialog(
                         }
                     )
                     CompactPresetChip(
-                        icon = Icons.Outlined.Archive,
+                        icon = Icons.Outlined.Cloud,
                         tint = colors.somedayWarmAmber,
                         label = stringResource(R.string.view_someday),
                         selected = currentScheduleState == ScheduleState.SOMEDAY,
@@ -601,7 +601,9 @@ fun DeadlineDatePickerDialog(
     currentDeadline: Long?,
     locale: Locale = Locale.getDefault(),
     onApplyDeadline: (Long?) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    titleText: String? = null,
+    clearButtonText: String? = null
 ) {
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
@@ -648,11 +650,11 @@ fun DeadlineDatePickerDialog(
                         Icon(
                             imageVector = Icons.Outlined.Flag,
                             contentDescription = null,
-                            tint = colors.deadlineUrgentRed,
+                            tint = if (titleText != null) colors.thingsBlue else colors.deadlineUrgentRed,
                             modifier = Modifier.size(16.dp)
                         )
                         Text(
-                            text = stringResource(R.string.deadline_picker_title),
+                            text = titleText ?: stringResource(R.string.deadline_picker_title),
                             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                             color = colors.primaryText
                         )
@@ -700,7 +702,7 @@ fun DeadlineDatePickerDialog(
                             .height(30.dp)
                     ) {
                         Text(
-                            text = stringResource(R.string.deadline_clear_button),
+                            text = clearButtonText ?: stringResource(R.string.deadline_clear_button),
                             style = MaterialTheme.typography.labelMedium,
                             color = colors.deadlineUrgentRed,
                             fontWeight = FontWeight.SemiBold

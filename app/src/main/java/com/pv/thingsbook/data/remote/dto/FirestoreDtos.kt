@@ -54,10 +54,11 @@ data class CloudDeltaBatchPayload(
     companion object {
         fun decodeWithHints(rawJson: String, codec: Json = firestoreJson): CloudDeltaBatchPayload {
             val base = codec.decodeFromString<CloudDeltaBatchPayload>(rawJson)
-            if (base.tasks.isEmpty()) return base
-            val omittedIds = runCatching {
-                val root = codec.parseToJsonElement(rawJson).jsonObject
-                val arr = root["tasks"]?.jsonArray ?: return@runCatching emptySet<String>()
+            if (base.tasks.isEmpty() && base.headings.isEmpty()) return base
+            val rootObj = runCatching { codec.parseToJsonElement(rawJson).jsonObject }.getOrNull()
+                ?: return base
+            val omittedTaskIds = runCatching {
+                val arr = rootObj["tasks"]?.jsonArray ?: return@runCatching emptySet<String>()
                 buildSet {
                     for (el in arr) {
                         val obj = el.jsonObject
@@ -68,10 +69,25 @@ data class CloudDeltaBatchPayload(
                     }
                 }
             }.getOrDefault(emptySet())
-            if (omittedIds.isEmpty()) return base
+            val omittedHeadingIds = runCatching {
+                val arr = rootObj["headings"]?.jsonArray ?: return@runCatching emptySet<String>()
+                buildSet {
+                    for (el in arr) {
+                        val obj = el.jsonObject
+                        if (!obj.containsKey("endDate")) {
+                            val hid = obj["id"]?.jsonPrimitive?.content?.trim().orEmpty()
+                            if (hid.isNotEmpty()) add(hid)
+                        }
+                    }
+                }
+            }.getOrDefault(emptySet())
+            if (omittedTaskIds.isEmpty() && omittedHeadingIds.isEmpty()) return base
             return base.copy(
-                tasks = base.tasks.map { dto ->
-                    if (dto.id in omittedIds) dto.copy(omittedTimeblockFields = true) else dto
+                headings = if (omittedHeadingIds.isEmpty()) base.headings else base.headings.map { dto ->
+                    if (dto.id in omittedHeadingIds) dto.copy(omittedEndDate = true) else dto
+                },
+                tasks = if (omittedTaskIds.isEmpty()) base.tasks else base.tasks.map { dto ->
+                    if (dto.id in omittedTaskIds) dto.copy(omittedTimeblockFields = true) else dto
                 }
             )
         }
@@ -252,16 +268,19 @@ data class HeadingFirestoreDto(
     val id: String = "",
     val projectId: String = "",
     val title: String = "",
+    val endDate: Long? = null,
     val sortOrder: Double = 0.0,
     val isArchived: Boolean = false,
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L,
-    val isDeleted: Boolean = false
+    val isDeleted: Boolean = false,
+    val omittedEndDate: Boolean = false
 ) {
     fun toEntity(): HeadingEntity = HeadingEntity(
         id = id,
         projectId = projectId,
         title = title,
+        endDate = endDate,
         sortOrder = sortOrder.finiteOrZero(),
         isArchived = isArchived,
         createdAt = createdAt,
@@ -274,6 +293,7 @@ data class HeadingFirestoreDto(
         "id" to id,
         "projectId" to projectId,
         "title" to title,
+        "endDate" to endDate,
         "sortOrder" to sortOrder.finiteOrZero(),
         "isArchived" to isArchived,
         "createdAt" to createdAt,
@@ -286,6 +306,7 @@ data class HeadingFirestoreDto(
             id = entity.id,
             projectId = entity.projectId,
             title = entity.title,
+            endDate = entity.endDate,
             sortOrder = entity.sortOrder.finiteOrZero(),
             isArchived = entity.isArchived,
             createdAt = entity.createdAt,
@@ -298,15 +319,18 @@ data class HeadingFirestoreDto(
             val id = (map["id"] as? String)?.trim() ?: return null
             val projectId = (map["projectId"] as? String)?.trim() ?: return null
             if (id.isEmpty() || projectId.isEmpty()) return null
+            val omittedEndDate = !map.containsKey("endDate")
             return HeadingFirestoreDto(
                 id = id,
                 projectId = projectId,
                 title = map["title"] as? String ?: "",
+                endDate = (map["endDate"] as? Number)?.toLong(),
                 sortOrder = ((map["sortOrder"] as? Number)?.toDouble() ?: 0.0).finiteOrZero(),
                 isArchived = map["isArchived"] as? Boolean ?: false,
                 createdAt = (map["createdAt"] as? Number)?.toLong() ?: 0L,
                 updatedAt = (map["updatedAt"] as? Number)?.toLong() ?: 0L,
-                isDeleted = map["isDeleted"] as? Boolean ?: false
+                isDeleted = map["isDeleted"] as? Boolean ?: false,
+                omittedEndDate = omittedEndDate
             )
         }
     }

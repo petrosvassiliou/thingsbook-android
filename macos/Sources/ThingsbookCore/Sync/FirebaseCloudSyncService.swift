@@ -725,7 +725,14 @@ public actor FirebaseCloudSyncService {
         let tags = (batch["tags"] as? [[String: Any]] ?? []).compactMap(Self.parseTag)
         let areas = (batch["areas"] as? [[String: Any]] ?? []).compactMap(Self.parseArea)
         let projects = (batch["projects"] as? [[String: Any]] ?? []).compactMap(Self.parseProject)
-        let headings = (batch["headings"] as? [[String: Any]] ?? []).compactMap(Self.parseHeading)
+        var omittedHeadingEndDateIds = Set<String>()
+        let headings = (batch["headings"] as? [[String: Any]] ?? []).compactMap { m -> Heading? in
+            guard let parsed = Self.parseHeadingWithHints(m) else { return nil }
+            if parsed.omittedEndDate {
+                omittedHeadingEndDateIds.insert(parsed.heading.id)
+            }
+            return parsed.heading
+        }
         var taskTags: [String: [String]] = [:]
         var omittedTimeblockTaskIds = Set<String>()
         let tasks = (batch["tasks"] as? [[String: Any]] ?? []).compactMap { m -> TaskItem? in
@@ -747,6 +754,7 @@ public actor FirebaseCloudSyncService {
                 areas: areas,
                 projects: projects,
                 headings: headings,
+                headingOmittedEndDateIds: omittedHeadingEndDateIds,
                 tasks: tasks,
                 taskTagIdsByTaskId: taskTags,
                 taskOmittedTimeblockTaskIds: omittedTimeblockTaskIds,
@@ -1152,6 +1160,7 @@ public actor FirebaseCloudSyncService {
                 "title": Self.fsString(head.title),
                 "sortOrder": Self.fsDouble(head.sortOrder),
                 "isArchived": Self.fsBool(head.isArchived),
+                "endDate": Self.fsNullableInt(head.endDate),
                 "createdAt": Self.fsInt(head.createdAt),
                 "updatedAt": Self.fsInt(head.updatedAt),
                 "isDeleted": Self.fsBool(head.isDeleted)
@@ -1460,6 +1469,7 @@ public actor FirebaseCloudSyncService {
                 "title": head.title,
                 "sortOrder": head.sortOrder,
                 "isArchived": head.isArchived,
+                "endDate": head.endDate as Any,
                 "createdAt": head.createdAt,
                 "updatedAt": head.updatedAt,
                 "isDeleted": head.isDeleted
@@ -1661,7 +1671,14 @@ public actor FirebaseCloudSyncService {
         let tags: [Tag] = tagMaps.compactMap(Self.parseTag)
         let areas: [Area] = areaMaps.compactMap(Self.parseArea)
         let projects: [Project] = projMaps.compactMap(Self.parseProject)
-        let headings: [Heading] = headMaps.compactMap(Self.parseHeading)
+        var omittedHeadingEndDateIds = Set<String>()
+        let headings: [Heading] = headMaps.compactMap { map -> Heading? in
+            guard let parsed = Self.parseHeadingWithHints(map) else { return nil }
+            if parsed.omittedEndDate {
+                omittedHeadingEndDateIds.insert(parsed.heading.id)
+            }
+            return parsed.heading
+        }
         var taskTagIds: [String: [String]] = [:]
         var omittedTimeblockTaskIds = Set<String>()
         let tasks: [TaskItem] = taskMaps.compactMap { map -> TaskItem? in
@@ -1700,6 +1717,7 @@ public actor FirebaseCloudSyncService {
                 areas: areas,
                 projects: projects,
                 headings: headings,
+                headingOmittedEndDateIds: omittedHeadingEndDateIds,
                 tasks: tasks,
                 taskTagIdsByTaskId: taskTagIds,
                 taskOmittedTimeblockTaskIds: omittedTimeblockTaskIds,
@@ -1859,7 +1877,14 @@ public actor FirebaseCloudSyncService {
             let tags = (batch["tags"] as? [[String: Any]] ?? []).compactMap(Self.parseTag)
             let areas = (batch["areas"] as? [[String: Any]] ?? []).compactMap(Self.parseArea)
             let projects = (batch["projects"] as? [[String: Any]] ?? []).compactMap(Self.parseProject)
-            let headings = (batch["headings"] as? [[String: Any]] ?? []).compactMap(Self.parseHeading)
+            var omittedHeadingEndDateIds = Set<String>()
+            let headings = (batch["headings"] as? [[String: Any]] ?? []).compactMap { m -> Heading? in
+                guard let parsed = Self.parseHeadingWithHints(m) else { return nil }
+                if parsed.omittedEndDate {
+                    omittedHeadingEndDateIds.insert(parsed.heading.id)
+                }
+                return parsed.heading
+            }
             var taskTags: [String: [String]] = [:]
             var omittedTimeblockTaskIds = Set<String>()
             let tasks = (batch["tasks"] as? [[String: Any]] ?? []).compactMap { m -> TaskItem? in
@@ -1880,6 +1905,7 @@ public actor FirebaseCloudSyncService {
                     areas: areas,
                     projects: projects,
                     headings: headings,
+                    headingOmittedEndDateIds: omittedHeadingEndDateIds,
                     tasks: tasks,
                     taskTagIdsByTaskId: taskTags,
                     taskOmittedTimeblockTaskIds: omittedTimeblockTaskIds,
@@ -2370,17 +2396,24 @@ public actor FirebaseCloudSyncService {
     }
 
     public static func parseHeading(_ map: [String: Any]) -> Heading? {
+        parseHeadingWithHints(map)?.heading
+    }
+
+    public static func parseHeadingWithHints(_ map: [String: Any]) -> (heading: Heading, omittedEndDate: Bool)? {
         guard let id = asString(map["id"]), let projectId = asString(map["projectId"]) else { return nil }
-        return Heading(
+        let omittedEndDate = !map.keys.contains("endDate")
+        let heading = Heading(
             id: id,
             projectId: projectId,
             title: (map["title"] as? String) ?? "",
             sortOrder: asDouble(map["sortOrder"]),
             isArchived: asBool(map["isArchived"]),
+            endDate: asInt64(map["endDate"]),
             createdAt: asInt64(map["createdAt"]) ?? 0,
             updatedAt: asInt64(map["updatedAt"]) ?? 0,
             isDeleted: asBool(map["isDeleted"])
         )
+        return (heading, omittedEndDate)
     }
 
     public static func parseTaskWithHints(

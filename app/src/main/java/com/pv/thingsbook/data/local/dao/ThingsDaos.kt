@@ -170,6 +170,12 @@ interface ProjectDao {
     suspend fun getDeletedProjectsList(): List<ProjectEntity>
 }
 
+data class HeadingTaskCountsTuple(
+    val headingId: String,
+    val totalTaskCount: Int,
+    val completedTaskCount: Int
+)
+
 @Dao
 interface HeadingDao {
     @Query("SELECT * FROM headings WHERE projectId = :projectId AND isDeleted = 0 AND isArchived = 0 ORDER BY sortOrder ASC")
@@ -177,6 +183,17 @@ interface HeadingDao {
 
     @Query("SELECT * FROM headings WHERE isDeleted = 0 AND isArchived = 0 ORDER BY sortOrder ASC")
     fun observeAllActiveHeadings(): Flow<List<HeadingEntity>>
+
+    @Query(
+        """
+        SELECT h.id AS headingId,
+            (SELECT COUNT(*) FROM tasks t WHERE t.headingId = h.id AND t.isDeleted = 0 AND t.status != 'CANCELED') AS totalTaskCount,
+            (SELECT COUNT(*) FROM tasks t WHERE t.headingId = h.id AND t.isDeleted = 0 AND t.status = 'COMPLETED') AS completedTaskCount
+        FROM headings h
+        WHERE h.isDeleted = 0 AND h.isArchived = 0
+        """
+    )
+    fun observeHeadingTaskCounts(): Flow<List<HeadingTaskCountsTuple>>
 
     @Query("SELECT * FROM headings WHERE projectId = :projectId AND isDeleted = 0 AND isArchived = 0 ORDER BY sortOrder ASC")
     suspend fun getHeadingsForProjectList(projectId: String): List<HeadingEntity>

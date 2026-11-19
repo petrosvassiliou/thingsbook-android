@@ -1,10 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Archive,
   ArrowDown,
   ArrowUp,
   Bell,
-  BookOpenCheck,
   CalendarDays,
   Check,
   CheckCircle2,
@@ -13,6 +11,7 @@ import {
   ChevronUp,
   ClipboardList,
   Cloud,
+  Compass,
   Copy,
   Edit3,
   Flag,
@@ -20,21 +19,21 @@ import {
   FolderInput,
   Globe,
   Heading as HeadingIcon,
+  History,
   Inbox,
-  Layers,
   List,
   ListChecks,
   Menu,
   Mic,
+  Milestone,
   Moon,
-  Package,
   PanelLeftClose,
   Plus,
   Search,
   Settings,
   Share2,
   Sparkles,
-  Star,
+  Sun,
   Tag,
   Trash2,
   X
@@ -53,6 +52,7 @@ import {
   type CalendarEventItem,
   type DeviceCalendarInfo,
   type FocusTimerUiState,
+  type HeadingRecord,
   type ProjectRecord,
   type QuickShareDraft,
   type SmartViewType,
@@ -225,7 +225,10 @@ export const App: React.FC = () => {
   // Modals (store entity IDs so modals always read live snapshot records and never overwrite titles)
   const [whenModalTaskId, setWhenModalTaskId] = useState<string | null>(null);
   const [deadlineModalTarget, setDeadlineModalTarget] = useState<
-    { kind: 'task'; taskId: string } | { kind: 'project'; projectId: string } | null
+    | { kind: 'task'; taskId: string }
+    | { kind: 'project'; projectId: string }
+    | { kind: 'heading'; headingId: string }
+    | null
   >(null);
   const [repeatModalTaskId, setRepeatModalTaskId] = useState<string | null>(null);
   const [moveModalTaskIds, setMoveModalTaskIds] = useState<string[] | null>(null);
@@ -2018,19 +2021,82 @@ export const App: React.FC = () => {
     return { numPart, subPart };
   };
 
-  // Group Upcoming tasks by computeUpcomingTargetDate (re-evaluated across 00:00 midnight via endOfToday)
+  // Group Upcoming tasks & active Phase End-Date Milestones by target date
   const upcomingGroups = useMemo(() => {
-    void endOfToday;
+    const todayStart = startOfDayEpoch(new Date(endOfToday));
     const filtered = filterByTag(upcomingTasks);
-    const map = new Map<number, TaskRecord[]>();
+    const map = new Map<
+      number,
+      {
+        tasks: TaskRecord[];
+        phases: Array<{
+          heading: HeadingRecord;
+          project: ProjectRecord;
+          done: number;
+          total: number;
+        }>;
+      }
+    >();
+
+    const ensureBucket = (day: number) => {
+      let entry = map.get(day);
+      if (!entry) {
+        entry = { tasks: [], phases: [] };
+        map.set(day, entry);
+      }
+      return entry;
+    };
+
     for (const tk of filtered) {
       const targetDay = computeUpcomingTargetDate(tk);
-      const list = map.get(targetDay) || [];
-      list.push(tk);
-      map.set(targetDay, list);
+      ensureBucket(targetDay).tasks.push(tk);
     }
-    return Array.from(map.entries()).sort((a, b) => a[0] - b[0]);
-  }, [upcomingTasks, filterByTag, endOfToday]);
+
+    const activeProjectsById = new Map(
+      snapshot.projects
+        .filter((p) => !p.isDeleted && p.status === 'ACTIVE')
+        .map((p) => [p.id, p])
+    );
+
+    for (const hd of snapshot.headings) {
+      if (hd.isDeleted || hd.isArchived || hd.endDate == null) continue;
+      const proj = activeProjectsById.get(hd.projectId);
+      if (!proj) continue;
+      if (selectedFilterTagId && !proj.tagIds.includes(selectedFilterTagId)) continue;
+      const phaseDay = startOfDayEpoch(new Date(hd.endDate));
+      if (phaseDay < todayStart) continue;
+      const phaseTasks = snapshot.tasks.filter(
+        (tk) =>
+          !tk.isDeleted &&
+          tk.projectId === proj.id &&
+          tk.headingId === hd.id &&
+          tk.status !== 'CANCELED'
+      );
+      const done = phaseTasks.filter((tk) => tk.status === 'COMPLETED').length;
+      ensureBucket(phaseDay).phases.push({
+        heading: hd,
+        project: proj,
+        done,
+        total: phaseTasks.length
+      });
+    }
+
+    return Array.from(map.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([dayEpoch, bucket]) => ({
+        dayEpoch,
+        tasks: bucket.tasks,
+        phases: bucket.phases.sort((a, b) => a.heading.sortOrder - b.heading.sortOrder)
+      }));
+  }, [
+    upcomingTasks,
+    filterByTag,
+    endOfToday,
+    snapshot.headings,
+    snapshot.projects,
+    snapshot.tasks,
+    selectedFilterTagId
+  ]);
 
   const effectiveSidebarVisible = isWideScreen ? prefs.sidebarVisible : mobileDrawerOpen;
 
@@ -2209,7 +2275,7 @@ export const App: React.FC = () => {
               title={t.topbarTooltipAreas}
               onClick={() => setAreaManagerOpen(true)}
             >
-              <Package size={17} />
+              <Folder size={17} />
             </button>
 
             {/* Tags Icon */}
@@ -2474,23 +2540,19 @@ export const App: React.FC = () => {
                         <Inbox size={26} style={{ color: 'var(--things-blue)' }} />
                       )}
                       {activeNav.view === 'TODAY' && (
-                        <Star
-                          size={26}
-                          fill="var(--things-blue)"
-                          style={{ color: 'var(--things-blue)' }}
-                        />
+                        <Sun size={26} style={{ color: 'var(--things-blue)' }} />
                       )}
                       {activeNav.view === 'UPCOMING' && (
                         <CalendarDays size={26} style={{ color: 'var(--things-blue)' }} />
                       )}
                       {activeNav.view === 'ANYTIME' && (
-                        <Layers size={26} style={{ color: 'var(--things-blue)' }} />
+                        <Compass size={26} style={{ color: 'var(--things-blue)' }} />
                       )}
                       {activeNav.view === 'SOMEDAY' && (
-                        <Archive size={26} style={{ color: 'var(--things-blue)' }} />
+                        <Cloud size={26} style={{ color: 'var(--things-blue)' }} />
                       )}
                       {activeNav.view === 'LOGBOOK' && (
-                        <BookOpenCheck size={26} style={{ color: 'var(--things-blue)' }} />
+                        <History size={26} style={{ color: 'var(--things-blue)' }} />
                       )}
                       {activeNav.view === 'TRASH' && (
                         <Trash2 size={26} style={{ color: 'var(--things-blue)' }} />
@@ -2773,7 +2835,7 @@ export const App: React.FC = () => {
                                   handleSelectNav({ kind: 'area', areaId: area.id })
                                 }
                               >
-                                <Package size={14.5} style={{ color: 'var(--anytime-teal)' }} />
+                                <Folder size={14.5} style={{ color: 'var(--things-blue)' }} />
                                 <span>{area.title}</span>
                               </button>
                             </div>
@@ -2823,7 +2885,7 @@ export const App: React.FC = () => {
                     {upcomingGroups.length === 0 ? (
                       <div className="empty-state">{t.emptyView}</div>
                     ) : (
-                      upcomingGroups.map(([dayEpoch, groupTasks]) => {
+                      upcomingGroups.map(({ dayEpoch, tasks: groupTasks, phases: groupPhases }) => {
                         const hdr = formatUpcomingHeader(dayEpoch);
                         const targetEpochDay = localEpochDayFromMs(dayEpoch);
                         const todayEpochDay = localEpochDayFromMs(endOfToday);
@@ -2846,12 +2908,49 @@ export const App: React.FC = () => {
                               <span className="upcoming-day-num">{hdr.numPart}</span>
                               <span className="upcoming-day-sub">{hdr.subPart}</span>
                             </div>
-                            {groupTasks.length > 0 && dayEvents.length > 0 && (
-                              <CalendarEventsBlock events={dayEvents} t={t} compactTop />
+                            {(groupTasks.length > 0 || groupPhases.length > 0) &&
+                              dayEvents.length > 0 && (
+                                <CalendarEventsBlock events={dayEvents} t={t} compactTop />
+                              )}
+                            {groupPhases.map((ph) => (
+                              <button
+                                key={`phase-ms-${ph.heading.id}`}
+                                type="button"
+                                className="phase-milestone-card"
+                                onClick={() =>
+                                  handleSelectNav({
+                                    kind: 'project',
+                                    projectId: ph.project.id
+                                  })
+                                }
+                              >
+                                <div className="phase-milestone-left">
+                                  <Milestone
+                                    size={15.5}
+                                    style={{ color: 'var(--things-blue)', flexShrink: 0 }}
+                                  />
+                                  <div className="phase-milestone-texts">
+                                    <span className="phase-milestone-title">
+                                      {ph.heading.title || t.entityHeading}
+                                    </span>
+                                    <span className="phase-milestone-sub">
+                                      {t.phaseMilestoneBadge} · {ph.project.title}
+                                    </span>
+                                  </div>
+                                </div>
+                                <ProjectProgressRing
+                                  completed={ph.done}
+                                  total={ph.total}
+                                  size={16}
+                                  showCount
+                                />
+                              </button>
+                            ))}
+                            {groupTasks.length > 0 && (
+                              <div className="task-list">
+                                {groupTasks.map((tk) => renderTaskRow(tk, groupTasks, true))}
+                              </div>
                             )}
-                            <div className="task-list">
-                              {groupTasks.map((tk) => renderTaskRow(tk, groupTasks, true))}
-                            </div>
                           </div>
                         );
                       })
@@ -2910,7 +3009,7 @@ export const App: React.FC = () => {
                   <div className="view-header" onClick={(e) => e.stopPropagation()}>
                     <div className="view-title-row">
                       <div className="view-title-left">
-                        <Package size={26} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
+                        <Folder size={26} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
                         {editingAreaHeader ? (
                           <input
                             type="text"
@@ -3362,7 +3461,7 @@ export const App: React.FC = () => {
                           title={t.assignArea}
                           onClick={() => setProjectAreaDropdownOpen((v) => !v)}
                         >
-                          <Package size={12.5} />
+                          <Folder size={12.5} />
                           <span>
                             {projArea
                               ? `${t.entityArea}: ${projArea.title}`
@@ -3490,11 +3589,28 @@ export const App: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Collapsible Project Headings with 4 Trailing Buttons & Drop Target */}
+                  {/* Collapsible Project Phases with Progress, End Date Capsule & Drop Target */}
                   {projHeadings.map((hd) => {
                     const hdTasks = visibleOpenProjTasks.filter(
                       (tk) => tk.headingId === hd.id
                     );
+                    const allHdTasks = allProjTasks.filter((tk) => tk.headingId === hd.id);
+                    const doneHdTasks = allHdTasks.filter(
+                      (tk) => tk.status === 'COMPLETED'
+                    ).length;
+                    const hdEndDiff =
+                      hd.endDate != null ? daysBetweenToday(hd.endDate) : null;
+                    const isPhaseOverdue =
+                      hdEndDiff != null &&
+                      hdEndDiff < 0 &&
+                      doneHdTasks < allHdTasks.length;
+                    const formattedPhaseEnd =
+                      hd.endDate != null
+                        ? new Intl.DateTimeFormat(lang, {
+                            month: 'short',
+                            day: 'numeric'
+                          }).format(new Date(hd.endDate))
+                        : null;
                     const isCollapsed = collapsedHeadingIds.has(hd.id);
                     const isEditing = editingHeadingId === hd.id;
 
@@ -3566,7 +3682,6 @@ export const App: React.FC = () => {
                                 headingId: hd.id,
                                 areaId: null
                               });
-                              // Auto-expand collapsed heading on drop
                               if (isCollapsed) {
                                 setCollapsedHeadingIds((prev) => {
                                   const next = new Set(prev);
@@ -3610,15 +3725,46 @@ export const App: React.FC = () => {
                               className="project-heading-title-btn"
                               onClick={toggleCollapse}
                             >
+                              <span className="project-phase-accent" />
                               <span>{hd.title || t.entityHeading}</span>
-                              {isCollapsed && hdTasks.length > 0 && (
-                                <span className="meta-badge">{hdTasks.length}</span>
+                              {allHdTasks.length > 0 && (
+                                <ProjectProgressRing
+                                  completed={doneHdTasks}
+                                  total={allHdTasks.length}
+                                  size={14}
+                                  showCount
+                                />
                               )}
                             </button>
                           )}
 
-                          {/* Exact 4 Trailing Icon Buttons: +, Rename, Delete, Expand/Collapse */}
+                          {/* Phase End Date Capsule + 4 Trailing Icon Buttons */}
                           <div className="project-heading-actions">
+                            <button
+                              type="button"
+                              className={`phase-end-pill ${
+                                isPhaseOverdue
+                                  ? 'overdue'
+                                  : hd.endDate != null
+                                    ? 'has-date'
+                                    : ''
+                              }`}
+                              title={t.phaseSetEndDate}
+                              onClick={() =>
+                                setDeadlineModalTarget({
+                                  kind: 'heading',
+                                  headingId: hd.id
+                                })
+                              }
+                            >
+                              <CalendarDays size={12} />
+                              <span>
+                                {formattedPhaseEnd != null
+                                  ? t.phaseEndsOn(formattedPhaseEnd)
+                                  : `+ ${t.phaseSetEndDate}`}
+                              </span>
+                            </button>
+
                             <button
                               type="button"
                               className="icon-btn"
@@ -3729,7 +3875,7 @@ export const App: React.FC = () => {
                   setSelectedTaskIds([]);
                 }}
               >
-                <Star size={12} fill="var(--today-star)" style={{ color: 'var(--today-star)' }} />
+                <Sun size={12} style={{ color: 'var(--today-star)' }} />
                 <span>{t.viewToday}</span>
               </button>
 
@@ -3854,18 +4000,29 @@ export const App: React.FC = () => {
           deadlineModalTarget.kind === 'task'
             ? snapshot.tasks.find((x) => x.id === deadlineModalTarget.taskId)
             : undefined;
+        const liveHeading =
+          deadlineModalTarget.kind === 'heading'
+            ? snapshot.headings.find((h) => h.id === deadlineModalTarget.headingId)
+            : undefined;
         if (deadlineModalTarget.kind === 'project' && !liveProject) return null;
         if (deadlineModalTarget.kind === 'task' && !liveTask) return null;
+        if (deadlineModalTarget.kind === 'heading' && !liveHeading) return null;
 
         return (
           <DeadlineModal
             titleLabel={
-              deadlineModalTarget.kind === 'project' ? t.targetDate : t.actionDeadline
+              deadlineModalTarget.kind === 'project'
+                ? t.targetDate
+                : deadlineModalTarget.kind === 'heading'
+                  ? `${liveHeading!.title || t.entityHeading} — ${t.phaseSetEndDate}`
+                  : t.actionDeadline
             }
             currentDeadline={
               deadlineModalTarget.kind === 'project'
                 ? liveProject!.deadline
-                : liveTask!.deadline
+                : deadlineModalTarget.kind === 'heading'
+                  ? (liveHeading!.endDate ?? null)
+                  : liveTask!.deadline
             }
             lang={lang}
             t={t}
@@ -3875,6 +4032,8 @@ export const App: React.FC = () => {
                   id: deadlineModalTarget.projectId,
                   deadline: dl
                 });
+              } else if (deadlineModalTarget.kind === 'heading') {
+                void localDb.updateHeadingEndDate(deadlineModalTarget.headingId, dl);
               } else {
                 void localDb.upsertTask({
                   id: deadlineModalTarget.taskId,

@@ -714,3 +714,17 @@ export function buildLegacyCompatibleNtfyChunks(
   return out.slice(0, maxChunks);
 }
 
+/**
+ * Resolves the merged `endDate` for an incoming remote `headings` delta so `v2.x` clients
+ * (which omit `endDate` from Firestore/ntfy payloads) preserve any existing local `endDate`
+ * while `v3.0+` clients explicitly sending `endDate: null` or a timestamp apply cleanly.
+ */
+export function resolveMergedHeadingEndDate(
+  local: Pick<HeadingRecord, 'endDate'> | undefined,
+  remote: Pick<HeadingRecord, 'endDate' | 'isDeleted'> & { omittedEndDate?: boolean }
+): number | null {
+  if (remote.omittedEndDate && !remote.isDeleted && local !== undefined) {
+    return local.endDate ?? null;
+  }
+  return remote.endDate ?? null;
+}

@@ -146,7 +146,7 @@ public struct TemplatesAndImportSheetView: View {
 
                     if store.projectTemplates.isEmpty {
                         HStack {
-                            Image(systemName: "square.stack.3d.up")
+                            Image(systemName: "square.on.square")
                                 .foregroundStyle(.secondary)
                             Text(store.tr("empty_view"))
                                 .font(.system(size: 12.5))
@@ -287,7 +287,7 @@ public struct TemplatesAndImportSheetView: View {
             if !rawOutlineText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 let preview = parsedOutlinePreview
                 HStack(spacing: 10) {
-                    Image(systemName: "chart.pie.fill")
+                    Image(systemName: "list.bullet.rectangle")
                         .foregroundStyle(ThingsMacPalette.accentBlue)
                     Text(preview.title)
                         .font(.system(size: 13, weight: .semibold))

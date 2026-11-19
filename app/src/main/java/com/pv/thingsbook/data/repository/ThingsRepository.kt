@@ -322,6 +322,7 @@ class ThingsRepository @Inject constructor(
                             id = it.id,
                             projectId = it.projectId,
                             title = it.title,
+                            endDate = it.endDate,
                             sortOrder = it.sortOrder,
                             isArchived = it.isArchived,
                             createdAt = it.createdAt,
@@ -1510,7 +1511,8 @@ class ThingsRepository @Inject constructor(
     suspend fun createHeadingInProject(
         projectId: String,
         title: String,
-        sortOrder: Double
+        sortOrder: Double,
+        endDate: Long? = null
     ): String {
         val now = System.currentTimeMillis()
         val id = UUID.randomUUID().toString()
@@ -1519,6 +1521,7 @@ class ThingsRepository @Inject constructor(
                 id = id,
                 projectId = projectId,
                 title = title,
+                endDate = endDate,
                 sortOrder = if (sortOrder.isFinite()) sortOrder else 1000.0,
                 isArchived = false,
                 createdAt = now,
@@ -1539,6 +1542,19 @@ class ThingsRepository @Inject constructor(
         database.headingDao().upsert(
             existing.copy(
                 title = trimmed,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun updateHeadingEndDate(headingId: String, endDate: Long?) {
+        val existing = database.headingDao().getById(headingId) ?: return
+        val now = System.currentTimeMillis()
+        database.headingDao().upsert(
+            existing.copy(
+                endDate = endDate,
                 updatedAt = now,
                 isDirty = true
             )
@@ -2450,8 +2466,15 @@ class ThingsRepository @Inject constructor(
 
         val headingBlueprints = headings.map { heading ->
             val hTasks = openTasks.filter { it.headingId == heading.id }.map { it.toTaskBlueprint() }
+            val hEndOffset = heading.endDate?.let { epoch ->
+                runCatching {
+                    val endDateLocal = Instant.ofEpochMilli(epoch).atZone(zone).toLocalDate()
+                    java.time.temporal.ChronoUnit.DAYS.between(anchorDate, endDateLocal).toInt().coerceIn(0, 3650)
+                }.getOrNull()
+            }
             TemplateHeadingBlueprint(
                 title = heading.title,
+                endDateDayOffset = hEndOffset,
                 tasks = hTasks
             )
         }
@@ -2618,11 +2641,15 @@ class ThingsRepository @Inject constructor(
             blueprint.headings.forEachIndexed { hIdx, headingBp ->
                 val headingId = UUID.randomUUID().toString()
                 val hSort = (hIdx + 1) * 1000.0 + blueprint.unheadedTasks.size * 100.0
+                val phaseEndDate = headingBp.endDateDayOffset?.let { offset ->
+                    anchorDate.plusDays(offset.toLong()).atStartOfDay(zone).toInstant().toEpochMilli()
+                }
                 database.headingDao().upsert(
                     HeadingEntity(
                         id = headingId,
                         projectId = projectId,
-                        title = headingBp.title.trim().ifEmpty { "Section ${hIdx + 1}" },
+                        title = headingBp.title.trim().ifEmpty { "Phase ${hIdx + 1}" },
+                        endDate = phaseEndDate,
                         sortOrder = hSort,
                         isArchived = false,
                         createdAt = now,
@@ -3265,6 +3292,7 @@ class ThingsRepository @Inject constructor(
                         id = h.id,
                         projectId = h.projectId,
                         title = h.title,
+                        endDate = h.endDate,
                         sortOrder = if (h.sortOrder.isFinite()) h.sortOrder else 0.0,
                         isArchived = h.isArchived,
                         createdAt = h.createdAt,
@@ -3464,6 +3492,7 @@ class ThingsRepository @Inject constructor(
                     id = h.id,
                     projectId = h.projectId,
                     title = h.title,
+                    endDate = h.endDate,
                     sortOrder = if (h.sortOrder.isFinite()) h.sortOrder else 0.0,
                     isArchived = h.isArchived,
                     createdAt = h.createdAt.takeIf { it > 0L } ?: now,

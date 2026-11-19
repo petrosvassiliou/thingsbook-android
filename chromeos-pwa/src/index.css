@@ -224,7 +224,169 @@ button {
 .sidebar-divider {
   height: 1px;
   background: var(--border-subtle);
-  margin: 8px 6px;
+  margin: 10px 6px;
+}
+
+/* 3.0-alpha.2: 2x2 Bento Focus Grid + Compact Secondary Utility Pills */
+.bento-focus-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-bottom: 8px;
+}
+
+.bento-tile {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9.5px 11px;
+  border-radius: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  text-align: left;
+  transition: background-color 0.14s ease, border-color 0.14s ease, transform 0.12s ease;
+}
+
+.bento-tile:hover {
+  background: var(--bg-sidebar-hover);
+  border-color: var(--border-strong);
+}
+
+.bento-tile.active {
+  background: var(--things-blue-soft);
+  border-color: rgba(56, 152, 236, 0.42);
+  color: var(--active-pill-text);
+}
+
+.bento-tile.drag-over {
+  outline: 2px solid var(--things-blue);
+  background: var(--things-blue-soft);
+}
+
+.bento-tile-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.bento-tile-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bento-tile-count {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.bento-tile.active .bento-tile-count {
+  color: var(--things-blue);
+}
+
+.bento-tile-label {
+  font-size: 12.6px;
+  font-weight: 620;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-utility-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 4px;
+}
+
+.utility-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5.5px;
+  padding: 5px 9.5px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 540;
+  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.utility-pill:hover {
+  background: var(--bg-sidebar-hover);
+  color: var(--text-primary);
+}
+
+.utility-pill.active {
+  background: var(--things-blue-soft);
+  border-color: rgba(56, 152, 236, 0.4);
+  color: var(--active-pill-text);
+  font-weight: 640;
+}
+
+.utility-pill.drag-over {
+  outline: 2px solid var(--things-blue);
+  background: var(--things-blue-soft);
+}
+
+.utility-pill-label {
+  white-space: nowrap;
+}
+
+.utility-pill-count {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Horizontal Linear Project Progress Bar */
+.project-linear-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.project-linear-track {
+  display: inline-block;
+  border-radius: 999px;
+  background: rgba(56, 152, 236, 0.18);
+  overflow: hidden;
+  position: relative;
+}
+
+.project-linear-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--things-blue);
+  transition: width 0.22s ease;
+}
+
+.project-linear-label {
+  font-size: 11px;
+  font-weight: 620;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.project-linear-done-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--things-blue);
+  color: #ffffff;
+  flex-shrink: 0;
 }
 
 .nav-row-wrap {
@@ -936,7 +1098,11 @@ button {
 /* ==================== Group & Collapsible Project Heading Headers ==================== */
 
 .group-section {
-  margin-bottom: 22px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
 }
 
 .group-header {
@@ -944,7 +1110,7 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 4px;
+  padding: 4px 4px 7px;
   margin-bottom: 5px;
   border-bottom: 1px solid var(--border-subtle);
 }
@@ -971,8 +1137,8 @@ button {
   display: flex;
   align-items: baseline;
   gap: 9px;
-  padding: 8px 4px 5px;
-  margin-bottom: 4px;
+  padding: 4px 4px 7px;
+  margin-bottom: 5px;
   border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -992,11 +1158,12 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
-  padding: 8px 6px 5px;
-  margin-bottom: 4px;
-  border-bottom: 1.5px solid rgba(36, 139, 253, 0.35);
-  border-radius: var(--radius-xs) var(--radius-xs) 0 0;
+  padding: 6px 6px 8px;
+  margin-bottom: 5px;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
   transition: background 0.12s ease;
 }
 
@@ -1005,16 +1172,107 @@ button {
   border-bottom-color: var(--things-blue);
 }
 
+.project-phase-accent {
+  width: 3.5px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--things-blue);
+  flex-shrink: 0;
+}
+
 .project-heading-title-btn {
   flex: 1;
-  min-width: 0;
+  min-width: 120px;
   display: flex;
   align-items: center;
   gap: 8px;
   text-align: left;
-  color: var(--things-blue);
+  color: var(--text-primary);
   font-weight: 700;
   font-size: 13.8px;
+}
+
+.phase-end-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-chip);
+  color: var(--text-secondary);
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  white-space: nowrap;
+}
+
+.phase-end-pill:hover {
+  border-color: var(--things-blue);
+  color: var(--things-blue);
+}
+
+.phase-end-pill.has-date {
+  background: var(--things-blue-soft);
+  border-color: rgba(56, 152, 236, 0.32);
+  color: var(--things-blue);
+}
+
+.phase-end-pill.overdue {
+  background: var(--deadline-red-bg);
+  border-color: rgba(229, 57, 53, 0.35);
+  color: var(--deadline-red);
+}
+
+.phase-milestone-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 11px;
+  margin-bottom: 5px;
+  border-radius: 12px;
+  background: var(--things-blue-soft);
+  border: 1px solid rgba(56, 152, 236, 0.28);
+  text-align: left;
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+.phase-milestone-card:hover {
+  border-color: var(--things-blue);
+}
+
+.phase-milestone-left {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  flex: 1;
+}
+
+.phase-milestone-texts {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.phase-milestone-title {
+  font-size: 13.4px;
+  font-weight: 680;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phase-milestone-sub {
+  font-size: 11.5px;
+  font-weight: 540;
+  color: var(--things-blue);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .project-heading-actions {
@@ -1204,10 +1462,10 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 1.5px 7px;
-  border-radius: var(--radius-xs);
+  padding: 2px 8.5px;
+  border-radius: 999px;
   font-size: 11.3px;
-  font-weight: 520;
+  font-weight: 540;
   background: var(--bg-chip);
   color: var(--text-secondary);
   white-space: nowrap;

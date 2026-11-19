@@ -36,22 +36,22 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.DeleteForever
+import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inbox
-import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.RestoreFromTrash
-import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.WbSunny
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -257,10 +257,10 @@ fun ThingsQuickShareModal(
 
                 val scheduleOptions = listOf(
                     Triple(ScheduleState.INBOX, stringResource(R.string.view_inbox), Icons.Outlined.Inbox),
-                    Triple(ScheduleState.TODAY, stringResource(R.string.view_today), Icons.Outlined.Star),
+                    Triple(ScheduleState.TODAY, stringResource(R.string.view_today), Icons.Outlined.WbSunny),
                     Triple(ScheduleState.THIS_EVENING, stringResource(R.string.view_this_evening), Icons.Outlined.Bedtime),
-                    Triple(ScheduleState.ANYTIME, stringResource(R.string.view_anytime), Icons.Outlined.Layers),
-                    Triple(ScheduleState.SOMEDAY, stringResource(R.string.view_someday), Icons.Outlined.Archive)
+                    Triple(ScheduleState.ANYTIME, stringResource(R.string.view_anytime), Icons.Outlined.Explore),
+                    Triple(ScheduleState.SOMEDAY, stringResource(R.string.view_someday), Icons.Outlined.Cloud)
                 )
 
                 Row(

@@ -41,6 +41,7 @@ data class Heading(
     val id: String,
     val projectId: String,
     val title: String,
+    val endDate: Long? = null,
     val sortOrder: Double,
     val isArchived: Boolean = false,
     val createdAt: Long,

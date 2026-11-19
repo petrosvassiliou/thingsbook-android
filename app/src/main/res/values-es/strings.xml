@@ -18,8 +18,8 @@
     <string name="entity_project">Proyecto</string>
     <string name="entity_projects">Proyectos</string>
     <string name="entity_new_project">Nuevo proyecto</string>
-    <string name="entity_heading">Encabezado</string>
-    <string name="entity_new_heading">Nuevo encabezado</string>
+    <string name="entity_heading">Fase</string>
+    <string name="entity_new_heading">Nueva fase</string>
     <string name="entity_todo">Tarea</string>
     <string name="entity_todos">Tareas</string>
     <string name="entity_new_todo">Nueva tarea</string>
@@ -47,7 +47,7 @@
     <string name="action_done">Listo</string>
     <string name="action_save">Guardar</string>
     <string name="action_cancel">Cancelar</string>
-    <string name="action_collapse_heading">Contraer/Expandir encabezado</string>
+    <string name="action_collapse_heading">Contraer/Expandir fase</string>
 
     <!-- Quick Find & Search -->
     <string name="quick_find_title">Búsqueda rápida</string>
@@ -96,9 +96,9 @@
     <string name="empty_today">No hay tareas programadas para Hoy.</string>
     <string name="empty_view">No hay elementos en esta vista.</string>
     <string name="magic_plus_drop_todo">Suelta para crear una nueva tarea aquí</string>
-    <string name="magic_plus_drop_heading">Suelta en el borde izquierdo para crear un encabezado</string>
+    <string name="magic_plus_drop_heading">Suelta en el borde izquierdo para crear una fase</string>
     <string name="magic_plus_insertion_label">Suelta para insertar la tarea aquí</string>
-    <string name="magic_plus_heading_label">Suelta a la izquierda para crear un encabezado</string>
+    <string name="magic_plus_heading_label">Suelta a la izquierda para crear una fase</string>
 
     <!-- Gemini AI Features in Thingsbook (Multilingual) -->
     <string name="gemini_hub_title">Thingsbook Intelligence (Gemini)</string>
@@ -109,7 +109,7 @@
     <string name="gemini_brain_dump_action">Extraer y programar tareas</string>
     <string name="gemini_project_architect_title">Arquitecto de proyectos IA</string>
     <string name="gemini_project_architect_placeholder">Describe tu objetivo (ej. «Mudanza a Madrid en otoño» o «Lanzar app Android 120Hz»)…</string>
-    <string name="gemini_project_architect_action">Generar proyecto con encabezados y tareas</string>
+    <string name="gemini_project_architect_action">Generar proyecto con fases y tareas</string>
     <string name="gemini_logbook_review_title">Reflexión IA del Registro</string>
     <string name="gemini_logbook_review_action">Resumir Registro y sugerir enfoque</string>
     <string name="gemini_generating">Gemini está estructurando tus ideas con calma…</string>
@@ -170,7 +170,7 @@
     <string name="magic_plus_todo_sub_project">Crear en el proyecto actual</string>
     <string name="magic_plus_todo_sub_area">Crear en el área actual</string>
     <string name="magic_plus_todo_sub_inbox">Crear en Entrada</string>
-    <string name="magic_plus_heading_sub">Insertar sección en el proyecto</string>
+    <string name="magic_plus_heading_sub">Insertar fase con fecha de fin opcional</string>
     <string name="magic_plus_project_sub_default">Con pasos y fecha objetivo</string>
     <string name="magic_plus_project_sub_area">Proyecto en esta área</string>
     <string name="magic_plus_project_sub_another">Crear otro proyecto</string>
@@ -218,7 +218,7 @@
 
     <!-- Backup & Restore -->
     <string name="backup_section_title">Copia de seguridad y restauración</string>
-    <string name="backup_section_desc">Guarda todas las tareas, áreas, proyectos, encabezados, etiquetas, subtareas y ajustes en un archivo (.tbbackup) — opcionalmente con contraseña AES-256 — y restaura el estado completo.</string>
+    <string name="backup_section_desc">Guarda todas las tareas, áreas, proyectos, fases, etiquetas, subtareas y ajustes en un archivo (.tbbackup) — opcionalmente con contraseña AES-256 — y restaura el estado completo.</string>
     <string name="backup_create_button">Crear copia</string>
     <string name="backup_restore_button">Restaurar archivo</string>
     <string name="backup_create_dialog_title">Crear copia de seguridad completa</string>
@@ -242,7 +242,7 @@
     <string name="backup_restore_encrypted_desc">Este archivo de copia está cifrado. Introduce la contraseña para restaurar todas las tareas, áreas, proyectos y etiquetas.</string>
     <string name="backup_restore_enter_password">Introducir contraseña</string>
     <string name="backup_preview_header">Contenido del archivo de copia:</string>
-    <string name="backup_preview_details">• %1$d tareas y %2$d subtareas\n• %3$d proyectos y %4$d encabezados\n• %5$d áreas y %6$d etiquetas</string>
+    <string name="backup_preview_details">• %1$d tareas y %2$d subtareas\n• %3$d proyectos y %4$d fases\n• %5$d áreas y %6$d etiquetas</string>
     <string name="backup_restore_replace_notice">Nota: la restauración completa reemplaza todas las entradas locales actuales por el contenido de esta copia.</string>
     <string name="backup_restore_confirm_decrypt">Descifrar y restaurar todo</string>
     <string name="backup_restore_confirm_plain">Restaurar todo ahora</string>
@@ -278,10 +278,10 @@
     <string name="subtask_move_up">Subir elemento</string>
     <string name="subtask_move_down">Bajar elemento</string>
     <string name="subtask_delete">Eliminar elemento</string>
-    <string name="heading_add_task">Añadir tarea bajo este encabezado</string>
+    <string name="heading_add_task">Añadir tarea bajo esta fase</string>
     <string name="task_drag_handle">Arrastrar para mover</string>
     <string name="drop_move_here">Mover aquí</string>
-    <string name="drop_heading_here">Suelta para insertar el encabezado aquí</string>
+    <string name="drop_heading_here">Suelta para insertar la fase aquí</string>
 
     <!-- App Auto-Update & Manual Update Check -->
     <string name="settings_updates_section">Actualizaciones de la app</string>
@@ -315,10 +315,10 @@
     <string name="context_adjust_deadline">Ajustar fecha límite</string>
     <string name="context_configure_repeat">Configurar repetición</string>
     <string name="context_assign_tags">Asignar etiquetas</string>
-    <string name="repeat_dialog_title">Repetir (Modo Things)</string>
+    <string name="repeat_dialog_title">Programar repetición</string>
     <string name="repeat_mode_fixed">Regularmente</string>
     <string name="repeat_mode_after">Al completar</string>
-    <string name="repeat_mode_fixed_desc">Calendario fijo (como «Regularly» en Things para Mac).</string>
+    <string name="repeat_mode_fixed_desc">Calendario fijo en fechas periódicas exactas.</string>
     <string name="repeat_mode_after_desc">La siguiente tarea se crea solo después de completar esta.</string>
     <string name="repeat_unit_days">Días</string>
     <string name="repeat_unit_weeks">Semanas</string>
@@ -368,7 +368,7 @@
     <string name="quick_share_destination_label">Guardar en:</string>
     <string name="settings_workflow_security_section">Flujo de trabajo, Agrupación y Bloqueo</string>
     <string name="settings_group_today_title">Agrupar Hoy por proyecto o área</string>
-    <string name="settings_group_today_desc">Organizar las tareas de Hoy bajo sus encabezados de proyecto o área (estilo Things 3).</string>
+    <string name="settings_group_today_desc">Organizar las tareas de Hoy bajo sus tarjetas de proyecto o área.</string>
     <string name="settings_biometric_lock_title">Bloqueo biométrico / PIN</string>
     <string name="settings_biometric_lock_desc">Requerir huella digital, desbloqueo facial o PIN al abrir Thingsbook (desactivado por defecto).</string>
     <string name="app_lock_title">Thingsbook está bloqueado</string>
@@ -431,7 +431,7 @@
     <string name="v2_starter_templates">Plantillas iniciales GTD</string>
     <string name="v2_my_templates">Mis plantillas guardadas</string>
     <string name="v2_import_markdown_title">Importar esquema Markdown / JSON</string>
-    <string name="v2_import_markdown_hint">Pega Markdown (# Proyecto, ## Sección, - [ ] Tarea, subtareas con sangría) o un esquema JSON…</string>
+    <string name="v2_import_markdown_hint">Pega Markdown (# Proyecto, ## Fase, - [ ] Tarea, subtareas con sangría) o un esquema JSON…</string>
     <string name="v2_import_create_project">Crear proyecto desde esquema</string>
     <string name="v2_timeblock_title">Bloque de tiempo</string>
     <string name="v2_timeblock_start">Hora de inicio</string>
@@ -473,4 +473,8 @@
     <string name="topbar_tooltip_cloud_sync">Sincronización Cloud</string>
     <string name="topbar_tooltip_settings">Ajustes</string>
     <string name="action_more_options">Más acciones</string>
+    <string name="phase_set_end_date">Fecha de fin</string>
+    <string name="phase_clear_end_date">Borrar fecha de fin</string>
+    <string name="phase_ends_on">Fin el %1$s</string>
+    <string name="phase_milestone_badge">Hito de fase</string>
 </resources>

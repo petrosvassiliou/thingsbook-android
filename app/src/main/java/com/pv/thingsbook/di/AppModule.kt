@@ -109,6 +109,14 @@ object AppModule {
         }
     }
 
+    internal val MIGRATION_4_5 = object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            if (!db.hasColumn("headings", "endDate")) {
+                db.execSQL("ALTER TABLE `headings` ADD COLUMN `endDate` INTEGER")
+            }
+        }
+    }
+
     private fun ensureDefaultFirebaseApp(context: Context): FirebaseApp {
         runCatching {
             if (FirebaseApp.getApps(context).isNotEmpty()) {
@@ -143,7 +151,7 @@ object AppModule {
             ThingsDatabase::class.java,
             ThingsDatabase.DATABASE_NAME
         )
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .addCallback(DatabaseSeeder(databaseProvider))
             .fallbackToDestructiveMigration()
             .fallbackToDestructiveMigrationOnDowngrade()

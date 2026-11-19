@@ -393,7 +393,7 @@ public struct WhenPopoverView: View {
             // Quick Presets
             VStack(spacing: 2) {
                 WhenPresetRow(
-                    icon: "star.fill",
+                    icon: "sun.max.fill",
                     color: ThingsMacPalette.todayYellow,
                     title: store.tr("view_today"),
                     shortcut: "⌘T",
@@ -420,7 +420,7 @@ public struct WhenPopoverView: View {
                     applyPreset(.upcoming)
                 }
                 WhenPresetRow(
-                    icon: "square.stack.3d.up.fill",
+                    icon: "safari.fill",
                     color: ThingsMacPalette.anytimeTeal,
                     title: store.tr("view_anytime"),
                     shortcut: nil,
@@ -429,7 +429,7 @@ public struct WhenPopoverView: View {
                     applyPreset(.anytime)
                 }
                 WhenPresetRow(
-                    icon: "archivebox.fill",
+                    icon: "cloud.fill",
                     color: ThingsMacPalette.somedayAmber,
                     title: store.tr("view_someday"),
                     shortcut: "⌘O",
@@ -658,14 +658,27 @@ private struct WhenPresetRow: View {
 public struct DeadlinePopoverView: View {
     @ObservedObject var store: ThingsbookStore
     let currentDeadlineMillis: Int64?
+    let customTitle: String?
+    let customClearTitle: String?
+    let accentTint: Color
     let onSelectDeadline: (Int64?) -> Void
     @Environment(\.dismiss) private var dismiss
 
     @State private var displayedMonth: Date
 
-    public init(store: ThingsbookStore, currentDeadlineMillis: Int64?, onSelectDeadline: @escaping (Int64?) -> Void) {
+    public init(
+        store: ThingsbookStore,
+        currentDeadlineMillis: Int64?,
+        customTitle: String? = nil,
+        customClearTitle: String? = nil,
+        accentTint: Color = ThingsMacPalette.deadlineCrimson,
+        onSelectDeadline: @escaping (Int64?) -> Void
+    ) {
         self.store = store
         self.currentDeadlineMillis = currentDeadlineMillis
+        self.customTitle = customTitle
+        self.customClearTitle = customClearTitle
+        self.accentTint = accentTint
         self.onSelectDeadline = onSelectDeadline
         _displayedMonth = State(initialValue: currentDeadlineMillis.map { DateEpochConverter.date(fromMillis: $0) } ?? Date())
     }
@@ -677,15 +690,18 @@ public struct DeadlinePopoverView: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center) {
-                Label(store.tr("deadline_picker_title"), systemImage: "flag.fill")
+                Label(
+                    customTitle ?? store.tr("deadline_picker_title"),
+                    systemImage: customTitle != nil ? "calendar.badge.clock" : "flag.fill"
+                )
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(ThingsMacPalette.deadlineCrimson)
+                    .foregroundStyle(accentTint)
 
                 Spacer()
 
                 if currentDeadlineMillis != nil {
                     SchedulingHoverPillButton(
-                        title: store.tr("deadline_clear_button"),
+                        title: customClearTitle ?? store.tr("deadline_clear_button"),
                         systemImage: "xmark.circle.fill",
                         tint: .secondary,
                         hoverTint: ThingsMacPalette.deadlineCrimson,
@@ -718,7 +734,7 @@ public struct DeadlinePopoverView: View {
                 displayedMonth: $displayedMonth,
                 selectedDate: selectedDeadlineDate,
                 locale: store.preferences.language.locale,
-                accentColor: ThingsMacPalette.deadlineCrimson
+                accentColor: accentTint
             ) { picked in
                 onSelectDeadline(DateEpochConverter.startOfDayMillis(for: picked))
                 dismiss()
@@ -978,7 +994,7 @@ public struct MoveDestinationPopoverView: View {
 
                     ForEach(store.areas) { area in
                         Divider().padding(.vertical, 3)
-                        moveRow(icon: "cube.fill", tint: ThingsMacPalette.areaGreen, title: area.title) {
+                        moveRow(icon: "folder.fill", tint: ThingsMacPalette.areaGreen, title: area.title) {
                             onMove(nil, nil, area.id, task.scheduleState == .inbox ? .anytime : nil)
                             dismiss()
                         }
@@ -1330,7 +1346,7 @@ public struct ManageAreasSheetView: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label(store.tr("areas_manage_title"), systemImage: "cube.fill")
+                Label(store.tr("areas_manage_title"), systemImage: "folder.fill")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.primary)
                 Spacer()
@@ -1343,7 +1359,7 @@ public struct ManageAreasSheetView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(Array(store.areas.enumerated()), id: \.element.id) { index, area in
                         HStack(spacing: 10) {
-                            Image(systemName: "cube.fill")
+                            Image(systemName: "folder.fill")
                                 .foregroundStyle(ThingsMacPalette.areaGreen)
                                 .font(.system(size: 13))
 

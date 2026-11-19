@@ -1,7 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Archive,
   ArrowDown,
   ArrowUp,
   Bell,
@@ -12,11 +11,12 @@ import {
   CheckSquare,
   Circle,
   Clock,
+  Cloud,
+  Compass,
   Copy,
   Flag,
   FolderInput,
   GripVertical,
-  Layers,
   Mic,
   Moon,
   MoreHorizontal,
@@ -25,7 +25,7 @@ import {
   Repeat,
   RotateCcw,
   Sparkles,
-  Star,
+  Sun,
   Tag,
   Timer,
   Trash2,
@@ -1040,13 +1040,13 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               }}
             >
               {task.scheduleState === 'TODAY' ? (
-                <Star size={12} fill="var(--today-star)" style={{ color: 'var(--today-star)' }} />
+                <Sun size={12} style={{ color: 'var(--today-star)' }} />
               ) : task.scheduleState === 'THIS_EVENING' ? (
                 <Moon size={12} />
               ) : task.scheduleState === 'SOMEDAY' ? (
-                <Archive size={12} />
+                <Cloud size={12} />
               ) : task.scheduleState === 'ANYTIME' && task.whenDate == null ? (
-                <Layers size={12} />
+                <Compass size={12} />
               ) : (
                 <Calendar size={12} />
               )}
@@ -1473,12 +1473,12 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               ) : showCollapsedSchedulePill ? (
                 task.scheduleState === 'TODAY' ? (
                   <span className="meta-badge today" title={t.viewToday}>
-                    <Star size={10.5} fill="var(--today-star)" style={{ color: 'var(--today-star)' }} />
+                    <Sun size={10.5} style={{ color: 'var(--today-star)' }} />
                     <span>{t.viewToday}</span>
                   </span>
                 ) : task.scheduleState === 'SOMEDAY' ? (
                   <span className="meta-badge" title={t.viewSomeday}>
-                    <Archive size={10.5} />
+                    <Cloud size={10.5} />
                     <span>{t.viewSomeday}</span>
                   </span>
                 ) : task.whenDate != null ? (

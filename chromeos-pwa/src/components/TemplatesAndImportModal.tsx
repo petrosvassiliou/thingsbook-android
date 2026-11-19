@@ -3,9 +3,9 @@ import {
   CheckSquare,
   ClipboardList,
   FileCode2,
+  Folder,
   FolderPlus,
   Heading,
-  Package,
   Sparkles,
   Trash2,
   X
@@ -276,7 +276,7 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
                   className={`chip-btn ${selectedAreaId === area.id ? 'active' : ''}`}
                   onClick={() => setSelectedAreaId(area.id)}
                 >
-                  <Package size={11.5} />
+                  <Folder size={11.5} />
                   <span>{area.title}</span>
                 </button>
               ))}

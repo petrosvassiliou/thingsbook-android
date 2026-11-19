@@ -123,6 +123,7 @@ public struct Heading: Identifiable, Equatable, Hashable, Codable, Sendable {
     public var title: String
     public var sortOrder: Double
     public var isArchived: Bool
+    public var endDate: Int64?
     public var createdAt: Int64
     public var updatedAt: Int64
     public var isDeleted: Bool
@@ -133,6 +134,7 @@ public struct Heading: Identifiable, Equatable, Hashable, Codable, Sendable {
         title: String,
         sortOrder: Double,
         isArchived: Bool = false,
+        endDate: Int64? = nil,
         createdAt: Int64,
         updatedAt: Int64,
         isDeleted: Bool = false
@@ -142,9 +144,27 @@ public struct Heading: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.title = title
         self.sortOrder = sortOrder
         self.isArchived = isArchived
+        self.endDate = endDate
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.isDeleted = isDeleted
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, projectId, title, sortOrder, isArchived, endDate, createdAt, updatedAt, isDeleted
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(String.self, forKey: .id)
+        self.projectId = try c.decode(String.self, forKey: .projectId)
+        self.title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        self.sortOrder = try c.decodeIfPresent(Double.self, forKey: .sortOrder) ?? 0
+        self.isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
+        self.endDate = try c.decodeIfPresent(Int64.self, forKey: .endDate)
+        self.createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
+        self.updatedAt = try c.decodeIfPresent(Int64.self, forKey: .updatedAt) ?? 0
+        self.isDeleted = try c.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
     }
 }
 
@@ -458,21 +478,31 @@ public struct TemplateTaskSpec: Codable, Equatable, Hashable, Sendable {
 
 public struct TemplateHeadingSpec: Codable, Equatable, Hashable, Sendable {
     public var title: String
+    public var endDateDayOffset: Int?
     public var tasks: [TemplateTaskSpec]
 
-    public init(title: String, tasks: [TemplateTaskSpec] = []) {
+    public init(title: String, endDateDayOffset: Int? = nil, tasks: [TemplateTaskSpec] = []) {
         self.title = title
+        self.endDateDayOffset = endDateDayOffset
         self.tasks = tasks
     }
 
     private enum CodingKeys: String, CodingKey {
-        case title, tasks
+        case title, endDateDayOffset, tasks
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        self.endDateDayOffset = try c.decodeIfPresent(Int.self, forKey: .endDateDayOffset)
         self.tasks = try c.decodeIfPresent([TemplateTaskSpec].self, forKey: .tasks) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(title, forKey: .title)
+        try c.encodeIfPresent(endDateDayOffset, forKey: .endDateDayOffset)
+        try c.encode(tasks, forKey: .tasks)
     }
 }
 
@@ -489,7 +519,7 @@ public struct ProjectTemplateBlueprint: Codable, Equatable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case unheadedTasks, tasks, rootTasks, headings
+        case unheadedTasks, tasks, rootTasks, headings, phases
     }
 
     public init(from decoder: Decoder) throws {
@@ -503,7 +533,13 @@ public struct ProjectTemplateBlueprint: Codable, Equatable, Hashable, Sendable {
         } else {
             self.unheadedTasks = []
         }
-        self.headings = try c.decodeIfPresent([TemplateHeadingSpec].self, forKey: .headings) ?? []
+        if let h = try c.decodeIfPresent([TemplateHeadingSpec].self, forKey: .headings) {
+            self.headings = h
+        } else if let p = try c.decodeIfPresent([TemplateHeadingSpec].self, forKey: .phases) {
+            self.headings = p
+        } else {
+            self.headings = []
+        }
     }
 
     public func encode(to encoder: Encoder) throws {

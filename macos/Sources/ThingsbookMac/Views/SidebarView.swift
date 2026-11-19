@@ -20,6 +20,20 @@ public struct SidebarView: View {
         }
     }
 
+    private var upcomingMilestoneCount: Int {
+        let todayEpochDay = DateEpochConverter.epochDay(for: Date())
+        let activeProjectIds = Set(store.projects.map(\.id))
+        var count = 0
+        for (projId, headings) in store.headingsByProject where activeProjectIds.contains(projId) {
+            for h in headings where !h.isDeleted && !h.isArchived && !h.title.isEmpty {
+                if let endMs = h.endDate, DateEpochConverter.epochDay(forMillis: endMs) >= todayEpochDay {
+                    count += 1
+                }
+            }
+        }
+        return count
+    }
+
     public var body: some View {
         VStack(spacing: 0) {
             // Brand Header (Icon B Glacier Liquid Glass Book Emblem)
@@ -59,50 +73,56 @@ public struct SidebarView: View {
 
                 Spacer()
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 14)
             .padding(.top, 12)
             .padding(.bottom, 10)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    // Primary GTD Smart Views
-                    smartViewRow(.inbox, count: store.inboxTasks.count)
-                        .padding(.bottom, 6)
-
-                    smartViewRow(.today, count: store.todayTotalBadgeCount)
-                    smartViewRow(.upcoming, count: store.upcomingTasks.count)
-                    smartViewRow(.anytime, count: store.anytimeTasks.count)
-                    smartViewRow(.someday, count: store.somedayTasks.count)
-
-                    weeklyReviewRow
-
-                    Divider()
-                        .padding(.vertical, 8)
-                        .padding(.horizontal, 10)
-
-                    smartViewRow(.logbook, count: 0)
-                    smartViewRow(.trash, count: store.trashedTasks.count + store.trashedProjects.count)
-
-                    // Areas -> Nested Projects Hierarchy (Primary 3.0 Structure)
-                    if !store.areas.isEmpty {
-                        Divider()
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 10)
-
-                        ForEach(store.areas) { area in
-                            areaSection(area)
-                                .padding(.bottom, 6)
+                VStack(alignment: .leading, spacing: 10) {
+                    // 1. 2x2 Bento Focus Grid (Inbox, Today, Upcoming, Anytime)
+                    VStack(spacing: 7) {
+                        HStack(spacing: 7) {
+                            bentoTile(.inbox, count: store.inboxTasks.count)
+                            bentoTile(.today, count: store.todayTotalBadgeCount)
+                        }
+                        HStack(spacing: 7) {
+                            bentoTile(.upcoming, count: store.upcomingTasks.count + upcomingMilestoneCount)
+                            bentoTile(.anytime, count: store.anytimeTasks.count)
                         }
                     }
 
-                    // Legacy / Unassigned Projects (not yet placed inside an Area)
+                    // 2. Compact Secondary Utility Pills (Someday, Logbook, Trash, Weekly Review, Templates)
+                    ThingsFlowLayout(horizontalSpacing: 5, verticalSpacing: 5) {
+                        utilitySmartPill(.someday, count: store.somedayTasks.count)
+                        utilitySmartPill(.logbook, count: 0)
+                        utilitySmartPill(.trash, count: store.trashedTasks.count + store.trashedProjects.count)
+                        weeklyReviewPill
+                        templatesPill
+                    }
+
+                    // 3. Areas -> Nested Projects Hierarchy (Workspace Folders + Linear Progress)
+                    if !store.areas.isEmpty {
+                        Divider()
+                            .padding(.vertical, 3)
+                            .padding(.horizontal, 4)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(store.areas) { area in
+                                areaSection(area)
+                            }
+                        }
+                    }
+
+                    // 4. Legacy / Unassigned Projects
                     if !store.standaloneActiveProjects.isEmpty {
                         Divider()
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 10)
+                            .padding(.vertical, 3)
+                            .padding(.horizontal, 4)
 
-                        ForEach(store.standaloneActiveProjects) { proj in
-                            projectRow(proj)
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(store.standaloneActiveProjects) { proj in
+                                projectRow(proj)
+                            }
                         }
                     }
                 }
@@ -111,6 +131,7 @@ public struct SidebarView: View {
             }
 
             Divider()
+                .opacity(0.65)
 
             // Bottom Sidebar Bar (+ New Project defaults into active/first Area, Areas X/8)
             HStack(spacing: 10) {
@@ -139,7 +160,7 @@ public struct SidebarView: View {
                     Button {
                         store.isNewAreaSheetPresented = true
                     } label: {
-                        Label(store.tr("entity_new_area"), systemImage: "cube")
+                        Label(store.tr("entity_new_area"), systemImage: "folder")
                     }
                     .disabled(store.areas.count >= ThingsSQLiteDatabase.maxAreas)
 
@@ -171,7 +192,7 @@ public struct SidebarView: View {
                     store.isAreaManagerPresented = true
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: "cube")
+                        Image(systemName: "folder")
                             .font(.system(size: 10.5))
                         Text("\(store.areas.count)/\(ThingsSQLiteDatabase.maxAreas)")
                             .font(.system(size: 11, weight: .medium, design: .rounded))
@@ -186,49 +207,22 @@ public struct SidebarView: View {
         }
         .background {
             ZStack {
-                Rectangle().fill(.ultraThinMaterial)
-                Rectangle().fill(ThingsMacPalette.subtleContainer.opacity(0.55))
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(ThingsMacPalette.subtleContainer.opacity(0.62))
             }
         }
-        .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(Color.primary.opacity(0.08))
-                .frame(width: 1)
-        }
-    }
-
-    private var weeklyReviewRow: some View {
-        let stalledCount = store.stalledProjects.count
-        return Button {
-            store.isWeeklyReviewPresented = true
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "checklist.checked")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 20)
-
-                Text(store.tr("v2_weekly_review_title"))
-                    .font(.system(size: 13.5, weight: .regular))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-
-                Spacer()
-
-                if stalledCount > 0 {
-                    Text("\(stalledCount)")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6.5)
-            .contentShape(Capsule(style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .thingsTooltip(store.tr("v2_weekly_review_title") + " (⇧⌘R)")
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.85)
+        )
+        .shadow(color: Color.black.opacity(0.07), radius: 10, x: 0, y: 4)
+        .padding(.leading, 8)
+        .padding(.trailing, 6)
+        .padding(.vertical, 8)
+        .background(ThingsMacPalette.canvasBackground.ignoresSafeArea())
     }
 
     private func smartViewShortcut(for view: SmartView) -> String {
@@ -243,47 +237,135 @@ public struct SidebarView: View {
         }
     }
 
-    private func smartViewRow(_ view: SmartView, count: Int) -> some View {
+    private func bentoTile(_ view: SmartView, count: Int) -> some View {
         let dest = NavigationDestination.smartView(view)
         let selected = store.selectedDestination == dest
         return Button {
             store.selectedDestination = dest
         } label: {
-            HStack(spacing: 10) {
-                Image(systemName: view.sfSymbol)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(ThingsMacPalette.color(for: view, isSelected: selected))
-                    .frame(width: 20)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .center) {
+                    Image(systemName: view.sfSymbol)
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(ThingsMacPalette.color(for: view, isSelected: selected))
+
+                    Spacer(minLength: 4)
+
+                    if count > 0 {
+                        Text("\(count)")
+                            .font(.system(size: 12.5, weight: .bold, design: .rounded))
+                            .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .primary)
+                    }
+                }
 
                 Text(store.tr(view.titleKey))
-                    .font(.system(size: 13.5, weight: selected ? .semibold : .regular))
+                    .font(.system(size: 12.5, weight: selected ? .bold : .semibold))
                     .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .primary)
                     .lineLimit(1)
-
-                Spacer()
-
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.system(size: 12, weight: selected ? .bold : .medium, design: .rounded))
-                        .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6.5)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.16) : ThingsMacPalette.cardSurface.opacity(0.76))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .strokeBorder(
+                        selected ? ThingsMacPalette.accentBlue.opacity(0.42) : Color.primary.opacity(0.075),
+                        lineWidth: selected ? 1.1 : 0.75
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .thingsTooltip("\(store.tr(view.titleKey)) (\(smartViewShortcut(for: view)))")
+    }
+
+    private func utilitySmartPill(_ view: SmartView, count: Int) -> some View {
+        let dest = NavigationDestination.smartView(view)
+        let selected = store.selectedDestination == dest
+        let badgeSuffix = (count > 0 && view != .logbook) ? " · \(count)" : ""
+        return Button {
+            store.selectedDestination = dest
+        } label: {
+            HStack(spacing: 4.5) {
+                Image(systemName: view.sfSymbol)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.color(for: view, isSelected: selected))
+
+                Text("\(store.tr(view.titleKey))\(badgeSuffix)")
+                    .font(.system(size: 11.5, weight: selected ? .semibold : .medium))
+                    .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .secondary)
+                    .lineLimit(1)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4.5)
             .background(
                 Capsule(style: .continuous)
-                    .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.15) : Color.clear)
+                    .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.16) : Color.primary.opacity(0.055))
             )
             .overlay(
                 Capsule(style: .continuous)
-                    .strokeBorder(selected ? ThingsMacPalette.accentBlue.opacity(0.28) : Color.clear, lineWidth: 0.8)
+                    .strokeBorder(selected ? ThingsMacPalette.accentBlue.opacity(0.32) : Color.primary.opacity(0.06), lineWidth: 0.75)
             )
             .contentShape(Capsule(style: .continuous))
         }
         .buttonStyle(.plain)
         .thingsTooltip("\(store.tr(view.titleKey)) (\(smartViewShortcut(for: view)))")
+    }
+
+    private var weeklyReviewPill: some View {
+        let stalledCount = store.stalledProjects.count
+        let suffix = stalledCount > 0 ? " · \(stalledCount)" : ""
+        return Button {
+            store.isWeeklyReviewPresented = true
+        } label: {
+            HStack(spacing: 4.5) {
+                Image(systemName: "checklist.checked")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text("\(store.tr("v2_weekly_review_title"))\(suffix)")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4.5)
+            .background(Capsule(style: .continuous).fill(Color.primary.opacity(0.055)))
+            .overlay(Capsule(style: .continuous).strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.75))
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .thingsTooltip(store.tr("v2_weekly_review_title") + " (⇧⌘R)")
+    }
+
+    private var templatesPill: some View {
+        Button {
+            store.templatesInitialTab = .gallery
+            store.isTemplatesSheetPresented = true
+        } label: {
+            HStack(spacing: 4.5) {
+                Image(systemName: "square.on.square")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text(store.tr("v2_templates_title"))
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4.5)
+            .background(Capsule(style: .continuous).fill(Color.primary.opacity(0.055)))
+            .overlay(Capsule(style: .continuous).strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.75))
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .thingsTooltip(store.tr("v2_templates_title"))
     }
 
     private func areaSection(_ area: Area) -> some View {
@@ -315,7 +397,7 @@ public struct SidebarView: View {
                     store.selectedDestination = dest
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "cube")
+                        Image(systemName: "folder.fill")
                             .font(.system(size: 12.5, weight: .semibold))
                             .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .secondary)
                             .frame(width: 18)
@@ -384,7 +466,6 @@ public struct SidebarView: View {
     private func projectRow(_ proj: Project, indented: Bool = false) -> some View {
         let dest = NavigationDestination.project(proj.id)
         let selected = store.selectedDestination == dest
-        let openCount = max(0, proj.totalTaskCount - proj.completedTaskCount)
         let stalledInfo = store.projectStalledInfo(proj)
         let statusHelpText: String? = {
             if stalledInfo.hasNoNextAction {
@@ -399,15 +480,7 @@ public struct SidebarView: View {
         return Button {
             store.selectedDestination = dest
         } label: {
-            HStack(spacing: 8) {
-                ProjectProgressRing(
-                    progress: proj.progress,
-                    size: 15,
-                    tint: ThingsMacPalette.accentBlue,
-                    isCompleted: proj.status == .completed
-                )
-                .frame(width: 20)
-
+            HStack(spacing: 7) {
                 Text(proj.title)
                     .font(.system(size: 13, weight: selected ? .semibold : .regular))
                     .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .primary)
@@ -428,14 +501,15 @@ public struct SidebarView: View {
                         .foregroundStyle(ThingsMacPalette.deadlineCrimson)
                 }
 
-                if openCount > 0 {
-                    Text("\(openCount)")
-                        .font(.system(size: 11.5, weight: .medium, design: .rounded))
-                        .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .secondary)
-                }
+                ProjectProgressRing(
+                    progress: proj.progress,
+                    size: 15,
+                    tint: ThingsMacPalette.accentBlue,
+                    isCompleted: proj.status == .completed
+                )
             }
             .padding(.leading, indented ? 26 : 12)
-            .padding(.trailing, 12)
+            .padding(.trailing, 10)
             .padding(.vertical, 5.5)
             .background(
                 Capsule(style: .continuous)

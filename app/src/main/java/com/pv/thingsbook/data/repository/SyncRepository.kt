@@ -702,6 +702,27 @@ class SyncRepository @Inject constructor(
         }
     }
 
+    private suspend fun applyRemoteHeadingDto(
+        dto: HeadingFirestoreDto,
+        nowMillis: Long
+    ) {
+        val local = database.headingDao().getById(dto.id)
+        val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
+        if (shouldRemoteWin(local?.updatedAt, local?.isDirty == true, dto.updatedAt, nowMillis)) {
+            val preservedEndDate = if (dto.omittedEndDate && local != null && !dto.isDeleted) {
+                local.endDate
+            } else {
+                dto.endDate
+            }
+            database.headingDao().upsert(
+                dto.toEntity().copy(
+                    endDate = preservedEndDate,
+                    updatedAt = clamped
+                )
+            )
+        }
+    }
+
     private fun buildSeriesLookupKeyFromParts(
         title: String,
         recurrenceRuleJson: String?,
@@ -1501,11 +1522,8 @@ class SyncRepository @Inject constructor(
 
             for (dto in batch.headings) {
                 if (dto.id.isBlank() || dto.projectId.isBlank()) continue
-                val local = database.headingDao().getById(dto.id)
                 val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
-                if (shouldRemoteWin(local?.updatedAt, local?.isDirty == true, dto.updatedAt, nowMillis)) {
-                    database.headingDao().upsert(dto.toEntity().copy(updatedAt = clamped))
-                }
+                applyRemoteHeadingDto(dto, nowMillis)
                 if (clamped > maxTimestamp) maxTimestamp = clamped
             }
 
@@ -1991,11 +2009,8 @@ class SyncRepository @Inject constructor(
                 val map = normalizeFirestoreMapWithId(doc.id, doc.data)
                 val dto = runCatching { HeadingFirestoreDto.fromFirestoreMap(map) }.getOrNull() ?: continue
                 if (dto.id.isBlank() || dto.projectId.isBlank()) continue
-                val local = database.headingDao().getById(dto.id)
                 val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
-                if (shouldRemoteWin(local?.updatedAt, local?.isDirty == true, dto.updatedAt, nowMillis)) {
-                    database.headingDao().upsert(dto.toEntity().copy(updatedAt = clamped))
-                }
+                applyRemoteHeadingDto(dto, nowMillis)
                 if (clamped > maxHeadings) maxHeadings = clamped
             }
 
@@ -2262,11 +2277,7 @@ class SyncRepository @Inject constructor(
                                         val map = normalizeFirestoreMapWithId(change.document.id, change.document.data)
                                         val dto = HeadingFirestoreDto.fromFirestoreMap(map) ?: return@runCatchingCancellable
                                         if (dto.id.isNotBlank() && dto.projectId.isNotBlank()) {
-                                            val local = database.headingDao().getById(dto.id)
-                                            val clamped = clampRemoteTimestamp(dto.updatedAt, nowMillis)
-                                            if (shouldRemoteWin(local?.updatedAt, local?.isDirty == true, dto.updatedAt, nowMillis)) {
-                                                database.headingDao().upsert(dto.toEntity().copy(updatedAt = clamped))
-                                            }
+                                            applyRemoteHeadingDto(dto, nowMillis)
                                             changed = true
                                         }
                                     }

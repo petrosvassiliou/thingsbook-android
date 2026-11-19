@@ -1,78 +1,59 @@
 import React from 'react';
+import { Check } from 'lucide-react';
 
 interface ProjectProgressRingProps {
   completed: number;
   total: number;
   size?: number;
   isProjectCompleted?: boolean;
+  showCount?: boolean;
 }
 
 /**
- * Thingsbook 3.0 — Material 3 Expressive Open-Track Progress Arc
- * Replaces the legacy pie-slice wedge with a clean rounded-cap Sky Light Blue
- * circular progress arc and a filled Sky Light Blue checkmark badge at 100%.
+ * Thingsbook 3.0-alpha.2 — Horizontal Linear Progress Pill
+ * Replaces circular pie/ring indicators with a clean, copyright-distinct
+ * rounded linear progress bar + optional tabular count.
  */
 export const ProjectProgressRing: React.FC<ProjectProgressRingProps> = ({
   completed,
   total,
   size = 16,
-  isProjectCompleted = false
+  isProjectCompleted = false,
+  showCount = false
 }) => {
-  const ratio = isProjectCompleted ? 1 : total > 0 ? Math.min(1, Math.max(0, completed / total)) : 0;
-  const strokeWidth = Math.max(1.8, size * 0.14);
-  const r = (size - strokeWidth - 1.2) / 2;
-  const cx = size / 2;
-  const cy = size / 2;
-  const circumference = 2 * Math.PI * r;
-  const dashOffset = circumference * (1 - ratio);
+  const ratio = isProjectCompleted
+    ? 1
+    : total > 0
+      ? Math.min(1, Math.max(0, completed / total))
+      : 0;
+  const isLarge = size >= 22;
+  const trackWidth = isLarge ? 68 : size >= 15 ? 34 : 26;
+  const trackHeight = isLarge ? 6 : 4.5;
+
+  if (ratio >= 1 && isProjectCompleted) {
+    return (
+      <span className="project-linear-done-badge" aria-hidden="true">
+        <Check size={isLarge ? 12 : 10} strokeWidth={3} />
+      </span>
+    );
+  }
 
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox={`0 0 ${size} ${size}`}
-      aria-hidden="true"
-      style={{ flexShrink: 0 }}
-    >
-      {ratio >= 1 ? (
-        <>
-          <circle cx={cx} cy={cy} r={r + strokeWidth * 0.35} fill="var(--things-blue)" />
-          <path
-            d={`M ${size * 0.30} ${size * 0.52} L ${size * 0.44} ${size * 0.66} L ${size * 0.72} ${size * 0.36}`}
-            fill="none"
-            stroke="#FFFFFF"
-            strokeWidth={Math.max(1.5, size * 0.12)}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </>
-      ) : (
-        <>
-          <circle
-            cx={cx}
-            cy={cy}
-            r={r}
-            fill="none"
-            stroke="var(--things-blue)"
-            strokeWidth={strokeWidth}
-            opacity={0.22}
-          />
-          {ratio > 0 && (
-            <circle
-              cx={cx}
-              cy={cy}
-              r={r}
-              fill="none"
-              stroke="var(--things-blue)"
-              strokeWidth={strokeWidth}
-              strokeDasharray={circumference}
-              strokeDashoffset={dashOffset}
-              strokeLinecap="round"
-              transform={`rotate(-90 ${cx} ${cy})`}
-            />
-          )}
-        </>
+    <span className="project-linear-progress" aria-hidden="true">
+      <span
+        className="project-linear-track"
+        style={{ width: trackWidth, height: trackHeight }}
+      >
+        <span
+          className="project-linear-fill"
+          style={{ width: `${Math.round(ratio * 100)}%` }}
+        />
+      </span>
+      {(showCount || isLarge) && (
+        <span className="project-linear-label">
+          {completed}/{total}
+        </span>
       )}
-    </svg>
+    </span>
   );
 };

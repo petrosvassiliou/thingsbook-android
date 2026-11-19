@@ -144,41 +144,66 @@ public struct ProjectProgressRing: View {
     public var size: CGFloat = 16
     public var tint: Color = ThingsMacPalette.accentBlue
     public var isCompleted: Bool = false
+    public var showFraction: Bool = false
+    public var completedCount: Int = 0
+    public var totalCount: Int = 0
 
-    public init(progress: Double, size: CGFloat = 16, tint: Color = ThingsMacPalette.accentBlue, isCompleted: Bool = false) {
+    public init(
+        progress: Double,
+        size: CGFloat = 16,
+        tint: Color = ThingsMacPalette.accentBlue,
+        isCompleted: Bool = false,
+        showFraction: Bool = false,
+        completedCount: Int = 0,
+        totalCount: Int = 0
+    ) {
         self.progress = min(1.0, max(0.0, progress))
         self.size = size
         self.tint = tint
         self.isCompleted = isCompleted
+        self.showFraction = showFraction
+        self.completedCount = completedCount
+        self.totalCount = totalCount
     }
 
     public var body: some View {
-        let strokeWidth = max(1.8, size * 0.14)
-        ZStack {
-            if isCompleted || progress >= 0.999 {
-                Circle()
-                    .fill(tint)
-                Image(systemName: "checkmark")
-                    .font(.system(size: size * 0.50, weight: .bold))
-                    .foregroundStyle(.white)
-            } else {
-                Circle()
-                    .stroke(tint.opacity(0.22), lineWidth: strokeWidth)
-                    .padding(strokeWidth * 0.5)
+        let barWidth = min(44, max(24, size * 1.65))
+        let barHeight = min(7.5, max(5.0, size * 0.34))
+        let badgeHeight = min(15.0, max(11.0, size * 0.68))
 
-                if progress > 0.001 {
-                    Circle()
-                        .trim(from: 0.0, to: progress)
-                        .stroke(
-                            tint,
-                            style: StrokeStyle(lineWidth: strokeWidth, lineCap: .round)
-                        )
-                        .rotationEffect(.degrees(-90))
-                        .padding(strokeWidth * 0.5)
+        HStack(spacing: 5) {
+            if isCompleted || progress >= 0.999 {
+                ZStack {
+                    Capsule(style: .continuous)
+                        .fill(tint)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: badgeHeight * 0.56, weight: .bold))
+                        .foregroundStyle(.white)
                 }
+                .frame(width: barWidth, height: badgeHeight)
+            } else {
+                ZStack(alignment: .leading) {
+                    Capsule(style: .continuous)
+                        .fill(tint.opacity(0.20))
+                        .frame(width: barWidth, height: barHeight)
+
+                    if progress > 0.005 {
+                        Capsule(style: .continuous)
+                            .fill(tint)
+                            .frame(width: max(barHeight, barWidth * progress), height: barHeight)
+                    }
+                }
+                .frame(width: barWidth, height: barHeight)
+            }
+
+            if showFraction && totalCount > 0 {
+                Text("\(completedCount)/\(totalCount)")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
             }
         }
-        .frame(width: size, height: size)
+        .animation(.spring(response: 0.28, dampingFraction: 0.82), value: progress)
     }
 }
 

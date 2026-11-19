@@ -408,14 +408,14 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-alpha.1")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-alpha.1")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 74)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-alpha.2")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-alpha.2")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 75)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.1", current: "2.1.0", includeBeta: false))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.1", current: "2.1.0", includeBeta: true))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.2", current: "3.0.0-alpha.1"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-alpha.1"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.2", current: "2.1.0", includeBeta: false))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.2", current: "2.1.0", includeBeta: true))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.3", current: "3.0.0-alpha.2"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-alpha.2"))
         XCTAssertEqual(
             FirebaseCloudSyncService.deriveUidWakeTopic(uid: " user-abc-123 "),
             "tb_uid_9d8ecb07e35952112a013d4819b4"
@@ -3068,6 +3068,91 @@ final class ThingsbookCoreTests: XCTestCase {
         )
         XCTAssertFalse(MacCalendarAppointmentStyleMetrics.showsInlineOpenInCalendarButton)
     }
+
+    // MARK: - 26. v3.0.0-alpha.2 Project Phases (endDate) & 100% v2.x Compatibility
+
+    func testProjectPhasesEndDateAndV2CompatibilityAlpha2() throws {
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let proj = try db.createProject(title: "Q4 Architecture", notes: "")
+        let phase = try db.createHeading(projectId: proj.id, title: "Phase 1: Discovery")
+        XCTAssertNil(phase.endDate)
+
+        let milestoneMs: Int64 = DateEpochConverter.startOfDayMillis(
+            for: Calendar.current.date(byAdding: .day, value: 5, to: Date()) ?? Date()
+        )
+        try db.setHeadingEndDate(headingId: phase.id, endDate: milestoneMs)
+
+        var snap = try db.loadWorkspaceSnapshot()
+        let updatedPhase = try XCTUnwrap(snap.headingsByProject[proj.id]?.first(where: { $0.id == phase.id }))
+        XCTAssertEqual(updatedPhase.endDate, milestoneMs)
+
+        // 1. Save as template preserves endDateDayOffset and instantiates Phase endDate cleanly
+        let savedTemplate = try db.saveProjectAsTemplate(projectId: proj.id, templateTitle: "Phased Playbook")
+        XCTAssertEqual(savedTemplate.blueprint.headings.first?.endDateDayOffset, 5)
+        let clonedProj = try db.instantiateProjectFromTemplate(savedTemplate, titleOverride: "Cloned Phased")
+        snap = try db.loadWorkspaceSnapshot()
+        XCTAssertNotNil(snap.headingsByProject[clonedProj.id]?.first?.endDate)
+
+        // JSON "phases" alias decodes into blueprint.headings while encoding keeps "headings" key
+        let aliasJson = """
+        {"phases":[{"title":"Launch Phase","endDateDayOffset":10,"tasks":[{"title":"Ship DMG","notes":"","checklistItems":[]}]}]}
+        """
+        let decodedAlias = try JSONDecoder().decode(ProjectTemplateBlueprint.self, from: Data(aliasJson.utf8))
+        XCTAssertEqual(decodedAlias.headings.first?.title, "Launch Phase")
+        XCTAssertEqual(decodedAlias.headings.first?.endDateDayOffset, 10)
+        XCTAssertTrue(decodedAlias.toJSONString().contains("\"headings\""))
+
+        // 2. .tbbackup roundtrip preserves Phase endDate, while v2.x heading without endDate decodes to nil
+        let backupPayload = try db.buildBackupPayload(preferences: AppPreferences())
+        let encodedBackup = try ThingsBackupCodec.encodeBackup(payload: backupPayload, password: nil)
+        let decodedBackup = try ThingsBackupCodec.decodeBackup(rawBytes: encodedBackup, password: nil)
+        XCTAssertEqual(decodedBackup.headings.first(where: { $0.id == phase.id })?.endDate, milestoneMs)
+
+        // 3. Remote sync from a v2.x client omitting "endDate" preserves local Phase endDate!
+        let v2RemoteParsed = try XCTUnwrap(FirebaseCloudSyncService.parseHeadingWithHints([
+            "id": phase.id,
+            "projectId": proj.id,
+            "title": "Phase 1: Discovery (Renamed on v2.1)",
+            "sortOrder": phase.sortOrder,
+            "isArchived": false,
+            "createdAt": phase.createdAt,
+            "updatedAt": Int64(Date().timeIntervalSince1970 * 1000) + 5_000,
+            "isDeleted": false
+        ]))
+        XCTAssertTrue(v2RemoteParsed.omittedEndDate)
+        _ = try db.applyRemoteDeltas(
+            RemoteDeltaBatch(
+                headings: [v2RemoteParsed.heading],
+                headingOmittedEndDateIds: [phase.id]
+            )
+        )
+        snap = try db.loadWorkspaceSnapshot()
+        let preservedPhase = try XCTUnwrap(snap.headingsByProject[proj.id]?.first(where: { $0.id == phase.id }))
+        XCTAssertEqual(preservedPhase.title, "Phase 1: Discovery (Renamed on v2.1)")
+        XCTAssertEqual(preservedPhase.endDate, milestoneMs)
+
+        // Whereas an explicit v3.0 remote clear ("endDate": NSNull()) clears endDate!
+        let v3ClearParsed = try XCTUnwrap(FirebaseCloudSyncService.parseHeadingWithHints([
+            "id": phase.id,
+            "projectId": proj.id,
+            "title": "Phase 1: Discovery (Cleared on v3.0)",
+            "endDate": NSNull(),
+            "sortOrder": phase.sortOrder,
+            "isArchived": false,
+            "createdAt": phase.createdAt,
+            "updatedAt": Int64(Date().timeIntervalSince1970 * 1000) + 10_000,
+            "isDeleted": false
+        ]))
+        XCTAssertFalse(v3ClearParsed.omittedEndDate)
+        _ = try db.applyRemoteDeltas(
+            RemoteDeltaBatch(
+                headings: [v3ClearParsed.heading],
+                headingOmittedEndDateIds: []
+            )
+        )
+        snap = try db.loadWorkspaceSnapshot()
+        let clearedPhase = try XCTUnwrap(snap.headingsByProject[proj.id]?.first(where: { $0.id == phase.id }))
+        XCTAssertEqual(clearedPhase.title, "Phase 1: Discovery (Cleared on v3.0)")
+        XCTAssertNil(clearedPhase.endDate)
+    }
 }
-
-

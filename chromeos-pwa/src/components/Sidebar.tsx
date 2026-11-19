@@ -1,20 +1,21 @@
 import React, { useState } from 'react';
 import {
-  Archive,
   BookOpen,
-  BookOpenCheck,
   CalendarDays,
   ChevronDown,
   ChevronRight,
   ClipboardList,
+  Cloud,
+  Compass,
   Download,
   Flag,
+  Folder,
+  FolderKanban,
+  History,
   Inbox,
-  Layers,
   ListChecks,
-  Package,
   Plus,
-  Star,
+  Sun,
   Trash2,
   X
 } from 'lucide-react';
@@ -71,21 +72,15 @@ function renderMonochromeSmartIcon(view: SmartViewType, size: number, isActive: 
     case 'INBOX':
       return <Inbox size={size} style={{ color }} />;
     case 'TODAY':
-      return (
-        <Star
-          size={size}
-          fill={isActive ? 'var(--things-blue)' : 'none'}
-          style={{ color }}
-        />
-      );
+      return <Sun size={size} style={{ color }} />;
     case 'UPCOMING':
       return <CalendarDays size={size} style={{ color }} />;
     case 'ANYTIME':
-      return <Layers size={size} style={{ color }} />;
+      return <Compass size={size} style={{ color }} />;
     case 'SOMEDAY':
-      return <Archive size={size} style={{ color }} />;
+      return <Cloud size={size} style={{ color }} />;
     case 'LOGBOOK':
-      return <BookOpenCheck size={size} style={{ color }} />;
+      return <History size={size} style={{ color }} />;
     case 'TRASH':
       return <Trash2 size={size} style={{ color }} />;
   }
@@ -163,18 +158,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   });
 
-  const smartItems: Array<{
+  const bentoPrimaryItems: Array<{
     view: SmartViewType;
     label: string;
     count?: number;
+    shortcutIdx: number;
   }> = [
-    { view: 'INBOX', label: t.viewInbox, count: counts.inbox },
-    { view: 'TODAY', label: t.viewToday, count: counts.today },
-    { view: 'UPCOMING', label: t.viewUpcoming, count: counts.upcoming },
-    { view: 'ANYTIME', label: t.viewAnytime, count: counts.anytime },
-    { view: 'SOMEDAY', label: t.viewSomeday, count: counts.someday },
-    { view: 'LOGBOOK', label: t.viewLogbook },
-    { view: 'TRASH', label: t.viewTrash, count: counts.trash }
+    { view: 'INBOX', label: t.viewInbox, count: counts.inbox, shortcutIdx: 1 },
+    { view: 'TODAY', label: t.viewToday, count: counts.today, shortcutIdx: 2 },
+    { view: 'UPCOMING', label: t.viewUpcoming, count: counts.upcoming, shortcutIdx: 3 },
+    { view: 'ANYTIME', label: t.viewAnytime, count: counts.anytime, shortcutIdx: 4 }
+  ];
+
+  const utilityViews: Array<{
+    view: SmartViewType;
+    label: string;
+    count?: number;
+    shortcutIdx: number;
+    droppable: boolean;
+  }> = [
+    { view: 'SOMEDAY', label: t.viewSomeday, count: counts.someday, shortcutIdx: 5, droppable: true },
+    { view: 'LOGBOOK', label: t.viewLogbook, shortcutIdx: 6, droppable: false },
+    { view: 'TRASH', label: t.viewTrash, count: counts.trash, shortcutIdx: 7, droppable: true }
   ];
 
   return (
@@ -209,116 +214,100 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         <div className="sidebar-scroll">
-          {smartItems.slice(0, 5).map((item, idx) => {
-            const isActive = activeNav.kind === 'smart' && activeNav.view === item.view;
-            const dKey = `smart-${item.view}`;
-            return (
-              <button
-                key={item.view}
-                type="button"
-                className={`nav-item ${isActive ? 'active' : ''} ${
-                  dragTargetKey === dKey ? 'drag-over' : ''
-                }`}
-                title={`${item.label} (Ctrl+${idx + 1})`}
-                onClick={() => onSelectNav({ kind: 'smart', view: item.view })}
-                {...makeDropHandlers(dKey, { kind: 'smart', view: item.view })}
-              >
-                <span className="nav-item-icon">
-                  {renderMonochromeSmartIcon(item.view, 17, isActive)}
-                </span>
-                <span className="nav-item-label">{item.label}</span>
-                {item.count != null && item.count > 0 && (
-                  <span className="nav-item-count">{item.count}</span>
-                )}
-              </button>
-            );
-          })}
+          {/* 2x2 Bento Focus Grid (Inbox, Today, Upcoming, Anytime) */}
+          <div className="bento-focus-grid">
+            {bentoPrimaryItems.map((item) => {
+              const isActive = activeNav.kind === 'smart' && activeNav.view === item.view;
+              const dKey = `smart-${item.view}`;
+              return (
+                <button
+                  key={item.view}
+                  type="button"
+                  className={`bento-tile ${isActive ? 'active' : ''} ${
+                    dragTargetKey === dKey ? 'drag-over' : ''
+                  }`}
+                  title={`${item.label} (Ctrl+${item.shortcutIdx})`}
+                  onClick={() => onSelectNav({ kind: 'smart', view: item.view })}
+                  {...makeDropHandlers(dKey, { kind: 'smart', view: item.view })}
+                >
+                  <div className="bento-tile-top">
+                    <span className="bento-tile-icon">
+                      {renderMonochromeSmartIcon(item.view, 16.5, isActive)}
+                    </span>
+                    <span className="bento-tile-count">
+                      {item.count != null && item.count > 0 ? item.count : ''}
+                    </span>
+                  </div>
+                  <span className="bento-tile-label">{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
 
-          <div style={{ height: 6 }} />
-          {(() => {
-            const logItem = smartItems[5];
-            const isActive = activeNav.kind === 'smart' && activeNav.view === 'LOGBOOK';
-            return (
-              <button
-                type="button"
-                className={`nav-item ${isActive ? 'active' : ''}`}
-                title={`${logItem.label} (Ctrl+6)`}
-                onClick={() => onSelectNav({ kind: 'smart', view: 'LOGBOOK' })}
-              >
-                <span className="nav-item-icon">
-                  {renderMonochromeSmartIcon('LOGBOOK', 17, isActive)}
-                </span>
-                <span className="nav-item-label">{logItem.label}</span>
-              </button>
-            );
-          })()}
-          {(() => {
-            const trashItem = smartItems[6];
-            const isActive = activeNav.kind === 'smart' && activeNav.view === 'TRASH';
-            const dKey = 'smart-TRASH';
-            return (
-              <button
-                type="button"
-                className={`nav-item ${isActive ? 'active' : ''} ${
-                  dragTargetKey === dKey ? 'drag-over' : ''
-                }`}
-                title={`${trashItem.label} (Ctrl+7)`}
-                onClick={() => onSelectNav({ kind: 'smart', view: 'TRASH' })}
-                {...makeDropHandlers(dKey, { kind: 'smart', view: 'TRASH' })}
-              >
-                <span className="nav-item-icon">
-                  {renderMonochromeSmartIcon('TRASH', 17, isActive)}
-                </span>
-                <span className="nav-item-label">{trashItem.label}</span>
-                {trashItem.count != null && trashItem.count > 0 && (
-                  <span className="nav-item-count">{trashItem.count}</span>
-                )}
-              </button>
-            );
-          })()}
+          {/* Compact Secondary Utility Pills (Someday, Weekly Review, Logbook, Trash, Templates) */}
+          <div className="sidebar-utility-pills">
+            {utilityViews.map((item) => {
+              const isActive = activeNav.kind === 'smart' && activeNav.view === item.view;
+              const dKey = `smart-${item.view}`;
+              return (
+                <button
+                  key={item.view}
+                  type="button"
+                  className={`utility-pill ${isActive ? 'active' : ''} ${
+                    dragTargetKey === dKey ? 'drag-over' : ''
+                  }`}
+                  title={`${item.label} (Ctrl+${item.shortcutIdx})`}
+                  onClick={() => onSelectNav({ kind: 'smart', view: item.view })}
+                  {...(item.droppable
+                    ? makeDropHandlers(dKey, { kind: 'smart', view: item.view })
+                    : {})}
+                >
+                  {renderMonochromeSmartIcon(item.view, 13.5, isActive)}
+                  <span className="utility-pill-label">{item.label}</span>
+                  {item.count != null && item.count > 0 && (
+                    <span className="utility-pill-count">{item.count}</span>
+                  )}
+                </button>
+              );
+            })}
 
-          {/* Guided GTD Weekly Review & Templates Launchers (monochrome M3 Expressive style) */}
-          <div style={{ height: 6 }} />
-          <button
-            type="button"
-            className="nav-item"
-            data-testid="sidebar-weekly-review-btn"
-            title={`${t.weeklyReviewTitle} (Ctrl+Shift+R)`}
-            onClick={() => {
-              onCloseMobile();
-              onOpenWeeklyReview();
-            }}
-          >
-            <span className="nav-item-icon">
-              <ListChecks size={16.5} style={{ color: 'var(--text-secondary)' }} />
-            </span>
-            <span className="nav-item-label">{t.weeklyReviewBtn}</span>
-            {stalledProjectsCount > 0 && (
-              <span className="nav-item-count">{stalledProjectsCount}</span>
-            )}
-          </button>
+            <button
+              type="button"
+              className="utility-pill"
+              data-testid="sidebar-weekly-review-btn"
+              title={`${t.weeklyReviewTitle} (Ctrl+Shift+R)`}
+              onClick={() => {
+                onCloseMobile();
+                onOpenWeeklyReview();
+              }}
+            >
+              <ListChecks size={13.5} style={{ color: 'var(--text-secondary)' }} />
+              <span className="utility-pill-label">{t.weeklyReviewBtn}</span>
+              {stalledProjectsCount > 0 && (
+                <span className="utility-pill-count">{stalledProjectsCount}</span>
+              )}
+            </button>
 
-          <button
-            type="button"
-            className="nav-item"
-            data-testid="sidebar-templates-btn"
-            title={t.templatesModalTitle}
-            onClick={() => {
-              onCloseMobile();
-              onOpenTemplates(resolveCurrentAreaId());
-            }}
-          >
-            <span className="nav-item-icon">
-              <ClipboardList size={16.5} style={{ color: 'var(--text-secondary)' }} />
-            </span>
-            <span className="nav-item-label">{t.templatesBtn}</span>
-          </button>
+            <button
+              type="button"
+              className="utility-pill"
+              data-testid="sidebar-templates-btn"
+              title={t.templatesModalTitle}
+              onClick={() => {
+                onCloseMobile();
+                onOpenTemplates(resolveCurrentAreaId());
+              }}
+            >
+              <ClipboardList size={13.5} style={{ color: 'var(--text-secondary)' }} />
+              <span className="utility-pill-label">{t.templatesBtn}</span>
+            </button>
+          </div>
 
           {(activeAreas.length > 0 || unassignedProjects.length > 0) && (
             <div className="sidebar-divider" />
           )}
 
-          {/* Areas -> Projects Collapsible Hierarchy */}
+          {/* Areas -> Projects Collapsible Hierarchy with Linear Progress Bars */}
           {activeAreas.map((area) => {
             const isAreaActive = activeNav.kind === 'area' && activeNav.areaId === area.id;
             const areaProjects = activeProjects.filter((p) => p.areaId === area.id);
@@ -351,7 +340,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     {...makeDropHandlers(areaKey, { kind: 'area', areaId: area.id })}
                   >
                     <span className="nav-item-icon">
-                      <Package
+                      <Folder
                         size={15.5}
                         style={{
                           color: isAreaActive ? 'var(--things-blue)' : 'var(--text-secondary)'
@@ -387,14 +376,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         onClick={() => onSelectNav({ kind: 'project', projectId: proj.id })}
                         {...makeDropHandlers(projKey, { kind: 'project', projectId: proj.id })}
                       >
-                        <ProjectProgressRing completed={prog.done} total={prog.total} size={15} />
+                        <FolderKanban
+                          size={13.5}
+                          style={{
+                            color: isProjActive ? 'var(--things-blue)' : 'var(--text-muted)',
+                            flexShrink: 0
+                          }}
+                        />
                         <span className="nav-item-label">{proj.title}</span>
                         {proj.deadline != null && (
                           <Flag
-                            size={12.5}
+                            size={11.5}
                             style={{ color: 'var(--deadline-red)', flexShrink: 0 }}
                           />
                         )}
+                        <ProjectProgressRing
+                          completed={prog.done}
+                          total={prog.total}
+                          size={15}
+                          showCount={prog.total > 0}
+                        />
                       </button>
                     );
                   })}
@@ -421,14 +422,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     onClick={() => onSelectNav({ kind: 'project', projectId: proj.id })}
                     {...makeDropHandlers(projKey, { kind: 'project', projectId: proj.id })}
                   >
-                    <ProjectProgressRing completed={prog.done} total={prog.total} size={15} />
+                    <FolderKanban
+                      size={14}
+                      style={{
+                        color: isProjActive ? 'var(--things-blue)' : 'var(--text-muted)',
+                        flexShrink: 0
+                      }}
+                    />
                     <span className="nav-item-label">{proj.title}</span>
                     {proj.deadline != null && (
                       <Flag
-                        size={12.5}
+                        size={11.5}
                         style={{ color: 'var(--deadline-red)', flexShrink: 0 }}
                       />
                     )}
+                    <ProjectProgressRing
+                      completed={prog.done}
+                      total={prog.total}
+                      size={15}
+                      showCount={prog.total > 0}
+                    />
                   </button>
                 );
               })}
@@ -449,7 +462,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         )}
 
-        {/* Sidebar Footer: + New Project (defaults into active/first Area) & Areas (X/8) */}
+        {/* Sidebar Footer: + New Project & Areas (X/8) */}
         <div className="sidebar-footer">
           <button
             type="button"
@@ -468,7 +481,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             title={t.areasManageTitle}
             onClick={onOpenManageAreas}
           >
-            <Package size={13.5} />
+            <Folder size={13.5} />
             <span>
               {t.entityAreas} ({activeAreas.length}/{MAX_AREAS})
             </span>
@@ -590,7 +603,6 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
           <span>{t.templatesBtn}</span>
         </button>
 
-        {/* Areas with their nested Projects grouped immediately beside each Area */}
         {activeAreas.length > 0 && <span className="strip-divider" />}
         {activeAreas.map((area) => {
           const isActive = activeNav.kind === 'area' && activeNav.areaId === area.id;
@@ -603,7 +615,7 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
                 title={`${t.entityArea}: ${area.title}`}
                 onClick={() => onSelectNav({ kind: 'area', areaId: area.id })}
               >
-                <Package
+                <Folder
                   size={13}
                   style={{ color: isActive ? 'var(--things-blue)' : 'var(--text-secondary)' }}
                 />
@@ -621,8 +633,8 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
                     title={`${area.title} › ${proj.title} (${prog.done}/${prog.total})`}
                     onClick={() => onSelectNav({ kind: 'project', projectId: proj.id })}
                   >
-                    <ProjectProgressRing completed={prog.done} total={prog.total} size={14} />
                     <span>{proj.title}</span>
+                    <ProjectProgressRing completed={prog.done} total={prog.total} size={13} />
                     {proj.deadline != null && (
                       <Flag size={11.5} style={{ color: 'var(--deadline-red)' }} />
                     )}
@@ -645,8 +657,8 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
               title={`${proj.title} (${prog.done}/${prog.total})`}
               onClick={() => onSelectNav({ kind: 'project', projectId: proj.id })}
             >
-              <ProjectProgressRing completed={prog.done} total={prog.total} size={14} />
               <span>{proj.title}</span>
+              <ProjectProgressRing completed={prog.done} total={prog.total} size={13} />
               {proj.deadline != null && (
                 <Flag size={11.5} style={{ color: 'var(--deadline-red)' }} />
               )}
@@ -670,7 +682,7 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
           title={t.areasManageTitle}
           onClick={onOpenManageAreas}
         >
-          <Package size={13} />
+          <Folder size={13} />
           <span>
             {t.entityAreas} ({activeAreas.length}/{MAX_AREAS})
           </span>

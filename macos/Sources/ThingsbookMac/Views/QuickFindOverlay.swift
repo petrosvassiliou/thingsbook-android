@@ -261,7 +261,7 @@ public struct QuickFindOverlay: View {
                                 dismiss()
                             } label: {
                                 HStack(spacing: 10) {
-                                    Image(systemName: "cube.fill")
+                                    Image(systemName: "folder.fill")
                                         .foregroundStyle(ThingsMacPalette.areaGreen)
                                         .frame(width: 20)
                                     Text(area.title)

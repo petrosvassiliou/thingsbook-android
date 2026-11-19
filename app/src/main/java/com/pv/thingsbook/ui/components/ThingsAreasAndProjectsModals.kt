@@ -36,7 +36,6 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -143,7 +142,7 @@ fun ThingsAreaManagerModal(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.Inventory2,
+                            imageVector = Icons.Outlined.Folder,
                             contentDescription = null,
                             tint = colors.thingsBlue,
                             modifier = Modifier.size(20.dp)
@@ -273,7 +272,7 @@ fun ThingsAreaManagerModal(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Outlined.Inventory2,
+                                            imageVector = Icons.Outlined.Folder,
                                             contentDescription = null,
                                             tint = colors.anytimeTeal,
                                             modifier = Modifier.size(18.dp)
@@ -760,7 +759,7 @@ fun CreateOrEditProjectDialog(
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.Inventory2,
+                                imageVector = Icons.Outlined.Folder,
                                 contentDescription = null,
                                 tint = if (isSelected) Color.White else colors.anytimeTeal,
                                 modifier = Modifier.size(13.dp)
@@ -1046,7 +1045,7 @@ fun MoveTaskToProjectOrAreaDialog(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Outlined.Inventory2,
+                                        imageVector = Icons.Outlined.Folder,
                                         contentDescription = null,
                                         tint = colors.anytimeTeal,
                                         modifier = Modifier.size(15.dp)

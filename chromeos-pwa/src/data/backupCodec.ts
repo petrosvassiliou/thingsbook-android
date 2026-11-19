@@ -89,6 +89,7 @@ export interface ThingsbookBackupPayload {
     id: string;
     projectId: string;
     title: string;
+    endDate?: number | null;
     sortOrder: number;
     isArchived: boolean;
     createdAt: number;
@@ -373,6 +374,7 @@ export function buildBackupPayloadFromEntities(params: {
       id: h.id,
       projectId: h.projectId,
       title: h.title,
+      endDate: h.endDate ?? null,
       sortOrder: Number.isFinite(h.sortOrder) ? h.sortOrder : 0,
       isArchived: Boolean(h.isArchived),
       createdAt: h.createdAt,
@@ -767,6 +769,7 @@ export function normalizeBackupPayloadToEntities(
       id: h.id,
       projectId: h.projectId,
       title: h.title || '',
+      endDate: typeof h.endDate === 'number' && Number.isFinite(h.endDate) ? Math.trunc(h.endDate) : null,
       sortOrder: Number.isFinite(h.sortOrder) ? h.sortOrder : 0,
       isArchived: Boolean(h.isArchived),
       createdAt: h.createdAt || now,

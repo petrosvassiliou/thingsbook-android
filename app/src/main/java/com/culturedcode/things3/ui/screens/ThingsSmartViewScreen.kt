@@ -67,6 +67,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.shadow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.MenuOpen
+import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
@@ -92,10 +93,12 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.LocalOffer
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.NotificationsActive
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material.icons.outlined.SystemUpdateAlt
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.foundation.BorderStroke
@@ -181,6 +184,7 @@ import com.culturedcode.things3.domain.model.Tag
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
 import com.culturedcode.things3.domain.model.TimeblockScheduleUtils
+import com.culturedcode.things3.domain.model.sortTasksForView
 import com.culturedcode.things3.ui.components.AttachmentImportOutcome
 import com.culturedcode.things3.ui.components.CreateOrEditProjectDialog
 import com.culturedcode.things3.ui.components.DeadlineDatePickerDialog
@@ -199,6 +203,7 @@ import com.culturedcode.things3.ui.components.QuickCreateAreaDialog
 import com.culturedcode.things3.ui.components.SampleTasksAccountMergeDialog
 import com.culturedcode.things3.ui.components.SmartViewIcon
 import com.culturedcode.things3.ui.components.SmartViewType
+import com.culturedcode.things3.ui.components.TaskTagPickerDialog
 import com.culturedcode.things3.ui.components.ThingsAreaManagerModal
 import com.culturedcode.things3.ui.components.ThingsAuthAndSyncModal
 import com.culturedcode.things3.ui.components.ThingsBackupCreateDialog
@@ -333,6 +338,9 @@ fun ThingsSmartViewScreen(
     val projectAttachments by viewModel.activeProjectAttachments.collectAsState()
     val areaTasks by viewModel.activeAreaTasks.collectAsState()
     val allTags by viewModel.allTags.collectAsState()
+    val tagSortMode by viewModel.tagSortMode.collectAsState()
+    val tagUsageCounts by viewModel.tagUsageCounts.collectAsState()
+    val viewSortMode by viewModel.viewSortMode.collectAsState()
 
     var magicDragState by remember { mutableStateOf(MagicPlusDragState()) }
     val projectDragController = remember { ProjectDragDropController() }
@@ -340,9 +348,23 @@ fun ThingsSmartViewScreen(
     var projectDialogPreselectedAreaId by remember { mutableStateOf<String?>(null) }
     var editingProject by remember { mutableStateOf<Project?>(null) }
     var showBatchMoveDialog by remember { mutableStateOf(false) }
+    var showBatchTagPickerDialog by remember { mutableStateOf(false) }
     var showEmptyTrashConfirmDialog by remember { mutableStateOf(false) }
     var externalDialogTriggerToken by remember { mutableIntStateOf(0) }
     var externalDialogTriggerType by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(selectedTaskIds.isEmpty()) {
+        if (selectedTaskIds.isEmpty() && showBatchTagPickerDialog) {
+            showBatchTagPickerDialog = false
+        }
+    }
+
+    val shouldApplyViewSort = when (val target = navTarget) {
+        is ActiveNavigationTarget.SmartView ->
+            target.type != SmartViewType.LOGBOOK && target.type != SmartViewType.TRASH
+        is ActiveNavigationTarget.ProjectDetail,
+        is ActiveNavigationTarget.AreaDetail -> true
+    }
 
     // Determine primary task list for current view, filtered by selected tag if active
     val rawPrimaryTasks: List<TaskItem> = when (val target = navTarget) {
@@ -359,16 +381,24 @@ fun ThingsSmartViewScreen(
         is ActiveNavigationTarget.AreaDetail -> areaTasks
     }
 
-    val primaryTasks: List<TaskItem> = remember(rawPrimaryTasks, selectedFilterTagId) {
+    val primaryTasks: List<TaskItem> = remember(rawPrimaryTasks, selectedFilterTagId, shouldApplyViewSort, viewSortMode) {
         val tagId = selectedFilterTagId
-        if (tagId == null) rawPrimaryTasks
-        else rawPrimaryTasks.filter { task -> task.tags.any { it.id == tagId } }
+        val tagFiltered = if (tagId == null) {
+            rawPrimaryTasks
+        } else {
+            rawPrimaryTasks.filter { task -> task.tags.any { it.id == tagId } }
+        }
+        if (shouldApplyViewSort) sortTasksForView(tagFiltered, viewSortMode) else tagFiltered
     }
 
-    val filteredEveningTasks: List<TaskItem> = remember(eveningTasks, selectedFilterTagId) {
+    val filteredEveningTasks: List<TaskItem> = remember(eveningTasks, selectedFilterTagId, viewSortMode) {
         val tagId = selectedFilterTagId
-        if (tagId == null) eveningTasks
-        else eveningTasks.filter { task -> task.tags.any { it.id == tagId } }
+        val tagFiltered = if (tagId == null) {
+            eveningTasks
+        } else {
+            eveningTasks.filter { task -> task.tags.any { it.id == tagId } }
+        }
+        sortTasksForView(tagFiltered, viewSortMode)
     }
 
     val allVisibleViewTasks: List<TaskItem> = remember(primaryTasks, filteredEveningTasks, navTarget) {
@@ -420,6 +450,7 @@ fun ThingsSmartViewScreen(
         showCreateProjectDialog = false
         editingProject = null
         showBatchMoveDialog = false
+        showBatchTagPickerDialog = false
         isMobileDrawerOpen = false
         viewModel.setMagicPlusMenuOpen(false)
         viewModel.createTaskAtPosition(primaryTasks, 0, "", forceTopUngroupedInProject = true)
@@ -427,6 +458,7 @@ fun ThingsSmartViewScreen(
 
     val triggerCreateProjectShortcut by rememberUpdatedState {
         showBatchMoveDialog = false
+        showBatchTagPickerDialog = false
         isMobileDrawerOpen = false
         viewModel.setMagicPlusMenuOpen(false)
         projectDialogPreselectedAreaId = currentArea?.id ?: currentProject?.areaId
@@ -463,6 +495,10 @@ fun ThingsSmartViewScreen(
                 when {
                     expandedTaskId != null -> {
                         viewModel.duplicateTask(expandedTaskId!!)
+                        true
+                    }
+                    selectedTaskIds.isNotEmpty() -> {
+                        viewModel.batchDuplicateSelectedTasks()
                         true
                     }
                     currentProject != null -> {
@@ -509,7 +545,7 @@ fun ThingsSmartViewScreen(
                 }
             }
             ctrlOrMeta && !nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_A &&
-                expandedTaskId == null && !showCreateProjectDialog && !showBatchMoveDialog -> {
+                expandedTaskId == null && !showCreateProjectDialog && !showBatchMoveDialog && !showBatchTagPickerDialog -> {
                 viewModel.selectAllTasks(allVisibleTaskIds)
                 true
             }
@@ -517,6 +553,10 @@ fun ThingsSmartViewScreen(
                 showCreateProjectDialog -> {
                     showCreateProjectDialog = false
                     editingProject = null
+                    true
+                }
+                showBatchTagPickerDialog -> {
+                    showBatchTagPickerDialog = false
                     true
                 }
                 showBatchMoveDialog -> {
@@ -575,6 +615,10 @@ fun ThingsSmartViewScreen(
                                     viewModel.duplicateTask(expandedTaskId!!)
                                     true
                                 }
+                                selectedTaskIds.isNotEmpty() -> {
+                                    viewModel.batchDuplicateSelectedTasks()
+                                    true
+                                }
                                 currentProject != null -> {
                                     viewModel.duplicateProject(currentProject.id)
                                     true
@@ -629,6 +673,10 @@ fun ThingsSmartViewScreen(
                             showCreateProjectDialog -> {
                                 showCreateProjectDialog = false
                                 editingProject = null
+                                true
+                            }
+                            showBatchTagPickerDialog -> {
+                                showBatchTagPickerDialog = false
                                 true
                             }
                             showBatchMoveDialog -> {
@@ -785,6 +833,8 @@ fun ThingsSmartViewScreen(
                         projectAttachments = projectAttachments,
                         locale = activeLocale,
                         trashItemCount = deletedTasks.size + deletedProjects.size,
+                        viewSortMode = viewSortMode,
+                        onSetViewSortMode = { viewModel.setViewSortMode(it) },
                         isTodayTimelineMode = isTodayTimelineMode,
                         onToggleTodayTimelineMode = { viewModel.setTodayTimelineMode(it) },
                         onSaveProjectAsTemplate = { pId, toastMsg ->
@@ -893,7 +943,7 @@ fun ThingsSmartViewScreen(
             }
         }
 
-        // Floating Multi-Task Selection Action Bar (Mouse Ctrl/Shift-Click & Things-for-iPhone Swipe)
+        // Floating Multi-Task Selection Action Bar (Mouse Ctrl/Shift-Click, Touch Long-Press & Swipe)
         if (selectedTaskIds.isNotEmpty()) {
             ThingsMultiSelectionBar(
                 selectedCount = selectedTaskIds.size,
@@ -914,6 +964,12 @@ fun ThingsSmartViewScreen(
                         .toEpochMilli()
                     viewModel.batchScheduleSelectedTasks(allVisibleViewTasks, ScheduleState.UPCOMING, tomorrowStartMillis)
                 },
+                onScheduleSomeday = {
+                    viewModel.batchScheduleSelectedTasks(allVisibleViewTasks, ScheduleState.SOMEDAY, null)
+                },
+                onOpenBatchTags = { showBatchTagPickerDialog = true },
+                onBatchPin = { viewModel.batchTogglePinSelectedTasks() },
+                onBatchDuplicate = { viewModel.batchDuplicateSelectedTasks() },
                 onOpenBatchMove = { showBatchMoveDialog = true },
                 onBatchComplete = { viewModel.batchCompleteSelectedTasks() },
                 onBatchDelete = { viewModel.batchDeleteSelectedTasks() },
@@ -1054,6 +1110,7 @@ fun ThingsSmartViewScreen(
                 areas = areas,
                 activeProjects = activeProjects,
                 allTags = allTags,
+                selectedTaskIds = selectedTaskIds,
                 allVisibleViewTasks = allVisibleViewTasks,
                 inboxTasks = inboxTasks,
                 todayTasks = todayTasks,
@@ -1065,6 +1122,8 @@ fun ThingsSmartViewScreen(
                 activeLocale = activeLocale,
                 showBatchMoveDialog = showBatchMoveDialog,
                 onDismissBatchMoveDialog = { showBatchMoveDialog = false },
+                showBatchTagPickerDialog = showBatchTagPickerDialog,
+                onDismissBatchTagPickerDialog = { showBatchTagPickerDialog = false },
                 showCreateProjectDialog = showCreateProjectDialog,
                 editingProject = editingProject,
                 projectDialogPreselectedAreaId = projectDialogPreselectedAreaId,
@@ -1617,6 +1676,8 @@ private fun ThingsTaskRowItem(
 ) {
     val currentEpochDay by viewModel.currentEpochDay.collectAsState()
     val navTarget by viewModel.navigationTarget.collectAsState()
+    val tagSortMode by viewModel.tagSortMode.collectAsState()
+    val tagUsageCounts by viewModel.tagUsageCounts.collectAsState()
     val isTodayView = navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
     androidx.compose.runtime.key(currentEpochDay) {
         ExpandableTaskCard(
@@ -1625,6 +1686,8 @@ private fun ThingsTaskRowItem(
             onRequestEnsureVisible = onRequestEnsureVisible,
             task = task,
             allTags = allTags,
+            tagSortMode = tagSortMode,
+            tagUsageCounts = tagUsageCounts,
             allAreas = areas,
             allProjects = activeProjects,
             allHeadings = allHeadings,
@@ -1666,6 +1729,9 @@ private fun ThingsTaskRowItem(
             onTriggerGeminiMagicBreakdown = {
                 viewModel.triggerGeminiMagicBreakdown(task, activeLocale)
             },
+            onTogglePin = if (task.status == TaskStatus.OPEN && !task.isDeleted) {
+                { viewModel.toggleTaskPinned(task.id) }
+            } else null,
             onDuplicateTask = { viewModel.duplicateTask(task.id) },
             onStartFocusTimer = { viewModel.startFocusTimer(task.id, task.title, task.durationMinutes) },
             onAddTaskAttachment = { fName, mime, bytes ->
@@ -1749,6 +1815,7 @@ private fun ThingsMainTaskLazyList(
     val deletedProjects by viewModel.deletedProjects.collectAsState()
     val groupTodayByProjectOrArea by viewModel.groupTodayByProjectOrArea.collectAsState()
     val isTodayTimelineMode by viewModel.isTodayTimelineMode.collectAsState()
+    val viewSortMode by viewModel.viewSortMode.collectAsState()
 
     if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) &&
         isTodayTimelineMode &&
@@ -1802,14 +1869,22 @@ private fun ThingsMainTaskLazyList(
     }
 
     // Project sections as displayed: tasks without (valid) heading first, then one section per heading
-    val projectSections: Map<String?, List<TaskItem>> = remember(isProjectView, primaryTasks, projectHeadings) {
+    val projectSections: Map<String?, List<TaskItem>> = remember(isProjectView, primaryTasks, projectHeadings, viewSortMode) {
         if (!isProjectView) {
             emptyMap()
         } else {
             val headingIdSet = projectHeadings.mapTo(HashSet()) { it.id }
             val result = LinkedHashMap<String?, List<TaskItem>>()
-            result[null] = primaryTasks.filter { it.headingId == null || it.headingId !in headingIdSet }
-            projectHeadings.forEach { h -> result[h.id] = primaryTasks.filter { it.headingId == h.id } }
+            result[null] = sortTasksForView(
+                primaryTasks.filter { it.headingId == null || it.headingId !in headingIdSet },
+                viewSortMode
+            )
+            projectHeadings.forEach { h ->
+                result[h.id] = sortTasksForView(
+                    primaryTasks.filter { it.headingId == h.id },
+                    viewSortMode
+                )
+            }
             result
         }
     }
@@ -2107,6 +2182,7 @@ private fun ThingsMainTaskLazyList(
                         canMoveDown = idx < areaProjects.lastIndex,
                         locale = activeLocale,
                         onOpenProject = { viewModel.selectProject(proj.id) },
+                        onDuplicateProject = { viewModel.duplicateProject(proj.id) },
                         onEditProject = { onRequestEditProject(proj) },
                         onUpdateDeadline = { dl -> viewModel.updateProjectDeadline(proj.id, dl) },
                         onMoveUp = { viewModel.moveProject(proj.id, true) },
@@ -2261,6 +2337,7 @@ private fun ThingsMainTaskLazyList(
             val todayDate = LocalDate.ofEpochDay(currentEpochDay)
             val groupedUpcoming = primaryTasks
                 .groupBy { task -> computeUpcomingTargetDate(task, todayDate, zone) }
+                .mapValues { (_, bucketTasks) -> sortTasksForView(bucketTasks, viewSortMode) }
                 .toSortedMap()
 
             var cumulativeTaskOffset = 0
@@ -2335,10 +2412,13 @@ private fun ThingsMainTaskLazyList(
             // Optional Things 3 "Group Today by Project or Area" mode
             val projectMap = activeProjects.associateBy { it.id }
             val areaMap = areas.associateBy { it.id }
-            val unassignedTodayTasks = primaryTasks.filter {
-                (it.projectId == null || it.projectId !in projectMap) &&
-                    (it.areaId == null || it.areaId !in areaMap)
-            }
+            val unassignedTodayTasks = sortTasksForView(
+                primaryTasks.filter {
+                    (it.projectId == null || it.projectId !in projectMap) &&
+                        (it.areaId == null || it.areaId !in areaMap)
+                },
+                viewSortMode
+            )
             itemsIndexed(
                 items = unassignedTodayTasks,
                 key = { _, task -> task.id }
@@ -2367,7 +2447,10 @@ private fun ThingsMainTaskLazyList(
             }
 
             activeProjects.forEach { proj ->
-                val projTodayTasks = primaryTasks.filter { it.projectId == proj.id }
+                val projTodayTasks = sortTasksForView(
+                    primaryTasks.filter { it.projectId == proj.id },
+                    viewSortMode
+                )
                 if (projTodayTasks.isNotEmpty()) {
                     item(key = "today_group_proj_${proj.id}") {
                         Row(
@@ -2416,9 +2499,12 @@ private fun ThingsMainTaskLazyList(
             }
 
             areas.forEach { area ->
-                val areaTodayTasks = primaryTasks.filter {
-                    (it.projectId == null || it.projectId !in projectMap) && it.areaId == area.id
-                }
+                val areaTodayTasks = sortTasksForView(
+                    primaryTasks.filter {
+                        (it.projectId == null || it.projectId !in projectMap) && it.areaId == area.id
+                    },
+                    viewSortMode
+                )
                 if (areaTodayTasks.isNotEmpty()) {
                     item(key = "today_group_area_${area.id}") {
                         Row(
@@ -2571,6 +2657,7 @@ private fun ThingsModalsOverlay(
     areas: List<Area>,
     activeProjects: List<Project>,
     allTags: List<Tag>,
+    selectedTaskIds: Set<String> = emptySet(),
     allVisibleViewTasks: List<TaskItem>,
     inboxTasks: List<TaskItem> = emptyList(),
     todayTasks: List<TaskItem> = emptyList(),
@@ -2582,6 +2669,8 @@ private fun ThingsModalsOverlay(
     activeLocale: Locale,
     showBatchMoveDialog: Boolean,
     onDismissBatchMoveDialog: () -> Unit,
+    showBatchTagPickerDialog: Boolean = false,
+    onDismissBatchTagPickerDialog: () -> Unit = {},
     showCreateProjectDialog: Boolean,
     editingProject: Project?,
     projectDialogPreselectedAreaId: String?,
@@ -2590,6 +2679,8 @@ private fun ThingsModalsOverlay(
     onDismissEmptyTrashConfirmDialog: () -> Unit = {}
 ) {
     val allHeadings by viewModel.allHeadings.collectAsState()
+    val tagSortMode by viewModel.tagSortMode.collectAsState()
+    val tagUsageCounts by viewModel.tagUsageCounts.collectAsState()
     val isSettingsModalOpen by viewModel.isSettingsModalOpen.collectAsState()
     val isLocalOnlyDbMode by viewModel.isLocalOnlyDbMode.collectAsState()
     val syncStatus by viewModel.syncStatus.collectAsState()
@@ -2639,6 +2730,44 @@ private fun ThingsModalsOverlay(
                 viewModel.batchMoveSelectedTasks(allVisibleViewTasks, pId, hId, aId)
             },
             onDismiss = onDismissBatchMoveDialog
+        )
+    }
+
+    // Batch Tag Picker Dialog for Multi-Selection
+    if (showBatchTagPickerDialog && selectedTaskIds.isNotEmpty()) {
+        val selectedTasksForBatch = remember(allVisibleViewTasks, selectedTaskIds) {
+            allVisibleViewTasks.filter { it.id in selectedTaskIds }
+        }
+        val commonBatchTagIds = remember(selectedTasksForBatch) {
+            if (selectedTasksForBatch.isEmpty()) {
+                emptyList()
+            } else {
+                selectedTasksForBatch
+                    .map { t -> t.tags.mapTo(LinkedHashSet()) { it.id } }
+                    .reduce { acc, set -> LinkedHashSet(acc.intersect(set)) }
+                    .toList()
+            }
+        }
+        TaskTagPickerDialog(
+            allTags = allTags,
+            selectedTagIds = commonBatchTagIds,
+            tagSortMode = tagSortMode,
+            tagUsageCounts = tagUsageCounts,
+            onUpdateSelectedTags = { updatedIds ->
+                val updatedSet = updatedIds.toSet()
+                val prevCommon = commonBatchTagIds.toSet()
+                val toAdd = updatedSet - prevCommon
+                val toRemove = prevCommon - updatedSet
+                viewModel.batchUpdateSelectedTasksTags(toAdd, toRemove)
+            },
+            onCreateAndAssignTag = { newTagTitle ->
+                viewModel.batchCreateAndAssignTagToSelectedTasks(newTagTitle)
+            },
+            onOpenFullTagManager = {
+                onDismissBatchTagPickerDialog()
+                viewModel.setTagManagerOpen(true)
+            },
+            onDismiss = onDismissBatchTagPickerDialog
         )
     }
 
@@ -2783,8 +2912,13 @@ private fun ThingsModalsOverlay(
     if (isTagManagerOpen) {
         ThingsTagManagerModal(
             allTags = allTags,
+            tagSortMode = tagSortMode,
+            tagUsageCounts = tagUsageCounts,
+            onSetTagSortMode = { viewModel.setTagSortMode(it) },
             onCreateTag = { title, shortcut -> viewModel.createTag(title, shortcut) },
             onRenameTag = { id, title, shortcut -> viewModel.renameTag(id, title, shortcut) },
+            onMoveTag = { id, moveUp -> viewModel.moveTag(id, moveUp) },
+            onMergeTags = { srcId, dstId -> viewModel.mergeTags(srcId, dstId) },
             onDeleteTag = { id -> viewModel.deleteTag(id) },
             onDismiss = { viewModel.setTagManagerOpen(false) }
         )
@@ -3131,6 +3265,10 @@ private fun ThingsMultiSelectionBar(
     onSelectAll: () -> Unit,
     onScheduleToday: () -> Unit,
     onScheduleTomorrow: () -> Unit,
+    onScheduleSomeday: () -> Unit = {},
+    onOpenBatchTags: () -> Unit = {},
+    onBatchPin: () -> Unit = {},
+    onBatchDuplicate: () -> Unit = {},
     onOpenBatchMove: () -> Unit,
     onBatchComplete: () -> Unit,
     onBatchDelete: () -> Unit,
@@ -3206,6 +3344,46 @@ private fun ThingsMultiSelectionBar(
                 )
             }
 
+            ThingsHoverTooltip(text = stringResource(R.string.v25_batch_someday)) {
+                ThingsTagPill(
+                    title = "📦 ${stringResource(R.string.v25_batch_someday)}",
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onScheduleSomeday()
+                    }
+                )
+            }
+
+            ThingsHoverTooltip(text = stringResource(R.string.v25_batch_tags)) {
+                ThingsTagPill(
+                    title = "🏷️ ${stringResource(R.string.v25_batch_tags)}",
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onOpenBatchTags()
+                    }
+                )
+            }
+
+            ThingsHoverTooltip(text = stringResource(R.string.v25_batch_pin)) {
+                ThingsTagPill(
+                    title = "📌 ${stringResource(R.string.v25_batch_pin)}",
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onBatchPin()
+                    }
+                )
+            }
+
+            ThingsHoverTooltip(text = "${stringResource(R.string.v25_batch_duplicate)} (Ctrl+D)") {
+                ThingsTagPill(
+                    title = "⧉ ${stringResource(R.string.v25_batch_duplicate)}",
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onBatchDuplicate()
+                    }
+                )
+            }
+
             ThingsHoverTooltip(text = stringResource(R.string.move_dialog_title)) {
                 ThingsTagPill(
                     title = "📁 ${stringResource(R.string.action_move)}",
@@ -3270,6 +3448,7 @@ private fun AreaProjectOverviewRow(
     canMoveDown: Boolean,
     locale: Locale,
     onOpenProject: () -> Unit,
+    onDuplicateProject: (() -> Unit)? = null,
     onEditProject: () -> Unit,
     onUpdateDeadline: (Long?) -> Unit,
     onMoveUp: () -> Unit,
@@ -3403,6 +3582,18 @@ private fun AreaProjectOverviewRow(
                             Icon(
                                 imageVector = Icons.Outlined.ArrowDownward,
                                 contentDescription = stringResource(R.string.action_move),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                }
+                if (onDuplicateProject != null) {
+                    ThingsHoverTooltip(text = stringResource(R.string.action_duplicate_project)) {
+                        IconButton(onClick = onDuplicateProject, modifier = Modifier.size(26.dp)) {
+                            Icon(
+                                imageVector = Icons.Outlined.ContentCopy,
+                                contentDescription = stringResource(R.string.action_duplicate_project),
                                 tint = colors.secondaryText,
                                 modifier = Modifier.size(14.dp)
                             )
@@ -4152,6 +4343,111 @@ private fun SmartViewNavigationStrip(
     }
 }
 
+@Composable
+private fun ViewSortMenuPill(
+    viewSortMode: String,
+    onSetViewSortMode: (String) -> Unit,
+    compactLabel: Boolean = false
+) {
+    val colors = ThingsTheme.colors
+    val haptics = LocalHapticFeedback.current
+    var expanded by remember { mutableStateOf(false) }
+    val isCustomActive = viewSortMode != "manual"
+    val sortModeTitleRes = when (viewSortMode) {
+        "deadline" -> R.string.v25_view_sort_deadline
+        "duration" -> R.string.v25_view_sort_duration
+        "alpha" -> R.string.v25_view_sort_alpha
+        else -> R.string.v25_view_sort_manual
+    }
+    val pillLabel = if (isCustomActive && !compactLabel) {
+        stringResource(sortModeTitleRes)
+    } else {
+        stringResource(R.string.v25_view_sort_label)
+    }
+
+    Box {
+        ThingsHoverTooltip(
+            text = "${stringResource(R.string.v25_view_sort_label)}: ${stringResource(sortModeTitleRes)}"
+        ) {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (isCustomActive) colors.thingsBlueSoft else colors.tagPillBg)
+                    .border(
+                        width = 0.75.dp,
+                        color = if (isCustomActive) colors.thingsBlue.copy(alpha = 0.38f) else colors.hairlineDivider,
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    .clickable {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        expanded = true
+                    }
+                    .padding(horizontal = if (compactLabel) 8.dp else 10.dp, vertical = 5.5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    imageVector = if (isCustomActive) Icons.Outlined.SwapVert else Icons.AutoMirrored.Outlined.Sort,
+                    contentDescription = stringResource(R.string.v25_view_sort_label),
+                    tint = if (isCustomActive) colors.thingsBlue else colors.secondaryText,
+                    modifier = Modifier.size(15.dp)
+                )
+                Text(
+                    text = pillLabel,
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = if (isCustomActive) FontWeight.Bold else FontWeight.Medium
+                    ),
+                    color = if (isCustomActive) colors.thingsBlue else colors.primaryText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.background(colors.cardElevatedSurface)
+        ) {
+            val options = listOf(
+                "manual" to R.string.v25_view_sort_manual,
+                "deadline" to R.string.v25_view_sort_deadline,
+                "duration" to R.string.v25_view_sort_duration,
+                "alpha" to R.string.v25_view_sort_alpha
+            )
+            options.forEach { (modeKey, labelRes) ->
+                val selected = viewSortMode == modeKey
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = stringResource(labelRes),
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                            ),
+                            color = if (selected) colors.thingsBlue else colors.primaryText
+                        )
+                    },
+                    trailingIcon = if (selected) {
+                        {
+                            Icon(
+                                imageVector = Icons.Outlined.Check,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    } else null,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        expanded = false
+                        onSetViewSortMode(modeKey)
+                    }
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ViewTitleHeader(
@@ -4163,6 +4459,8 @@ private fun ViewTitleHeader(
     projectAttachments: List<TaskAttachment> = emptyList(),
     locale: Locale,
     trashItemCount: Int = 0,
+    viewSortMode: String = "manual",
+    onSetViewSortMode: (String) -> Unit = {},
     isTodayTimelineMode: Boolean = false,
     onToggleTodayTimelineMode: (Boolean) -> Unit = {},
     onSaveProjectAsTemplate: (String, String) -> Unit = { _, _ -> },
@@ -4283,6 +4581,12 @@ private fun ViewTitleHeader(
     }
 
     val areaWord = stringResource(R.string.entity_area)
+    val showSortPill = when (navTarget) {
+        is ActiveNavigationTarget.SmartView ->
+            navTarget.type != SmartViewType.LOGBOOK && navTarget.type != SmartViewType.TRASH
+        is ActiveNavigationTarget.ProjectDetail -> true
+        is ActiveNavigationTarget.AreaDetail -> !isRenamingAreaInline
+    }
 
     Column(
         modifier = Modifier
@@ -4445,191 +4749,204 @@ private fun ViewTitleHeader(
                 }
             }
 
-            // Quick Actions for Today (List | Timeline toggle), Project, Area, or Trash in Header
-            if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY)) {
-                ThingsTodayModeSegmentedToggle(
-                    isTimelineMode = isTodayTimelineMode,
-                    onModeChange = onToggleTodayTimelineMode
-                )
-            } else if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TRASH) && trashItemCount > 0) {
-                ThingsHoverTooltip(text = stringResource(R.string.trash_empty_btn)) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(colors.deadlineSoftBg)
-                            .clickable(onClick = onRequestEmptyTrash)
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.DeleteOutline,
-                            contentDescription = stringResource(R.string.trash_empty_btn),
-                            tint = colors.deadlineUrgentRed,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = stringResource(R.string.trash_empty_btn),
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                            color = colors.deadlineUrgentRed
-                        )
-                    }
+            // Quick Actions for Sort, Today (List | Timeline toggle), Project, Area, or Trash in Header
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (showSortPill) {
+                    ViewSortMenuPill(
+                        viewSortMode = viewSortMode,
+                        onSetViewSortMode = onSetViewSortMode,
+                        compactLabel = currentProject != null || currentArea != null
+                    )
                 }
-            } else if (currentProject != null) {
-                val projIdx = projects.indexOfFirst { it.id == currentProject.id }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    if (projIdx > 0) {
-                        ThingsHoverTooltip(text = stringResource(R.string.project_move_up)) {
-                            IconButton(
-                                onClick = { onMoveProject(currentProject.id, true) },
-                                modifier = Modifier.size(30.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.ArrowUpward,
-                                    contentDescription = stringResource(R.string.project_move_up),
-                                    tint = colors.secondaryText,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                    }
-                    if (projIdx != -1 && projIdx < projects.lastIndex) {
-                        ThingsHoverTooltip(text = stringResource(R.string.project_move_down)) {
-                            IconButton(
-                                onClick = { onMoveProject(currentProject.id, false) },
-                                modifier = Modifier.size(30.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.ArrowDownward,
-                                    contentDescription = stringResource(R.string.project_move_down),
-                                    tint = colors.secondaryText,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                    }
-                    ThingsHoverTooltip(text = "${stringResource(R.string.action_duplicate_project)} (Ctrl+D)") {
-                        IconButton(
-                            onClick = { onDuplicateProject(currentProject.id) },
-                            modifier = Modifier.size(30.dp)
+
+                if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY)) {
+                    ThingsTodayModeSegmentedToggle(
+                        isTimelineMode = isTodayTimelineMode,
+                        onModeChange = onToggleTodayTimelineMode
+                    )
+                } else if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TRASH) && trashItemCount > 0) {
+                    ThingsHoverTooltip(text = stringResource(R.string.trash_empty_btn)) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(colors.deadlineSoftBg)
+                                .clickable(onClick = onRequestEmptyTrash)
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.ContentCopy,
-                                contentDescription = stringResource(R.string.action_duplicate_project),
-                                tint = colors.secondaryText,
+                                imageVector = Icons.Outlined.DeleteOutline,
+                                contentDescription = stringResource(R.string.trash_empty_btn),
+                                tint = colors.deadlineUrgentRed,
                                 modifier = Modifier.size(16.dp)
                             )
-                        }
-                    }
-                    ThingsHoverTooltip(text = stringResource(R.string.project_edit_title)) {
-                        IconButton(
-                            onClick = { onEditProject(currentProject) },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Edit,
-                                contentDescription = stringResource(R.string.project_edit_title),
-                                tint = colors.thingsBlue,
-                                modifier = Modifier.size(17.dp)
+                            Text(
+                                text = stringResource(R.string.trash_empty_btn),
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = colors.deadlineUrgentRed
                             )
                         }
                     }
-                    ThingsHoverTooltip(text = stringResource(R.string.project_complete_tooltip)) {
-                        IconButton(
-                            onClick = { onCompleteProject(currentProject.id) },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.CheckCircleOutline,
-                                contentDescription = stringResource(R.string.project_complete_tooltip),
-                                tint = colors.logbookGreen,
-                                modifier = Modifier.size(18.dp)
-                            )
+                } else if (currentProject != null) {
+                    val projIdx = projects.indexOfFirst { it.id == currentProject.id }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        if (projIdx > 0) {
+                            ThingsHoverTooltip(text = stringResource(R.string.project_move_up)) {
+                                IconButton(
+                                    onClick = { onMoveProject(currentProject.id, true) },
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.ArrowUpward,
+                                        contentDescription = stringResource(R.string.project_move_up),
+                                        tint = colors.secondaryText,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
                         }
-                    }
-                    ThingsHoverTooltip(text = stringResource(R.string.project_delete_tooltip)) {
-                        IconButton(
-                            onClick = { onDeleteProject(currentProject.id) },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.DeleteOutline,
-                                contentDescription = stringResource(R.string.project_delete_tooltip),
-                                tint = colors.deadlineUrgentRed,
-                                modifier = Modifier.size(18.dp)
-                            )
+                        if (projIdx != -1 && projIdx < projects.lastIndex) {
+                            ThingsHoverTooltip(text = stringResource(R.string.project_move_down)) {
+                                IconButton(
+                                    onClick = { onMoveProject(currentProject.id, false) },
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.ArrowDownward,
+                                        contentDescription = stringResource(R.string.project_move_down),
+                                        tint = colors.secondaryText,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
                         }
-                    }
-                }
-            } else if (currentArea != null && !isRenamingAreaInline) {
-                val areaIdx = areas.indexOfFirst { it.id == currentArea.id }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    if (areaIdx > 0) {
-                        ThingsHoverTooltip(text = stringResource(R.string.area_move_up)) {
+                        ThingsHoverTooltip(text = "${stringResource(R.string.action_duplicate_project)} (Ctrl+D)") {
                             IconButton(
-                                onClick = { onMoveArea(currentArea.id, true) },
+                                onClick = { onDuplicateProject(currentProject.id) },
                                 modifier = Modifier.size(30.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Outlined.ArrowUpward,
-                                    contentDescription = stringResource(R.string.area_move_up),
+                                    imageVector = Icons.Outlined.ContentCopy,
+                                    contentDescription = stringResource(R.string.action_duplicate_project),
                                     tint = colors.secondaryText,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
                         }
-                    }
-                    if (areaIdx != -1 && areaIdx < areas.lastIndex) {
-                        ThingsHoverTooltip(text = stringResource(R.string.area_move_down)) {
+                        ThingsHoverTooltip(text = stringResource(R.string.project_edit_title)) {
                             IconButton(
-                                onClick = { onMoveArea(currentArea.id, false) },
+                                onClick = { onEditProject(currentProject) },
                                 modifier = Modifier.size(30.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Outlined.ArrowDownward,
-                                    contentDescription = stringResource(R.string.area_move_down),
-                                    tint = colors.secondaryText,
-                                    modifier = Modifier.size(16.dp)
+                                    imageVector = Icons.Outlined.Edit,
+                                    contentDescription = stringResource(R.string.project_edit_title),
+                                    tint = colors.thingsBlue,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                        }
+                        ThingsHoverTooltip(text = stringResource(R.string.project_complete_tooltip)) {
+                            IconButton(
+                                onClick = { onCompleteProject(currentProject.id) },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.CheckCircleOutline,
+                                    contentDescription = stringResource(R.string.project_complete_tooltip),
+                                    tint = colors.logbookGreen,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        ThingsHoverTooltip(text = stringResource(R.string.project_delete_tooltip)) {
+                            IconButton(
+                                onClick = { onDeleteProject(currentProject.id) },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.DeleteOutline,
+                                    contentDescription = stringResource(R.string.project_delete_tooltip),
+                                    tint = colors.deadlineUrgentRed,
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
                     }
-                    ThingsHoverTooltip(text = stringResource(R.string.areas_rename_label)) {
-                        IconButton(
-                            onClick = {
-                                inlineAreaField = TextFieldValue(
-                                    text = currentArea.title,
-                                    selection = TextRange(0, currentArea.title.length)
-                                )
-                                isRenamingAreaInline = true
-                            },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Edit,
-                                contentDescription = stringResource(R.string.areas_rename_label),
-                                tint = colors.thingsBlue,
-                                modifier = Modifier.size(17.dp)
-                            )
+                } else if (currentArea != null && !isRenamingAreaInline) {
+                    val areaIdx = areas.indexOfFirst { it.id == currentArea.id }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        if (areaIdx > 0) {
+                            ThingsHoverTooltip(text = stringResource(R.string.area_move_up)) {
+                                IconButton(
+                                    onClick = { onMoveArea(currentArea.id, true) },
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.ArrowUpward,
+                                        contentDescription = stringResource(R.string.area_move_up),
+                                        tint = colors.secondaryText,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
                         }
-                    }
-                    ThingsHoverTooltip(text = stringResource(R.string.area_delete_tooltip)) {
-                        IconButton(
-                            onClick = { onDeleteArea(currentArea.id) },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.DeleteOutline,
-                                contentDescription = stringResource(R.string.area_delete_tooltip),
-                                tint = colors.deadlineUrgentRed,
-                                modifier = Modifier.size(18.dp)
-                            )
+                        if (areaIdx != -1 && areaIdx < areas.lastIndex) {
+                            ThingsHoverTooltip(text = stringResource(R.string.area_move_down)) {
+                                IconButton(
+                                    onClick = { onMoveArea(currentArea.id, false) },
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.ArrowDownward,
+                                        contentDescription = stringResource(R.string.area_move_down),
+                                        tint = colors.secondaryText,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                        ThingsHoverTooltip(text = stringResource(R.string.areas_rename_label)) {
+                            IconButton(
+                                onClick = {
+                                    inlineAreaField = TextFieldValue(
+                                        text = currentArea.title,
+                                        selection = TextRange(0, currentArea.title.length)
+                                    )
+                                    isRenamingAreaInline = true
+                                },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Edit,
+                                    contentDescription = stringResource(R.string.areas_rename_label),
+                                    tint = colors.thingsBlue,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                        }
+                        ThingsHoverTooltip(text = stringResource(R.string.area_delete_tooltip)) {
+                            IconButton(
+                                onClick = { onDeleteArea(currentArea.id) },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.DeleteOutline,
+                                    contentDescription = stringResource(R.string.area_delete_tooltip),
+                                    tint = colors.deadlineUrgentRed,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                 }

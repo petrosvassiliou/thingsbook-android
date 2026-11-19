@@ -473,4 +473,26 @@
     <string name="topbar_tooltip_cloud_sync">Synchronisation Cloud</string>
     <string name="topbar_tooltip_settings">Paramètres</string>
     <string name="action_more_options">Plus d’actions</string>
+    <string name="v25_pin_task">Épingler en haut</string>
+    <string name="v25_unpin_task">Désépingler</string>
+    <string name="v25_pinned_badge">Épinglée</string>
+    <string name="v25_tags_search_placeholder">Rechercher des tags…</string>
+    <string name="v25_tags_assign_search_placeholder">Rechercher ou créer un tag…</string>
+    <string name="v25_tags_no_matches">Aucun tag correspondant</string>
+    <string name="v25_tags_sort_alpha">A–Z</string>
+    <string name="v25_tags_sort_most_used">Plus utilisés</string>
+    <string name="v25_tags_sort_manual">Personnalisé</string>
+    <string name="v25_tags_merge_action">Fusionner dans…</string>
+    <string name="v25_tags_merge_target_prompt">Fusionner « %1$s » dans :</string>
+    <string name="v25_tags_merged_toast">« %1$s » fusionné dans « %2$s »</string>
+    <string name="v25_view_sort_label">Trier</string>
+    <string name="v25_view_sort_manual">Manuel</string>
+    <string name="v25_view_sort_deadline">Par échéance</string>
+    <string name="v25_view_sort_duration">Par durée</string>
+    <string name="v25_view_sort_alpha">Alphabétique (A–Z)</string>
+    <string name="v25_copy_suffix">Copie</string>
+    <string name="v25_batch_pin">Épingler</string>
+    <string name="v25_batch_tags">Tags</string>
+    <string name="v25_batch_duplicate">Dupliquer</string>
+    <string name="v25_batch_someday">Un jour</string>
 </resources>

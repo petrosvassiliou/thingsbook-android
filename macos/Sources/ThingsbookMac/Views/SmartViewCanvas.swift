@@ -123,6 +123,10 @@ public struct SmartViewCanvas: View {
                 }
             }
 
+            if view != .logbook && view != .trash {
+                viewSortMenu
+            }
+
             if view == .logbook && !store.logbookTasks.isEmpty {
                 Button {
                     store.geminiInitialTab = .logbookReview
@@ -200,6 +204,62 @@ public struct SmartViewCanvas: View {
 
         case .trash:
             trashCanvas
+        }
+    }
+
+    // MARK: - View Sort Menu (v2.5.0)
+
+    private var viewSortMenu: some View {
+        let currentMode = store.preferences.viewSortMode
+        let activeOptionLabel: String = {
+            switch currentMode {
+            case "deadline": return store.tr("v25_view_sort_deadline")
+            case "duration": return store.tr("v25_view_sort_duration")
+            case "alpha": return store.tr("v25_view_sort_alpha")
+            default: return store.tr("v25_view_sort_manual")
+            }
+        }()
+        let isNonDefault = currentMode != "manual"
+
+        return Menu {
+            sortModeMenuItem(mode: "manual", title: store.tr("v25_view_sort_manual"))
+            sortModeMenuItem(mode: "deadline", title: store.tr("v25_view_sort_deadline"))
+            sortModeMenuItem(mode: "duration", title: store.tr("v25_view_sort_duration"))
+            sortModeMenuItem(mode: "alpha", title: store.tr("v25_view_sort_alpha"))
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(isNonDefault ? activeOptionLabel : store.tr("v25_view_sort_label"))
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .foregroundStyle(isNonDefault ? ThingsMacPalette.accentBlue : .secondary)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5.5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(isNonDefault ? ThingsMacPalette.accentBlue.opacity(0.13) : Color.primary.opacity(0.055))
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize(horizontal: true, vertical: false)
+        .thingsTooltip("\(store.tr("v25_view_sort_label")): \(activeOptionLabel)")
+    }
+
+    @ViewBuilder
+    private func sortModeMenuItem(mode: String, title: String) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
+                store.preferences.viewSortMode = mode
+            }
+        } label: {
+            if store.preferences.viewSortMode == mode {
+                Label(title, systemImage: "checkmark")
+            } else {
+                Text(title)
+            }
         }
     }
 
@@ -281,7 +341,7 @@ public struct SmartViewCanvas: View {
 
             VStack(alignment: .leading, spacing: 22) {
                 ForEach(sortedDays, id: \.self) { epochDay in
-                    let dayTasks = grouped[epochDay] ?? []
+                    let dayTasks = TaskViewSorter.sort(grouped[epochDay] ?? [], mode: store.preferences.viewSortMode)
                     let sampleMillis = dayTasks.first?.whenDate
                     VStack(alignment: .leading, spacing: 8) {
                         upcomingDayHeader(sampleMillis: sampleMillis)
@@ -394,6 +454,8 @@ public struct SmartViewCanvas: View {
 
                 Spacer()
 
+                viewSortMenu
+
                 HStack(spacing: 6) {
                     Button {
                         store.moveProjectOrder(project, direction: -1)
@@ -454,7 +516,7 @@ public struct SmartViewCanvas: View {
                             store.markProjectReviewed(project.id)
                         }
                         Button(store.tr("action_duplicate_project")) {
-                            if let copy = try? store.database.duplicateProject(project.id, copySuffix: store.tr("macos_copy_suffix")) {
+                            if let copy = try? store.database.duplicateProject(project.id, copySuffix: store.tr("v25_copy_suffix")) {
                                 store.selectedDestination = .project(copy.id)
                             }
                         }
@@ -599,7 +661,10 @@ public struct SmartViewCanvas: View {
 
             let openTasks = store.tasksForProject(project.id)
             let headings = store.headingsByProject[project.id] ?? []
-            let unheaded = openTasks.filter { $0.headingId == nil }
+            let unheaded = TaskViewSorter.sort(
+                openTasks.filter { $0.headingId == nil },
+                mode: store.preferences.viewSortMode
+            )
 
             tagFilterBar(for: openTasks)
 
@@ -611,11 +676,17 @@ public struct SmartViewCanvas: View {
                 }
 
                 ForEach(Array(headings.enumerated()), id: \.element.id) { hIdx, heading in
-                    let sectionTasks = openTasks.filter { $0.headingId == heading.id }
+                    let sectionTasks = TaskViewSorter.sort(
+                        openTasks.filter { $0.headingId == heading.id },
+                        mode: store.preferences.viewSortMode
+                    )
                     let prevHeadingOrder = hIdx > 0 ? headings[hIdx - 1].sortOrder : nil
                     let prevSectionId: String? = hIdx > 0 ? headings[hIdx - 1].id : nil
                     let prevSectionLastTaskOrder: Double? = hIdx > 0
-                        ? openTasks.filter { $0.headingId == headings[hIdx - 1].id }.last?.sortOrder
+                        ? TaskViewSorter.sort(
+                            openTasks.filter { $0.headingId == headings[hIdx - 1].id },
+                            mode: store.preferences.viewSortMode
+                        ).last?.sortOrder
                         : unheaded.last?.sortOrder
 
                     projectHeadingSection(
@@ -829,6 +900,9 @@ public struct SmartViewCanvas: View {
                 Text(area.title)
                     .font(.system(size: 28, weight: .bold))
                 Spacer()
+
+                viewSortMenu
+
                 Button {
                     store.editingArea = area
                 } label: {
@@ -894,7 +968,7 @@ public struct SmartViewCanvas: View {
                                 store.markProjectReviewed(proj.id)
                             }
                             Button(store.tr("action_duplicate_project")) {
-                                if let copy = try? store.database.duplicateProject(proj.id, copySuffix: store.tr("macos_copy_suffix")) {
+                                if let copy = try? store.database.duplicateProject(proj.id, copySuffix: store.tr("v25_copy_suffix")) {
                                     store.selectedDestination = .project(copy.id)
                                 }
                             }
@@ -1134,7 +1208,7 @@ public struct SmartViewCanvas: View {
 
         return VStack(alignment: .leading, spacing: 16) {
             ForEach(sortedKeys, id: \.self) { groupName in
-                let groupTasks = grouped[groupName] ?? []
+                let groupTasks = TaskViewSorter.sort(grouped[groupName] ?? [], mode: store.preferences.viewSortMode)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(groupName)
                         .font(.system(size: 13.5, weight: .bold))
@@ -1147,13 +1221,13 @@ public struct SmartViewCanvas: View {
                             .magicPlusDropSlot(
                                 id: "gtask_\(task.id)",
                                 kind: .task(
-                                    taskId: task.id,
-                                    headingId: task.headingId,
-                                    prevOrder: idx > 0 ? groupTasks[idx - 1].sortOrder : nil,
-                                    taskOrder: task.sortOrder,
-                                    nextOrder: (idx + 1 < groupTasks.count) ? groupTasks[idx + 1].sortOrder : nil,
-                                    epochDayOverride: nil,
-                                    evening: false
+                                     taskId: task.id,
+                                     headingId: task.headingId,
+                                     prevOrder: idx > 0 ? groupTasks[idx - 1].sortOrder : nil,
+                                     taskOrder: task.sortOrder,
+                                     nextOrder: (idx + 1 < groupTasks.count) ? groupTasks[idx + 1].sortOrder : nil,
+                                     epochDayOverride: nil,
+                                     evening: false
                                 ),
                                 activeDrop: store.magicPlusActiveDrop,
                                 newTodoLabel: store.tr("entity_new_todo"),

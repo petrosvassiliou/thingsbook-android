@@ -352,6 +352,27 @@ export interface TranslationStrings {
   topbarTooltipLanguage: string;
   topbarTooltipCloudSync: string;
   topbarTooltipSettings: string;
+  pinTask: string;
+  unpinTask: string;
+  pinnedBadge: string;
+  tagsSearchPlaceholder: string;
+  tagsAssignSearchPlaceholder: string;
+  tagsNoMatches: string;
+  tagsSortAlpha: string;
+  tagsSortMostUsed: string;
+  tagsSortManual: string;
+  tagsMergeAction: string;
+  tagsMergeTargetPrompt: (name: string) => string;
+  tagsMergedToast: (src: string, dst: string) => string;
+  viewSortLabel: string;
+  viewSortManual: string;
+  viewSortDeadline: string;
+  viewSortDuration: string;
+  viewSortAlpha: string;
+  batchPin: string;
+  batchTags: string;
+  batchDuplicate: string;
+  batchSomeday: string;
 }
 
 export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
@@ -724,7 +745,28 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     topbarTooltipNotifications: 'Notifications',
     topbarTooltipLanguage: 'Language',
     topbarTooltipCloudSync: 'Cloud Sync',
-    topbarTooltipSettings: 'Settings'
+    topbarTooltipSettings: 'Settings',
+    pinTask: 'Pin to Top',
+    unpinTask: 'Unpin',
+    pinnedBadge: 'Pinned',
+    tagsSearchPlaceholder: 'Filter tags…',
+    tagsAssignSearchPlaceholder: 'Search or create tag…',
+    tagsNoMatches: 'No matching tags',
+    tagsSortAlpha: 'A–Z',
+    tagsSortMostUsed: 'Most Used',
+    tagsSortManual: 'Custom',
+    tagsMergeAction: 'Merge Into…',
+    tagsMergeTargetPrompt: (name) => `Merge “${name}” into:`,
+    tagsMergedToast: (src, dst) => `Merged “${src}” into “${dst ?? ''}”`,
+    viewSortLabel: 'Sort',
+    viewSortManual: 'Manual',
+    viewSortDeadline: 'Deadline',
+    viewSortDuration: 'Duration',
+    viewSortAlpha: 'Title (A–Z)',
+    batchPin: 'Pin',
+    batchTags: 'Tags',
+    batchDuplicate: 'Duplicate',
+    batchSomeday: 'Someday'
   },
   de: {
     appName: 'Thingsbook',
@@ -1098,7 +1140,28 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     topbarTooltipNotifications: 'Benachrichtigungen',
     topbarTooltipLanguage: 'Sprache',
     topbarTooltipCloudSync: 'Cloud-Sync',
-    topbarTooltipSettings: 'Einstellungen'
+    topbarTooltipSettings: 'Einstellungen',
+    pinTask: 'Oben anheften',
+    unpinTask: 'Lösen',
+    pinnedBadge: 'Angeheftet',
+    tagsSearchPlaceholder: 'Tags filtern…',
+    tagsAssignSearchPlaceholder: 'Tag suchen oder neu anlegen…',
+    tagsNoMatches: 'Keine passenden Tags',
+    tagsSortAlpha: 'A–Z',
+    tagsSortMostUsed: 'Meistgenutzt',
+    tagsSortManual: 'Manuell',
+    tagsMergeAction: 'Zusammenführen…',
+    tagsMergeTargetPrompt: (name) => `„${name}“ zusammenführen in:`,
+    tagsMergedToast: (src, dst) => `„${src}“ mit „${dst ?? ''}“ zusammengeführt`,
+    viewSortLabel: 'Sortieren',
+    viewSortManual: 'Manuell',
+    viewSortDeadline: 'Frist',
+    viewSortDuration: 'Dauer',
+    viewSortAlpha: 'Titel (A–Z)',
+    batchPin: 'Anheften',
+    batchTags: 'Tags',
+    batchDuplicate: 'Duplizieren',
+    batchSomeday: 'Irgendwann'
   },
   fr: {
     appName: 'Thingsbook',
@@ -1470,7 +1533,28 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     topbarTooltipNotifications: 'Notifications',
     topbarTooltipLanguage: 'Langue',
     topbarTooltipCloudSync: 'Synchronisation Cloud',
-    topbarTooltipSettings: 'Paramètres'
+    topbarTooltipSettings: 'Paramètres',
+    pinTask: 'Épingler en haut',
+    unpinTask: 'Désépingler',
+    pinnedBadge: 'Épinglée',
+    tagsSearchPlaceholder: 'Filtrer les tags…',
+    tagsAssignSearchPlaceholder: 'Rechercher ou créer un tag…',
+    tagsNoMatches: 'Aucun tag correspondant',
+    tagsSortAlpha: 'A–Z',
+    tagsSortMostUsed: 'Plus utilisés',
+    tagsSortManual: 'Personnalisé',
+    tagsMergeAction: 'Fusionner vers…',
+    tagsMergeTargetPrompt: (name) => `Fusionner « ${name} » dans :`,
+    tagsMergedToast: (src, dst) => `« ${src} » fusionné dans « ${dst ?? ''} »`,
+    viewSortLabel: 'Trier',
+    viewSortManual: 'Manuel',
+    viewSortDeadline: 'Échéance',
+    viewSortDuration: 'Durée',
+    viewSortAlpha: 'Titre (A–Z)',
+    batchPin: 'Épingler',
+    batchTags: 'Tags',
+    batchDuplicate: 'Dupliquer',
+    batchSomeday: 'Un jour'
   },
   it: {
     appName: 'Thingsbook',
@@ -1842,7 +1926,28 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     topbarTooltipNotifications: 'Notifiche',
     topbarTooltipLanguage: 'Lingua',
     topbarTooltipCloudSync: 'Sincronizzazione Cloud',
-    topbarTooltipSettings: 'Impostazioni'
+    topbarTooltipSettings: 'Impostazioni',
+    pinTask: 'Fissa in alto',
+    unpinTask: 'Rimuovi fissaggio',
+    pinnedBadge: 'Fissata',
+    tagsSearchPlaceholder: 'Filtra tag…',
+    tagsAssignSearchPlaceholder: 'Cerca o crea tag…',
+    tagsNoMatches: 'Nessun tag corrispondente',
+    tagsSortAlpha: 'A–Z',
+    tagsSortMostUsed: 'Più usati',
+    tagsSortManual: 'Personalizzato',
+    tagsMergeAction: 'Unisci in…',
+    tagsMergeTargetPrompt: (name) => `Unisci «${name}» in:`,
+    tagsMergedToast: (src, dst) => `«${src}» unito in «${dst ?? ''}»`,
+    viewSortLabel: 'Ordina',
+    viewSortManual: 'Manuale',
+    viewSortDeadline: 'Scadenza',
+    viewSortDuration: 'Durata',
+    viewSortAlpha: 'Titolo (A–Z)',
+    batchPin: 'Fissa',
+    batchTags: 'Tag',
+    batchDuplicate: 'Duplica',
+    batchSomeday: 'Prima o poi'
   },
   es: {
     appName: 'Thingsbook',
@@ -2214,7 +2319,28 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     topbarTooltipNotifications: 'Notificaciones',
     topbarTooltipLanguage: 'Idioma',
     topbarTooltipCloudSync: 'Sincronización Cloud',
-    topbarTooltipSettings: 'Ajustes'
+    topbarTooltipSettings: 'Ajustes',
+    pinTask: 'Fijar arriba',
+    unpinTask: 'Desfijar',
+    pinnedBadge: 'Fijada',
+    tagsSearchPlaceholder: 'Filtrar etiquetas…',
+    tagsAssignSearchPlaceholder: 'Buscar o crear etiqueta…',
+    tagsNoMatches: 'Sin etiquetas coincidentes',
+    tagsSortAlpha: 'A–Z',
+    tagsSortMostUsed: 'Más usadas',
+    tagsSortManual: 'Personalizado',
+    tagsMergeAction: 'Fusionar en…',
+    tagsMergeTargetPrompt: (name) => `Fusionar «${name}» en:`,
+    tagsMergedToast: (src, dst) => `«${src}» fusionada en «${dst ?? ''}»`,
+    viewSortLabel: 'Ordenar',
+    viewSortManual: 'Manual',
+    viewSortDeadline: 'Fecha límite',
+    viewSortDuration: 'Duración',
+    viewSortAlpha: 'Título (A–Z)',
+    batchPin: 'Fijar',
+    batchTags: 'Etiquetas',
+    batchDuplicate: 'Duplicar',
+    batchSomeday: 'Algún día'
   }
 };
 

@@ -12,8 +12,10 @@ import {
   type RecurrenceRule,
   type ScheduleState,
   type TagRecord,
+  type TagSortMode,
   type TaskRecord,
-  type TaskStatus
+  type TaskStatus,
+  type ViewSortMode
 } from '../domain/types.ts';
 
 export const BACKUP_MAGIC = 'THINGSBOOK_BACKUP_V1';
@@ -55,6 +57,8 @@ export interface BackupPreferencesDto {
   groupTodayByProjectOrArea?: boolean | null;
   includeBetaUpdates?: boolean | null;
   lastWeeklyReviewAt?: number | null;
+  tagSortMode?: string | null;
+  viewSortMode?: string | null;
 }
 
 export interface ThingsbookBackupPayload {
@@ -105,6 +109,7 @@ export interface ThingsbookBackupPayload {
     reminderTime: number | null;
     scheduledStartMinutes?: number | null;
     durationMinutes?: number | null;
+    isPinned?: boolean | null;
     completedAt: number | null;
     projectId: string | null;
     headingId: string | null;
@@ -389,6 +394,7 @@ export function buildBackupPayloadFromEntities(params: {
       reminderTime: t.reminderTime,
       scheduledStartMinutes: t.scheduledStartMinutes ?? null,
       durationMinutes: t.durationMinutes ?? null,
+      isPinned: Boolean(t.isPinned),
       completedAt: t.completedAt,
       projectId: t.projectId,
       headingId: t.headingId,
@@ -665,6 +671,18 @@ export function normalizeScheduleState(val: string | undefined, fallback: Schedu
   return fallback;
 }
 
+export function normalizeTagSortMode(val: string | null | undefined): TagSortMode {
+  if (val === 'most_used' || val === 'manual' || val === 'alpha') return val;
+  return 'alpha';
+}
+
+export function normalizeViewSortMode(val: string | null | undefined): ViewSortMode {
+  if (val === 'deadline' || val === 'duration' || val === 'alpha' || val === 'manual') {
+    return val;
+  }
+  return 'manual';
+}
+
 export interface NormalizedBackupEntities {
   tags: TagRecord[];
   areas: AreaRecord[];
@@ -677,6 +695,8 @@ export interface NormalizedBackupEntities {
   preferences: {
     includeBetaUpdates: boolean;
     lastWeeklyReviewAt: number;
+    tagSortMode: TagSortMode;
+    viewSortMode: ViewSortMode;
   };
 }
 
@@ -827,6 +847,7 @@ export function normalizeBackupPayloadToEntities(
         reminderTime: t.reminderTime ?? null,
         scheduledStartMinutes,
         durationMinutes,
+        isPinned: Boolean(t.isPinned),
         completedAt: t.completedAt ?? null,
         projectId: cleanProjId,
         headingId: cleanHeadId,
@@ -922,7 +943,9 @@ export function normalizeBackupPayloadToEntities(
         payload.preferences?.lastWeeklyReviewAt != null &&
         Number.isFinite(payload.preferences.lastWeeklyReviewAt)
           ? Math.max(0, Math.trunc(payload.preferences.lastWeeklyReviewAt))
-          : 0
+          : 0,
+      tagSortMode: normalizeTagSortMode(payload.preferences?.tagSortMode),
+      viewSortMode: normalizeViewSortMode(payload.preferences?.viewSortMode)
     }
   };
 }

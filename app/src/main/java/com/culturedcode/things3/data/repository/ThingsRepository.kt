@@ -416,6 +416,7 @@ class ThingsRepository @Inject constructor(
         areaId: String? = null,
         recurrenceRule: RecurrenceRule? = null,
         sortOrder: Double = 1000.0,
+        isPinned: Boolean? = null,
         tagIds: List<String> = emptyList()
     ): String {
         val now = System.currentTimeMillis()
@@ -438,6 +439,7 @@ class ThingsRepository @Inject constructor(
 
         val resolvedStartMins = scheduledStartMinutes ?: if (preserveExistingTimeblock) existing?.scheduledStartMinutes else null
         val resolvedDurationMins = durationMinutes ?: if (preserveExistingTimeblock) existing?.durationMinutes else null
+        val resolvedIsPinned = isPinned ?: existing?.isPinned ?: false
 
         val entity = TaskEntity(
             id = id,
@@ -456,6 +458,7 @@ class ThingsRepository @Inject constructor(
             areaId = areaId,
             recurrenceRuleJson = recurrenceRule?.let { json.encodeToString(it) },
             sortOrder = if (sortOrder.isFinite()) sortOrder else 1000.0,
+            isPinned = resolvedIsPinned,
             tagIdsJson = json.encodeToString(tagIds),
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
@@ -483,6 +486,36 @@ class ThingsRepository @Inject constructor(
         return id
     }
 
+    suspend fun setTasksPinned(taskIds: Collection<String>, isPinned: Boolean) {
+        val distinctIds = taskIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (distinctIds.isEmpty()) return
+        val now = System.currentTimeMillis()
+        var mutated = false
+        database.withTransaction {
+            val existingTasks = distinctIds.chunked(500).flatMap { chunk ->
+                database.taskDao().getByIds(chunk)
+            }
+            val updated = existingTasks.mapNotNull { task ->
+                if (task.isDeleted || task.isPinned == isPinned) {
+                    null
+                } else {
+                    task.copy(
+                        isPinned = isPinned,
+                        updatedAt = maxOf(now, task.updatedAt + 1L),
+                        isDirty = true
+                    )
+                }
+            }
+            if (updated.isNotEmpty()) {
+                database.taskDao().upsertAll(updated)
+                mutated = true
+            }
+        }
+        if (mutated) {
+            syncRepository.triggerBackgroundSync()
+        }
+    }
+
     private suspend fun silentlyPurgeTaskEntities(targets: List<TaskEntity>, now: Long) {
         if (targets.isEmpty()) return
         for (target in targets) {
@@ -502,6 +535,7 @@ class ThingsRepository @Inject constructor(
                         tagIdsJson = "[]",
                         scheduledStartMinutes = null,
                         durationMinutes = null,
+                        isPinned = false,
                         isDeleted = true,
                         updatedAt = tombstoneAt,
                         isDirty = true
@@ -653,6 +687,7 @@ class ThingsRepository @Inject constructor(
             deadline = nextDeadlineEpoch,
             reminderTime = nextReminderTime,
             completedAt = null,
+            isPinned = false,
             createdAt = existingById?.createdAt ?: now,
             updatedAt = if (existingById != null) maxOf(now, existingById.updatedAt + 1L) else now,
             isDeleted = false,
@@ -2003,6 +2038,9 @@ class ThingsRepository @Inject constructor(
                     areaId = null,
                     tagIdsJson = "[]",
                     reminderTime = null,
+                    scheduledStartMinutes = null,
+                    durationMinutes = null,
+                    isPinned = false,
                     isDeleted = true,
                     updatedAt = now,
                     isDirty = true
@@ -2244,30 +2282,317 @@ class ThingsRepository @Inject constructor(
         id: String = UUID.randomUUID().toString(),
         title: String,
         shortcut: String? = null,
-        parentTagId: String? = null
+        parentTagId: String? = null,
+        allowClearShortcut: Boolean = false
     ): String {
         val trimmedTitle = title.trim()
         if (trimmedTitle.isEmpty()) return id
         val now = System.currentTimeMillis()
-        val existingById = database.tagDao().getById(id)
-        val existing = existingById ?: database.tagDao().getAllNonDeletedTagsList()
-            .firstOrNull { it.title.trim().equals(trimmedTitle, ignoreCase = true) }
+        val activeTags = database.tagDao().getAllNonDeletedTagsList()
+        val existingById = database.tagDao().getById(id)?.takeIf { !it.isDeleted }
+        val collidingActive = activeTags.firstOrNull {
+            it.id != id && it.title.trim().equals(trimmedTitle, ignoreCase = true)
+        }
+
+        if (existingById != null && collidingActive != null) {
+            val cleanShortcut = shortcut?.trim()?.takeIf { it.isNotEmpty() }
+            if (cleanShortcut != null && collidingActive.shortcut.isNullOrBlank()) {
+                database.tagDao().upsert(
+                    collidingActive.copy(
+                        shortcut = cleanShortcut,
+                        updatedAt = maxOf(now, collidingActive.updatedAt + 1L),
+                        isDirty = true
+                    )
+                )
+            }
+            mergeTags(sourceTagId = existingById.id, targetTagId = collidingActive.id)
+            return collidingActive.id
+        }
+
+        val existing = existingById ?: collidingActive
         val resolvedId = existing?.id ?: id
         val cleanShortcut = shortcut?.trim()?.takeIf { it.isNotEmpty() }
+        val resolvedShortcut = when {
+            allowClearShortcut -> cleanShortcut
+            cleanShortcut != null -> cleanShortcut
+            else -> existing?.shortcut
+        }
+        val nextSortOrder = (activeTags.maxOfOrNull { it.sortOrder.takeIf(Double::isFinite) ?: 0.0 } ?: 0.0) + 1000.0
         val tagEntity = TagEntity(
             id = resolvedId,
             title = if (existingById == null && existing != null) existing.title else trimmedTitle,
             parentTagId = parentTagId ?: existing?.parentTagId,
-            shortcut = cleanShortcut ?: existing?.shortcut,
-            sortOrder = existing?.sortOrder ?: (now % 100_000).toDouble(),
+            shortcut = resolvedShortcut,
+            sortOrder = existing?.sortOrder?.takeIf(Double::isFinite) ?: nextSortOrder,
             createdAt = existing?.createdAt ?: now,
-            updatedAt = now,
+            updatedAt = maxOf(now, (existing?.updatedAt ?: 0L) + 1L),
             isDeleted = false,
             isDirty = true
         )
         database.tagDao().upsert(tagEntity)
         syncRepository.triggerBackgroundSync()
         return resolvedId
+    }
+
+    suspend fun mergeTags(sourceTagId: String, targetTagId: String): Boolean {
+        val srcId = sourceTagId.trim()
+        val dstId = targetTagId.trim()
+        if (srcId.isEmpty() || dstId.isEmpty() || srcId == dstId) return false
+        val source = database.tagDao().getById(srcId)?.takeIf { !it.isDeleted } ?: return false
+        val target = database.tagDao().getById(dstId)?.takeIf { !it.isDeleted } ?: return false
+        val now = System.currentTimeMillis()
+
+        fun remapIds(ids: Collection<String>): Pair<List<String>, Boolean> {
+            var changed = false
+            val out = mutableListOf<String>()
+            for (raw in ids) {
+                val mapped = if (raw == srcId) dstId else raw
+                if (mapped != raw) changed = true
+                if (mapped !in out) {
+                    out += mapped
+                } else {
+                    changed = true
+                }
+            }
+            return out to changed
+        }
+
+        database.withTransaction {
+            val taskCrossRefsByTask = database.taskDao().getAllTaskTagCrossRefs()
+                .groupBy({ it.taskId }, { it.tagId })
+            val projCrossRefsByProject = database.projectDao().getAllProjectTagCrossRefs()
+                .groupBy({ it.projectId }, { it.tagId })
+
+            val candidateTasks = (database.taskDao().getAllNonDeletedTasksList() +
+                database.taskDao().getDeletedTasksList()).distinctBy { it.id }
+            for (task in candidateTasks) {
+                val jsonTags = decodeStringList(task.tagIdsJson)
+                val crossRefTags = taskCrossRefsByTask[task.id].orEmpty()
+                if (srcId in jsonTags || srcId in crossRefTags) {
+                    val combined = LinkedHashSet<String>(jsonTags).apply { addAll(crossRefTags) }
+                    val (nextTags, _) = remapIds(combined)
+                    database.taskDao().upsertTaskWithTags(
+                        task.copy(
+                            tagIdsJson = json.encodeToString(nextTags),
+                            updatedAt = maxOf(now, task.updatedAt + 1L),
+                            isDirty = true
+                        ),
+                        nextTags
+                    )
+                }
+            }
+
+            val candidateProjects = (database.projectDao().getAllNonDeletedProjectsList() +
+                database.projectDao().getDeletedProjectsList()).distinctBy { it.id }
+            for (proj in candidateProjects) {
+                val jsonTags = decodeStringList(proj.tagIdsJson)
+                val crossRefTags = projCrossRefsByProject[proj.id].orEmpty()
+                if (srcId in jsonTags || srcId in crossRefTags) {
+                    val combined = LinkedHashSet<String>(jsonTags).apply { addAll(crossRefTags) }
+                    val (nextTags, _) = remapIds(combined)
+                    database.projectDao().upsertProjectWithTags(
+                        proj.copy(
+                            tagIdsJson = json.encodeToString(nextTags),
+                            updatedAt = maxOf(now, proj.updatedAt + 1L),
+                            isDirty = true
+                        ),
+                        nextTags
+                    )
+                }
+            }
+
+            val updatedAreas = database.areaDao().getActiveAreasList().mapNotNull { area ->
+                val (nextTags, changed) = remapIds(decodeStringList(area.tagIdsJson))
+                if (changed) {
+                    area.copy(
+                        tagIdsJson = json.encodeToString(nextTags),
+                        updatedAt = maxOf(now, area.updatedAt + 1L),
+                        isDirty = true
+                    )
+                } else null
+            }
+            if (updatedAreas.isNotEmpty()) {
+                database.areaDao().upsertAll(updatedAreas)
+            }
+
+            val updatedTemplates = database.projectTemplateDao().getAllNonDeletedTemplatesList().mapNotNull { tpl ->
+                val (nextTplTags, tplTagsChanged) = remapIds(decodeStringList(tpl.tagIdsJson))
+                val blueprintMayContainSrc = tpl.blueprintJson.contains(srcId)
+                var nextBlueprintJson = tpl.blueprintJson
+                var bpChanged = false
+                if (blueprintMayContainSrc) {
+                    val bp = ProjectTemplateCodec.decodeBlueprint(tpl.blueprintJson, tpl.title, tpl.notes)
+                    val (bpTags, bpRootChanged) = remapIds(bp.tagIds)
+                    val nextUnheaded = bp.unheadedTasks.map { tb ->
+                        val (tTags, tc) = remapIds(tb.tagIds)
+                        if (tc) {
+                            bpChanged = true
+                            tb.copy(tagIds = tTags)
+                        } else tb
+                    }
+                    val nextHeadings = bp.headings.map { hb ->
+                        hb.copy(
+                            tasks = hb.tasks.map { tb ->
+                                val (tTags, tc) = remapIds(tb.tagIds)
+                                if (tc) {
+                                    bpChanged = true
+                                    tb.copy(tagIds = tTags)
+                                } else tb
+                            }
+                        )
+                    }
+                    if (bpRootChanged || bpChanged) {
+                        bpChanged = true
+                        nextBlueprintJson = ProjectTemplateCodec.encodeBlueprint(
+                            bp.copy(
+                                tagIds = bpTags,
+                                unheadedTasks = nextUnheaded,
+                                headings = nextHeadings
+                            )
+                        )
+                    }
+                }
+                if (tplTagsChanged || bpChanged) {
+                    tpl.copy(
+                        tagIdsJson = json.encodeToString(nextTplTags),
+                        blueprintJson = nextBlueprintJson,
+                        updatedAt = maxOf(now, tpl.updatedAt + 1L),
+                        isDirty = true
+                    )
+                } else null
+            }
+            if (updatedTemplates.isNotEmpty()) {
+                database.projectTemplateDao().upsertAll(updatedTemplates)
+            }
+
+            val childTags = database.tagDao().getAllNonDeletedTagsList().mapNotNull { child ->
+                if (child.id != srcId && child.parentTagId == srcId) {
+                    child.copy(
+                        parentTagId = if (child.id != target.id) target.id else null,
+                        updatedAt = maxOf(now, child.updatedAt + 1L),
+                        isDirty = true
+                    )
+                } else null
+            }
+            if (childTags.isNotEmpty()) {
+                database.tagDao().upsertAll(childTags)
+            }
+
+            database.tagDao().deleteTaskTagCrossRefsForTag(srcId)
+            database.tagDao().deleteProjectTagCrossRefsForTag(srcId)
+
+            if (target.shortcut.isNullOrBlank() && !source.shortcut.isNullOrBlank()) {
+                database.tagDao().upsert(
+                    target.copy(
+                        shortcut = source.shortcut,
+                        updatedAt = maxOf(now, target.updatedAt + 1L),
+                        isDirty = true
+                    )
+                )
+            }
+
+            database.tagDao().upsert(
+                source.copy(
+                    shortcut = null,
+                    isDeleted = true,
+                    updatedAt = maxOf(now, source.updatedAt + 1L),
+                    isDirty = true
+                )
+            )
+        }
+        syncRepository.triggerBackgroundSync()
+        return true
+    }
+
+    suspend fun moveTag(tagId: String, moveUp: Boolean) {
+        val tags = database.tagDao().getAllNonDeletedTagsList().sortedWith(
+            compareBy<TagEntity> { it.sortOrder }
+                .thenBy { it.createdAt }
+                .thenBy { it.title.lowercase(Locale.ROOT) }
+                .thenBy { it.id }
+        )
+        val index = tags.indexOfFirst { it.id == tagId }
+        if (index == -1) return
+        val targetIndex = if (moveUp) index - 1 else index + 1
+        if (targetIndex !in tags.indices) return
+
+        val now = System.currentTimeMillis()
+        val strictlyOrdered = tags.zipWithNext().all { (a, b) -> b.sortOrder > a.sortOrder }
+        if (strictlyOrdered) {
+            val current = tags[index]
+            val neighbor = tags[targetIndex]
+            database.tagDao().upsertAll(
+                listOf(
+                    current.copy(
+                        sortOrder = neighbor.sortOrder,
+                        updatedAt = maxOf(now, current.updatedAt + 1L),
+                        isDirty = true
+                    ),
+                    neighbor.copy(
+                        sortOrder = current.sortOrder,
+                        updatedAt = maxOf(now, neighbor.updatedAt + 1L),
+                        isDirty = true
+                    )
+                )
+            )
+        } else {
+            val reordered = tags.toMutableList()
+            val moved = reordered.removeAt(index)
+            reordered.add(targetIndex, moved)
+            val updates = reordered.mapIndexedNotNull { idx, tag ->
+                val desiredOrder = (idx + 1) * 1000.0
+                if (tag.sortOrder != desiredOrder) {
+                    tag.copy(
+                        sortOrder = desiredOrder,
+                        updatedAt = maxOf(now, tag.updatedAt + 1L),
+                        isDirty = true
+                    )
+                } else null
+            }
+            if (updates.isNotEmpty()) {
+                database.tagDao().upsertAll(updates)
+            }
+        }
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun batchUpdateTasksTags(
+        taskIds: Collection<String>,
+        tagIdsToAdd: Set<String>,
+        tagIdsToRemove: Set<String>
+    ) {
+        val distinctTaskIds = taskIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (distinctTaskIds.isEmpty() || (tagIdsToAdd.isEmpty() && tagIdsToRemove.isEmpty())) return
+        val now = System.currentTimeMillis()
+        var mutated = false
+        database.withTransaction {
+            val validTagIds = database.tagDao().getAllNonDeletedTagsList().mapTo(HashSet()) { it.id }
+            val cleanAddIds = tagIdsToAdd.filter { it in validTagIds }
+            val tasks = distinctTaskIds.chunked(500).flatMap { chunk ->
+                database.taskDao().getByIds(chunk)
+            }
+            for (task in tasks) {
+                if (task.isDeleted) continue
+                val currentTags = decodeStringList(task.tagIdsJson)
+                val nextTags = (currentTags.filterNot { it in tagIdsToRemove } + cleanAddIds)
+                    .filter { it in validTagIds }
+                    .distinct()
+                if (nextTags != currentTags) {
+                    database.taskDao().upsertTaskWithTags(
+                        task.copy(
+                            tagIdsJson = json.encodeToString(nextTags),
+                            updatedAt = maxOf(now, task.updatedAt + 1L),
+                            isDirty = true
+                        ),
+                        nextTags
+                    )
+                    mutated = true
+                }
+            }
+        }
+        if (mutated) {
+            syncRepository.triggerBackgroundSync()
+        }
     }
 
     suspend fun softDeleteTag(tagId: String) {
@@ -3309,6 +3634,7 @@ class ThingsRepository @Inject constructor(
                         areaId = t.areaId,
                         recurrenceRuleJson = t.recurrenceRuleJson,
                         sortOrder = if (t.sortOrder.isFinite()) t.sortOrder else 0.0,
+                        isPinned = t.isPinned,
                         tagIdsJson = t.tagIdsJson,
                         createdAt = t.createdAt,
                         updatedAt = t.updatedAt
@@ -3543,6 +3869,7 @@ class ThingsRepository @Inject constructor(
                     areaId = cleanAreaId,
                     recurrenceRuleJson = validRecurrenceJson,
                     sortOrder = if (t.sortOrder.isFinite()) t.sortOrder else 0.0,
+                    isPinned = t.isPinned,
                     tagIdsJson = json.encodeToString(combinedTagIds),
                     createdAt = t.createdAt.takeIf { it > 0L } ?: now,
                     updatedAt = t.updatedAt.takeIf { it > 0L } ?: now,
@@ -3703,6 +4030,7 @@ class ThingsRepository @Inject constructor(
             runCatching { json.decodeFromString<RecurrenceRule>(it) }.getOrNull()
         },
         sortOrder = task.sortOrder,
+        isPinned = task.isPinned,
         checklistItems = checklistItems
             .filter { !it.isDeleted }
             .sortedBy { it.sortOrder }

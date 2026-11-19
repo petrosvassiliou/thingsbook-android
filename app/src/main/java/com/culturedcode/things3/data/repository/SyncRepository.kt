@@ -777,11 +777,15 @@ class SyncRepository @Inject constructor(
             (baseEntity.scheduleState == ScheduleState.TODAY ||
                 baseEntity.scheduleState == ScheduleState.THIS_EVENING ||
                 baseEntity.scheduleState == ScheduleState.UPCOMING)
+        val keepLocalPin = effectiveDto.omittedPinField &&
+            !(effectiveDto.isDeleted && effectiveDto.purgedFromTrash) &&
+            local != null
 
         val finalEntity = baseEntity.copy(
             updatedAt = clampedTs,
             scheduledStartMinutes = if (keepLocalTimeblock) local?.scheduledStartMinutes else baseEntity.scheduledStartMinutes,
-            durationMinutes = if (keepLocalTimeblock) local?.durationMinutes else baseEntity.durationMinutes
+            durationMinutes = if (keepLocalTimeblock) local?.durationMinutes else baseEntity.durationMinutes,
+            isPinned = if (keepLocalPin) local!!.isPinned else baseEntity.isPinned
         )
         val effectiveTagIds = if (effectiveDto.isDeleted && effectiveDto.purgedFromTrash) emptyList() else effectiveDto.tagIds
         database.taskDao().upsertTaskWithTags(finalEntity, effectiveTagIds)
@@ -942,6 +946,7 @@ class SyncRepository @Inject constructor(
                         tagIdsJson = "[]",
                         scheduledStartMinutes = null,
                         durationMinutes = null,
+                        isPinned = false,
                         isDeleted = true,
                         isDirty = true,
                         updatedAt = tombstoneAt

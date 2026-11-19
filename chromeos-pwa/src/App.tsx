@@ -3,6 +3,7 @@ import {
   Archive,
   ArrowDown,
   ArrowUp,
+  ArrowUpDown,
   Bell,
   BookOpenCheck,
   CalendarDays,
@@ -29,6 +30,8 @@ import {
   Moon,
   Package,
   PanelLeftClose,
+  Pin,
+  PinOff,
   Plus,
   Search,
   Settings,
@@ -58,12 +61,17 @@ import {
   type SmartViewType,
   type SupportedLang,
   type TagRecord,
-  type TaskRecord
+  type TagSortMode,
+  type TaskRecord,
+  type ViewSortMode
 } from './domain/types';
 import {
+  computeTagUsageCounts,
   detectStalledProjects,
   evaluateProjectStalledStatus,
-  resolveTopBarLayoutTier
+  resolveTopBarLayoutTier,
+  sortTagsForMode,
+  sortTasksForView
 } from './domain/v2Utils';
 import {
   clearLastCalendarError,
@@ -220,6 +228,7 @@ export const App: React.FC = () => {
 
   // Topbar Popovers, Magic Plus & Inline Quick Find
   const [langDropdownOpen, setLangDropdownOpen] = useState(false);
+  const [viewSortDropdownOpen, setViewSortDropdownOpen] = useState(false);
   const [quickFindOpen, setQuickFindOpen] = useState(false);
   const [magicFabOpen, setMagicFabOpen] = useState(false);
 
@@ -230,7 +239,7 @@ export const App: React.FC = () => {
   >(null);
   const [repeatModalTaskId, setRepeatModalTaskId] = useState<string | null>(null);
   const [moveModalTaskIds, setMoveModalTaskIds] = useState<string[] | null>(null);
-  const [tagPickerTaskId, setTagPickerTaskId] = useState<string | null>(null);
+  const [tagPickerTaskIds, setTagPickerTaskIds] = useState<string[] | null>(null);
   const [areaManagerOpen, setAreaManagerOpen] = useState(false);
   const [quickCreateAreaOpen, setQuickCreateAreaOpen] = useState(false);
   const [projectModalState, setProjectModalState] = useState<{
@@ -1264,6 +1273,20 @@ export const App: React.FC = () => {
     });
   }, [currentViewBaseTasks, selectedTaskIds.length]);
 
+  const viewSortMode: ViewSortMode = prefs.viewSortMode ?? 'manual';
+  const tagSortMode: TagSortMode = prefs.tagSortMode ?? 'alpha';
+
+  const tagUsageCounts = useMemo(
+    () =>
+      computeTagUsageCounts({
+        tasks: snapshot.tasks,
+        projects: snapshot.projects,
+        areas: snapshot.areas,
+        projectTemplates: snapshot.projectTemplates
+      }),
+    [snapshot.tasks, snapshot.projects, snapshot.areas, snapshot.projectTemplates]
+  );
+
   // ViewTagFilterUtils: compute usedTags strictly from currentViewBaseTasks
   const usedTagsInCurrentView = useMemo((): TagRecord[] => {
     const usedIds = new Set<string>();
@@ -1272,10 +1295,12 @@ export const App: React.FC = () => {
         if (tagsMap.has(tid)) usedIds.add(tid);
       }
     }
-    return Array.from(usedIds)
-      .map((id) => tagsMap.get(id)!)
-      .sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title));
-  }, [currentViewBaseTasks, tagsMap]);
+    return sortTagsForMode(
+      Array.from(usedIds).map((id) => tagsMap.get(id)!),
+      tagSortMode,
+      tagUsageCounts
+    );
+  }, [currentViewBaseTasks, tagsMap, tagSortMode, tagUsageCounts]);
 
   useEffect(() => {
     if (
@@ -1294,12 +1319,102 @@ export const App: React.FC = () => {
     [selectedFilterTagId]
   );
 
+  const orderedVisibleTaskIds = useMemo((): string[] => {
+    if (activeNav.kind === 'smart') {
+      if (activeNav.view === 'TRASH') return [];
+      if (activeNav.view === 'LOGBOOK') {
+        return filterByTag(logbookTasks).map((tk) => tk.id);
+      }
+      if (activeNav.view === 'TODAY') {
+        const daySorted = sortTasksForView(filterByTag(todayDaytimeTasks), viewSortMode);
+        const eveSorted = sortTasksForView(filterByTag(todayEveningTasks), viewSortMode);
+        if (!prefs.groupTodayByProjectOrArea) {
+          return [...daySorted, ...eveSorted].map((tk) => tk.id);
+        }
+        const seen = new Set<string>();
+        const ordered: TaskRecord[] = [];
+        const pushList = (items: TaskRecord[]) => {
+          for (const item of items) {
+            if (!seen.has(item.id)) {
+              seen.add(item.id);
+              ordered.push(item);
+            }
+          }
+        };
+        pushList(daySorted.filter((tk) => tk.projectId == null && tk.areaId == null));
+        for (const proj of activeProjects) {
+          pushList(daySorted.filter((tk) => tk.projectId === proj.id));
+        }
+        for (const area of activeAreas) {
+          pushList(daySorted.filter((tk) => tk.projectId == null && tk.areaId === area.id));
+        }
+        pushList(daySorted);
+        pushList(eveSorted);
+        return ordered.map((tk) => tk.id);
+      }
+      if (activeNav.view === 'UPCOMING') {
+        const filtered = filterByTag(upcomingTasks);
+        const byDay = new Map<number, TaskRecord[]>();
+        for (const tk of filtered) {
+          const day = computeUpcomingTargetDate(tk);
+          const bucket = byDay.get(day) || [];
+          bucket.push(tk);
+          byDay.set(day, bucket);
+        }
+        const sortedDays = Array.from(byDay.entries()).sort((a, b) => a[0] - b[0]);
+        const ids: string[] = [];
+        for (const [, bucket] of sortedDays) {
+          for (const tk of sortTasksForView(bucket, viewSortMode)) {
+            ids.push(tk.id);
+          }
+        }
+        return ids;
+      }
+      return sortTasksForView(filterByTag(currentViewBaseTasks), viewSortMode).map((tk) => tk.id);
+    }
+    if (activeNav.kind === 'area') {
+      return sortTasksForView(filterByTag(currentViewBaseTasks), viewSortMode).map((tk) => tk.id);
+    }
+    const projHeadings = snapshot.headings.filter(
+      (h) => !h.isDeleted && !h.isArchived && h.projectId === activeNav.projectId
+    );
+    const validHeadingIds = new Set(projHeadings.map((h) => h.id));
+    const visibleOpen = filterByTag(currentViewBaseTasks);
+    const ungrouped = sortTasksForView(
+      visibleOpen.filter((tk) => !tk.headingId || !validHeadingIds.has(tk.headingId)),
+      viewSortMode
+    );
+    const ids = ungrouped.map((tk) => tk.id);
+    for (const hd of projHeadings) {
+      const hdList = sortTasksForView(
+        visibleOpen.filter((tk) => tk.headingId === hd.id),
+        viewSortMode
+      );
+      for (const tk of hdList) ids.push(tk.id);
+    }
+    return ids;
+  }, [
+    activeNav,
+    filterByTag,
+    logbookTasks,
+    todayDaytimeTasks,
+    todayEveningTasks,
+    upcomingTasks,
+    currentViewBaseTasks,
+    viewSortMode,
+    prefs.groupTodayByProjectOrArea,
+    activeProjects,
+    activeAreas,
+    snapshot.headings
+  ]);
+
   const handleSelectNav = useCallback(
     (nav: ActiveNavigation, highlightTaskId?: string) => {
       setActiveNav(nav);
       setMobileDrawerOpen(false);
       setEditingAreaHeader(false);
       setProjectAreaDropdownOpen(false);
+      setViewSortDropdownOpen(false);
       setSelectedTaskIds([]);
       if (highlightTaskId) {
         setExpandedTaskId(highlightTaskId);
@@ -1339,6 +1454,20 @@ export const App: React.FC = () => {
     },
     [t.copySuffix]
   );
+
+  const handleBatchDuplicateSelected = useCallback(async () => {
+    if (selectedTaskIds.length === 0) return;
+    const selectedSet = new Set(selectedTaskIds);
+    const orderedIds = orderedVisibleTaskIds.filter((id) => selectedSet.has(id));
+    for (const id of selectedTaskIds) {
+      if (!orderedIds.includes(id)) orderedIds.push(id);
+    }
+    const createdIds = await localDb.batchDuplicateTasks(orderedIds, t.copySuffix);
+    if (createdIds.length > 0) {
+      setExpandedTaskId(null);
+      setSelectedTaskIds(createdIds);
+    }
+  }, [selectedTaskIds, orderedVisibleTaskIds, t.copySuffix]);
 
   const handleDuplicateProject = useCallback(
     async (projectId: string) => {
@@ -1641,7 +1770,7 @@ export const App: React.FC = () => {
         if (deadlineModalTarget) return setDeadlineModalTarget(null);
         if (repeatModalTaskId) return setRepeatModalTaskId(null);
         if (moveModalTaskIds) return setMoveModalTaskIds(null);
-        if (tagPickerTaskId) return setTagPickerTaskId(null);
+        if (tagPickerTaskIds) return setTagPickerTaskIds(null);
         if (areaManagerOpen) return setAreaManagerOpen(false);
         if (quickCreateAreaOpen) return setQuickCreateAreaOpen(false);
         if (projectModalState.open) return setProjectModalState({ open: false });
@@ -1652,6 +1781,7 @@ export const App: React.FC = () => {
         if (settingsModalOpen) return setSettingsModalOpen(false);
         if (magicFabOpen) return setMagicFabOpen(false);
         if (langDropdownOpen) return setLangDropdownOpen(false);
+        if (viewSortDropdownOpen) return setViewSortDropdownOpen(false);
         if (projectAreaDropdownOpen) return setProjectAreaDropdownOpen(false);
         if (quickFindOpen) return setQuickFindOpen(false);
         if (expandedTaskId) return setExpandedTaskId(null);
@@ -1714,11 +1844,16 @@ export const App: React.FC = () => {
           void localDb.performUndo();
           return;
         }
-        // Ctrl+D -> Duplicate expanded To-Do or active Project
+        // Ctrl+D -> Duplicate expanded To-Do -> multi-selected To-Dos -> active Project
         if (lower === 'd' && !e.shiftKey) {
           if (expandedTaskId) {
             e.preventDefault();
             void handleDuplicateTask(expandedTaskId);
+            return;
+          }
+          if (!inInput && selectedTaskIds.length > 0) {
+            e.preventDefault();
+            void handleBatchDuplicateSelected();
             return;
           }
           if (!inInput && activeNav.kind === 'project') {
@@ -1770,10 +1905,9 @@ export const App: React.FC = () => {
           !projectModalState.open &&
           !moveModalTaskIds
         ) {
-          const allIds = filterByTag(currentViewBaseTasks).map((x) => x.id);
-          if (allIds.length > 0) {
+          if (orderedVisibleTaskIds.length > 0) {
             e.preventDefault();
-            setSelectedTaskIds(allIds);
+            setSelectedTaskIds(orderedVisibleTaskIds);
           }
           return;
         }
@@ -1805,14 +1939,18 @@ export const App: React.FC = () => {
           );
           if (matchedTag) {
             e.preventDefault();
-            for (const tid of targetIds) {
-              const tk = snapshot.tasks.find((x) => x.id === tid);
-              if (!tk) continue;
-              const nextTags = tk.tagIds.includes(matchedTag.id)
-                ? tk.tagIds.filter((id) => id !== matchedTag.id)
-                : [...tk.tagIds, matchedTag.id];
-              void localDb.upsertTask({ id: tk.id, tagIds: nextTags });
-            }
+            const liveTargets = snapshot.tasks.filter(
+              (x) => !x.isDeleted && targetIds.includes(x.id)
+            );
+            const allHaveTag =
+              liveTargets.length > 0 &&
+              liveTargets.every((tk) => tk.tagIds.includes(matchedTag.id));
+            void localDb.batchUpdateTasks(
+              targetIds,
+              allHaveTag
+                ? { removeTagIds: [matchedTag.id] }
+                : { addTagIds: [matchedTag.id] }
+            );
           }
         }
       }
@@ -1832,7 +1970,7 @@ export const App: React.FC = () => {
     deadlineModalTarget,
     repeatModalTaskId,
     moveModalTaskIds,
-    tagPickerTaskId,
+    tagPickerTaskIds,
     areaManagerOpen,
     quickCreateAreaOpen,
     projectModalState.open,
@@ -1843,6 +1981,7 @@ export const App: React.FC = () => {
     settingsModalOpen,
     magicFabOpen,
     langDropdownOpen,
+    viewSortDropdownOpen,
     projectAreaDropdownOpen,
     quickFindOpen,
     expandedTaskId,
@@ -1852,10 +1991,10 @@ export const App: React.FC = () => {
     handleSelectNav,
     createNewTodoInCurrentContext,
     handleDuplicateTask,
+    handleBatchDuplicateSelected,
     handleDuplicateProject,
     defaultAreaIdForNewProject,
-    filterByTag,
-    currentViewBaseTasks,
+    orderedVisibleTaskIds,
     snapshot.tags,
     snapshot.tasks
   ]);
@@ -1991,7 +2130,7 @@ export const App: React.FC = () => {
       onOpenDeadlineModal={(taskId) => setDeadlineModalTarget({ kind: 'task', taskId })}
       onOpenRepeatModal={(taskId) => setRepeatModalTaskId(taskId)}
       onOpenMoveModal={(taskId) => setMoveModalTaskIds([taskId])}
-      onOpenTagsModal={(taskId) => setTagPickerTaskId(taskId)}
+      onOpenTagsModal={(taskId) => setTagPickerTaskIds([taskId])}
       onStartFocusTimer={handleStartFocusTimer}
       onDuplicateTask={(taskId) => void handleDuplicateTask(taskId)}
       onDropReorder={(draggedId, targetId) =>
@@ -1999,6 +2138,67 @@ export const App: React.FC = () => {
       }
       onToast={showToast}
     />
+  );
+
+  const viewSortLabelForMode = (mode: ViewSortMode): string => {
+    switch (mode) {
+      case 'deadline':
+        return t.viewSortDeadline;
+      case 'duration':
+        return t.viewSortDuration;
+      case 'alpha':
+        return t.viewSortAlpha;
+      case 'manual':
+      default:
+        return t.viewSortManual;
+    }
+  };
+
+  const renderViewSortDropdown = () => (
+    <div className="dropdown-anchor" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        className={`view-sort-pill ${viewSortMode !== 'manual' ? 'active' : ''}`}
+        data-testid="view-sort-pill"
+        title={t.viewSortLabel}
+        onClick={() => setViewSortDropdownOpen((v) => !v)}
+      >
+        <ArrowUpDown size={13} />
+        <span>{viewSortLabelForMode(viewSortMode)}</span>
+      </button>
+
+      {viewSortDropdownOpen && (
+        <>
+          <div
+            style={{ position: 'fixed', inset: 0, zIndex: 70 }}
+            onClick={() => setViewSortDropdownOpen(false)}
+          />
+          <div className="dropdown-popover" style={{ minWidth: 170 }}>
+            {(
+              [
+                ['manual', t.viewSortManual],
+                ['deadline', t.viewSortDeadline],
+                ['duration', t.viewSortDuration],
+                ['alpha', t.viewSortAlpha]
+              ] as Array<[ViewSortMode, string]>
+            ).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                className="dropdown-item"
+                onClick={() => {
+                  updatePrefs({ viewSortMode: mode });
+                  setViewSortDropdownOpen(false);
+                }}
+              >
+                <span>{label}</span>
+                {viewSortMode === mode && <Check size={14} />}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   );
 
   // Determine current view title for MagicPlusFab subtitle
@@ -2056,8 +2256,10 @@ export const App: React.FC = () => {
       list.push(tk);
       map.set(targetDay, list);
     }
-    return Array.from(map.entries()).sort((a, b) => a[0] - b[0]);
-  }, [upcomingTasks, filterByTag, endOfToday]);
+    return Array.from(map.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([day, list]) => [day, sortTasksForView(list, viewSortMode)] as [number, TaskRecord[]]);
+  }, [upcomingTasks, filterByTag, endOfToday, viewSortMode]);
 
   const effectiveSidebarVisible = isWideScreen ? prefs.sidebarVisible : mobileDrawerOpen;
 
@@ -2071,7 +2273,7 @@ export const App: React.FC = () => {
           !deadlineModalTarget &&
           !repeatModalTaskId &&
           !moveModalTaskIds &&
-          !tagPickerTaskId
+          !tagPickerTaskIds
         ) {
           setExpandedTaskId(null);
         } else if (selectedTaskIds.length > 0 && !expandedTaskId) {
@@ -2529,44 +2731,50 @@ export const App: React.FC = () => {
                       <h1 className="view-title">{currentViewTitle}</h1>
                     </div>
 
-                    {activeNav.view === 'TODAY' && (
-                      <div className="v2-segmented-toggle" data-testid="today-mode-toggle">
-                        <button
-                          type="button"
-                          className={`v2-segmented-btn ${todayViewMode === 'list' ? 'active' : ''}`}
-                          data-testid="today-mode-list-btn"
-                          title={t.todayModeList}
-                          onClick={() => setTodayViewMode('list')}
-                        >
-                          <List size={13.5} />
-                          <span>{t.todayModeList}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={`v2-segmented-btn ${todayViewMode === 'timeline' ? 'active' : ''}`}
-                          data-testid="today-mode-timeline-btn"
-                          title={t.todayModeTimeline}
-                          onClick={() => setTodayViewMode('timeline')}
-                        >
-                          <CalendarDays size={13.5} />
-                          <span>{t.todayModeTimeline}</span>
-                        </button>
-                      </div>
-                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      {activeNav.view !== 'LOGBOOK' &&
+                        activeNav.view !== 'TRASH' &&
+                        renderViewSortDropdown()}
 
-                    {activeNav.view === 'TRASH' &&
-                      deletedProjects.length + deletedTasks.length > 0 && (
-                        <button
-                          type="button"
-                          className="chip-btn urgent"
-                          data-testid="empty-trash-btn"
-                          title={t.trashEmptyBtn}
-                          onClick={() => setEmptyTrashConfirmOpen(true)}
-                        >
-                          <Trash2 size={13} />
-                          <span>{t.trashEmptyBtn}</span>
-                        </button>
+                      {activeNav.view === 'TODAY' && (
+                        <div className="v2-segmented-toggle" data-testid="today-mode-toggle">
+                          <button
+                            type="button"
+                            className={`v2-segmented-btn ${todayViewMode === 'list' ? 'active' : ''}`}
+                            data-testid="today-mode-list-btn"
+                            title={t.todayModeList}
+                            onClick={() => setTodayViewMode('list')}
+                          >
+                            <List size={13.5} />
+                            <span>{t.todayModeList}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`v2-segmented-btn ${todayViewMode === 'timeline' ? 'active' : ''}`}
+                            data-testid="today-mode-timeline-btn"
+                            title={t.todayModeTimeline}
+                            onClick={() => setTodayViewMode('timeline')}
+                          >
+                            <CalendarDays size={13.5} />
+                            <span>{t.todayModeTimeline}</span>
+                          </button>
+                        </div>
                       )}
+
+                      {activeNav.view === 'TRASH' &&
+                        deletedProjects.length + deletedTasks.length > 0 && (
+                          <button
+                            type="button"
+                            className="chip-btn urgent"
+                            data-testid="empty-trash-btn"
+                            title={t.trashEmptyBtn}
+                            onClick={() => setEmptyTrashConfirmOpen(true)}
+                          >
+                            <Trash2 size={13} />
+                            <span>{t.trashEmptyBtn}</span>
+                          </button>
+                        )}
+                    </div>
                   </div>
                 </div>
 
@@ -2700,8 +2908,8 @@ export const App: React.FC = () => {
 
                 {/* TODAY View (Daytime + Optional Project/Area Grouping + 🌙 This Evening | 🗓️ Timeline) */}
                 {activeNav.view === 'TODAY' && (() => {
-                  const dayFiltered = filterByTag(todayDaytimeTasks);
-                  const eveFiltered = filterByTag(todayEveningTasks);
+                  const dayFiltered = sortTasksForView(filterByTag(todayDaytimeTasks), viewSortMode);
+                  const eveFiltered = sortTasksForView(filterByTag(todayEveningTasks), viewSortMode);
 
                   if (todayViewMode === 'timeline') {
                     return (
@@ -2907,7 +3115,11 @@ export const App: React.FC = () => {
                 {activeNav.view !== 'TODAY' &&
                   activeNav.view !== 'UPCOMING' &&
                   activeNav.view !== 'TRASH' && (() => {
-                    const list = filterByTag(currentViewBaseTasks);
+                    const rawList = filterByTag(currentViewBaseTasks);
+                    const list =
+                      activeNav.view === 'LOGBOOK'
+                        ? rawList
+                        : sortTasksForView(rawList, viewSortMode);
                     if (list.length === 0) {
                       return (
                         <div className="empty-state">
@@ -2934,7 +3146,10 @@ export const App: React.FC = () => {
               }
               const areaIdx = activeAreas.findIndex((a) => a.id === area.id);
               const areaProjects = activeProjects.filter((p) => p.areaId === area.id);
-              const areaDirectTasks = filterByTag(currentViewBaseTasks);
+              const areaDirectTasks = sortTasksForView(
+                filterByTag(currentViewBaseTasks),
+                viewSortMode
+              );
 
               return (
                 <>
@@ -2977,7 +3192,8 @@ export const App: React.FC = () => {
                         )}
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        {renderViewSortDropdown()}
                         <button
                           type="button"
                           className="icon-btn"
@@ -3219,8 +3435,11 @@ export const App: React.FC = () => {
               const validHeadingIdSet = new Set(projHeadings.map((h) => h.id));
 
               const visibleOpenProjTasks = filterByTag(currentViewBaseTasks);
-              const ungroupedTasks = visibleOpenProjTasks.filter(
-                (tk) => !tk.headingId || !validHeadingIdSet.has(tk.headingId)
+              const ungroupedTasks = sortTasksForView(
+                visibleOpenProjTasks.filter(
+                  (tk) => !tk.headingId || !validHeadingIdSet.has(tk.headingId)
+                ),
+                viewSortMode
               );
 
               const dlDiff =
@@ -3232,7 +3451,7 @@ export const App: React.FC = () => {
                 <>
                   {/* Project Header */}
                   <div className="view-header" onClick={(e) => e.stopPropagation()}>
-                    {/* Row 1: ProgressRing(26) + Title + Attention/Review Badge + Up/Down + Edit + Complete + Delete */}
+                    {/* Row 1: ProgressRing(26) + Title + Attention/Review Badge + Sort + Up/Down + Edit + Complete + Delete */}
                     <div className="view-title-row">
                       <div className="view-title-left" style={{ flexWrap: 'wrap' }}>
                         <ProjectProgressRing
@@ -3263,7 +3482,8 @@ export const App: React.FC = () => {
                         )}
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                        {renderViewSortDropdown()}
                         <button
                           type="button"
                           className="icon-btn"
@@ -3523,8 +3743,9 @@ export const App: React.FC = () => {
 
                   {/* Collapsible Project Headings with 4 Trailing Buttons & Drop Target */}
                   {projHeadings.map((hd) => {
-                    const hdTasks = visibleOpenProjTasks.filter(
-                      (tk) => tk.headingId === hd.id
+                    const hdTasks = sortTasksForView(
+                      visibleOpenProjTasks.filter((tk) => tk.headingId === hd.id),
+                      viewSortMode
                     );
                     const isCollapsed = collapsedHeadingIds.has(hd.id);
                     const isEditing = editingHeadingId === hd.id;
@@ -3730,7 +3951,14 @@ export const App: React.FC = () => {
 
         {/* Floating Multi-Selection Bar (ThingsMultiSelectionBar) */}
         {selectedTaskIds.length > 0 && !expandedTaskId && (() => {
-          const allVisibleIds = filterByTag(currentViewBaseTasks).map((x) => x.id);
+          const allVisibleIds = orderedVisibleTaskIds;
+          const liveSelectedTasks = snapshot.tasks.filter(
+            (x) => !x.isDeleted && selectedTaskIds.includes(x.id)
+          );
+          const allSelectedPinned =
+            liveSelectedTasks.length > 0 &&
+            liveSelectedTasks.every((tk) => Boolean(tk.isPinned));
+
           return (
             <div className="multi-select-bar" onClick={(e) => e.stopPropagation()}>
               <span className="multi-count-pill">
@@ -3783,11 +4011,61 @@ export const App: React.FC = () => {
               <button
                 type="button"
                 className="chip-btn"
+                title={t.batchSomeday}
+                onClick={async () => {
+                  await localDb.batchUpdateTasks(selectedTaskIds, {
+                    scheduleState: 'SOMEDAY',
+                    whenDate: null
+                  });
+                  setSelectedTaskIds([]);
+                }}
+              >
+                <Archive size={12} style={{ color: 'var(--someday-amber)' }} />
+                <span>{t.batchSomeday}</span>
+              </button>
+
+              <button
+                type="button"
+                className="chip-btn"
                 title={t.actionMove}
                 onClick={() => setMoveModalTaskIds(selectedTaskIds)}
               >
                 <FolderInput size={12} />
                 <span>{t.actionMove}</span>
+              </button>
+
+              <button
+                type="button"
+                className="chip-btn"
+                title={t.batchTags}
+                onClick={() => setTagPickerTaskIds(selectedTaskIds)}
+              >
+                <Tag size={12} />
+                <span>{t.batchTags}</span>
+              </button>
+
+              <button
+                type="button"
+                className={`chip-btn ${allSelectedPinned ? 'active' : ''}`}
+                title={allSelectedPinned ? t.unpinTask : t.batchPin}
+                onClick={async () => {
+                  await localDb.batchUpdateTasks(selectedTaskIds, {
+                    isPinned: !allSelectedPinned
+                  });
+                }}
+              >
+                {allSelectedPinned ? <PinOff size={12} /> : <Pin size={12} />}
+                <span>{allSelectedPinned ? t.unpinTask : t.batchPin}</span>
+              </button>
+
+              <button
+                type="button"
+                className="chip-btn"
+                title={`${t.batchDuplicate} (Ctrl+D)`}
+                onClick={() => void handleBatchDuplicateSelected()}
+              >
+                <Copy size={12} />
+                <span>{t.batchDuplicate}</span>
               </button>
 
               <button
@@ -3949,25 +4227,44 @@ export const App: React.FC = () => {
         />
       )}
 
-      {tagPickerTaskId && (() => {
-        const liveTask = snapshot.tasks.find((x) => x.id === tagPickerTaskId);
-        if (!liveTask) return null;
+      {tagPickerTaskIds && (() => {
+        const liveTasks = snapshot.tasks.filter(
+          (x) => !x.isDeleted && tagPickerTaskIds.includes(x.id)
+        );
+        if (liveTasks.length === 0) return null;
+        const liveIds = liveTasks.map((tk) => tk.id);
+        const tagCounts = new Map<string, number>();
+        for (const tk of liveTasks) {
+          for (const tid of new Set(tk.tagIds)) {
+            tagCounts.set(tid, (tagCounts.get(tid) ?? 0) + 1);
+          }
+        }
+        const selectedTagIds: string[] = [];
+        const indeterminateTagIds: string[] = [];
+        for (const [tid, count] of tagCounts.entries()) {
+          if (count === liveTasks.length) {
+            selectedTagIds.push(tid);
+          } else if (count > 0) {
+            indeterminateTagIds.push(tid);
+          }
+        }
         return (
           <TaskTagPickerModal
-            selectedTagIds={liveTask.tagIds}
+            selectedTagIds={selectedTagIds}
+            indeterminateTagIds={indeterminateTagIds}
             tags={snapshot.tags}
+            usageCounts={tagUsageCounts}
+            tagSortMode={tagSortMode}
             t={t}
             onToggleTag={(tagId) => {
-              const next = liveTask.tagIds.includes(tagId)
-                ? liveTask.tagIds.filter((id) => id !== tagId)
-                : [...liveTask.tagIds, tagId];
-              void localDb.upsertTask({
-                id: liveTask.id,
-                tagIds: next
-              });
+              if (selectedTagIds.includes(tagId)) {
+                void localDb.batchUpdateTasks(liveIds, { removeTagIds: [tagId] });
+              } else {
+                void localDb.batchUpdateTasks(liveIds, { addTagIds: [tagId] });
+              }
             }}
             onOpenManageTags={() => setTagManagerOpen(true)}
-            onClose={() => setTagPickerTaskId(null)}
+            onClose={() => setTagPickerTaskIds(null)}
           />
         );
       })()}
@@ -4072,7 +4369,11 @@ export const App: React.FC = () => {
       {tagManagerOpen && (
         <TagManagerModal
           tags={snapshot.tags}
+          usageCounts={tagUsageCounts}
+          tagSortMode={tagSortMode}
           t={t}
+          onChangeTagSortMode={(mode) => updatePrefs({ tagSortMode: mode })}
+          onToast={showToast}
           onClose={() => setTagManagerOpen(false)}
         />
       )}

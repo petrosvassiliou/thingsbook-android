@@ -46,12 +46,16 @@ public final class ThingsbookStore: ObservableObject {
     @Published public var preferences: AppPreferences {
         didSet {
             preferences.save()
+            if oldValue.viewSortMode != preferences.viewSortMode {
+                applyViewSortToLoadedTasks()
+            }
         }
     }
     @Published public var selectedDestination: NavigationDestination = .smartView(.today) {
         didSet {
             selectedFilterTagId = nil
             selectedTaskIds.removeAll()
+            lastSelectedTaskId = nil
             expandedTaskId = nil
         }
     }
@@ -80,6 +84,7 @@ public final class ThingsbookStore: ObservableObject {
     // MARK: - Selection, Filtering & Magic Plus Drag-to-Insert
     @Published public var selectedFilterTagId: String? = nil
     @Published public var selectedTaskIds: Set<String> = []
+    @Published public var lastSelectedTaskId: String? = nil
     @Published public var expandedTaskId: String? = nil
     @Published public var collapsedHeadingIds: Set<String> = []
     @Published public var magicPlusActiveDrop: MacMagicPlusResolvedDrop? = nil
@@ -243,18 +248,19 @@ public final class ThingsbookStore: ObservableObject {
 
     public func reloadSnapshot() {
         guard let snap = try? database.loadWorkspaceSnapshot() else { return }
+        let sortMode = preferences.viewSortMode
         self.areas = snap.areas
         self.projects = snap.projects
         self.projectTemplates = snap.projectTemplates
         self.headingsByProject = snap.headingsByProject
         self.projectAttachments = snap.projectAttachments
         self.tags = snap.tags
-        self.inboxTasks = snap.inboxTasks
-        self.todayDaytimeTasks = snap.todayDaytimeTasks
-        self.thisEveningTasks = snap.thisEveningTasks
-        self.upcomingTasks = snap.upcomingTasks
-        self.anytimeTasks = snap.anytimeTasks
-        self.somedayTasks = snap.somedayTasks
+        self.inboxTasks = TaskViewSorter.sort(snap.inboxTasks, mode: sortMode)
+        self.todayDaytimeTasks = TaskViewSorter.sort(snap.todayDaytimeTasks, mode: sortMode)
+        self.thisEveningTasks = TaskViewSorter.sort(snap.thisEveningTasks, mode: sortMode)
+        self.upcomingTasks = sortUpcomingTasksByDayBucket(snap.upcomingTasks, mode: sortMode)
+        self.anytimeTasks = TaskViewSorter.sort(snap.anytimeTasks, mode: sortMode)
+        self.somedayTasks = TaskViewSorter.sort(snap.somedayTasks, mode: sortMode)
         self.logbookTasks = snap.logbookTasks
         self.trashedTasks = snap.trashedTasks
         self.trashedProjects = snap.trashedProjects
@@ -267,6 +273,27 @@ public final class ThingsbookStore: ObservableObject {
             preferences: preferences,
             todayTaskCount: snap.todayDaytimeTasks.count + snap.thisEveningTasks.count
         )
+    }
+
+    public func applyViewSortToLoadedTasks() {
+        let sortMode = preferences.viewSortMode
+        inboxTasks = TaskViewSorter.sort(inboxTasks, mode: sortMode)
+        todayDaytimeTasks = TaskViewSorter.sort(todayDaytimeTasks, mode: sortMode)
+        thisEveningTasks = TaskViewSorter.sort(thisEveningTasks, mode: sortMode)
+        upcomingTasks = sortUpcomingTasksByDayBucket(upcomingTasks, mode: sortMode)
+        anytimeTasks = TaskViewSorter.sort(anytimeTasks, mode: sortMode)
+        somedayTasks = TaskViewSorter.sort(somedayTasks, mode: sortMode)
+    }
+
+    private func sortUpcomingTasksByDayBucket(_ list: [TaskItem], mode: String) -> [TaskItem] {
+        let todayEpochDay = DateEpochConverter.epochDay(for: Date())
+        let grouped = Dictionary(grouping: list) { task -> Int in
+            guard let w = task.whenDate else { return Int.max }
+            return max(todayEpochDay + 1, DateEpochConverter.epochDay(forMillis: w))
+        }
+        return grouped.keys.sorted().flatMap { day in
+            TaskViewSorter.sort(grouped[day] ?? [], mode: mode)
+        }
     }
 
     public func deleteSampleTasks() {
@@ -286,6 +313,25 @@ public final class ThingsbookStore: ObservableObject {
         todayDaytimeTasks.count + thisEveningTasks.count
     }
 
+    public var tagUsageCounts: [String: Int] {
+        var counts: [String: Int] = [:]
+        for task in allOpenTasks {
+            for tid in Set(task.tagIds) {
+                counts[tid, default: 0] += 1
+            }
+        }
+        for proj in projects where !proj.isDeleted && proj.status == .active {
+            for tid in Set(proj.tagIds) {
+                counts[tid, default: 0] += 1
+            }
+        }
+        return counts
+    }
+
+    public var sortedTags: [Tag] {
+        TagListSorter.sort(tags, mode: preferences.tagSortMode, usageCounts: tagUsageCounts)
+    }
+
     public func filterTasksByActiveTag(_ list: [TaskItem]) -> [TaskItem] {
         guard let filterTagId = selectedFilterTagId else { return list }
         return list.filter { $0.tagIds.contains(filterTagId) }
@@ -293,7 +339,10 @@ public final class ThingsbookStore: ObservableObject {
 
     public func tasksForProject(_ projectId: String) -> [TaskItem] {
         filterTasksByActiveTag(
-            allOpenTasks.filter { $0.projectId == projectId }.sorted { $0.sortOrder < $1.sortOrder }
+            TaskViewSorter.sort(
+                allOpenTasks.filter { $0.projectId == projectId },
+                mode: preferences.viewSortMode
+            )
         )
     }
 
@@ -303,7 +352,10 @@ public final class ThingsbookStore: ObservableObject {
 
     public func looseTasksForArea(_ areaId: String) -> [TaskItem] {
         filterTasksByActiveTag(
-            allOpenTasks.filter { $0.areaId == areaId && $0.projectId == nil }.sorted { $0.sortOrder < $1.sortOrder }
+            TaskViewSorter.sort(
+                allOpenTasks.filter { $0.areaId == areaId && $0.projectId == nil },
+                mode: preferences.viewSortMode
+            )
         )
     }
 
@@ -323,6 +375,130 @@ public final class ThingsbookStore: ObservableObject {
     public func area(byId id: String?) -> Area? {
         guard let id else { return nil }
         return areas.first { $0.id == id }
+    }
+
+    private func containerGroupKey(for task: TaskItem) -> String {
+        if let pid = task.projectId, let proj = project(byId: pid) {
+            if let aid = proj.areaId, let area = area(byId: aid) {
+                return "\(area.title) › \(proj.title)"
+            }
+            return proj.title
+        }
+        if let aid = task.areaId, let area = area(byId: aid) {
+            return area.title
+        }
+        return tr("macos_today_unassigned")
+    }
+
+    private func containerGroupedTasks(_ tasks: [TaskItem]) -> [TaskItem] {
+        let grouped = Dictionary(grouping: tasks, by: containerGroupKey(for:))
+        return grouped.keys.sorted().flatMap { key in
+            TaskViewSorter.sort(grouped[key] ?? [], mode: preferences.viewSortMode)
+        }
+    }
+
+    public func currentVisibleTaskIdsInOrder() -> [String] {
+        switch selectedDestination {
+        case .smartView(let sv):
+            switch sv {
+            case .inbox:
+                return filterTasksByActiveTag(inboxTasks).map(\.id)
+            case .today:
+                let daytime = filterTasksByActiveTag(todayDaytimeTasks)
+                let evening = filterTasksByActiveTag(thisEveningTasks)
+                if todayViewMode == .list && preferences.groupTodayByProjectOrArea {
+                    return (containerGroupedTasks(daytime) + evening).map(\.id)
+                }
+                return (daytime + evening).map(\.id)
+            case .upcoming:
+                return filterTasksByActiveTag(upcomingTasks).map(\.id)
+            case .anytime:
+                return containerGroupedTasks(filterTasksByActiveTag(anytimeTasks)).map(\.id)
+            case .someday:
+                return filterTasksByActiveTag(somedayTasks).map(\.id)
+            case .logbook:
+                return filterTasksByActiveTag(logbookTasks).map(\.id)
+            case .trash:
+                return trashedTasks.map(\.id)
+            }
+        case .project(let pid):
+            let open = tasksForProject(pid)
+            let headings = headingsByProject[pid] ?? []
+            var ordered = TaskViewSorter.sort(open.filter { $0.headingId == nil }, mode: preferences.viewSortMode).map(\.id)
+            for heading in headings where !collapsedHeadingIds.contains(heading.id) {
+                let sec = TaskViewSorter.sort(open.filter { $0.headingId == heading.id }, mode: preferences.viewSortMode)
+                ordered.append(contentsOf: sec.map(\.id))
+            }
+            return ordered
+        case .area(let aid):
+            return looseTasksForArea(aid).map(\.id)
+        }
+    }
+
+    public func orderedTaskIds(matching idSet: Set<String>) -> [String] {
+        guard !idSet.isEmpty else { return [] }
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for id in currentVisibleTaskIdsInOrder() where idSet.contains(id) && !seen.contains(id) {
+            seen.insert(id)
+            ordered.append(id)
+        }
+        if ordered.count < idSet.count {
+            for t in (allOpenTasks + logbookTasks) where idSet.contains(t.id) && !seen.contains(t.id) {
+                seen.insert(t.id)
+                ordered.append(t.id)
+            }
+        }
+        return ordered
+    }
+
+    public func handleTaskRowClick(taskId: String, modifiers: NSEvent.ModifierFlags) {
+        if modifiers.contains(.shift) {
+            let visibleIds = currentVisibleTaskIdsInOrder()
+            let anchorId = lastSelectedTaskId ?? expandedTaskId ?? selectedTaskIds.first
+            withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+                expandedTaskId = nil
+                if let anchorId,
+                   let aIdx = visibleIds.firstIndex(of: anchorId),
+                   let bIdx = visibleIds.firstIndex(of: taskId) {
+                    let lower = min(aIdx, bIdx)
+                    let upper = max(aIdx, bIdx)
+                    let rangeIds = Set(visibleIds[lower...upper])
+                    if modifiers.contains(.command) {
+                        selectedTaskIds.formUnion(rangeIds)
+                    } else {
+                        selectedTaskIds = rangeIds
+                    }
+                    if lastSelectedTaskId == nil {
+                        lastSelectedTaskId = anchorId
+                    }
+                } else {
+                    selectedTaskIds.insert(taskId)
+                    lastSelectedTaskId = taskId
+                }
+            }
+        } else if modifiers.contains(.command) {
+            withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+                if selectedTaskIds.contains(taskId) {
+                    selectedTaskIds.remove(taskId)
+                    if expandedTaskId == taskId {
+                        expandedTaskId = nil
+                    }
+                } else {
+                    selectedTaskIds.insert(taskId)
+                    lastSelectedTaskId = taskId
+                    if selectedTaskIds.count > 1 {
+                        expandedTaskId = nil
+                    }
+                }
+            }
+        } else {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                selectedTaskIds = [taskId]
+                lastSelectedTaskId = taskId
+                expandedTaskId = taskId
+            }
+        }
     }
 
     // MARK: - v2.0 Weekly Review, Stalled Projects, Templates & Timeblocking
@@ -849,18 +1025,166 @@ public final class ThingsbookStore: ObservableObject {
         }
     }
 
+    public func setTasksPinned(_ taskIds: [String], isPinned: Bool) {
+        guard !taskIds.isEmpty else { return }
+        try? database.setTasksPinned(taskIds, isPinned: isPinned)
+    }
+
+    public func togglePinForSelectedTasks() {
+        let ids = Array(selectedTaskIds)
+        guard !ids.isEmpty else { return }
+        let candidates = (allOpenTasks + logbookTasks).filter { selectedTaskIds.contains($0.id) }
+        let shouldPin = candidates.isEmpty ? true : !candidates.allSatisfy(\.isPinned)
+        setTasksPinned(ids, isPinned: shouldPin)
+    }
+
+    public func togglePinForSelectedOrExpandedTasks() {
+        let ids: [String]
+        if !selectedTaskIds.isEmpty {
+            ids = Array(selectedTaskIds)
+        } else if let exp = expandedTaskId {
+            ids = [exp]
+        } else {
+            return
+        }
+        let candidates = (allOpenTasks + logbookTasks).filter { ids.contains($0.id) }
+        let shouldPin = candidates.isEmpty ? true : !candidates.allSatisfy(\.isPinned)
+        setTasksPinned(ids, isPinned: shouldPin)
+    }
+
+    public func completeSelectedTasks() {
+        let ids = orderedTaskIds(matching: selectedTaskIds)
+        guard !ids.isEmpty else { return }
+        var completedTitles: [String] = []
+        for id in ids {
+            guard let task = allOpenTasks.first(where: { $0.id == id }) else { continue }
+            if focusTimer?.taskId == id {
+                stopFocusTimer()
+            }
+            NotificationReminderService.shared.cancelTaskReminder(taskId: id)
+            let spawnedId = (try? database.setTaskStatus(taskId: id, status: .completed)) ?? nil
+            if let spawnedId {
+                reloadSnapshot()
+                if let spawnedTask = allOpenTasks.first(where: { $0.id == spawnedId }) {
+                    NotificationReminderService.shared.syncTaskReminder(spawnedTask, lang: preferences.language)
+                }
+            }
+            completedTitles.append(task.title.isEmpty ? tr("macos_untitled_todo") : task.title)
+        }
+        reloadSnapshot()
+        selectedTaskIds.removeAll()
+        if let exp = expandedTaskId, ids.contains(exp) {
+            expandedTaskId = nil
+        }
+    }
+
+    public func scheduleSelectedTasks(_ preset: ScheduleState) {
+        let resolved = WhenScheduleResolver.resolvePresetSelection(
+            preset: preset,
+            reminderEnabled: false,
+            reminderHour: 9,
+            reminderMinute: 0
+        )
+        let ids = Array(selectedTaskIds)
+        guard !ids.isEmpty else { return }
+        for id in ids {
+            if var t = allOpenTasks.first(where: { $0.id == id }) {
+                t.scheduleState = resolved.scheduleState
+                t.whenDate = resolved.whenDateEpochMillis
+                updateTask(t)
+            }
+        }
+    }
+
+    public func batchTagSelectionState() -> (allSelected: Set<String>, partialSelected: Set<String>) {
+        let selectedTasks = allOpenTasks.filter { selectedTaskIds.contains($0.id) }
+        guard !selectedTasks.isEmpty else { return ([], []) }
+        var counts: [String: Int] = [:]
+        for t in selectedTasks {
+            for tid in Set(t.tagIds) {
+                counts[tid, default: 0] += 1
+            }
+        }
+        var allSet = Set<String>()
+        var partialSet = Set<String>()
+        for (tid, cnt) in counts {
+            if cnt == selectedTasks.count {
+                allSet.insert(tid)
+            } else if cnt > 0 {
+                partialSet.insert(tid)
+            }
+        }
+        return (allSet, partialSet)
+    }
+
+    public func batchToggleTagOnSelectedTasks(_ tagId: String) {
+        let ids = Array(selectedTaskIds)
+        guard !ids.isEmpty else { return }
+        let state = batchTagSelectionState()
+        if state.allSelected.contains(tagId) {
+            try? database.batchUpdateTasksTags(ids, addTagIds: [], removeTagIds: [tagId])
+        } else {
+            try? database.batchUpdateTasksTags(ids, addTagIds: [tagId], removeTagIds: [])
+        }
+    }
+
+    public func duplicateSelectedTasks() {
+        let orderedIds = orderedTaskIds(matching: selectedTaskIds)
+        guard !orderedIds.isEmpty else { return }
+        let copySuffix = tr("v25_copy_suffix")
+        if let copies = try? database.duplicateTasks(orderedIds, copySuffix: copySuffix), !copies.isEmpty {
+            selectedTaskIds = Set(copies.map(\.id))
+            lastSelectedTaskId = copies.last?.id
+            if copies.count == 1 {
+                expandedTaskId = copies[0].id
+            } else {
+                expandedTaskId = nil
+            }
+        }
+    }
+
     public func duplicateSelectedOrExpandedTask() {
-        let targetId = expandedTaskId ?? selectedTaskIds.first
-        guard let targetId else { return }
-        if let copy = try? database.duplicateTask(targetId) {
-            selectedTaskIds = [copy.id]
-            expandedTaskId = copy.id
+        let copySuffix = tr("v25_copy_suffix")
+        if let expId = expandedTaskId {
+            if let copy = try? database.duplicateTask(expId, copySuffix: copySuffix) {
+                selectedTaskIds = [copy.id]
+                lastSelectedTaskId = copy.id
+                expandedTaskId = copy.id
+            }
+            return
+        }
+        if !selectedTaskIds.isEmpty {
+            duplicateSelectedTasks()
+            return
+        }
+        if case .project(let pid) = selectedDestination {
+            if let copy = try? database.duplicateProject(pid, copySuffix: copySuffix) {
+                selectedDestination = .project(copy.id)
+            }
+        }
+    }
+
+    public func moveTagOrder(_ tagId: String, moveUp: Bool) {
+        try? database.moveTagOrder(tagId, moveUp: moveUp)
+    }
+
+    public func mergeTag(sourceTag: Tag, into targetTag: Tag) {
+        guard sourceTag.id != targetTag.id else { return }
+        if selectedFilterTagId == sourceTag.id {
+            selectedFilterTagId = targetTag.id
+        }
+        if (try? database.mergeTags(sourceTagId: sourceTag.id, into: targetTag.id)) == true {
+            showToast(trf("v25_tags_merged_toast", sourceTag.title, targetTag.title))
         }
     }
 
     public func applyTagShortcut(_ char: String) {
         let lower = char.lowercased()
         guard let matchedTag = tags.first(where: { $0.shortcut?.lowercased() == lower }) else { return }
+        if selectedTaskIds.count > 1 {
+            batchToggleTagOnSelectedTasks(matchedTag.id)
+            return
+        }
         let targetIds = !selectedTaskIds.isEmpty ? Array(selectedTaskIds) : (expandedTaskId.map { [$0] } ?? [])
         for id in targetIds {
             if let task = allOpenTasks.first(where: { $0.id == id }) {
@@ -1200,6 +1524,8 @@ public final class ThingsbookStore: ObservableObject {
             if let dm = payload.preferences.dailyDigestMinute { prefs.dailyDigestMinute = dm }
             if let gt = payload.preferences.groupTodayByProjectOrArea { prefs.groupTodayByProjectOrArea = gt }
             if let ib = payload.preferences.includeBetaUpdates { prefs.includeBetaUpdates = ib }
+            if let tsm = payload.preferences.tagSortMode, !tsm.isEmpty { prefs.tagSortMode = tsm }
+            if let vsm = payload.preferences.viewSortMode, !vsm.isEmpty { prefs.viewSortMode = vsm }
             if let tag = payload.preferences.languageTag {
                 prefs.language = tag.isEmpty ? .system : (AppLanguage(rawValue: tag) ?? .system)
             }

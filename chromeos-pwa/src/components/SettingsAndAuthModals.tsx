@@ -316,6 +316,21 @@ const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
           );
           restoredPatch.calendarIdsInitialized = true;
         }
+        if (p.tagSortMode != null) {
+          restoredPatch.tagSortMode =
+            p.tagSortMode === 'most_used' || p.tagSortMode === 'manual' || p.tagSortMode === 'alpha'
+              ? p.tagSortMode
+              : 'alpha';
+        }
+        if (p.viewSortMode != null) {
+          restoredPatch.viewSortMode =
+            p.viewSortMode === 'deadline' ||
+            p.viewSortMode === 'duration' ||
+            p.viewSortMode === 'alpha' ||
+            p.viewSortMode === 'manual'
+              ? p.viewSortMode
+              : 'manual';
+        }
         onRestoredPrefs(restoredPatch);
       }
 

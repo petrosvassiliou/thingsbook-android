@@ -69,6 +69,7 @@ public struct RemoteDeltaBatch: Sendable {
     public var tasks: [TaskItem]
     public var taskTagIdsByTaskId: [String: [String]]
     public var taskOmittedTimeblockTaskIds: Set<String>
+    public var taskOmittedPinTaskIds: Set<String>
     public var checklistItems: [ChecklistItem]
     public var attachments: [RemoteAttachmentDelta]
     public var projectTemplates: [ProjectTemplate]
@@ -81,6 +82,7 @@ public struct RemoteDeltaBatch: Sendable {
         tasks: [TaskItem] = [],
         taskTagIdsByTaskId: [String: [String]] = [:],
         taskOmittedTimeblockTaskIds: Set<String> = [],
+        taskOmittedPinTaskIds: Set<String> = [],
         checklistItems: [ChecklistItem] = [],
         attachments: [RemoteAttachmentDelta] = [],
         projectTemplates: [ProjectTemplate] = []
@@ -92,6 +94,7 @@ public struct RemoteDeltaBatch: Sendable {
         self.tasks = tasks
         self.taskTagIdsByTaskId = taskTagIdsByTaskId
         self.taskOmittedTimeblockTaskIds = taskOmittedTimeblockTaskIds
+        self.taskOmittedPinTaskIds = taskOmittedPinTaskIds
         self.checklistItems = checklistItems
         self.attachments = attachments
         self.projectTemplates = projectTemplates
@@ -297,6 +300,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             area_id TEXT REFERENCES areas(id) ON DELETE SET NULL,
             recurrence_rule TEXT,
             sort_order REAL NOT NULL DEFAULT 0.0,
+            is_pinned INTEGER NOT NULL DEFAULT 0,
             tag_ids_json TEXT NOT NULL DEFAULT '[]',
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
@@ -402,6 +406,9 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         try? execLocked("ALTER TABLE tasks ADD COLUMN scheduled_start_minutes INTEGER DEFAULT NULL;")
         try? execLocked("ALTER TABLE tasks ADD COLUMN duration_minutes INTEGER DEFAULT NULL;")
         try? execLocked("ALTER TABLE projects ADD COLUMN last_reviewed_at INTEGER DEFAULT NULL;")
+
+        // Safe non-destructive v2.5.0 column migration for task pinning
+        try? execLocked("ALTER TABLE tasks ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0;")
 
         try installFts5Locked()
     }
@@ -686,19 +693,25 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 }
             }
 
+            inbox = TaskViewSorter.sort(inbox, mode: "manual")
             todayDaytime.sort {
+                if $0.isPinned != $1.isPinned { return $0.isPinned && !$1.isPinned }
                 let d0 = $0.deadline == nil ? 1 : 0
                 let d1 = $1.deadline == nil ? 1 : 0
                 if d0 != d1 { return d0 < d1 }
                 if let dl0 = $0.deadline, let dl1 = $1.deadline, dl0 != dl1 { return dl0 < dl1 }
                 return $0.sortOrder < $1.sortOrder
             }
+            thisEvening = TaskViewSorter.sort(thisEvening, mode: "manual")
             upcoming.sort {
                 let w0 = $0.whenDate ?? Int64.max
                 let w1 = $1.whenDate ?? Int64.max
                 if w0 != w1 { return w0 < w1 }
+                if $0.isPinned != $1.isPinned { return $0.isPinned && !$1.isPinned }
                 return $0.sortOrder < $1.sortOrder
             }
+            anytime = TaskViewSorter.sort(anytime, mode: "manual")
+            someday = TaskViewSorter.sort(someday, mode: "manual")
             logbook.sort { ($0.completedAt ?? $0.updatedAt) > ($1.completedAt ?? $1.updatedAt) }
             trashed.sort { $0.updatedAt > $1.updatedAt }
 
@@ -759,7 +772,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         SELECT t.id, t.title, t.notes, t.status, t.schedule_state, t.when_date, t.deadline,
                                t.reminder_time, t.completed_at, t.project_id, t.heading_id, t.area_id,
                                t.recurrence_rule, t.sort_order, t.tag_ids_json, t.created_at, t.updated_at, t.is_deleted,
-                               t.scheduled_start_minutes, t.duration_minutes
+                               t.scheduled_start_minutes, t.duration_minutes, t.is_pinned
                         FROM tasks t
                         JOIN tasks_fts fts ON t.rowid = fts.rowid
                         WHERE tasks_fts MATCH ? AND t.is_deleted = 0\(statusClause)
@@ -771,7 +784,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         SELECT t.id, t.title, t.notes, t.status, t.schedule_state, t.when_date, t.deadline,
                                t.reminder_time, t.completed_at, t.project_id, t.heading_id, t.area_id,
                                t.recurrence_rule, t.sort_order, t.tag_ids_json, t.created_at, t.updated_at, t.is_deleted,
-                               t.scheduled_start_minutes, t.duration_minutes
+                               t.scheduled_start_minutes, t.duration_minutes, t.is_pinned
                         FROM tasks t
                         WHERE t.is_deleted = 0\(statusClause)
                         ORDER BY CASE WHEN t.status = 'OPEN' THEN 0 ELSE 1 END ASC, t.updated_at DESC
@@ -1294,6 +1307,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             areaId: completedTask.areaId,
             recurrenceRule: rule,
             sortOrder: maxOrder + 1000.0,
+            isPinned: false,
             checklistItems: clonedChecklists,
             tags: completedTask.tags,
             createdAt: existingById?.createdAt ?? nowMillis,
@@ -1525,7 +1539,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         bindText(ttStmt, 1, taskId)
         _ = sqlite3_step(ttStmt)
 
-        let stmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 1, is_dirty = 1, title = '', notes = '', recurrence_rule = NULL, tag_ids_json = '[]', scheduled_start_minutes = NULL, duration_minutes = NULL, updated_at = MAX(updated_at + 1, ?) WHERE id = ?;")
+        let stmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 1, is_dirty = 1, is_pinned = 0, title = '', notes = '', recurrence_rule = NULL, tag_ids_json = '[]', scheduled_start_minutes = NULL, duration_minutes = NULL, updated_at = MAX(updated_at + 1, ?) WHERE id = ?;")
         defer { sqlite3_finalize(stmt) }
         bindInt64(stmt, 1, now)
         bindText(stmt, 2, taskId)
@@ -1585,55 +1599,143 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         _ = sqlite3_step(stmt)
     }
 
+    public func setTasksPinned(_ taskIds: [String], isPinned: Bool) throws {
+        guard !taskIds.isEmpty else { return }
+        let didMutate: Bool = try queue.sync {
+            let now = nowMillis()
+            var changed = false
+            try inTransactionLocked {
+                for tid in Set(taskIds) {
+                    let stmt = try prepareLocked("""
+                        UPDATE tasks
+                        SET is_pinned = ?,
+                            updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END,
+                            is_dirty = 1
+                        WHERE id = ? AND is_deleted = 0;
+                    """)
+                    defer { sqlite3_finalize(stmt) }
+                    bindBool(stmt, 1, isPinned)
+                    bindInt64(stmt, 2, now)
+                    bindInt64(stmt, 3, now)
+                    bindText(stmt, 4, tid)
+                    if sqlite3_step(stmt) == SQLITE_DONE, sqlite3_changes(db) > 0 {
+                        changed = true
+                    }
+                }
+            }
+            return changed
+        }
+        if didMutate { notifyMutation() }
+    }
+
+    private func duplicateSingleTaskLocked(
+        source: TaskItem,
+        rawTagIds: [String],
+        copySuffix: String,
+        sortOrderOffset: Double,
+        now: Int64
+    ) throws -> TaskItem {
+        let newId = UUID().uuidString
+        let trimmedSuffix = copySuffix.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTitle = source.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedTitle: String
+        if trimmedTitle.isEmpty || trimmedSuffix.isEmpty {
+            resolvedTitle = source.title
+        } else {
+            resolvedTitle = "\(source.title) (\(trimmedSuffix))"
+        }
+        let clonedChecklists = source.checklistItems.map { chk in
+            ChecklistItem(
+                id: UUID().uuidString,
+                taskId: newId,
+                title: chk.title,
+                isCompleted: chk.isCompleted,
+                sortOrder: chk.sortOrder,
+                createdAt: now,
+                updatedAt: now
+            )
+        }
+        let copy = TaskItem(
+            id: newId,
+            title: resolvedTitle,
+            notes: source.notes,
+            status: .open,
+            scheduleState: source.scheduleState,
+            whenDate: source.whenDate,
+            deadline: source.deadline,
+            reminderTime: source.reminderTime,
+            scheduledStartMinutes: source.scheduledStartMinutes,
+            durationMinutes: source.durationMinutes,
+            completedAt: nil,
+            projectId: source.projectId,
+            headingId: source.headingId,
+            areaId: source.areaId,
+            recurrenceRule: source.recurrenceRule,
+            sortOrder: source.sortOrder + sortOrderOffset,
+            isPinned: source.isPinned,
+            checklistItems: clonedChecklists,
+            tags: source.tags,
+            createdAt: now,
+            updatedAt: now
+        )
+        try upsertTaskLocked(copy, tagIds: rawTagIds, isDirty: true)
+        for chk in clonedChecklists {
+            try upsertChecklistItemLocked(chk, isDirty: true)
+        }
+        return copy
+    }
+
     @discardableResult
-    public func duplicateTask(_ taskId: String) throws -> TaskItem? {
+    public func duplicateTask(_ taskId: String, copySuffix: String = "Copy") throws -> TaskItem? {
         let duplicated: TaskItem? = try queue.sync {
             guard let source = try fetchTaskByIdLocked(taskId) else { return nil }
+            let rawTagIds = (try? fetchAllTaskTagIdsLocked()[taskId]) ?? source.tagIds
             let now = nowMillis()
-            let newId = UUID().uuidString
             return try inTransactionLocked {
-                let clonedChecklists = source.checklistItems.map { chk in
-                    ChecklistItem(
-                        id: UUID().uuidString,
-                        taskId: newId,
-                        title: chk.title,
-                        isCompleted: chk.isCompleted,
-                        sortOrder: chk.sortOrder,
-                        createdAt: now,
-                        updatedAt: now
-                    )
-                }
-                let copy = TaskItem(
-                    id: newId,
-                    title: source.title,
-                    notes: source.notes,
-                    status: .open,
-                    scheduleState: source.scheduleState,
-                    whenDate: source.whenDate,
-                    deadline: source.deadline,
-                    reminderTime: source.reminderTime,
-                    scheduledStartMinutes: source.scheduledStartMinutes,
-                    durationMinutes: source.durationMinutes,
-                    completedAt: nil,
-                    projectId: source.projectId,
-                    headingId: source.headingId,
-                    areaId: source.areaId,
-                    recurrenceRule: source.recurrenceRule,
-                    sortOrder: source.sortOrder + 0.5,
-                    checklistItems: clonedChecklists,
-                    tags: source.tags,
-                    createdAt: now,
-                    updatedAt: now
+                try duplicateSingleTaskLocked(
+                    source: source,
+                    rawTagIds: rawTagIds,
+                    copySuffix: copySuffix,
+                    sortOrderOffset: 0.5,
+                    now: now
                 )
-                try upsertTaskLocked(copy, tagIds: source.tagIds, isDirty: true)
-                for chk in clonedChecklists {
-                    try upsertChecklistItemLocked(chk, isDirty: true)
-                }
-                return copy
             }
         }
         if duplicated != nil { notifyMutation() }
         return duplicated
+    }
+
+    @discardableResult
+    public func duplicateTasks(_ taskIds: [String], copySuffix: String = "Copy") throws -> [TaskItem] {
+        var uniqueOrderedIds: [String] = []
+        var seen = Set<String>()
+        for id in taskIds where seen.insert(id).inserted {
+            uniqueOrderedIds.append(id)
+        }
+        guard !uniqueOrderedIds.isEmpty else { return [] }
+
+        let copies: [TaskItem] = try queue.sync {
+            let now = nowMillis()
+            let allRawTagIds = (try? fetchAllTaskTagIdsLocked()) ?? [:]
+            return try inTransactionLocked {
+                var created: [TaskItem] = []
+                for (index, tid) in uniqueOrderedIds.enumerated() {
+                    guard let source = try fetchTaskByIdLocked(tid), !source.isDeleted else { continue }
+                    let rawTagIds = allRawTagIds[tid] ?? source.tagIds
+                    let copy = try duplicateSingleTaskLocked(
+                        source: source,
+                        rawTagIds: rawTagIds,
+                        copySuffix: copySuffix,
+                        sortOrderOffset: 0.5 + Double(index) * 0.001,
+                        now: now + Int64(index)
+                    )
+                    created.append(copy)
+                }
+                return created
+            }
+        }
+        if !copies.isEmpty { notifyMutation() }
+        return copies
     }
 
     public func reorderTask(taskId: String, prevOrder: Double?, nextOrder: Double?, newHeadingId: String?? = nil) throws {
@@ -2815,16 +2917,28 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
     @discardableResult
     public func createOrUpdateTag(id: String? = nil, title: String, parentTagId: String? = nil, shortcut: String? = nil) throws -> Tag {
+        var didMutate = false
         let tag = try queue.sync { () -> Tag in
             let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
             let existingTags = try fetchActiveTagsLocked()
+            let cleanShortcut = shortcut?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().first.map(String.init)
             if id == nil, let match = existingTags.first(where: { $0.title.caseInsensitiveCompare(cleanTitle) == .orderedSame }) {
+                if let explicitShortcut = cleanShortcut, match.shortcut != explicitShortcut {
+                    let now = max(nowMillis(), match.updatedAt + 1)
+                    var updated = match
+                    updated.shortcut = explicitShortcut
+                    updated.updatedAt = now
+                    try inTransactionLocked {
+                        try upsertTagLocked(updated, isDirty: true)
+                    }
+                    didMutate = true
+                    return updated
+                }
                 return match
             }
             let existingById = id.flatMap { targetId in existingTags.first(where: { $0.id == targetId }) }
-            let now = nowMillis()
+            let now = max(nowMillis(), (existingById?.updatedAt ?? 0) + 1)
             let maxOrd = existingTags.map(\.sortOrder).max() ?? 0.0
-            let cleanShortcut = shortcut?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().first.map(String.init)
             let t = Tag(
                 id: id ?? UUID().uuidString,
                 title: cleanTitle,
@@ -2834,11 +2948,124 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 createdAt: existingById?.createdAt ?? now,
                 updatedAt: now
             )
-            try upsertTagLocked(t, isDirty: true)
+            try inTransactionLocked {
+                try upsertTagLocked(t, isDirty: true)
+            }
+            didMutate = true
             return t
         }
-        notifyMutation()
+        if didMutate { notifyMutation() }
         return tag
+    }
+
+    @discardableResult
+    public func mergeTags(sourceTagId: String, into targetTagId: String) throws -> Bool {
+        let cleanSource = sourceTagId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanTarget = targetTagId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanSource.isEmpty, !cleanTarget.isEmpty, cleanSource != cleanTarget else {
+            return false
+        }
+        let merged: Bool = try queue.sync {
+            let activeTags = try fetchActiveTagsLocked()
+            guard activeTags.contains(where: { $0.id == cleanSource }),
+                  let targetTag = activeTags.first(where: { $0.id == cleanTarget }) else {
+                return false
+            }
+            let now = nowMillis()
+            try inTransactionLocked {
+                if targetTag.parentTagId == cleanSource {
+                    let fixTargetParent = try prepareLocked("""
+                        UPDATE tags
+                        SET parent_tag_id = NULL, updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END, is_dirty = 1
+                        WHERE id = ?;
+                    """)
+                    defer { sqlite3_finalize(fixTargetParent) }
+                    bindInt64(fixTargetParent, 1, now)
+                    bindInt64(fixTargetParent, 2, now)
+                    bindText(fixTargetParent, 3, cleanTarget)
+                    _ = sqlite3_step(fixTargetParent)
+                }
+
+                try remapTagReferencesLocked(
+                    from: cleanSource,
+                    to: cleanTarget,
+                    now: now,
+                    markAffectedDirty: true
+                )
+
+                let tombstoneStmt = try prepareLocked("""
+                    UPDATE tags
+                    SET is_deleted = 1, parent_tag_id = NULL, shortcut = NULL,
+                        updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END,
+                        is_dirty = 1
+                    WHERE id = ?;
+                """)
+                defer { sqlite3_finalize(tombstoneStmt) }
+                bindInt64(tombstoneStmt, 1, now)
+                bindInt64(tombstoneStmt, 2, now)
+                bindText(tombstoneStmt, 3, cleanSource)
+                _ = sqlite3_step(tombstoneStmt)
+            }
+            return true
+        }
+        if merged { notifyMutation() }
+        return merged
+    }
+
+    public func moveTagOrder(_ tagId: String, moveUp: Bool) throws {
+        let didMove: Bool = try queue.sync {
+            let active = try fetchActiveTagsLocked()
+            var ordered = TagListSorter.sort(active, mode: "manual", usageCounts: [:])
+            guard let idx = ordered.firstIndex(where: { $0.id == tagId }) else { return false }
+            let targetIdx = moveUp ? (idx - 1) : (idx + 1)
+            guard ordered.indices.contains(targetIdx) else { return false }
+
+            ordered.swapAt(idx, targetIdx)
+            let now = nowMillis()
+            try inTransactionLocked {
+                for (position, var tag) in ordered.enumerated() {
+                    let desiredOrder = Double((position + 1) * 100)
+                    if abs(tag.sortOrder - desiredOrder) > 0.0001 {
+                        tag.sortOrder = desiredOrder
+                        tag.updatedAt = max(now, tag.updatedAt + 1)
+                        try writeTagRowLocked(tag, isDirty: true)
+                    }
+                }
+            }
+            return true
+        }
+        if didMove { notifyMutation() }
+    }
+
+    public func batchUpdateTasksTags(
+        _ taskIds: [String],
+        addTagIds: Set<String>,
+        removeTagIds: Set<String>
+    ) throws {
+        guard !taskIds.isEmpty, (!addTagIds.isEmpty || !removeTagIds.isEmpty) else { return }
+        let didMutate: Bool = try queue.sync {
+            let validTagIds = Set((try fetchActiveTagsLocked()).map(\.id))
+            let tagIdsByTask = try fetchAllTaskTagIdsLocked()
+            let now = nowMillis()
+            var changed = false
+            try inTransactionLocked {
+                for tid in Set(taskIds) {
+                    guard var task = try fetchTaskByIdLocked(tid), !task.isDeleted else { continue }
+                    let currentIds = tagIdsByTask[tid] ?? task.tagIds
+                    var nextIds = currentIds.filter { !removeTagIds.contains($0) && validTagIds.contains($0) }
+                    for addId in addTagIds.sorted() where validTagIds.contains(addId) && !nextIds.contains(addId) {
+                        nextIds.append(addId)
+                    }
+                    if Set(nextIds) != Set(currentIds) {
+                        task.updatedAt = max(now, task.updatedAt + 1)
+                        try upsertTaskLocked(task, tagIds: nextIds, isDirty: true)
+                        changed = true
+                    }
+                }
+            }
+            return changed
+        }
+        if didMutate { notifyMutation() }
     }
 
     public func deleteTag(_ tagId: String) throws {
@@ -3271,6 +3498,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     areaId: t.areaId,
                     recurrenceRuleJson: encodeRecurrence(t.recurrenceRule),
                     sortOrder: t.sortOrder,
+                    isPinned: t.isPinned,
                     tagIdsJson: encodeStringArray(t.tagIds),
                     createdAt: t.createdAt,
                     updatedAt: t.updatedAt
@@ -3358,7 +3586,9 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 calendarEventsEnabled: preferences.calendarEventsEnabled,
                 selectedCalendarIds: preferences.selectedCalendarIds,
                 groupTodayByProjectOrArea: preferences.groupTodayByProjectOrArea,
-                includeBetaUpdates: preferences.includeBetaUpdates
+                includeBetaUpdates: preferences.includeBetaUpdates,
+                tagSortMode: preferences.tagSortMode,
+                viewSortMode: preferences.viewSortMode
             )
 
             return ThingsbookBackupPayload(
@@ -3500,6 +3730,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         areaId: dto.areaId.flatMap { validAreaIds.contains($0) ? $0 : nil },
                         recurrenceRule: decodeRecurrence(dto.recurrenceRuleJson),
                         sortOrder: dto.sortOrder,
+                        isPinned: dto.isPinned,
                         createdAt: dto.createdAt,
                         updatedAt: dto.updatedAt
                     )
@@ -3876,6 +4107,11 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                                 if toSave.durationMinutes == nil {
                                     toSave.durationMinutes = existingLocal.durationMinutes
                                 }
+                            }
+                            if let existingLocal,
+                               !toSave.isDeleted,
+                               deltas.taskOmittedPinTaskIds.contains(remote.id) {
+                                toSave.isPinned = existingLocal.isPinned
                             }
                             let rawTags = deltas.taskTagIdsByTaskId[remote.id] ?? remote.tagIds
                             let remappedTags = Self.remapTagIdList(rawTags, using: tagRemap)
@@ -4867,13 +5103,14 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     private func upsertTaskLocked(_ task: TaskItem, tagIds: [String], isDirty: Bool) throws {
         let uniqueTags = task.isDeleted ? [] : Array(Set(tagIds))
         let isPurgedTombstone = task.isDeleted && task.title.isEmpty && task.notes.isEmpty
+        let effectivePinned = !task.isDeleted && task.isPinned
         let stmt = try prepareLocked("""
             INSERT INTO tasks (
                 id, title, notes, status, schedule_state, when_date, deadline, reminder_time,
                 scheduled_start_minutes, duration_minutes,
-                completed_at, project_id, heading_id, area_id, recurrence_rule, sort_order,
+                completed_at, project_id, heading_id, area_id, recurrence_rule, sort_order, is_pinned,
                 tag_ids_json, created_at, updated_at, is_deleted, is_purged, is_dirty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 notes = excluded.notes,
@@ -4890,6 +5127,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 area_id = excluded.area_id,
                 recurrence_rule = excluded.recurrence_rule,
                 sort_order = excluded.sort_order,
+                is_pinned = excluded.is_pinned,
                 tag_ids_json = excluded.tag_ids_json,
                 updated_at = excluded.updated_at,
                 is_deleted = excluded.is_deleted,
@@ -4917,12 +5155,13 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         bindText(stmt, 14, task.areaId)
         bindText(stmt, 15, encodeRecurrence(task.recurrenceRule))
         sqlite3_bind_double(stmt, 16, task.sortOrder)
-        bindText(stmt, 17, encodeStringArray(uniqueTags))
-        bindInt64(stmt, 18, task.createdAt)
-        bindInt64(stmt, 19, task.updatedAt)
-        bindBool(stmt, 20, task.isDeleted)
-        bindBool(stmt, 21, isPurgedTombstone)
-        bindBool(stmt, 22, isDirty)
+        bindBool(stmt, 17, effectivePinned)
+        bindText(stmt, 18, encodeStringArray(uniqueTags))
+        bindInt64(stmt, 19, task.createdAt)
+        bindInt64(stmt, 20, task.updatedAt)
+        bindBool(stmt, 21, task.isDeleted)
+        bindBool(stmt, 22, isPurgedTombstone)
+        bindBool(stmt, 23, isDirty)
         if sqlite3_step(stmt) != SQLITE_DONE {
             throw ThingsDatabaseError.sqlError(currentErrorMessageLocked())
         }
@@ -5359,7 +5598,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             SELECT id, title, notes, status, schedule_state, when_date, deadline, reminder_time,
                    completed_at, project_id, heading_id, area_id, recurrence_rule, sort_order,
                    tag_ids_json, created_at, updated_at, is_deleted,
-                   scheduled_start_minutes, duration_minutes
+                   scheduled_start_minutes, duration_minutes, is_pinned
             FROM tasks WHERE \(whereClause) ORDER BY \(orderBy);
         """)
         defer { sqlite3_finalize(stmt) }
@@ -5391,6 +5630,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         let isDeleted = colBool(stmt, 17)
         let refTagIds = isDeleted ? [] : (tagIdsByTask[id] ?? [])
         let resolvedTags = refTagIds.compactMap { tagsById[$0] }.sorted { $0.sortOrder < $1.sortOrder }
+        let isPinned = !isDeleted && colBool(stmt, 20)
 
         return TaskItem(
             id: id,
@@ -5409,6 +5649,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             areaId: colString(stmt, 11),
             recurrenceRule: decodeRecurrence(colString(stmt, 12)),
             sortOrder: sqlite3_column_double(stmt, 13),
+            isPinned: isPinned,
             checklistItems: checklistsByTask[id] ?? [],
             tags: resolvedTags,
             attachments: attachmentsByTask[id] ?? [],

@@ -48,6 +48,7 @@ import com.culturedcode.things3.domain.model.TaskAttachment
 import com.culturedcode.things3.domain.model.TaskItem
 import com.culturedcode.things3.domain.model.TaskStatus
 import com.culturedcode.things3.domain.model.TimeblockScheduleUtils
+import com.culturedcode.things3.domain.model.sortTagsForMode
 import com.culturedcode.things3.domain.util.runCatchingCancellable
 import com.culturedcode.things3.ui.components.FocusTimerUiState
 import com.culturedcode.things3.ui.components.QuickShareDraft
@@ -74,6 +75,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import java.io.BufferedReader
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -246,6 +248,49 @@ class ThingsbookViewModel @Inject constructor(
     private val _collapsedHeadingIds = MutableStateFlow<Set<String>>(emptySet())
     val collapsedHeadingIds: StateFlow<Set<String>> = _collapsedHeadingIds.asStateFlow()
 
+    private val settingsPrefs = appContext.getSharedPreferences("thingsbook_ui_prefs", Context.MODE_PRIVATE)
+    private val coreSettingsPrefs = appContext.getSharedPreferences("thingsbook_settings_prefs", Context.MODE_PRIVATE)
+    private val tagDecodeJson = Json { ignoreUnknownKeys = true }
+
+    private fun normalizeTagSortMode(raw: String?): String = when (raw?.trim()?.lowercase(Locale.ROOT)) {
+        "most_used" -> "most_used"
+        "manual" -> "manual"
+        else -> "alpha"
+    }
+
+    private fun normalizeViewSortMode(raw: String?): String = when (raw?.trim()?.lowercase(Locale.ROOT)) {
+        "deadline" -> "deadline"
+        "duration" -> "duration"
+        "alpha" -> "alpha"
+        else -> "manual"
+    }
+
+    private val _tagSortMode = MutableStateFlow(
+        normalizeTagSortMode(coreSettingsPrefs.getString(PREF_TAG_SORT_MODE, "alpha"))
+    )
+    val tagSortMode: StateFlow<String> = _tagSortMode.asStateFlow()
+
+    fun setTagSortMode(mode: String) {
+        val normalized = normalizeTagSortMode(mode)
+        _tagSortMode.value = normalized
+        runCatching {
+            coreSettingsPrefs.edit().putString(PREF_TAG_SORT_MODE, normalized).apply()
+        }
+    }
+
+    private val _viewSortMode = MutableStateFlow(
+        normalizeViewSortMode(coreSettingsPrefs.getString(PREF_VIEW_SORT_MODE, "manual"))
+    )
+    val viewSortMode: StateFlow<String> = _viewSortMode.asStateFlow()
+
+    fun setViewSortMode(mode: String) {
+        val normalized = normalizeViewSortMode(mode)
+        _viewSortMode.value = normalized
+        runCatching {
+            coreSettingsPrefs.edit().putString(PREF_VIEW_SORT_MODE, normalized).apply()
+        }
+    }
+
     // Tag Filter & Tag Management Modal States
     private val _selectedFilterTagId = MutableStateFlow<String?>(null)
     val selectedFilterTagId: StateFlow<String?> = _selectedFilterTagId.asStateFlow()
@@ -362,7 +407,51 @@ class ThingsbookViewModel @Inject constructor(
         .catch { emit(emptyList()) }
         .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val allTags: StateFlow<List<Tag>> = repository.observeAllTags()
+    private fun decodeRawTagIds(tagIdsJson: String): List<String> {
+        if (tagIdsJson.isBlank() || tagIdsJson == "[]") return emptyList()
+        return runCatching { tagDecodeJson.decodeFromString<List<String>>(tagIdsJson) }
+            .getOrDefault(emptyList())
+            .mapNotNull { it.trim().takeIf(String::isNotEmpty) }
+            .distinct()
+    }
+
+    val tagUsageCounts: StateFlow<Map<String, Int>> = combine(
+        repository.observeAllTasksRaw(),
+        repository.observeAllProjectsRaw()
+    ) { allRawTasks, allRawProjects ->
+        runCatching {
+            val inactiveOrDeletedProjectIds = allRawProjects
+                .asSequence()
+                .filter { it.isDeleted || it.status != ProjectStatus.ACTIVE }
+                .map { it.id }
+                .toSet()
+            val counts = HashMap<String, Int>()
+            for (task in allRawTasks) {
+                if (task.isDeleted || task.status != TaskStatus.OPEN) continue
+                if (task.projectId != null && task.projectId in inactiveOrDeletedProjectIds) continue
+                for (tagId in decodeRawTagIds(task.tagIdsJson)) {
+                    counts[tagId] = (counts[tagId] ?: 0) + 1
+                }
+            }
+            for (proj in allRawProjects) {
+                if (proj.isDeleted || proj.status != ProjectStatus.ACTIVE) continue
+                for (tagId in decodeRawTagIds(proj.tagIdsJson)) {
+                    counts[tagId] = (counts[tagId] ?: 0) + 1
+                }
+            }
+            counts.toMap()
+        }.getOrDefault(emptyMap())
+    }
+        .catch { emit(emptyMap()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    val allTags: StateFlow<List<Tag>> = combine(
+        repository.observeAllTags(),
+        _tagSortMode,
+        tagUsageCounts
+    ) { tags, mode, counts ->
+        sortTagsForMode(tags, mode, counts)
+    }
         .catch { emit(emptyList()) }
         .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -1591,7 +1680,39 @@ class ThingsbookViewModel @Inject constructor(
 
     fun renameTag(tagId: String, newTitle: String, shortcut: String?) {
         safeVmScope.launch {
-            repository.createOrUpdateTag(id = tagId, title = newTitle, shortcut = shortcut)
+            val resolvedId = repository.createOrUpdateTag(
+                id = tagId,
+                title = newTitle,
+                shortcut = shortcut,
+                allowClearShortcut = true
+            )
+            if (resolvedId != tagId && _selectedFilterTagId.value == tagId) {
+                _selectedFilterTagId.value = resolvedId
+            }
+        }
+    }
+
+    fun mergeTags(sourceTagId: String, targetTagId: String) {
+        if (sourceTagId.isBlank() || targetTagId.isBlank() || sourceTagId == targetTagId) return
+        safeVmScope.launch {
+            val sourceTitle = allTags.value.firstOrNull { it.id == sourceTagId }?.title ?: sourceTagId
+            val targetTitle = allTags.value.firstOrNull { it.id == targetTagId }?.title ?: targetTagId
+            if (_selectedFilterTagId.value == sourceTagId) {
+                _selectedFilterTagId.value = targetTagId
+            }
+            val merged = repository.mergeTags(sourceTagId = sourceTagId, targetTagId = targetTagId)
+            if (merged) {
+                showCelebrationToast(
+                    getLocalizedString(R.string.v25_tags_merged_toast, sourceTitle, targetTitle)
+                )
+            }
+        }
+    }
+
+    fun moveTag(tagId: String, moveUp: Boolean) {
+        if (tagId.isBlank()) return
+        safeVmScope.launch {
+            repository.moveTag(tagId = tagId, moveUp = moveUp)
         }
     }
 
@@ -1674,9 +1795,6 @@ class ThingsbookViewModel @Inject constructor(
     // v1.3.0 / v1.4.0: Settings Modal, Collapsible Sidebar, Local/Cloud DB Mode,
     // Live Task Statistics, and Off-Main-Thread CSV Import/Export/Share
     // =========================================================================
-
-    private val settingsPrefs = appContext.getSharedPreferences("thingsbook_ui_prefs", Context.MODE_PRIVATE)
-    private val coreSettingsPrefs = appContext.getSharedPreferences("thingsbook_settings_prefs", Context.MODE_PRIVATE)
 
     private val _isSettingsModalOpen = MutableStateFlow(false)
     val isSettingsModalOpen: StateFlow<Boolean> = _isSettingsModalOpen.asStateFlow()
@@ -2098,7 +2216,9 @@ class ThingsbookViewModel @Inject constructor(
             selectedCalendarIds = _selectedCalendarIds.value.sorted(),
             groupTodayByProjectOrArea = _groupTodayByProjectOrArea.value,
             lastWeeklyReviewAt = _lastWeeklyReviewAt.value,
-            includeBetaUpdates = _includeBetaUpdates.value
+            includeBetaUpdates = _includeBetaUpdates.value,
+            tagSortMode = _tagSortMode.value,
+            viewSortMode = _viewSortMode.value
         )
     }
 
@@ -2317,6 +2437,8 @@ class ThingsbookViewModel @Inject constructor(
                     restoredPrefs.includeBetaUpdates?.let { betaEnabled ->
                         setIncludeBetaUpdates(betaEnabled, triggerCheck = false)
                     }
+                    restoredPrefs.tagSortMode?.let { setTagSortMode(it) }
+                    restoredPrefs.viewSortMode?.let { setViewSortMode(it) }
                     if (
                         restoredPrefs.dailyDigestEnabled != null &&
                         restoredPrefs.dailyDigestHour != null &&
@@ -2373,6 +2495,7 @@ class ThingsbookViewModel @Inject constructor(
         if (taskId in current) {
             _selectedTaskIds.value = current - taskId
         } else {
+            _expandedTaskId.value = null
             _selectedTaskIds.value = current + taskId
             lastSelectedAnchorTaskId = taskId
         }
@@ -2467,6 +2590,51 @@ class ThingsbookViewModel @Inject constructor(
                 repository.moveTaskToContainer(task.id, projectId, headingId, areaId)
             }
             _selectedTaskIds.value = emptySet()
+        }
+    }
+
+    fun batchTogglePinSelectedTasks() {
+        val ids = _selectedTaskIds.value.toList()
+        if (ids.isEmpty()) return
+        safeVmScope.launch {
+            val entities = ids.mapNotNull { repository.getTaskEntityById(it) }.filter { !it.isDeleted }
+            if (entities.isEmpty()) {
+                _selectedTaskIds.value = emptySet()
+                return@launch
+            }
+            val targetPinned = entities.any { !it.isPinned }
+            repository.setTasksPinned(ids, targetPinned)
+            _selectedTaskIds.value = emptySet()
+        }
+    }
+
+    fun batchDuplicateSelectedTasks() {
+        val ids = _selectedTaskIds.value.toList()
+        if (ids.isEmpty()) return
+        safeVmScope.launch {
+            val copySuffix = getLocalizedString(R.string.v25_copy_suffix)
+            ids.forEach { id ->
+                repository.duplicateTask(id, copySuffix = copySuffix)
+            }
+            _selectedTaskIds.value = emptySet()
+        }
+    }
+
+    fun batchUpdateSelectedTasksTags(tagIdsToAdd: Set<String>, tagIdsToRemove: Set<String>) {
+        val ids = _selectedTaskIds.value.toList()
+        if (ids.isEmpty() || (tagIdsToAdd.isEmpty() && tagIdsToRemove.isEmpty())) return
+        safeVmScope.launch {
+            repository.batchUpdateTasksTags(ids, tagIdsToAdd, tagIdsToRemove)
+        }
+    }
+
+    fun batchCreateAndAssignTagToSelectedTasks(newTagTitle: String) {
+        val ids = _selectedTaskIds.value.toList()
+        val cleanTitle = newTagTitle.trim()
+        if (ids.isEmpty() || cleanTitle.isEmpty()) return
+        safeVmScope.launch {
+            val newId = repository.createOrUpdateTag(title = cleanTitle)
+            repository.batchUpdateTasksTags(ids, setOf(newId), emptySet())
         }
     }
 
@@ -2991,9 +3159,19 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
+    fun toggleTaskPinned(taskId: String) {
+        if (taskId.isBlank()) return
+        safeVmScope.launch {
+            val entity = repository.getTaskEntityById(taskId) ?: return@launch
+            if (entity.isDeleted) return@launch
+            repository.setTasksPinned(listOf(taskId), !entity.isPinned)
+        }
+    }
+
     fun duplicateTask(taskId: String) {
         safeVmScope.launch {
-            val clonedId = repository.duplicateTask(taskId)
+            val copySuffix = getLocalizedString(R.string.v25_copy_suffix)
+            val clonedId = repository.duplicateTask(taskId, copySuffix = copySuffix)
             if (clonedId != null) {
                 _expandedTaskId.value = clonedId
             }
@@ -3002,7 +3180,8 @@ class ThingsbookViewModel @Inject constructor(
 
     fun duplicateProject(projectId: String) {
         safeVmScope.launch {
-            val clonedId = repository.duplicateProject(projectId)
+            val copySuffix = getLocalizedString(R.string.v25_copy_suffix)
+            val clonedId = repository.duplicateProject(projectId, copySuffix = copySuffix)
             if (clonedId != null) {
                 _expandedTaskId.value = null
                 _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(clonedId)
@@ -3780,6 +3959,8 @@ class ThingsbookViewModel @Inject constructor(
         private const val PREF_INCLUDE_BETA_UPDATES = "include_beta_updates"
         private const val PREF_LAST_WEEKLY_REVIEW_AT = "last_weekly_review_at"
         private const val PREF_TODAY_TIMELINE_MODE = "today_timeline_mode"
+        private const val PREF_TAG_SORT_MODE = "tag_sort_mode"
+        private const val PREF_VIEW_SORT_MODE = "view_sort_mode"
         private const val UPCOMING_CALENDAR_HORIZON_DAYS = 30L
     }
 }

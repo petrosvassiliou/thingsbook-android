@@ -285,6 +285,7 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
     public var areaId: String?
     public var recurrenceRule: RecurrenceRule?
     public var sortOrder: Double
+    public var isPinned: Bool
     public var checklistItems: [ChecklistItem]
     public var tags: [Tag]
     public var attachments: [TaskAttachment]
@@ -309,6 +310,7 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         areaId: String? = nil,
         recurrenceRule: RecurrenceRule? = nil,
         sortOrder: Double = 1000.0,
+        isPinned: Bool = false,
         checklistItems: [ChecklistItem] = [],
         tags: [Tag] = [],
         attachments: [TaskAttachment] = [],
@@ -332,6 +334,7 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.areaId = areaId
         self.recurrenceRule = recurrenceRule
         self.sortOrder = sortOrder
+        self.isPinned = isPinned
         self.checklistItems = checklistItems
         self.tags = tags
         self.attachments = attachments
@@ -343,7 +346,7 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id, title, notes, status, scheduleState, whenDate, deadline, reminderTime
         case scheduledStartMinutes, durationMinutes, completedAt, projectId, headingId, areaId
-        case recurrenceRule, sortOrder, checklistItems, tags, attachments, createdAt, updatedAt, isDeleted
+        case recurrenceRule, sortOrder, isPinned, checklistItems, tags, attachments, createdAt, updatedAt, isDeleted
     }
 
     public init(from decoder: Decoder) throws {
@@ -364,6 +367,7 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.areaId = try c.decodeIfPresent(String.self, forKey: .areaId)
         self.recurrenceRule = try c.decodeIfPresent(RecurrenceRule.self, forKey: .recurrenceRule)
         self.sortOrder = try c.decodeIfPresent(Double.self, forKey: .sortOrder) ?? 1000.0
+        self.isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
         self.checklistItems = try c.decodeIfPresent([ChecklistItem].self, forKey: .checklistItems) ?? []
         self.tags = try c.decodeIfPresent([Tag].self, forKey: .tags) ?? []
         self.attachments = try c.decodeIfPresent([TaskAttachment].self, forKey: .attachments) ?? []
@@ -1574,6 +1578,8 @@ public struct AppPreferences: Codable, Equatable, Sendable {
     public var includeBetaUpdates: Bool
     public var hideSampleSetupBanner: Bool
     public var menuBarSelectedProjectId: String?
+    public var tagSortMode: String
+    public var viewSortMode: String
 
     public init(
         localOnlyDbMode: Bool = false,
@@ -1589,7 +1595,9 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         autoUpdateCheckEnabled: Bool = true,
         includeBetaUpdates: Bool = AppUpdateService.currentVersionIsPrerelease,
         hideSampleSetupBanner: Bool = false,
-        menuBarSelectedProjectId: String? = nil
+        menuBarSelectedProjectId: String? = nil,
+        tagSortMode: String = "alpha",
+        viewSortMode: String = "manual"
     ) {
         self.localOnlyDbMode = localOnlyDbMode
         self.sidebarVisible = sidebarVisible
@@ -1605,13 +1613,15 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         self.includeBetaUpdates = includeBetaUpdates
         self.hideSampleSetupBanner = hideSampleSetupBanner
         self.menuBarSelectedProjectId = menuBarSelectedProjectId
+        self.tagSortMode = tagSortMode
+        self.viewSortMode = viewSortMode
     }
 
     private enum CodingKeys: String, CodingKey {
         case localOnlyDbMode, sidebarVisible, dailyDigestEnabled, dailyDigestHour, dailyDigestMinute
         case language, calendarEventsEnabled, selectedCalendarIds, groupTodayByProjectOrArea
         case biometricLockEnabled, autoUpdateCheckEnabled, includeBetaUpdates
-        case hideSampleSetupBanner, menuBarSelectedProjectId
+        case hideSampleSetupBanner, menuBarSelectedProjectId, tagSortMode, viewSortMode
     }
 
     public init(from decoder: Decoder) throws {
@@ -1630,6 +1640,8 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         self.includeBetaUpdates = try c.decodeIfPresent(Bool.self, forKey: .includeBetaUpdates) ?? AppUpdateService.currentVersionIsPrerelease
         self.hideSampleSetupBanner = try c.decodeIfPresent(Bool.self, forKey: .hideSampleSetupBanner) ?? false
         self.menuBarSelectedProjectId = try c.decodeIfPresent(String.self, forKey: .menuBarSelectedProjectId)
+        self.tagSortMode = try c.decodeIfPresent(String.self, forKey: .tagSortMode) ?? "alpha"
+        self.viewSortMode = try c.decodeIfPresent(String.self, forKey: .viewSortMode) ?? "manual"
     }
 
     private static let storageKey = "thingsbook_macos_preferences_v1"
@@ -2701,5 +2713,102 @@ public enum MacCalendarAppointmentStyleMetrics {
     }
 }
 
+// MARK: - v2.5.0 Pin-First Task Sorter & Tag List Sorter
 
+public enum TaskViewSorter {
+    public static func sort(_ tasks: [TaskItem], mode: String) -> [TaskItem] {
+        let normalizedMode = mode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return tasks.sorted { lhs, rhs in
+            if lhs.isPinned != rhs.isPinned {
+                return lhs.isPinned && !rhs.isPinned
+            }
+            switch normalizedMode {
+            case "deadline":
+                switch (lhs.deadline, rhs.deadline) {
+                case let (l?, r?):
+                    if l != r { return l < r }
+                case (_?, nil):
+                    return true
+                case (nil, _?):
+                    return false
+                case (nil, nil):
+                    break
+                }
+            case "duration":
+                let lDur = (lhs.durationMinutes ?? 0) > 0 ? lhs.durationMinutes : nil
+                let rDur = (rhs.durationMinutes ?? 0) > 0 ? rhs.durationMinutes : nil
+                switch (lDur, rDur) {
+                case let (l?, r?):
+                    if l != r { return l < r }
+                case (_?, nil):
+                    return true
+                case (nil, _?):
+                    return false
+                case (nil, nil):
+                    break
+                }
+            case "alpha":
+                let cmp = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
+                if cmp != .orderedSame {
+                    return cmp == .orderedAscending
+                }
+            default:
+                break
+            }
+            if lhs.sortOrder != rhs.sortOrder {
+                return lhs.sortOrder < rhs.sortOrder
+            }
+            if lhs.createdAt != rhs.createdAt {
+                return lhs.createdAt < rhs.createdAt
+            }
+            return lhs.id < rhs.id
+        }
+    }
+}
+
+public enum TagListSorter {
+    public static func sort(
+        _ tags: [Tag],
+        mode: String,
+        usageCounts: [String: Int] = [:]
+    ) -> [Tag] {
+        let normalizedMode = mode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return tags.sorted { lhs, rhs in
+            switch normalizedMode {
+            case "most_used":
+                let lCount = usageCounts[lhs.id] ?? 0
+                let rCount = usageCounts[rhs.id] ?? 0
+                if lCount != rCount {
+                    return lCount > rCount
+                }
+                let cmp = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
+                if cmp != .orderedSame {
+                    return cmp == .orderedAscending
+                }
+                if lhs.sortOrder != rhs.sortOrder {
+                    return lhs.sortOrder < rhs.sortOrder
+                }
+                return lhs.id < rhs.id
+            case "manual":
+                if lhs.sortOrder != rhs.sortOrder {
+                    return lhs.sortOrder < rhs.sortOrder
+                }
+                let cmp = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
+                if cmp != .orderedSame {
+                    return cmp == .orderedAscending
+                }
+                return lhs.id < rhs.id
+            default: // "alpha"
+                let cmp = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
+                if cmp != .orderedSame {
+                    return cmp == .orderedAscending
+                }
+                if lhs.sortOrder != rhs.sortOrder {
+                    return lhs.sortOrder < rhs.sortOrder
+                }
+                return lhs.id < rhs.id
+            }
+        }
+    }
+}
 

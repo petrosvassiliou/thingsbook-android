@@ -30,14 +30,11 @@ import type {
   HeadingRecord,
   ProjectRecord,
   ProjectTemplate,
-  TagRecord,
-  TaskRecord
+  TagRecord
 } from '../domain/types';
 import {
   normalizeProjectStatus,
-  normalizeScheduleState,
-  normalizeTaskStatus,
-  safeParseRecurrence
+  normalizeScheduleState
 } from './backupCodec';
 import { hasStoredGoogleCalendarAccountForEmail } from './calendarService';
 import {
@@ -70,8 +67,13 @@ import {
   formatUidWakeChannelFromHex,
   formatUidWakeSeed,
   normalizeFirestoreDocWithId,
+  taskFromFirestoreMap,
+  taskToFirestoreMap,
+  type RemoteTaskWithHints,
   type SyncCollectionName
 } from './syncUtils';
+
+export { taskFromFirestoreMap, taskToFirestoreMap, type RemoteTaskWithHints };
 
 function extractAuthErrorCode(err: unknown): string {
   const code = (err as { code?: unknown })?.code;
@@ -306,76 +308,6 @@ function headingFromFirestoreMap(map: Record<string, unknown>): HeadingRecord | 
     updatedAt: Math.trunc(finiteNumber(map.updatedAt)),
     isDeleted: Boolean(map.isDeleted),
     isDirty: false
-  };
-}
-
-function taskToFirestoreMap(task: TaskRecord): Record<string, unknown> {
-  return {
-    id: task.id,
-    title: task.title,
-    notes: task.notes || '',
-    status: task.status,
-    scheduleState: task.scheduleState,
-    whenDate: task.whenDate != null ? Math.trunc(task.whenDate) : null,
-    deadline: task.deadline != null ? Math.trunc(task.deadline) : null,
-    reminderTime: task.reminderTime != null ? Math.trunc(task.reminderTime) : null,
-    scheduledStartMinutes:
-      task.scheduledStartMinutes != null ? Math.trunc(task.scheduledStartMinutes) : null,
-    durationMinutes:
-      task.durationMinutes != null ? Math.trunc(task.durationMinutes) : null,
-    completedAt: task.completedAt != null ? Math.trunc(task.completedAt) : null,
-    projectId: task.projectId ?? null,
-    headingId: task.headingId ?? null,
-    areaId: task.areaId ?? null,
-    recurrenceRule: task.recurrenceRule ? JSON.stringify(task.recurrenceRule) : null,
-    sortOrder: finiteNumber(task.sortOrder),
-    tagIds: task.tagIds || [],
-    createdAt: Math.trunc(finiteNumber(task.createdAt)),
-    updatedAt: Math.trunc(finiteNumber(task.updatedAt)),
-    isDeleted: Boolean(task.isDeleted),
-    purgedFromTrash: Boolean(task.purgedFromTrash)
-  };
-}
-
-type RemoteTaskWithHints = TaskRecord & { omittedTimeblockFields?: boolean };
-
-function taskFromFirestoreMap(map: Record<string, unknown>): RemoteTaskWithHints | null {
-  const id = nullableString(map.id);
-  if (!id) return null;
-  const title = typeof map.title === 'string' ? map.title : '';
-  const notes = typeof map.notes === 'string' ? map.notes : '';
-  const isDeleted = Boolean(map.isDeleted);
-  const omittedTimeblockFields = !Object.prototype.hasOwnProperty.call(
-    map,
-    'scheduledStartMinutes'
-  );
-  return {
-    id,
-    title,
-    notes,
-    status: normalizeTaskStatus(typeof map.status === 'string' ? map.status : 'OPEN'),
-    scheduleState: normalizeScheduleState(
-      typeof map.scheduleState === 'string' ? map.scheduleState : 'INBOX',
-      'INBOX'
-    ),
-    whenDate: nullableNumber(map.whenDate),
-    deadline: nullableNumber(map.deadline),
-    reminderTime: nullableNumber(map.reminderTime),
-    scheduledStartMinutes: nullableNumber(map.scheduledStartMinutes),
-    durationMinutes: nullableNumber(map.durationMinutes),
-    completedAt: nullableNumber(map.completedAt),
-    projectId: nullableString(map.projectId),
-    headingId: nullableString(map.headingId),
-    areaId: nullableString(map.areaId),
-    recurrenceRule: safeParseRecurrence(nullableString(map.recurrenceRule)),
-    sortOrder: finiteNumber(map.sortOrder),
-    tagIds: stringList(map.tagIds),
-    createdAt: Math.trunc(finiteNumber(map.createdAt)),
-    updatedAt: Math.trunc(finiteNumber(map.updatedAt)),
-    isDeleted,
-    isDirty: false,
-    purgedFromTrash: Boolean(map.purgedFromTrash || (isDeleted && !title && !notes)),
-    ...(omittedTimeblockFields ? { omittedTimeblockFields: true } : {})
   };
 }
 

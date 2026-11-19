@@ -473,4 +473,26 @@
     <string name="topbar_tooltip_cloud_sync">Cloud Sync</string>
     <string name="topbar_tooltip_settings">Settings</string>
     <string name="action_more_options">More Actions</string>
+    <string name="v25_pin_task">Pin to Top</string>
+    <string name="v25_unpin_task">Unpin</string>
+    <string name="v25_pinned_badge">Pinned</string>
+    <string name="v25_tags_search_placeholder">Search tags…</string>
+    <string name="v25_tags_assign_search_placeholder">Search or create tag…</string>
+    <string name="v25_tags_no_matches">No matching tags</string>
+    <string name="v25_tags_sort_alpha">A–Z</string>
+    <string name="v25_tags_sort_most_used">Most Used</string>
+    <string name="v25_tags_sort_manual">Custom</string>
+    <string name="v25_tags_merge_action">Merge Into…</string>
+    <string name="v25_tags_merge_target_prompt">Merge \"%1$s\" into:</string>
+    <string name="v25_tags_merged_toast">Merged \"%1$s\" into \"%2$s\"</string>
+    <string name="v25_view_sort_label">Sort</string>
+    <string name="v25_view_sort_manual">Manual</string>
+    <string name="v25_view_sort_deadline">By Deadline</string>
+    <string name="v25_view_sort_duration">By Duration</string>
+    <string name="v25_view_sort_alpha">Alphabetical (A–Z)</string>
+    <string name="v25_copy_suffix">Copy</string>
+    <string name="v25_batch_pin">Pin</string>
+    <string name="v25_batch_tags">Tags</string>
+    <string name="v25_batch_duplicate">Duplicate</string>
+    <string name="v25_batch_someday">Someday</string>
 </resources>

@@ -238,6 +238,7 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
     public var areaId: String?
     public var recurrenceRuleJson: String?
     public var sortOrder: Double
+    public var isPinned: Bool
     public var tagIdsJson: String
     public var createdAt: Int64
     public var updatedAt: Int64
@@ -259,6 +260,7 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
         areaId: String? = nil,
         recurrenceRuleJson: String? = nil,
         sortOrder: Double = 0,
+        isPinned: Bool = false,
         tagIdsJson: String = "[]",
         createdAt: Int64 = 0,
         updatedAt: Int64 = 0
@@ -279,6 +281,7 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
         self.areaId = areaId
         self.recurrenceRuleJson = recurrenceRuleJson
         self.sortOrder = sortOrder
+        self.isPinned = isPinned
         self.tagIdsJson = tagIdsJson
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -302,6 +305,7 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
         self.areaId = try? c.decodeIfPresent(String.self, forKey: .areaId)
         self.recurrenceRuleJson = try? c.decodeIfPresent(String.self, forKey: .recurrenceRuleJson)
         self.sortOrder = (try? c.decode(Double.self, forKey: .sortOrder)) ?? 0
+        self.isPinned = (try? c.decodeIfPresent(Bool.self, forKey: .isPinned)) ?? false
         self.tagIdsJson = (try? c.decode(String.self, forKey: .tagIdsJson)) ?? "[]"
         self.createdAt = (try? c.decode(Int64.self, forKey: .createdAt)) ?? 0
         self.updatedAt = (try? c.decode(Int64.self, forKey: .updatedAt)) ?? 0
@@ -539,6 +543,8 @@ public struct BackupPreferencesDto: Codable, Equatable, Sendable {
     public var selectedCalendarIds: [String]?
     public var groupTodayByProjectOrArea: Bool?
     public var includeBetaUpdates: Bool?
+    public var tagSortMode: String?
+    public var viewSortMode: String?
 
     public init(
         sidebarVisible: Bool? = nil,
@@ -549,7 +555,9 @@ public struct BackupPreferencesDto: Codable, Equatable, Sendable {
         calendarEventsEnabled: Bool? = nil,
         selectedCalendarIds: [String]? = nil,
         groupTodayByProjectOrArea: Bool? = nil,
-        includeBetaUpdates: Bool? = nil
+        includeBetaUpdates: Bool? = nil,
+        tagSortMode: String? = nil,
+        viewSortMode: String? = nil
     ) {
         self.sidebarVisible = sidebarVisible
         self.dailyDigestEnabled = dailyDigestEnabled
@@ -560,6 +568,8 @@ public struct BackupPreferencesDto: Codable, Equatable, Sendable {
         self.selectedCalendarIds = selectedCalendarIds
         self.groupTodayByProjectOrArea = groupTodayByProjectOrArea
         self.includeBetaUpdates = includeBetaUpdates
+        self.tagSortMode = tagSortMode
+        self.viewSortMode = viewSortMode
     }
 }
 

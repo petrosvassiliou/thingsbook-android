@@ -48,6 +48,8 @@ import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import com.culturedcode.things3.domain.model.TimeblockScheduleUtils
 import com.culturedcode.things3.domain.model.TodayTimelineEntry
+import com.culturedcode.things3.domain.model.sortTagsForMode
+import com.culturedcode.things3.domain.model.sortTasksForView
 import com.culturedcode.things3.ui.components.MagicPlusDropMode
 import com.culturedcode.things3.ui.components.ThingsTooltipHostState
 import com.culturedcode.things3.ui.components.TooltipTimingPolicy
@@ -761,9 +763,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(85, BuildConfig.VERSION_CODE)
-        assertEquals("2.1.4", BuildConfig.VERSION_NAME)
-        assertFalse("Final 2.1.4 release must not contain pre-release hyphen", BuildConfig.VERSION_NAME.contains("-"))
+        assertEquals(87, BuildConfig.VERSION_CODE)
+        assertEquals("2.5.0", BuildConfig.VERSION_NAME)
+        assertFalse("Final 2.5.0 release must not contain pre-release hyphen", BuildConfig.VERSION_NAME.contains("-"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -1814,7 +1816,299 @@ class V2UpgradeAndFeaturesTest {
         val settingsKt = File(appSrcMain, "java/com/culturedcode/things3/ui/components/ThingsSettingsModal.kt").readText()
         assertTrue(settingsKt.contains("LocalLiveAppLocaleOverride.current?.languageTag"))
     }
+
+    @Test
+    fun `v2_5_0 sortTasksForView floats pinned tasks first across manual deadline duration and alpha modes`() {
+        fun sampleTask(
+            id: String,
+            title: String,
+            sortOrder: Double,
+            isPinned: Boolean = false,
+            deadline: Long? = null,
+            durationMinutes: Int? = null,
+            createdAt: Long = 1_000L
+        ) = TaskItem(
+            id = id,
+            title = title,
+            notes = "",
+            status = TaskStatus.OPEN,
+            scheduleState = ScheduleState.TODAY,
+            whenDate = 1_000L,
+            deadline = deadline,
+            reminderTime = null,
+            durationMinutes = durationMinutes,
+            completedAt = null,
+            projectId = null,
+            headingId = null,
+            areaId = null,
+            recurrenceRule = null,
+            sortOrder = sortOrder,
+            isPinned = isPinned,
+            createdAt = createdAt,
+            updatedAt = createdAt
+        )
+
+        val tasks = listOf(
+            sampleTask(id = "t-unpinned-early", title = "Charlie", sortOrder = 100.0, isPinned = false, deadline = 2_000L, durationMinutes = 15),
+            sampleTask(id = "t-pinned-late", title = "Zulu", sortOrder = 400.0, isPinned = true, deadline = 9_000L, durationMinutes = 60),
+            sampleTask(id = "t-unpinned-no-dl", title = "Alpha", sortOrder = 200.0, isPinned = false, deadline = null, durationMinutes = 0),
+            sampleTask(id = "t-pinned-early", title = "Bravo", sortOrder = 300.0, isPinned = true, deadline = 4_000L, durationMinutes = 25),
+            sampleTask(id = "t-unpinned-mid", title = "Delta", sortOrder = 250.0, isPinned = false, deadline = 5_000L, durationMinutes = 45)
+        )
+
+        // Manual: pinned tasks first by sortOrder ASC, then unpinned by sortOrder ASC
+        assertEquals(
+            listOf("t-pinned-early", "t-pinned-late", "t-unpinned-early", "t-unpinned-no-dl", "t-unpinned-mid"),
+            sortTasksForView(tasks, "manual").map { it.id }
+        )
+
+        // Deadline: pinned tasks first (earliest deadline ASC), then unpinned (non-null deadlines ASC, then null deadline)
+        assertEquals(
+            listOf("t-pinned-early", "t-pinned-late", "t-unpinned-early", "t-unpinned-mid", "t-unpinned-no-dl"),
+            sortTasksForView(tasks, "deadline").map { it.id }
+        )
+
+        // Duration: pinned tasks first (positive durationMinutes ASC), then unpinned (positive durationMinutes ASC, then 0/null)
+        assertEquals(
+            listOf("t-pinned-early", "t-pinned-late", "t-unpinned-early", "t-unpinned-mid", "t-unpinned-no-dl"),
+            sortTasksForView(tasks, "duration").map { it.id }
+        )
+
+        // Alpha: pinned tasks first (case-insensitive A–Z), then unpinned (case-insensitive A–Z)
+        assertEquals(
+            listOf("t-pinned-early", "t-pinned-late", "t-unpinned-no-dl", "t-unpinned-early", "t-unpinned-mid"),
+            sortTasksForView(tasks, "alpha").map { it.id }
+        )
+    }
+
+    @Test
+    fun `v2_5_0 sortTagsForMode orders tags by alpha most_used and manual modes`() {
+        val tags = listOf(
+            Tag(id = "tag-z", title = "Zoom", parentTagId = null, shortcut = "z", sortOrder = 100.0, createdAt = 10L, updatedAt = 10L),
+            Tag(id = "tag-a", title = "admin", parentTagId = null, shortcut = "a", sortOrder = 300.0, createdAt = 20L, updatedAt = 20L),
+            Tag(id = "tag-d", title = "Deep Work", parentTagId = null, shortcut = "d", sortOrder = 200.0, createdAt = 30L, updatedAt = 30L)
+        )
+        val counts = mapOf(
+            "tag-d" to 9,
+            "tag-z" to 2,
+            "tag-a" to 2
+        )
+
+        assertEquals(
+            listOf("tag-a", "tag-d", "tag-z"),
+            sortTagsForMode(tags, "alpha", counts).map { it.id }
+        )
+        assertEquals(
+            listOf("tag-d", "tag-a", "tag-z"),
+            sortTagsForMode(tags, "most_used", counts).map { it.id }
+        )
+        assertEquals(
+            listOf("tag-z", "tag-d", "tag-a"),
+            sortTagsForMode(tags, "manual", counts).map { it.id }
+        )
+    }
+
+    @Test
+    fun `v2_5_0 BackupTaskDto isPinned and BackupPreferencesDto tagSortMode viewSortMode roundtrip and legacy compatibility`() {
+        val payload = ThingsbookBackupPayload(
+            createdAt = 1_800_000_000_000L,
+            appVersionName = "2.5.0",
+            tasks = listOf(
+                BackupTaskDto(
+                    id = "task-pinned-1",
+                    title = "Ship Android v2.5.0",
+                    isPinned = true,
+                    sortOrder = 100.0,
+                    createdAt = 1_800_000_000_000L,
+                    updatedAt = 1_800_000_000_000L
+                ),
+                BackupTaskDto(
+                    id = "task-unpinned-2",
+                    title = "Regular task",
+                    isPinned = false,
+                    sortOrder = 200.0,
+                    createdAt = 1_800_000_000_000L,
+                    updatedAt = 1_800_000_000_000L
+                )
+            ),
+            preferences = BackupPreferencesDto(
+                sidebarVisible = true,
+                tagSortMode = "most_used",
+                viewSortMode = "deadline"
+            )
+        )
+
+        val encodedBytes = ThingsBackupCodec.encodeBackup(
+            payload = payload,
+            password = "v25-secret".toCharArray(),
+            appVersionName = "2.5.0",
+            appVersionCode = 87
+        )
+        val decoded = ThingsBackupCodec.decodeBackup(encodedBytes, "v25-secret".toCharArray())
+
+        assertEquals(2, decoded.tasks.size)
+        assertTrue(decoded.tasks.first { it.id == "task-pinned-1" }.isPinned)
+        assertFalse(decoded.tasks.first { it.id == "task-unpinned-2" }.isPinned)
+        assertEquals("most_used", decoded.preferences.tagSortMode)
+        assertEquals("deadline", decoded.preferences.viewSortMode)
+
+        // Legacy backup JSON without isPinned, tagSortMode, or viewSortMode defaults cleanly
+        val legacyJson = """
+            {
+              "schemaVersion": 1,
+              "createdAt": 1750000000000,
+              "appVersionName": "2.1.4",
+              "tasks": [{"id": "legacy-t1", "title": "Legacy Task"}],
+              "preferences": {"sidebarVisible": true}
+            }
+        """.trimIndent()
+        val legacyDecoded = lenientJson.decodeFromString<ThingsbookBackupPayload>(legacyJson)
+        assertFalse(legacyDecoded.tasks.single().isPinned)
+        assertNull(legacyDecoded.preferences.tagSortMode)
+        assertNull(legacyDecoded.preferences.viewSortMode)
+    }
+
+    @Test
+    fun `v2_5_0 TaskFirestoreDto isPinned and omittedPinField backward compatibility and tombstone scrubbing`() {
+        // 1. Legacy Firestore map omitting isPinned flags omittedPinField = true
+        val legacyMap = mapOf<String, Any?>(
+            "id" to "task-legacy-sync",
+            "title" to "Edited on v2.1 client",
+            "status" to "OPEN",
+            "scheduleState" to "TODAY",
+            "updatedAt" to 1_800_100_000_000L
+        )
+        val legacyDto = TaskFirestoreDto.fromFirestoreMap(legacyMap)
+        assertNotNull(legacyDto)
+        assertFalse(legacyDto!!.isPinned)
+        assertTrue(legacyDto.omittedPinField)
+
+        // 2. v2.5.0 entity roundtrips isPinned = true with omittedPinField = false
+        val pinnedEntity = TaskEntity(
+            id = "task-v25-pinned",
+            title = "Pinned Focus",
+            notes = "",
+            status = TaskStatus.OPEN,
+            scheduleState = ScheduleState.TODAY,
+            sortOrder = 50.0,
+            isPinned = true,
+            createdAt = 1_800_100_000_000L,
+            updatedAt = 1_800_100_000_500L
+        )
+        val serializedMap = TaskFirestoreDto.fromEntity(pinnedEntity).toFirestoreMap()
+        assertEquals(true, serializedMap["isPinned"])
+        val parsedV25Dto = TaskFirestoreDto.fromFirestoreMap(serializedMap)
+        assertNotNull(parsedV25Dto)
+        assertTrue(parsedV25Dto!!.isPinned)
+        assertFalse(parsedV25Dto.omittedPinField)
+        assertTrue(parsedV25Dto.toEntity().isPinned)
+
+        // 3. Purged tombstone resets isPinned = false on wire and entity
+        val purgedTombstoneEntity = pinnedEntity.copy(
+            title = "",
+            notes = "",
+            isPinned = false,
+            isDeleted = true
+        )
+        val tombstoneMap = TaskFirestoreDto.fromEntity(purgedTombstoneEntity).toFirestoreMap()
+        assertEquals(false, tombstoneMap["isPinned"])
+
+        val remotePurgedWithStalePin = TaskFirestoreDto(
+            id = "task-purged-pin",
+            title = "Stale",
+            isPinned = true,
+            isDeleted = true,
+            purgedFromTrash = true,
+            updatedAt = 1_800_100_001_000L
+        )
+        assertFalse(remotePurgedWithStalePin.toEntity().isPinned)
+        assertEquals(false, remotePurgedWithStalePin.toFirestoreMap()["isPinned"])
+
+        // 4. CloudDeltaBatchPayload.decodeWithHints distinguishes omitted vs explicit isPinned
+        val deltaJson = """
+            {
+              "userId": "u1",
+              "deviceId": "d1",
+              "batchTimestamp": 1800100002000,
+              "tasks": [
+                {"id": "delta-legacy", "title": "No Pin Key", "status": "OPEN", "scheduleState": "TODAY", "updatedAt": 1800100002000},
+                {"id": "delta-pinned", "title": "Explicit Pin", "status": "OPEN", "scheduleState": "TODAY", "isPinned": true, "updatedAt": 1800100002000},
+                {"id": "delta-unpinned", "title": "Explicit Unpin", "status": "OPEN", "scheduleState": "TODAY", "isPinned": false, "updatedAt": 1800100002000}
+              ]
+            }
+        """.trimIndent()
+        val decodedBatch = CloudDeltaBatchPayload.decodeWithHints(deltaJson, lenientJson)
+        val deltaLegacy = decodedBatch.tasks.first { it.id == "delta-legacy" }
+        val deltaPinned = decodedBatch.tasks.first { it.id == "delta-pinned" }
+        val deltaUnpinned = decodedBatch.tasks.first { it.id == "delta-unpinned" }
+
+        assertTrue(deltaLegacy.omittedPinField)
+        assertFalse(deltaPinned.omittedPinField)
+        assertTrue(deltaPinned.isPinned)
+        assertFalse(deltaUnpinned.omittedPinField)
+        assertFalse(deltaUnpinned.isPinned)
+    }
+
+    @Test
+    fun `v2_5_0 ThingsTagManagerModal uses constant height without heightIn and all 22 v25 localization keys exist across 5 languages`() {
+        val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
+        val tagModalKt = File(
+            appSrcMain,
+            "java/com/culturedcode/things3/ui/components/ThingsTagManagerModal.kt"
+        ).readText()
+
+        assertFalse(
+            "ThingsTagManagerModal.kt must NEVER use heightIn( so tag lists stay constant-height locked",
+            tagModalKt.contains("heightIn(")
+        )
+        assertTrue(tagModalKt.contains(".height(manageListHeight)"))
+        assertTrue(tagModalKt.contains(".height(pickerListHeight)"))
+
+        val expectedV25Keys = setOf(
+            "v25_pin_task",
+            "v25_unpin_task",
+            "v25_pinned_badge",
+            "v25_tags_search_placeholder",
+            "v25_tags_assign_search_placeholder",
+            "v25_tags_no_matches",
+            "v25_tags_sort_alpha",
+            "v25_tags_sort_most_used",
+            "v25_tags_sort_manual",
+            "v25_tags_merge_action",
+            "v25_tags_merge_target_prompt",
+            "v25_tags_merged_toast",
+            "v25_view_sort_label",
+            "v25_view_sort_manual",
+            "v25_view_sort_deadline",
+            "v25_view_sort_duration",
+            "v25_view_sort_alpha",
+            "v25_copy_suffix",
+            "v25_batch_pin",
+            "v25_batch_tags",
+            "v25_batch_duplicate",
+            "v25_batch_someday"
+        )
+        assertEquals(22, expectedV25Keys.size)
+
+        val resRoot = File(appSrcMain, "res")
+        for (folder in listOf("values", "values-de", "values-fr", "values-it", "values-es")) {
+            val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(File(resRoot, "$folder/strings.xml"))
+            val nodes = doc.getElementsByTagName("string")
+            val keysInFile = mutableMapOf<String, String>()
+            for (i in 0 until nodes.length) {
+                val elem = nodes.item(i)
+                val name = elem.attributes?.getNamedItem("name")?.nodeValue ?: continue
+                keysInFile[name] = elem.textContent.orEmpty()
+            }
+            for (k in expectedV25Keys) {
+                val v = keysInFile[k]
+                assertNotNull("Missing $k in $folder/strings.xml", v)
+                assertTrue("Blank $k in $folder/strings.xml", v!!.isNotBlank())
+            }
+        }
+    }
 }
+
 
 
 

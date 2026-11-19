@@ -55,23 +55,40 @@ data class CloudDeltaBatchPayload(
         fun decodeWithHints(rawJson: String, codec: Json = firestoreJson): CloudDeltaBatchPayload {
             val base = codec.decodeFromString<CloudDeltaBatchPayload>(rawJson)
             if (base.tasks.isEmpty()) return base
-            val omittedIds = runCatching {
+            var omittedTimeblockIds = emptySet<String>()
+            var omittedPinIds = emptySet<String>()
+            runCatching {
                 val root = codec.parseToJsonElement(rawJson).jsonObject
-                val arr = root["tasks"]?.jsonArray ?: return@runCatching emptySet<String>()
-                buildSet {
-                    for (el in arr) {
-                        val obj = el.jsonObject
-                        if (!obj.containsKey("scheduledStartMinutes")) {
-                            val tid = obj["id"]?.jsonPrimitive?.content?.trim().orEmpty()
-                            if (tid.isNotEmpty()) add(tid)
-                        }
+                val arr = root["tasks"]?.jsonArray ?: return@runCatching
+                val tbSet = HashSet<String>()
+                val pinSet = HashSet<String>()
+                for (el in arr) {
+                    val obj = el.jsonObject
+                    val tid = obj["id"]?.jsonPrimitive?.content?.trim().orEmpty()
+                    if (tid.isEmpty()) continue
+                    if (!obj.containsKey("scheduledStartMinutes")) {
+                        tbSet.add(tid)
+                    }
+                    if (!obj.containsKey("isPinned")) {
+                        pinSet.add(tid)
                     }
                 }
-            }.getOrDefault(emptySet())
-            if (omittedIds.isEmpty()) return base
+                omittedTimeblockIds = tbSet
+                omittedPinIds = pinSet
+            }
+            if (omittedTimeblockIds.isEmpty() && omittedPinIds.isEmpty()) return base
             return base.copy(
                 tasks = base.tasks.map { dto ->
-                    if (dto.id in omittedIds) dto.copy(omittedTimeblockFields = true) else dto
+                    val omitTb = dto.id in omittedTimeblockIds
+                    val omitPin = dto.id in omittedPinIds
+                    if (omitTb || omitPin) {
+                        dto.copy(
+                            omittedTimeblockFields = dto.omittedTimeblockFields || omitTb,
+                            omittedPinField = dto.omittedPinField || omitPin
+                        )
+                    } else {
+                        dto
+                    }
                 }
             )
         }
@@ -330,13 +347,16 @@ data class TaskFirestoreDto(
     val areaId: String? = null,
     val recurrenceRule: String? = null,
     val sortOrder: Double = 0.0,
+    val isPinned: Boolean = false,
     val tagIds: List<String> = emptyList(),
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L,
     val isDeleted: Boolean = false,
     val purgedFromTrash: Boolean = false,
     @Transient
-    val omittedTimeblockFields: Boolean = false
+    val omittedTimeblockFields: Boolean = false,
+    @Transient
+    val omittedPinField: Boolean = false
 ) {
     fun toEntity(): TaskEntity {
         val isPurgedTombstone = isDeleted && (purgedFromTrash || (title.isEmpty() && notes.isEmpty()))
@@ -359,6 +379,7 @@ data class TaskFirestoreDto(
                 it.isNotBlank() && runCatching { firestoreJson.decodeFromString<RecurrenceRule>(it) }.isSuccess
             },
             sortOrder = sortOrder.finiteOrZero(),
+            isPinned = if (isPurgedTombstone) false else isPinned,
             tagIdsJson = firestoreJson.encodeToString(if (isPurgedTombstone) emptyList() else tagIds),
             createdAt = createdAt,
             updatedAt = updatedAt,
@@ -367,54 +388,62 @@ data class TaskFirestoreDto(
         )
     }
 
-    fun toFirestoreMap(): Map<String, Any?> = mapOf(
-        "id" to id,
-        "title" to title,
-        "notes" to notes,
-        "status" to status,
-        "scheduleState" to scheduleState,
-        "whenDate" to whenDate,
-        "deadline" to deadline,
-        "reminderTime" to reminderTime,
-        "scheduledStartMinutes" to scheduledStartMinutes,
-        "durationMinutes" to durationMinutes,
-        "completedAt" to completedAt,
-        "projectId" to projectId,
-        "headingId" to headingId,
-        "areaId" to areaId,
-        "recurrenceRule" to recurrenceRule,
-        "sortOrder" to sortOrder.finiteOrZero(),
-        "tagIds" to tagIds,
-        "createdAt" to createdAt,
-        "updatedAt" to updatedAt,
-        "isDeleted" to isDeleted,
-        "purgedFromTrash" to (purgedFromTrash || (isDeleted && title.isEmpty() && notes.isEmpty()))
-    )
+    fun toFirestoreMap(): Map<String, Any?> {
+        val isPurgedTombstone = isDeleted && (purgedFromTrash || (title.isEmpty() && notes.isEmpty()))
+        return mapOf(
+            "id" to id,
+            "title" to title,
+            "notes" to notes,
+            "status" to status,
+            "scheduleState" to scheduleState,
+            "whenDate" to whenDate,
+            "deadline" to deadline,
+            "reminderTime" to reminderTime,
+            "scheduledStartMinutes" to scheduledStartMinutes,
+            "durationMinutes" to durationMinutes,
+            "completedAt" to completedAt,
+            "projectId" to projectId,
+            "headingId" to headingId,
+            "areaId" to areaId,
+            "recurrenceRule" to recurrenceRule,
+            "sortOrder" to sortOrder.finiteOrZero(),
+            "isPinned" to (if (isPurgedTombstone) false else isPinned),
+            "tagIds" to tagIds,
+            "createdAt" to createdAt,
+            "updatedAt" to updatedAt,
+            "isDeleted" to isDeleted,
+            "purgedFromTrash" to isPurgedTombstone
+        )
+    }
 
     companion object {
-        fun fromEntity(entity: TaskEntity): TaskFirestoreDto = TaskFirestoreDto(
-            id = entity.id,
-            title = entity.title,
-            notes = entity.notes,
-            status = entity.status.name,
-            scheduleState = entity.scheduleState.name,
-            whenDate = entity.whenDate,
-            deadline = entity.deadline,
-            reminderTime = entity.reminderTime,
-            scheduledStartMinutes = entity.scheduledStartMinutes,
-            durationMinutes = entity.durationMinutes,
-            completedAt = entity.completedAt,
-            projectId = entity.projectId,
-            headingId = entity.headingId,
-            areaId = entity.areaId,
-            recurrenceRule = entity.recurrenceRuleJson,
-            sortOrder = entity.sortOrder.finiteOrZero(),
-            tagIds = runCatching { firestoreJson.decodeFromString<List<String>>(entity.tagIdsJson) }.getOrDefault(emptyList()),
-            createdAt = entity.createdAt,
-            updatedAt = entity.updatedAt,
-            isDeleted = entity.isDeleted,
-            purgedFromTrash = entity.isDeleted && entity.title.isEmpty() && entity.notes.isEmpty()
-        )
+        fun fromEntity(entity: TaskEntity): TaskFirestoreDto {
+            val isPurgedTombstone = entity.isDeleted && entity.title.isEmpty() && entity.notes.isEmpty()
+            return TaskFirestoreDto(
+                id = entity.id,
+                title = entity.title,
+                notes = entity.notes,
+                status = entity.status.name,
+                scheduleState = entity.scheduleState.name,
+                whenDate = entity.whenDate,
+                deadline = entity.deadline,
+                reminderTime = entity.reminderTime,
+                scheduledStartMinutes = entity.scheduledStartMinutes,
+                durationMinutes = entity.durationMinutes,
+                completedAt = entity.completedAt,
+                projectId = entity.projectId,
+                headingId = entity.headingId,
+                areaId = entity.areaId,
+                recurrenceRule = entity.recurrenceRuleJson,
+                sortOrder = entity.sortOrder.finiteOrZero(),
+                isPinned = if (isPurgedTombstone) false else entity.isPinned,
+                tagIds = runCatching { firestoreJson.decodeFromString<List<String>>(entity.tagIdsJson) }.getOrDefault(emptyList()),
+                createdAt = entity.createdAt,
+                updatedAt = entity.updatedAt,
+                isDeleted = entity.isDeleted,
+                purgedFromTrash = isPurgedTombstone
+            )
+        }
 
         fun fromFirestoreMap(map: Map<String, Any?>?): TaskFirestoreDto? {
             if (map == null) return null
@@ -425,6 +454,8 @@ data class TaskFirestoreDto(
             val isDeleted = map["isDeleted"] as? Boolean ?: false
             val purged = (map["purgedFromTrash"] as? Boolean == true) || (isDeleted && title.isEmpty() && notes.isEmpty())
             val omittedTimeblock = !map.containsKey("scheduledStartMinutes")
+            val omittedPin = !map.containsKey("isPinned")
+            val rawIsPinned = map["isPinned"] as? Boolean ?: false
             return TaskFirestoreDto(
                 id = id,
                 title = title,
@@ -442,12 +473,14 @@ data class TaskFirestoreDto(
                 areaId = (map["areaId"] as? String)?.takeIf { it.isNotBlank() },
                 recurrenceRule = (map["recurrenceRule"] as? String)?.takeIf { it.isNotBlank() },
                 sortOrder = ((map["sortOrder"] as? Number)?.toDouble() ?: 0.0).finiteOrZero(),
+                isPinned = if (purged) false else rawIsPinned,
                 tagIds = (map["tagIds"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
                 createdAt = (map["createdAt"] as? Number)?.toLong() ?: 0L,
                 updatedAt = (map["updatedAt"] as? Number)?.toLong() ?: 0L,
                 isDeleted = isDeleted,
                 purgedFromTrash = purged,
-                omittedTimeblockFields = omittedTimeblock
+                omittedTimeblockFields = omittedTimeblock,
+                omittedPinField = omittedPin
             )
         }
     }

@@ -6,6 +6,11 @@ import type {
   RecurrenceRule,
   TaskRecord
 } from '../domain/types.ts';
+import {
+  normalizeScheduleState,
+  normalizeTaskStatus,
+  safeParseRecurrence
+} from './backupCodec.ts';
 
 export const MAX_ATTACHMENT_INLINE_BYTES = 700_000;
 export const ATTACHMENT_BATCH_CHUNK_SIZE = 8;
@@ -116,6 +121,7 @@ export type RecurringDedupCandidate = Pick<
   | 'scheduledStartMinutes'
   | 'durationMinutes'
 > & {
+  isPinned?: boolean;
   deadline?: number | null;
   reminderTime?: number | null;
   updatedAt?: number;
@@ -131,6 +137,7 @@ export interface RecurringWinnerEnrichment {
   durationMinutes?: number | null;
   deadline?: number | null;
   reminderTime?: number | null;
+  isPinned?: boolean;
   minUpdatedAt: number;
 }
 
@@ -349,6 +356,10 @@ export function planRecurringDeduplication(
         patch.reminderTime = donorRem;
         changed = true;
       }
+    }
+    if (!winner.isPinned && losers.some((l) => Boolean(l.isPinned))) {
+      patch.isPinned = true;
+      changed = true;
     }
 
     if (changed) {
@@ -712,5 +723,104 @@ export function buildLegacyCompatibleNtfyChunks(
   appendFieldChunks('attachments', input.attachments);
   appendFieldChunks('projectTemplates', input.projectTemplates);
   return out.slice(0, maxChunks);
+}
+
+function syncFiniteNumber(v: unknown, fallback = 0): number {
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function syncNullableNumber(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
+function syncNullableString(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  return t.length > 0 ? t : null;
+}
+
+function syncStringList(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0);
+}
+
+export function taskToFirestoreMap(task: TaskRecord): Record<string, unknown> {
+  return {
+    id: task.id,
+    title: task.title,
+    notes: task.notes || '',
+    status: task.status,
+    scheduleState: task.scheduleState,
+    whenDate: task.whenDate != null ? Math.trunc(task.whenDate) : null,
+    deadline: task.deadline != null ? Math.trunc(task.deadline) : null,
+    reminderTime: task.reminderTime != null ? Math.trunc(task.reminderTime) : null,
+    scheduledStartMinutes:
+      task.scheduledStartMinutes != null ? Math.trunc(task.scheduledStartMinutes) : null,
+    durationMinutes:
+      task.durationMinutes != null ? Math.trunc(task.durationMinutes) : null,
+    isPinned: !task.isDeleted && Boolean(task.isPinned),
+    completedAt: task.completedAt != null ? Math.trunc(task.completedAt) : null,
+    projectId: task.projectId ?? null,
+    headingId: task.headingId ?? null,
+    areaId: task.areaId ?? null,
+    recurrenceRule: task.recurrenceRule ? JSON.stringify(task.recurrenceRule) : null,
+    sortOrder: syncFiniteNumber(task.sortOrder),
+    tagIds: task.tagIds || [],
+    createdAt: Math.trunc(syncFiniteNumber(task.createdAt)),
+    updatedAt: Math.trunc(syncFiniteNumber(task.updatedAt)),
+    isDeleted: Boolean(task.isDeleted),
+    purgedFromTrash: Boolean(task.purgedFromTrash)
+  };
+}
+
+export type RemoteTaskWithHints = TaskRecord & {
+  omittedTimeblockFields?: boolean;
+  omittedPinnedField?: boolean;
+};
+
+export function taskFromFirestoreMap(map: Record<string, unknown>): RemoteTaskWithHints | null {
+  const id = syncNullableString(map.id);
+  if (!id) return null;
+  const title = typeof map.title === 'string' ? map.title : '';
+  const notes = typeof map.notes === 'string' ? map.notes : '';
+  const isDeleted = Boolean(map.isDeleted);
+  const omittedTimeblockFields = !Object.prototype.hasOwnProperty.call(
+    map,
+    'scheduledStartMinutes'
+  );
+  const omittedPinnedField = !Object.prototype.hasOwnProperty.call(map, 'isPinned');
+  return {
+    id,
+    title,
+    notes,
+    status: normalizeTaskStatus(typeof map.status === 'string' ? map.status : 'OPEN'),
+    scheduleState: normalizeScheduleState(
+      typeof map.scheduleState === 'string' ? map.scheduleState : 'INBOX',
+      'INBOX'
+    ),
+    whenDate: syncNullableNumber(map.whenDate),
+    deadline: syncNullableNumber(map.deadline),
+    reminderTime: syncNullableNumber(map.reminderTime),
+    scheduledStartMinutes: syncNullableNumber(map.scheduledStartMinutes),
+    durationMinutes: syncNullableNumber(map.durationMinutes),
+    isPinned: Boolean(map.isPinned),
+    completedAt: syncNullableNumber(map.completedAt),
+    projectId: syncNullableString(map.projectId),
+    headingId: syncNullableString(map.headingId),
+    areaId: syncNullableString(map.areaId),
+    recurrenceRule: safeParseRecurrence(syncNullableString(map.recurrenceRule)),
+    sortOrder: syncFiniteNumber(map.sortOrder),
+    tagIds: syncStringList(map.tagIds),
+    createdAt: Math.trunc(syncFiniteNumber(map.createdAt)),
+    updatedAt: Math.trunc(syncFiniteNumber(map.updatedAt)),
+    isDeleted,
+    isDirty: false,
+    purgedFromTrash: Boolean(map.purgedFromTrash || (isDeleted && !title && !notes)),
+    ...(omittedTimeblockFields ? { omittedTimeblockFields: true } : {}),
+    ...(omittedPinnedField ? { omittedPinnedField: true } : {})
+  };
 }
 

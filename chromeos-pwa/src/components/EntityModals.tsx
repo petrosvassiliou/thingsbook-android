@@ -8,9 +8,12 @@ import {
   Flag,
   Folder,
   FolderInput,
+  GitMerge,
   Inbox,
+  Minus,
   Package,
   Plus,
+  Search,
   Tag,
   Trash2,
   X
@@ -23,8 +26,10 @@ import {
   type AreaRecord,
   type HeadingRecord,
   type ProjectRecord,
-  type TagRecord
+  type TagRecord,
+  type TagSortMode
 } from '../domain/types';
+import { sortTagsForMode } from '../domain/v2Utils';
 import { localDb } from '../data/localDb';
 import {
   ensureNotificationPermission,
@@ -592,18 +597,38 @@ export const MoveTaskModal: React.FC<MoveTaskModalProps> = ({
 
 interface TagManagerModalProps {
   tags: TagRecord[];
+  usageCounts: ReadonlyMap<string, number>;
+  tagSortMode: TagSortMode;
   t: TranslationStrings;
+  onChangeTagSortMode: (mode: TagSortMode) => void;
+  onToast: (msg: string) => void;
   onClose: () => void;
 }
 
-export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClose }) => {
+export const TagManagerModal: React.FC<TagManagerModalProps> = ({
+  tags,
+  usageCounts,
+  tagSortMode,
+  t,
+  onChangeTagSortMode,
+  onToast,
+  onClose
+}) => {
   const [title, setTitle] = useState('');
   const [shortcut, setShortcut] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editShortcut, setEditShortcut] = useState('');
+  const [mergingId, setMergingId] = useState<string | null>(null);
+  const [mergeTargetId, setMergeTargetId] = useState<string>('');
 
   const activeTags = tags.filter((tg) => !tg.isDeleted);
+  const sortedTags = sortTagsForMode(activeTags, tagSortMode, usageCounts);
+  const normQuery = searchQuery.trim().toLowerCase();
+  const filteredTags = normQuery
+    ? sortedTags.filter((tg) => tg.title.toLowerCase().includes(normQuery))
+    : sortedTags;
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -614,6 +639,33 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
     });
     setTitle('');
     setShortcut('');
+  };
+
+  const commitEdit = async (tg: TagRecord) => {
+    const trimmed = editTitle.trim();
+    if (trimmed) {
+      const updated = await localDb.upsertTag({
+        id: tg.id,
+        title: trimmed,
+        shortcut: editShortcut.trim().toUpperCase().slice(0, 1) || null
+      });
+      if (updated.id !== tg.id) {
+        onToast(t.tagsMergedToast(tg.title, updated.title));
+      }
+    }
+    setEditingId(null);
+  };
+
+  const commitMerge = async (sourceTag: TagRecord) => {
+    if (!mergeTargetId || mergeTargetId === sourceTag.id) return;
+    const targetTag = activeTags.find((tg) => tg.id === mergeTargetId);
+    if (!targetTag) return;
+    const ok = await localDb.mergeTags(sourceTag.id, targetTag.id);
+    if (ok) {
+      onToast(t.tagsMergedToast(sourceTag.title, targetTag.title));
+    }
+    setMergingId(null);
+    setMergeTargetId('');
   };
 
   return (
@@ -629,7 +681,7 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
           </button>
         </div>
 
-        <form onSubmit={handleCreate} style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        <form onSubmit={handleCreate} style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
           <input
             type="text"
             className="text-field"
@@ -641,7 +693,7 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
           <input
             type="text"
             className="text-field"
-            style={{ width: 112 }}
+            style={{ width: 104 }}
             maxLength={1}
             value={shortcut}
             onChange={(e) => setShortcut(e.target.value.toUpperCase().slice(0, 1))}
@@ -652,119 +704,297 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
           </button>
         </form>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '54vh', overflowY: 'auto' }}>
-          {activeTags.map((tg) => {
-            const isEditing = editingId === tg.id;
-            return (
-              <div
-                key={tg.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: '7px 10px',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'var(--bg-subtle)',
-                  border: '1px solid var(--border-subtle)'
-                }}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginBottom: 10,
+            flexWrap: 'wrap'
+          }}
+        >
+          <div style={{ position: 'relative', flex: '1 1 160px', display: 'flex', alignItems: 'center' }}>
+            <Search
+              size={14}
+              style={{
+                position: 'absolute',
+                left: 10,
+                color: 'var(--text-tertiary)',
+                pointerEvents: 'none'
+              }}
+            />
+            <input
+              type="text"
+              className="text-field"
+              style={{ width: '100%', paddingLeft: 30, paddingRight: searchQuery ? 28 : 10 }}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t.tagsSearchPlaceholder}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                className="icon-btn"
+                style={{ position: 'absolute', right: 4, width: 22, height: 22 }}
+                onClick={() => setSearchQuery('')}
               >
-                <Tag size={14} style={{ color: 'var(--things-blue)' }} />
-                {isEditing ? (
-                  <>
-                    <input
-                      type="text"
-                      className="text-field"
-                      style={{ flex: 1, padding: '4px 8px' }}
-                      autoFocus
-                      value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
-                      onKeyDown={async (e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          if (editTitle.trim()) {
-                            await localDb.upsertTag({
-                              id: tg.id,
-                              title: editTitle.trim(),
-                              shortcut: editShortcut.trim().toUpperCase().slice(0, 1) || null
-                            });
-                          }
-                          setEditingId(null);
-                        } else if (e.key === 'Escape') {
-                          e.stopPropagation();
-                          setEditingId(null);
-                        }
-                      }}
-                    />
-                    <input
-                      type="text"
-                      className="text-field"
-                      style={{ width: 72, padding: '4px 8px' }}
-                      maxLength={1}
-                      value={editShortcut}
-                      onChange={(e) => setEditShortcut(e.target.value.toUpperCase().slice(0, 1))}
-                      placeholder="Key"
-                      onKeyDown={async (e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          if (editTitle.trim()) {
-                            await localDb.upsertTag({
-                              id: tg.id,
-                              title: editTitle.trim(),
-                              shortcut: editShortcut.trim().toUpperCase().slice(0, 1) || null
-                            });
-                          }
-                          setEditingId(null);
-                        } else if (e.key === 'Escape') {
-                          e.stopPropagation();
-                          setEditingId(null);
-                        }
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="icon-btn active"
-                      onClick={async () => {
-                        if (editTitle.trim()) {
-                          await localDb.upsertTag({
-                            id: tg.id,
-                            title: editTitle.trim(),
-                            shortcut: editShortcut.trim().toUpperCase().slice(0, 1) || null
-                          });
-                        }
-                        setEditingId(null);
+                <X size={13} />
+              </button>
+            )}
+          </div>
+
+          <div className="v2-segmented-toggle" role="group">
+            {(
+              [
+                ['alpha', t.tagsSortAlpha],
+                ['most_used', t.tagsSortMostUsed],
+                ['manual', t.tagsSortManual]
+              ] as const
+            ).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                className={`v2-seg-btn ${tagSortMode === mode ? 'active' : ''}`}
+                onClick={() => onChangeTagSortMode(mode)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+            height: 'min(260px, 40vh)',
+            minHeight: 170,
+            overflowY: 'auto'
+          }}
+        >
+          {filteredTags.length === 0 ? (
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--text-tertiary)',
+                fontSize: 13
+              }}
+            >
+              {t.tagsNoMatches}
+            </div>
+          ) : (
+            filteredTags.map((tg, idx) => {
+              const isEditing = editingId === tg.id;
+              const isMerging = mergingId === tg.id;
+              const usageCount = usageCounts.get(tg.id) ?? 0;
+              const otherActiveTags = activeTags.filter((cand) => cand.id !== tg.id);
+              const isFirst = idx === 0;
+              const isLast = idx === filteredTags.length - 1;
+
+              return (
+                <div
+                  key={tg.id}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                    padding: '7px 10px',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'var(--bg-subtle)',
+                    border: '1px solid var(--border-subtle)'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Tag size={14} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
+                    {isEditing ? (
+                      <>
+                        <input
+                          type="text"
+                          className="text-field"
+                          style={{ flex: 1, padding: '4px 8px' }}
+                          autoFocus
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          onKeyDown={async (e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              await commitEdit(tg);
+                            } else if (e.key === 'Escape') {
+                              e.stopPropagation();
+                              setEditingId(null);
+                            }
+                          }}
+                        />
+                        <input
+                          type="text"
+                          className="text-field"
+                          style={{ width: 68, padding: '4px 8px' }}
+                          maxLength={1}
+                          value={editShortcut}
+                          onChange={(e) => setEditShortcut(e.target.value.toUpperCase().slice(0, 1))}
+                          placeholder="Key"
+                          onKeyDown={async (e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              await commitEdit(tg);
+                            } else if (e.key === 'Escape') {
+                              e.stopPropagation();
+                              setEditingId(null);
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="icon-btn active"
+                          onClick={() => commitEdit(tg)}
+                        >
+                          <Check size={14} />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span
+                          style={{
+                            flex: 1,
+                            fontWeight: 560,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          {tg.title}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 11.5,
+                            fontWeight: 600,
+                            padding: '1px 7px',
+                            borderRadius: 999,
+                            background: 'var(--bg-hover)',
+                            color: 'var(--text-secondary)'
+                          }}
+                        >
+                          {usageCount}
+                        </span>
+                        {tg.shortcut && <kbd>Ctrl+{tg.shortcut}</kbd>}
+                        {tagSortMode === 'manual' && (
+                          <>
+                            <button
+                              type="button"
+                              className="icon-btn"
+                              disabled={Boolean(normQuery) || isFirst}
+                              onClick={() => localDb.moveTagOrder(tg.id, 'up')}
+                            >
+                              <ArrowUp size={13.5} />
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-btn"
+                              disabled={Boolean(normQuery) || isLast}
+                              onClick={() => localDb.moveTagOrder(tg.id, 'down')}
+                            >
+                              <ArrowDown size={13.5} />
+                            </button>
+                          </>
+                        )}
+                        {otherActiveTags.length > 0 && (
+                          <button
+                            type="button"
+                            className={`icon-btn ${isMerging ? 'active' : ''}`}
+                            title={t.tagsMergeAction}
+                            onClick={() => {
+                              if (isMerging) {
+                                setMergingId(null);
+                                setMergeTargetId('');
+                              } else {
+                                setEditingId(null);
+                                setMergingId(tg.id);
+                                setMergeTargetId(otherActiveTags[0]?.id ?? '');
+                              }
+                            }}
+                          >
+                            <GitMerge size={14} />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          onClick={() => {
+                            setMergingId(null);
+                            setEditingId(tg.id);
+                            setEditTitle(tg.title);
+                            setEditShortcut(tg.shortcut || '');
+                          }}
+                        >
+                          <Edit3 size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          style={{ color: 'var(--deadline-red)' }}
+                          onClick={() => localDb.deleteTag(tg.id)}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </>
+                    )}
+                  </div>
+
+                  {isMerging && otherActiveTags.length > 0 && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        paddingTop: 6,
+                        borderTop: '1px solid var(--border-subtle)',
+                        fontSize: 12.5
                       }}
                     >
-                      <Check size={14} />
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <span style={{ flex: 1, fontWeight: 560 }}>{tg.title}</span>
-                    {tg.shortcut && <kbd>Ctrl+{tg.shortcut}</kbd>}
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => {
-                        setEditingId(tg.id);
-                        setEditTitle(tg.title);
-                        setEditShortcut(tg.shortcut || '');
-                      }}
-                    >
-                      <Edit3 size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      style={{ color: 'var(--deadline-red)' }}
-                      onClick={() => localDb.deleteTag(tg.id)}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </>
-                )}
-              </div>
-            );
-          })}
+                      <span style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                        {t.tagsMergeTargetPrompt(tg.title)}
+                      </span>
+                      <select
+                        className="text-field"
+                        style={{ flex: 1, padding: '4px 8px', fontSize: 12.5 }}
+                        value={mergeTargetId}
+                        onChange={(e) => setMergeTargetId(e.target.value)}
+                      >
+                        {otherActiveTags.map((cand) => (
+                          <option key={cand.id} value={cand.id}>
+                            {cand.title}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        className="icon-btn active"
+                        title={t.tagsMergeAction}
+                        onClick={() => commitMerge(tg)}
+                      >
+                        <Check size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        title={t.actionCancel}
+                        onClick={() => {
+                          setMergingId(null);
+                          setMergeTargetId('');
+                        }}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
     </div>
@@ -775,7 +1005,10 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
 
 interface TaskTagPickerModalProps {
   selectedTagIds: string[];
+  indeterminateTagIds?: string[];
   tags: TagRecord[];
+  usageCounts: ReadonlyMap<string, number>;
+  tagSortMode: TagSortMode;
   t: TranslationStrings;
   onToggleTag: (tagId: string) => void;
   onOpenManageTags: () => void;
@@ -784,7 +1017,10 @@ interface TaskTagPickerModalProps {
 
 export const TaskTagPickerModal: React.FC<TaskTagPickerModalProps> = ({
   selectedTagIds,
+  indeterminateTagIds = [],
   tags,
+  usageCounts,
+  tagSortMode,
   t,
   onToggleTag,
   onOpenManageTags,
@@ -792,6 +1028,11 @@ export const TaskTagPickerModal: React.FC<TaskTagPickerModalProps> = ({
 }) => {
   const [quickTag, setQuickTag] = useState('');
   const activeTags = tags.filter((tg) => !tg.isDeleted);
+  const sortedTags = sortTagsForMode(activeTags, tagSortMode, usageCounts);
+  const normQuery = quickTag.trim().toLowerCase();
+  const filteredTags = normQuery
+    ? sortedTags.filter((tg) => tg.title.toLowerCase().includes(normQuery))
+    : sortedTags;
 
   const handleQuickCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -821,39 +1062,92 @@ export const TaskTagPickerModal: React.FC<TaskTagPickerModalProps> = ({
         </div>
 
         <form onSubmit={handleQuickCreate} style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          <input
-            type="text"
-            className="text-field"
-            autoFocus
-            value={quickTag}
-            onChange={(e) => setQuickTag(e.target.value)}
-            placeholder={t.tagsNewPlaceholder}
-          />
+          <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center' }}>
+            <Search
+              size={14}
+              style={{
+                position: 'absolute',
+                left: 10,
+                color: 'var(--text-tertiary)',
+                pointerEvents: 'none'
+              }}
+            />
+            <input
+              type="text"
+              className="text-field"
+              style={{ width: '100%', paddingLeft: 30, paddingRight: quickTag ? 28 : 10 }}
+              autoFocus
+              value={quickTag}
+              onChange={(e) => setQuickTag(e.target.value)}
+              placeholder={t.tagsAssignSearchPlaceholder}
+            />
+            {quickTag && (
+              <button
+                type="button"
+                className="icon-btn"
+                style={{ position: 'absolute', right: 4, width: 22, height: 22 }}
+                onClick={() => setQuickTag('')}
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
           <button type="submit" className="btn-primary" disabled={!quickTag.trim()}>
             <Plus size={15} />
           </button>
         </form>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: '48vh', overflowY: 'auto' }}>
-          {activeTags.map((tg) => {
-            const checked = selectedTagIds.includes(tg.id);
-            return (
-              <button
-                key={tg.id}
-                type="button"
-                className="dropdown-item"
-                onClick={() => onToggleTag(tg.id)}
-              >
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 9 }}>
-                  <span className={`things-checkbox ${checked ? 'completed' : ''}`} style={{ width: 17, height: 17, minWidth: 17 }}>
-                    {checked && <Check size={11} strokeWidth={3} />}
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+            height: 'min(240px, 38vh)',
+            minHeight: 160,
+            overflowY: 'auto'
+          }}
+        >
+          {filteredTags.length === 0 ? (
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--text-tertiary)',
+                fontSize: 13
+              }}
+            >
+              {t.tagsNoMatches}
+            </div>
+          ) : (
+            filteredTags.map((tg) => {
+              const checked = selectedTagIds.includes(tg.id);
+              const indeterminate = !checked && indeterminateTagIds.includes(tg.id);
+              return (
+                <button
+                  key={tg.id}
+                  type="button"
+                  className="dropdown-item"
+                  onClick={() => onToggleTag(tg.id)}
+                >
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 9 }}>
+                    <span
+                      className={`things-checkbox ${checked ? 'completed' : indeterminate ? 'indeterminate' : ''}`}
+                      style={{ width: 17, height: 17, minWidth: 17 }}
+                    >
+                      {checked && <Check size={11} strokeWidth={3} />}
+                      {indeterminate && <Minus size={11} strokeWidth={3} />}
+                    </span>
+                    <span>{tg.title}</span>
                   </span>
-                  <span>{tg.title}</span>
-                </span>
-                {tg.shortcut && <kbd>Ctrl+{tg.shortcut}</kbd>}
-              </button>
-            );
-          })}
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    {tg.shortcut && <kbd>Ctrl+{tg.shortcut}</kbd>}
+                  </span>
+                </button>
+              );
+            })
+          )}
         </div>
 
         <div

@@ -1,5 +1,5 @@
-export const APP_VERSION = '2.1.4';
-export const APP_BUILD_CODE = 85;
+export const APP_VERSION = '2.5.0';
+export const APP_BUILD_CODE = 87;
 export const MAX_AREAS = 8;
 
 export type ScheduleState =
@@ -111,6 +111,7 @@ export interface TaskRecord {
   recurrenceRule: RecurrenceRule | null;
   sortOrder: number;
   tagIds: string[];
+  isPinned?: boolean;
   createdAt: number;
   updatedAt: number;
   isDeleted: boolean;
@@ -207,6 +208,10 @@ export type SupportedLang = 'en' | 'de' | 'fr' | 'it' | 'es';
 
 export type ThemeMode = 'system' | 'light' | 'dark';
 
+export type TagSortMode = 'alpha' | 'most_used' | 'manual';
+
+export type ViewSortMode = 'manual' | 'deadline' | 'duration' | 'alpha';
+
 export interface AppPreferences {
   language: SupportedLang | 'system';
   themeMode: ThemeMode;
@@ -227,6 +232,8 @@ export interface AppPreferences {
   biometricAppLockEnabled: boolean;
   appLockPinHash: string;
   appLockWebAuthnCredId: string;
+  tagSortMode?: TagSortMode;
+  viewSortMode?: ViewSortMode;
 }
 
 export type AppSettings = AppPreferences;

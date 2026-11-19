@@ -34,6 +34,8 @@ import {
   encodeThingsBackup,
   inspectThingsBackup,
   normalizeBackupPayloadToEntities,
+  normalizeTagSortMode,
+  normalizeViewSortMode,
   summarizeBackupPayload,
   type BackupInspection,
   type BackupPreferencesDto,
@@ -134,7 +136,7 @@ export function computeStatistics(
   };
 }
 
-const DEFAULT_PREFS: AppPreferences = {
+export const DEFAULT_PREFS: AppPreferences = {
   language: 'system',
   themeMode: 'system',
   sidebarVisible: true,
@@ -153,7 +155,9 @@ const DEFAULT_PREFS: AppPreferences = {
   groupTodayByProjectOrArea: false,
   biometricAppLockEnabled: false,
   appLockPinHash: '',
-  appLockWebAuthnCredId: ''
+  appLockWebAuthnCredId: '',
+  tagSortMode: 'alpha',
+  viewSortMode: 'manual'
 };
 
 export function loadPreferences(): AppPreferences {
@@ -161,7 +165,12 @@ export function loadPreferences(): AppPreferences {
     const raw = localStorage.getItem(PREFS_STORAGE_KEY);
     if (!raw) return { ...DEFAULT_PREFS };
     const parsed = JSON.parse(raw);
-    return { ...DEFAULT_PREFS, ...parsed };
+    return {
+      ...DEFAULT_PREFS,
+      ...parsed,
+      tagSortMode: normalizeTagSortMode(parsed?.tagSortMode),
+      viewSortMode: normalizeViewSortMode(parsed?.viewSortMode)
+    };
   } catch {
     return { ...DEFAULT_PREFS };
   }
@@ -395,6 +404,7 @@ export class ThingsLocalDb {
         tagIds: [],
         scheduledStartMinutes: null,
         durationMinutes: null,
+        isPinned: false,
         isDeleted: true,
         purgedFromTrash: true,
         isDirty: true,
@@ -443,6 +453,7 @@ export class ThingsLocalDb {
             enrich.durationMinutes !== undefined ? enrich.durationMinutes : winner.durationMinutes,
           deadline: enrich.deadline !== undefined ? enrich.deadline : winner.deadline,
           reminderTime: enrich.reminderTime !== undefined ? enrich.reminderTime : winner.reminderTime,
+          isPinned: enrich.isPinned !== undefined ? enrich.isPinned : Boolean(winner.isPinned),
           updatedAt: Math.max(now, winner.updatedAt + 1, enrich.minUpdatedAt),
           isDirty: true
         });
@@ -572,6 +583,7 @@ export class ThingsLocalDb {
           if (spawned && !spawned.isDeleted) {
             await tx.objectStore('tasks').put({
               ...spawned,
+              isPinned: false,
               isDeleted: true,
               purgedFromTrash: true,
               updatedAt: now,
@@ -660,6 +672,9 @@ export class ThingsLocalDb {
     recurrenceRule?: RecurrenceRule | null;
     sortOrder?: number;
     tagIds?: string[];
+    addTagIds?: string[];
+    removeTagIds?: string[];
+    isPinned?: boolean;
     suppressUndo?: boolean;
   }): Promise<TaskRecord> {
     const db = await this.getDb();
@@ -759,6 +774,17 @@ export class ThingsLocalDb {
         ? Math.max(5, Math.min(720, Math.trunc(rawDuration)))
         : null;
 
+    let resolvedTagIds = params.tagIds !== undefined ? [...params.tagIds] : [...(existing?.tagIds ?? [])];
+    if (params.addTagIds && params.addTagIds.length > 0) {
+      for (const tid of params.addTagIds) {
+        if (!resolvedTagIds.includes(tid)) resolvedTagIds.push(tid);
+      }
+    }
+    if (params.removeTagIds && params.removeTagIds.length > 0) {
+      const rem = new Set(params.removeTagIds);
+      resolvedTagIds = resolvedTagIds.filter((tid) => !rem.has(tid));
+    }
+
     const record: TaskRecord = {
       id,
       title: resolvedTitle,
@@ -782,7 +808,8 @@ export class ThingsLocalDb {
         params.sortOrder !== undefined && Number.isFinite(params.sortOrder)
           ? params.sortOrder
           : (existing?.sortOrder ?? 1000),
-      tagIds: params.tagIds !== undefined ? params.tagIds : (existing?.tagIds ?? []),
+      tagIds: resolvedTagIds,
+      isPinned: params.isPinned !== undefined ? Boolean(params.isPinned) : Boolean(existing?.isPinned),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       isDeleted: false,
@@ -862,6 +889,7 @@ export class ThingsLocalDb {
     recurrenceRule?: RecurrenceRule | null;
     sortOrder?: number;
     tagIds?: string[];
+    isPinned?: boolean;
   }): Promise<TaskRecord> {
     return this.enqueueWrite(async () => {
       const record = await this.upsertTaskUnlocked(params);
@@ -882,6 +910,10 @@ export class ThingsLocalDb {
       projectId?: string | null;
       headingId?: string | null;
       areaId?: string | null;
+      tagIds?: string[];
+      addTagIds?: string[];
+      removeTagIds?: string[];
+      isPinned?: boolean;
     }
   ): Promise<void> {
     if (taskIds.length === 0) return;
@@ -984,6 +1016,7 @@ export class ThingsLocalDb {
       whenDate: nextWhen,
       deadline: nextDeadline,
       reminderTime: nextReminder,
+      isPinned: false,
       sortOrder: completedTask.sortOrder + 0.01,
       createdAt: existingById?.createdAt ?? now,
       updatedAt: nextUpdatedAt,
@@ -1389,6 +1422,7 @@ export class ThingsLocalDb {
           durationMinutes: null,
           recurrenceRule: null,
           tagIds: [],
+          isPinned: false,
           projectId: null,
           headingId: null,
           isDeleted: true,
@@ -1452,6 +1486,7 @@ export class ThingsLocalDb {
               durationMinutes: null,
               recurrenceRule: null,
               tagIds: [],
+              isPinned: false,
               projectId: null,
               headingId: null,
               isDeleted: true,
@@ -1576,6 +1611,7 @@ export class ThingsLocalDb {
             durationMinutes: null,
             recurrenceRule: null,
             tagIds: [],
+            isPinned: false,
             isDeleted: true,
             purgedFromTrash: true,
             updatedAt: now,
@@ -1655,46 +1691,119 @@ export class ThingsLocalDb {
   }
 
   async duplicateTask(taskId: string, copySuffix = 'Copy'): Promise<string | null> {
+    const ids = await this.batchDuplicateTasks([taskId], copySuffix);
+    return ids[0] ?? null;
+  }
+
+  async batchDuplicateTasks(taskIds: string[], copySuffix = 'Copy'): Promise<string[]> {
+    const uniqueIds = Array.from(new Set(taskIds.filter(Boolean)));
+    if (uniqueIds.length === 0) return [];
+
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
-      const existing = (await db.get('tasks', taskId)) as TaskRecord | undefined;
-      if (!existing || existing.isDeleted) return null;
       const now = Date.now();
-      const newId = crypto.randomUUID();
-      const trimmed = existing.title.trim();
-      const newTitle = trimmed ? `${trimmed} (${copySuffix})` : existing.title;
-      await db.put('tasks', {
-        ...existing,
-        id: newId,
-        title: newTitle,
-        status: 'OPEN',
-        completedAt: null,
-        reminderTime:
-          existing.reminderTime != null && existing.reminderTime > now
-            ? existing.reminderTime
-            : null,
-        sortOrder: existing.sortOrder + 10.0,
-        createdAt: now,
-        updatedAt: now,
-        isDeleted: false,
-        isDirty: true
-      });
-      const allChk = (await db.getAll('checklist_items')) as ChecklistItemRecord[];
-      for (const c of allChk.filter((x) => x.taskId === taskId && !x.isDeleted)) {
-        await db.put('checklist_items', {
-          ...c,
-          id: crypto.randomUUID(),
-          taskId: newId,
-          isCompleted: false,
-          createdAt: now,
-          updatedAt: now,
-          isDeleted: false,
-          isDirty: true
-        });
+      const tx = db.transaction(['tasks', 'checklist_items'], 'readwrite');
+      const taskStore = tx.objectStore('tasks');
+      const chkStore = tx.objectStore('checklist_items');
+
+      const allTasks = (await taskStore.getAll()) as TaskRecord[];
+      const taskById = new Map(allTasks.map((t) => [t.id, t]));
+      const allChk = (await chkStore.getAll()) as ChecklistItemRecord[];
+
+      const validSources = uniqueIds
+        .map((id) => taskById.get(id))
+        .filter((t): t is TaskRecord => Boolean(t && !t.isDeleted));
+      if (validSources.length === 0) {
+        await tx.done;
+        return [];
       }
+
+      validSources.sort((a, b) => {
+        if (Boolean(b.isPinned) !== Boolean(a.isPinned)) {
+          return a.isPinned ? -1 : 1;
+        }
+        return a.sortOrder - b.sortOrder || a.createdAt - b.createdAt;
+      });
+
+      const bucketKeyOf = (t: TaskRecord): string =>
+        `${t.projectId ?? ''}\u001F${t.headingId ?? ''}\u001F${t.areaId ?? ''}\u001F${t.isPinned ? '1' : '0'}`;
+
+      const sourcesByBucket = new Map<string, TaskRecord[]>();
+      for (const src of validSources) {
+        const bKey = bucketKeyOf(src);
+        const list = sourcesByBucket.get(bKey);
+        if (list) list.push(src);
+        else sourcesByBucket.set(bKey, [src]);
+      }
+
+      const copySortOrderById = new Map<string, number>();
+      for (const [bKey, group] of sourcesByBucket.entries()) {
+        const lastSourceOrder = group.reduce((m, x) => Math.max(m, x.sortOrder), -Infinity);
+        let nextCeiling: number | null = null;
+        for (const candidate of allTasks) {
+          if (candidate.isDeleted) continue;
+          if (bucketKeyOf(candidate) !== bKey) continue;
+          if (candidate.sortOrder > lastSourceOrder) {
+            if (nextCeiling === null || candidate.sortOrder < nextCeiling) {
+              nextCeiling = candidate.sortOrder;
+            }
+          }
+        }
+        const count = group.length;
+        const rawStep =
+          nextCeiling !== null ? (nextCeiling - lastSourceOrder) / (count + 1) : 10.0;
+        const step = rawStep > 1e-7 ? rawStep : 0.0001;
+        for (let i = 0; i < count; i++) {
+          copySortOrderById.set(group[i].id, lastSourceOrder + step * (i + 1));
+        }
+      }
+
+      const createdIds: string[] = [];
+      for (let i = 0; i < validSources.length; i++) {
+        const src = validSources[i];
+        const newId = crypto.randomUUID();
+        const trimmed = src.title.trim();
+        const newTitle = trimmed ? `${trimmed} (${copySuffix})` : src.title;
+        const copyTs = now + i;
+        await taskStore.put({
+          ...src,
+          id: newId,
+          title: newTitle,
+          status: 'OPEN',
+          completedAt: null,
+          reminderTime: src.reminderTime != null && src.reminderTime > now ? src.reminderTime : null,
+          isPinned: Boolean(src.isPinned),
+          sortOrder: copySortOrderById.get(src.id) ?? src.sortOrder + (i + 1) * 10,
+          createdAt: copyTs,
+          updatedAt: copyTs,
+          isDeleted: false,
+          purgedFromTrash: false,
+          isDirty: true
+        } satisfies TaskRecord);
+
+        const srcChecklists = allChk
+          .filter((c) => c.taskId === src.id && !c.isDeleted)
+          .sort((a, b) => a.sortOrder - b.sortOrder);
+        for (const c of srcChecklists) {
+          await chkStore.put({
+            ...c,
+            id: crypto.randomUUID(),
+            taskId: newId,
+            isCompleted: false,
+            createdAt: copyTs,
+            updatedAt: copyTs,
+            isDeleted: false,
+            isDirty: true
+          } satisfies ChecklistItemRecord);
+        }
+
+        createdIds.push(newId);
+      }
+
+      await tx.done;
       await this.refreshSnapshot();
       this.triggerSync();
-      return newId;
+      return createdIds;
     });
   }
 
@@ -2685,31 +2794,230 @@ export class ThingsLocalDb {
     });
   }
 
+  private async mergeTagsUnlocked(
+    db: IDBPDatabase,
+    sourceTagId: string,
+    targetTagId: string,
+    now = Date.now()
+  ): Promise<TagRecord | null> {
+    if (!sourceTagId || !targetTagId || sourceTagId === targetTagId) return null;
+    const tx = db.transaction(
+      ['tags', 'tasks', 'projects', 'areas', 'projectTemplates'],
+      'readwrite'
+    );
+    const tagStore = tx.objectStore('tags');
+    const source = (await tagStore.get(sourceTagId)) as TagRecord | undefined;
+    const target = (await tagStore.get(targetTagId)) as TagRecord | undefined;
+    if (!source || source.isDeleted || !target || target.isDeleted) {
+      await tx.done;
+      return null;
+    }
+
+    const remapTagList = (ids: string[] | undefined): { next: string[]; changed: boolean } => {
+      const raw = ids || [];
+      let changed = false;
+      const out: string[] = [];
+      for (const id of raw) {
+        const mapped = id === sourceTagId ? targetTagId : id;
+        if (mapped !== id) changed = true;
+        if (!out.includes(mapped)) {
+          out.push(mapped);
+        } else {
+          changed = true;
+        }
+      }
+      return { next: out, changed };
+    };
+
+    for (const storeName of ['tasks', 'projects', 'areas', 'projectTemplates'] as const) {
+      const store = tx.objectStore(storeName);
+      const rows = (await store.getAll()) as Array<{
+        id: string;
+        tagIds?: string[];
+        updatedAt: number;
+        isDeleted: boolean;
+      }>;
+      for (const row of rows) {
+        if (row.isDeleted) continue;
+        const { next, changed } = remapTagList(row.tagIds);
+        if (changed) {
+          await store.put({
+            ...row,
+            tagIds: next,
+            updatedAt: Math.max(now, row.updatedAt + 1),
+            isDirty: true
+          });
+        }
+      }
+    }
+
+    let finalTarget = target;
+    const allTags = (await tagStore.getAll()) as TagRecord[];
+    for (const tg of allTags) {
+      if (tg.isDeleted || tg.id === sourceTagId) continue;
+      if (tg.id === targetTagId && tg.parentTagId === sourceTagId) {
+        finalTarget = {
+          ...tg,
+          parentTagId:
+            source.parentTagId && source.parentTagId !== targetTagId ? source.parentTagId : null,
+          updatedAt: Math.max(now, tg.updatedAt + 1),
+          isDirty: true
+        };
+        await tagStore.put(finalTarget);
+      } else if (tg.id !== targetTagId && tg.parentTagId === sourceTagId) {
+        await tagStore.put({
+          ...tg,
+          parentTagId: targetTagId,
+          updatedAt: Math.max(now, tg.updatedAt + 1),
+          isDirty: true
+        });
+      }
+    }
+
+    await tagStore.put({
+      ...source,
+      parentTagId: null,
+      shortcut: null,
+      isDeleted: true,
+      updatedAt: Math.max(now, source.updatedAt + 1),
+      isDirty: true
+    });
+
+    await tx.done;
+    return finalTarget;
+  }
+
+  async mergeTags(sourceTagId: string, targetTagId: string): Promise<boolean> {
+    if (!sourceTagId || !targetTagId || sourceTagId === targetTagId) return false;
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const merged = await this.mergeTagsUnlocked(db, sourceTagId, targetTagId, Date.now());
+      if (!merged) return false;
+      await this.refreshSnapshot();
+      this.triggerSync();
+      return true;
+    });
+  }
+
+  async moveTagOrder(tagId: string, direction: 'up' | 'down'): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const tx = db.transaction('tags', 'readwrite');
+      const allTags = (await tx.store.getAll()) as TagRecord[];
+      const active = allTags
+        .filter((tg) => !tg.isDeleted)
+        .sort(
+          (a, b) =>
+            a.sortOrder - b.sortOrder ||
+            a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }) ||
+            a.id.localeCompare(b.id)
+        );
+      const idx = active.findIndex((tg) => tg.id === tagId);
+      const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (idx < 0 || swapIdx < 0 || swapIdx >= active.length) {
+        await tx.done;
+        return;
+      }
+
+      const a = active[idx];
+      const b = active[swapIdx];
+      const hasAnyDuplicateOrder =
+        new Set(active.map((tg) => tg.sortOrder)).size < active.length;
+
+      if (hasAnyDuplicateOrder || a.sortOrder === b.sortOrder) {
+        const reordered = [...active];
+        [reordered[idx], reordered[swapIdx]] = [reordered[swapIdx], reordered[idx]];
+        for (let i = 0; i < reordered.length; i++) {
+          const nextOrder = (i + 1) * 1000;
+          const item = reordered[i];
+          if (item.sortOrder !== nextOrder || item.id === a.id || item.id === b.id) {
+            await tx.store.put({
+              ...item,
+              sortOrder: nextOrder,
+              updatedAt: Math.max(now, item.updatedAt + 1),
+              isDirty: true
+            });
+          }
+        }
+      } else {
+        await tx.store.put({
+          ...a,
+          sortOrder: b.sortOrder,
+          updatedAt: Math.max(now, a.updatedAt + 1),
+          isDirty: true
+        });
+        await tx.store.put({
+          ...b,
+          sortOrder: a.sortOrder,
+          updatedAt: Math.max(now, b.updatedAt + 1),
+          isDirty: true
+        });
+      }
+
+      await tx.done;
+      await this.refreshSnapshot();
+      this.triggerSync();
+    });
+  }
+
   async upsertTag(params: {
     id?: string;
     title: string;
     shortcut?: string | null;
     parentTagId?: string | null;
+    sortOrder?: number;
   }): Promise<TagRecord> {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
       const now = Date.now();
       const trimmedTitle = params.title.trim();
+      const normTitle = trimmedTitle.toLowerCase();
+
+      if (params.id) {
+        const allTagsSnapshot = (await db.getAll('tags')) as TagRecord[];
+        const collisionTarget = allTagsSnapshot.find(
+          (tg) => !tg.isDeleted && tg.id !== params.id && tg.title.trim().toLowerCase() === normTitle
+        );
+        if (collisionTarget) {
+          const merged = await this.mergeTagsUnlocked(db, params.id, collisionTarget.id, now);
+          await this.refreshSnapshot();
+          this.triggerSync();
+          return merged ?? collisionTarget;
+        }
+      }
+
       const tx = db.transaction('tags', 'readwrite');
       const allTags = (await tx.store.getAll()) as TagRecord[];
+      const activeTags = allTags.filter((tg) => !tg.isDeleted);
       const sameTitleActive = !params.id
-        ? allTags.find(
-            (tg) => !tg.isDeleted && tg.title.trim().toLowerCase() === trimmedTitle.toLowerCase()
-          )
+        ? activeTags.find((tg) => tg.title.trim().toLowerCase() === normTitle)
         : undefined;
       const id = params.id || sameTitleActive?.id || crypto.randomUUID();
       const existing = sameTitleActive ?? ((await tx.store.get(id)) as TagRecord | undefined);
+      const maxSortOrder = activeTags.reduce(
+        (m, tg) => (Number.isFinite(tg.sortOrder) && tg.sortOrder > m ? tg.sortOrder : m),
+        0
+      );
+      const resolvedShortcut =
+        params.shortcut !== undefined
+          ? params.shortcut != null && params.shortcut.trim().length > 0
+            ? params.shortcut.trim().toUpperCase().slice(0, 1)
+            : null
+          : (existing?.shortcut ?? null);
+
       const record: TagRecord = {
         id,
         title: trimmedTitle,
-        shortcut: params.shortcut !== undefined ? params.shortcut : (existing?.shortcut ?? null),
-        parentTagId: params.parentTagId !== undefined ? params.parentTagId : (existing?.parentTagId ?? null),
-        sortOrder: existing?.sortOrder ?? (now % 100000),
+        shortcut: resolvedShortcut,
+        parentTagId:
+          params.parentTagId !== undefined ? params.parentTagId : (existing?.parentTagId ?? null),
+        sortOrder:
+          params.sortOrder !== undefined && Number.isFinite(params.sortOrder)
+            ? params.sortOrder
+            : existing
+              ? existing.sortOrder
+              : maxSortOrder + 1000,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
         isDeleted: false,
@@ -2890,6 +3198,7 @@ export class ThingsLocalDb {
             durationMinutes: null,
             recurrenceRule: null,
             tagIds: [],
+            isPinned: false,
             isDeleted: true,
             purgedFromTrash: true,
             updatedAt: Math.max(now, existing.updatedAt + 1),
@@ -3228,7 +3537,7 @@ export class ThingsLocalDb {
     areas?: AreaRecord[];
     projects?: ProjectRecord[];
     headings?: HeadingRecord[];
-    tasks?: Array<TaskRecord & { omittedTimeblockFields?: boolean }>;
+    tasks?: Array<TaskRecord & { omittedTimeblockFields?: boolean; omittedPinnedField?: boolean }>;
     checklistItems?: ChecklistItemRecord[];
     attachments?: AttachmentRecord[];
     projectTemplates?: ProjectTemplate[];
@@ -3349,7 +3658,7 @@ export class ThingsLocalDb {
 
         for (const remoteWithHint of batch.tasks) {
           if (!remoteWithHint.id) continue;
-          const { omittedTimeblockFields, ...remote } = remoteWithHint;
+          const { omittedTimeblockFields, omittedPinnedField, ...remote } = remoteWithHint;
           const clampedTs = clampUpdatedAt(remote.updatedAt);
           const local = (await taskStore.get(remote.id)) as TaskRecord | undefined;
 
@@ -3394,6 +3703,11 @@ export class ThingsLocalDb {
               (remote.scheduleState === 'TODAY' ||
                 remote.scheduleState === 'THIS_EVENING' ||
                 remote.scheduleState === 'UPCOMING');
+            const resolvedPinned = remote.isDeleted
+              ? false
+              : omittedPinnedField
+                ? Boolean(local?.isPinned)
+                : Boolean(remote.isPinned);
 
             await taskStore.put({
               ...remote,
@@ -3404,6 +3718,7 @@ export class ThingsLocalDb {
               durationMinutes: keepLocalTimeblock
                 ? (local?.durationMinutes ?? null)
                 : (remote.durationMinutes ?? null),
+              isPinned: resolvedPinned,
               purgedFromTrash: Boolean(
                 remote.purgedFromTrash || (remote.isDeleted && local?.purgedFromTrash)
               ),
@@ -3545,7 +3860,9 @@ export class ThingsLocalDb {
         selectedCalendarIds: prefs.selectedCalendarIds,
         groupTodayByProjectOrArea: prefs.groupTodayByProjectOrArea,
         includeBetaUpdates: Boolean(prefs.includeBetaUpdates),
-        lastWeeklyReviewAt: prefs.lastWeeklyReviewAt || 0
+        lastWeeklyReviewAt: prefs.lastWeeklyReviewAt || 0,
+        tagSortMode: prefs.tagSortMode ?? 'alpha',
+        viewSortMode: prefs.viewSortMode ?? 'manual'
       },
       appVersionName: `${APP_VERSION}-chromeos`
     });

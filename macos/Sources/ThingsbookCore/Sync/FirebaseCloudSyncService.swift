@@ -728,11 +728,15 @@ public actor FirebaseCloudSyncService {
         let headings = (batch["headings"] as? [[String: Any]] ?? []).compactMap(Self.parseHeading)
         var taskTags: [String: [String]] = [:]
         var omittedTimeblockTaskIds = Set<String>()
+        var omittedPinTaskIds = Set<String>()
         let tasks = (batch["tasks"] as? [[String: Any]] ?? []).compactMap { m -> TaskItem? in
             guard let parsed = Self.parseTaskWithHints(m) else { return nil }
             taskTags[parsed.task.id] = parsed.tagIds
             if parsed.omittedTimeblock {
                 omittedTimeblockTaskIds.insert(parsed.task.id)
+            }
+            if parsed.omittedPin {
+                omittedPinTaskIds.insert(parsed.task.id)
             }
             return parsed.task
         }
@@ -750,6 +754,7 @@ public actor FirebaseCloudSyncService {
                 tasks: tasks,
                 taskTagIdsByTaskId: taskTags,
                 taskOmittedTimeblockTaskIds: omittedTimeblockTaskIds,
+                taskOmittedPinTaskIds: omittedPinTaskIds,
                 checklistItems: checklists,
                 attachments: attachments,
                 projectTemplates: projectTemplates
@@ -1182,6 +1187,7 @@ public actor FirebaseCloudSyncService {
                 "areaId": Self.fsNullableString(task.areaId),
                 "recurrenceRule": Self.fsNullableString(recString),
                 "sortOrder": Self.fsDouble(task.sortOrder),
+                "isPinned": Self.fsBool(!task.isDeleted && task.isPinned),
                 "tagIds": Self.fsStringArray(task.tagIds),
                 "createdAt": Self.fsInt(task.createdAt),
                 "updatedAt": Self.fsInt(task.updatedAt),
@@ -1488,6 +1494,7 @@ public actor FirebaseCloudSyncService {
                 "areaId": task.areaId as Any,
                 "recurrenceRule": recString as Any,
                 "sortOrder": task.sortOrder,
+                "isPinned": !task.isDeleted && task.isPinned,
                 "tagIds": task.tagIds,
                 "createdAt": task.createdAt,
                 "updatedAt": task.updatedAt,
@@ -1664,11 +1671,15 @@ public actor FirebaseCloudSyncService {
         let headings: [Heading] = headMaps.compactMap(Self.parseHeading)
         var taskTagIds: [String: [String]] = [:]
         var omittedTimeblockTaskIds = Set<String>()
+        var omittedPinTaskIds = Set<String>()
         let tasks: [TaskItem] = taskMaps.compactMap { map -> TaskItem? in
             guard let parsed = Self.parseTaskWithHints(map) else { return nil }
             taskTagIds[parsed.task.id] = parsed.tagIds
             if parsed.omittedTimeblock {
                 omittedTimeblockTaskIds.insert(parsed.task.id)
+            }
+            if parsed.omittedPin {
+                omittedPinTaskIds.insert(parsed.task.id)
             }
             return parsed.task
         }
@@ -1703,6 +1714,7 @@ public actor FirebaseCloudSyncService {
                 tasks: tasks,
                 taskTagIdsByTaskId: taskTagIds,
                 taskOmittedTimeblockTaskIds: omittedTimeblockTaskIds,
+                taskOmittedPinTaskIds: omittedPinTaskIds,
                 checklistItems: checklists,
                 attachments: attachments,
                 projectTemplates: projectTemplates
@@ -1862,11 +1874,15 @@ public actor FirebaseCloudSyncService {
             let headings = (batch["headings"] as? [[String: Any]] ?? []).compactMap(Self.parseHeading)
             var taskTags: [String: [String]] = [:]
             var omittedTimeblockTaskIds = Set<String>()
+            var omittedPinTaskIds = Set<String>()
             let tasks = (batch["tasks"] as? [[String: Any]] ?? []).compactMap { m -> TaskItem? in
                 guard let parsed = Self.parseTaskWithHints(m) else { return nil }
                 taskTags[parsed.task.id] = parsed.tagIds
                 if parsed.omittedTimeblock {
                     omittedTimeblockTaskIds.insert(parsed.task.id)
+                }
+                if parsed.omittedPin {
+                    omittedPinTaskIds.insert(parsed.task.id)
                 }
                 return parsed.task
             }
@@ -1883,6 +1899,7 @@ public actor FirebaseCloudSyncService {
                     tasks: tasks,
                     taskTagIdsByTaskId: taskTags,
                     taskOmittedTimeblockTaskIds: omittedTimeblockTaskIds,
+                    taskOmittedPinTaskIds: omittedPinTaskIds,
                     checklistItems: checklists,
                     attachments: attachments,
                     projectTemplates: projectTemplates
@@ -2385,7 +2402,7 @@ public actor FirebaseCloudSyncService {
 
     public static func parseTaskWithHints(
         _ map: [String: Any]
-    ) -> (task: TaskItem, tagIds: [String], omittedTimeblock: Bool)? {
+    ) -> (task: TaskItem, tagIds: [String], omittedTimeblock: Bool, omittedPin: Bool)? {
         guard let id = asString(map["id"]) else { return nil }
         var rule: RecurrenceRule? = nil
         if let recStr = asString(map["recurrenceRule"]), let data = recStr.data(using: .utf8) {
@@ -2395,6 +2412,7 @@ public actor FirebaseCloudSyncService {
         let isDeleted = asBool(map["isDeleted"])
         let purged = isDeleted && asBool(map["purgedFromTrash"])
         let omittedTimeblock = !map.keys.contains("scheduledStartMinutes") && !map.keys.contains("durationMinutes")
+        let omittedPin = (map["isPinned"] == nil)
         let task = TaskItem(
             id: id,
             title: purged ? "" : ((map["title"] as? String) ?? ""),
@@ -2412,11 +2430,12 @@ public actor FirebaseCloudSyncService {
             areaId: asString(map["areaId"]),
             recurrenceRule: rule,
             sortOrder: asDouble(map["sortOrder"]),
+            isPinned: !isDeleted && asBool(map["isPinned"]),
             createdAt: asInt64(map["createdAt"]) ?? 0,
             updatedAt: asInt64(map["updatedAt"]) ?? 0,
             isDeleted: isDeleted
         )
-        return (task, tids, omittedTimeblock)
+        return (task, tids, omittedTimeblock, omittedPin)
     }
 
     public static func parseTask(_ map: [String: Any]) -> (TaskItem, [String])? {

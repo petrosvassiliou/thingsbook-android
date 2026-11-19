@@ -408,9 +408,9 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.1.4")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.1.4")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 85)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.5.0")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.5.0")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 87)
         XCTAssertFalse(AppUpdateService.currentVersionIsPrerelease)
         let ultraCompact = MacToolbarLayoutMetrics.compute(detailWidth: 506.0, isSidebarCollapsed: false)
         XCTAssertEqual(ultraCompact.usableWidth, 450.0)
@@ -3071,6 +3071,281 @@ final class ThingsbookCoreTests: XCTestCase {
         )
         XCTAssertFalse(MacCalendarAppointmentStyleMetrics.showsInlineOpenInCalendarButton)
     }
+
+    // MARK: - 26. v2.5.0 TaskViewSorter & TagListSorter (Pin-First + Manual/Deadline/Duration/Alpha & Tag Modes)
+
+    func testV250TaskViewSorterAndTagListSorter() {
+        let t1 = TaskItem(
+            id: "task-1",
+            title: "Charlie",
+            deadline: 3_000_000,
+            durationMinutes: 60,
+            sortOrder: 100,
+            isPinned: false,
+            createdAt: 1_000,
+            updatedAt: 1_000
+        )
+        let t2 = TaskItem(
+            id: "task-2",
+            title: "alpha",
+            deadline: nil,
+            durationMinutes: 15,
+            sortOrder: 200,
+            isPinned: false,
+            createdAt: 2_000,
+            updatedAt: 2_000
+        )
+        let t3 = TaskItem(
+            id: "task-3",
+            title: "Bravo",
+            deadline: 1_500_000,
+            durationMinutes: nil,
+            sortOrder: 300,
+            isPinned: true,
+            createdAt: 3_000,
+            updatedAt: 3_000
+        )
+        let t4 = TaskItem(
+            id: "task-4",
+            title: "Delta",
+            deadline: 900_000,
+            durationMinutes: 0,
+            sortOrder: 50,
+            isPinned: true,
+            createdAt: 4_000,
+            updatedAt: 4_000
+        )
+
+        let raw = [t1, t2, t3, t4]
+
+        // 1. Manual: pinned tasks float first (sortOrder 50 then 300), then unpinned (100 then 200)
+        XCTAssertEqual(
+            TaskViewSorter.sort(raw, mode: "manual").map(\.id),
+            ["task-4", "task-3", "task-1", "task-2"]
+        )
+
+        // 2. Deadline: pinned tasks first by deadline ASC, then unpinned with non-nil deadline first, then nil deadline
+        XCTAssertEqual(
+            TaskViewSorter.sort(raw, mode: "deadline").map(\.id),
+            ["task-4", "task-3", "task-1", "task-2"]
+        )
+
+        // 3. Duration: pinned tasks first (both have <=0/nil duration, tie-break sortOrder ASC: task-4 then task-3),
+        //    then unpinned with >0 duration ASC (15m task-2 before 60m task-1)
+        let t3WithDur = TaskItem(
+            id: "task-3",
+            title: "Bravo",
+            deadline: 1_500_000,
+            durationMinutes: 25,
+            sortOrder: 300,
+            isPinned: true,
+            createdAt: 3_000,
+            updatedAt: 3_000
+        )
+        XCTAssertEqual(
+            TaskViewSorter.sort([t1, t2, t3WithDur, t4], mode: "duration").map(\.id),
+            ["task-3", "task-4", "task-2", "task-1"]
+        )
+
+        // 4. Alpha: pinned tasks first alphabetically ("Bravo" < "Delta"), then unpinned ("alpha" < "Charlie")
+        XCTAssertEqual(
+            TaskViewSorter.sort(raw, mode: "alpha").map(\.id),
+            ["task-3", "task-4", "task-2", "task-1"]
+        )
+
+        // 5. TagListSorter: alpha, most_used, manual
+        let tagA = Tag(id: "tg-z", title: "Zebra", sortOrder: 10, createdAt: 100, updatedAt: 100)
+        let tagB = Tag(id: "tg-a", title: "apple", sortOrder: 30, createdAt: 100, updatedAt: 100)
+        let tagC = Tag(id: "tg-m", title: "Mango", sortOrder: 20, createdAt: 100, updatedAt: 100)
+        let tags = [tagA, tagB, tagC]
+        let counts: [String: Int] = ["tg-m": 5, "tg-z": 2, "tg-a": 2]
+
+        XCTAssertEqual(TagListSorter.sort(tags, mode: "alpha", usageCounts: counts).map(\.id), ["tg-a", "tg-m", "tg-z"])
+        XCTAssertEqual(TagListSorter.sort(tags, mode: "most_used", usageCounts: counts).map(\.id), ["tg-m", "tg-a", "tg-z"])
+        XCTAssertEqual(TagListSorter.sort(tags, mode: "manual", usageCounts: counts).map(\.id), ["tg-z", "tg-m", "tg-a"])
+    }
+
+    // MARK: - 27. v2.5.0 SQLite Pinning, Tag Merge, Tag Reorder, Batch Tags, Duplicate Tasks & Cloud Sync Pin Preservation
+
+    func testV250DatabasePinningTagMergeMoveBatchTagsDuplicateAndCloudSync() throws {
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let area = try db.createArea(title: "Engineering")
+        let proj = try db.createProject(title: "macOS v2.5", areaId: area.id)
+
+        // 1. Tag creation, shortcut clearing on edit, manual order move, and tag merge
+        let tagSrc = try db.createOrUpdateTag(title: "WIP", shortcut: "w")
+        XCTAssertEqual(tagSrc.shortcut, "w")
+        let clearedShortcutTag = try db.createOrUpdateTag(id: tagSrc.id, title: "WIP", shortcut: nil)
+        XCTAssertNil(clearedShortcutTag.shortcut, "Editing an existing tag with nil/empty shortcut must clear shortcut")
+
+        let tagDst = try db.createOrUpdateTag(title: "Active", shortcut: "a")
+        let tagThird = try db.createOrUpdateTag(title: "Review", shortcut: "r")
+
+        // Verify moveTagOrder swaps manual sort_order cleanly
+        let beforeMove = TagListSorter.sort(try db.loadWorkspaceSnapshot().tags, mode: "manual").map(\.id)
+        XCTAssertEqual(beforeMove, [tagSrc.id, tagDst.id, tagThird.id])
+        try db.moveTagOrder(tagThird.id, moveUp: true)
+        let afterMoveUp = TagListSorter.sort(try db.loadWorkspaceSnapshot().tags, mode: "manual").map(\.id)
+        XCTAssertEqual(afterMoveUp, [tagSrc.id, tagThird.id, tagDst.id])
+        try db.moveTagOrder(tagThird.id, moveUp: false)
+        let afterMoveDown = TagListSorter.sort(try db.loadWorkspaceSnapshot().tags, mode: "manual").map(\.id)
+        XCTAssertEqual(afterMoveDown, [tagSrc.id, tagDst.id, tagThird.id])
+
+        // 2. Pinning CRUD, Quick Find, recurring spawn reset, and tombstone reset
+        let todayMillis = DateEpochConverter.startOfDayMillis(for: Date())
+        let taskA = try db.createTask(
+            title: "First Task",
+            scheduleState: .inbox,
+            projectId: proj.id,
+            tagIds: [tagSrc.id],
+            checklistTitles: ["Step 1", "Step 2"]
+        )
+        let taskB = try db.createTask(
+            title: "Second Recurring Task",
+            scheduleState: .today,
+            whenDate: todayMillis,
+            recurrenceRule: RecurrenceRule(mode: .fixedSchedule, interval: 1, unit: .days),
+            tagIds: [tagSrc.id, tagDst.id]
+        )
+
+        try db.setTasksPinned([taskB.id], isPinned: true)
+        var snap = try db.loadWorkspaceSnapshot()
+        XCTAssertEqual(snap.allOpenTasks.first(where: { $0.id == taskA.id })?.isPinned, false)
+        XCTAssertEqual(snap.allOpenTasks.first(where: { $0.id == taskB.id })?.isPinned, true)
+
+        let qf = try db.searchQuickFind(rawQuery: "Recurring")
+        XCTAssertEqual(qf.tasks.first?.isPinned, true, "searchQuickFind must read is_pinned")
+
+        // Completing a pinned recurring task spawns an UNPINNED next occurrence
+        let spawnedId = try XCTUnwrap(try db.setTaskStatus(taskId: taskB.id, status: .completed))
+        snap = try db.loadWorkspaceSnapshot()
+        let spawnedTask = try XCTUnwrap(snap.allOpenTasks.first(where: { $0.id == spawnedId }))
+        XCTAssertFalse(spawnedTask.isPinned, "Spawned recurring occurrence must start with isPinned == false")
+
+        // 3. Merge source tag into target tag (deduplicates refs & tombstones source tag)
+        var updatedProj = try XCTUnwrap(snap.projects.first(where: { $0.id == proj.id }))
+        updatedProj.tagIds = [tagSrc.id]
+        try db.updateProject(updatedProj)
+
+        let merged = try db.mergeTags(sourceTagId: tagSrc.id, into: tagDst.id)
+        XCTAssertTrue(merged)
+        snap = try db.loadWorkspaceSnapshot()
+        XCTAssertFalse(snap.tags.contains(where: { $0.id == tagSrc.id }))
+        XCTAssertEqual(snap.allOpenTasks.first(where: { $0.id == taskA.id })?.tagIds, [tagDst.id])
+        XCTAssertEqual(snap.projects.first(where: { $0.id == proj.id })?.tagIds, [tagDst.id])
+        let dirtyAfterMerge = try db.fetchDirtyBatch()
+        XCTAssertTrue(dirtyAfterMerge.tags.contains(where: { $0.id == tagSrc.id && $0.isDeleted }))
+
+        // 4. Batch tag update across multiple tasks
+        try db.batchUpdateTasksTags([taskA.id, spawnedTask.id], addTagIds: [tagThird.id], removeTagIds: [tagDst.id])
+        snap = try db.loadWorkspaceSnapshot()
+        XCTAssertEqual(Set(snap.allOpenTasks.first(where: { $0.id == taskA.id })?.tagIds ?? []), [tagThird.id])
+        XCTAssertEqual(Set(snap.allOpenTasks.first(where: { $0.id == spawnedTask.id })?.tagIds ?? []), [tagThird.id])
+
+        // 5. Duplicate tasks with localized copySuffix preserves isPinned, checklist items, and tags
+        try db.setTasksPinned([taskA.id], isPinned: true)
+        let copies = try db.duplicateTasks([taskA.id, spawnedTask.id], copySuffix: "Kopie")
+        XCTAssertEqual(copies.count, 2)
+        XCTAssertEqual(copies[0].title, "First Task (Kopie)")
+        XCTAssertTrue(copies[0].isPinned)
+        XCTAssertEqual(copies[0].checklistItems.map(\.title), ["Step 1", "Step 2"])
+        XCTAssertEqual(copies[0].tagIds, [tagThird.id])
+        XCTAssertEqual(copies[1].title, "Second Recurring Task (Kopie)")
+        XCTAssertFalse(copies[1].isPinned)
+
+        // 6. Legacy remote delta omitting isPinned preserves local isPinned state
+        let legacyPayloadWithoutPin: [String: Any] = [
+            "id": taskA.id,
+            "title": "First Task Renamed From Older Client",
+            "status": "OPEN",
+            "scheduleState": "INBOX",
+            "projectId": proj.id,
+            "sortOrder": taskA.sortOrder,
+            "createdAt": taskA.createdAt,
+            "updatedAt": Int64(Date().timeIntervalSince1970 * 1000.0) + 5_000,
+            "isDeleted": false
+        ]
+        let parsedHints = try XCTUnwrap(FirebaseCloudSyncService.parseTaskWithHints(legacyPayloadWithoutPin))
+        XCTAssertTrue(parsedHints.omittedPin)
+        _ = try db.applyRemoteDeltas(
+            RemoteDeltaBatch(
+                tasks: [parsedHints.task],
+                taskOmittedPinTaskIds: [parsedHints.task.id]
+            )
+        )
+        snap = try db.loadWorkspaceSnapshot()
+        let syncedTaskA = try XCTUnwrap(snap.allOpenTasks.first(where: { $0.id == taskA.id }))
+        XCTAssertEqual(syncedTaskA.title, "First Task Renamed From Older Client")
+        XCTAssertTrue(syncedTaskA.isPinned, "Omitted remote isPinned field must preserve local isPinned state")
+
+        // 7. Purging deleted task to tombstone resets isPinned = false
+        try db.permanentlyDeleteTask(copies[0].id)
+        let purgedTombstone = try XCTUnwrap(try db.fetchDirtyBatch().tasks.first(where: { $0.id == copies[0].id }))
+        XCTAssertTrue(purgedTombstone.isDeleted)
+        XCTAssertFalse(purgedTombstone.isPinned)
+    }
+
+    // MARK: - 28. v2.5.0 .tbbackup Roundtrip (isPinned, tagSortMode, viewSortMode) & 22 Localization Keys
+
+    func testV250BackupRoundtripAndLocalizationParity() throws {
+        let sourceDb = try ThingsSQLiteDatabase(path: ":memory:")
+        let pinnedTask = try sourceDb.createTask(title: "Pinned Backup Task", scheduleState: .today)
+        let normalTask = try sourceDb.createTask(title: "Normal Backup Task", scheduleState: .inbox)
+        try sourceDb.setTasksPinned([pinnedTask.id], isPinned: true)
+
+        var sourcePrefs = AppPreferences()
+        sourcePrefs.tagSortMode = "most_used"
+        sourcePrefs.viewSortMode = "deadline"
+
+        let exportedPayload = try sourceDb.buildBackupPayload(preferences: sourcePrefs)
+        let archiveBytes = try ThingsBackupCodec.encodeBackup(payload: exportedPayload, password: nil)
+        let decodedPayload = try ThingsBackupCodec.decodeBackup(rawBytes: archiveBytes, password: nil)
+
+        XCTAssertEqual(decodedPayload.preferences?.tagSortMode, "most_used")
+        XCTAssertEqual(decodedPayload.preferences?.viewSortMode, "deadline")
+
+        let targetDb = try ThingsSQLiteDatabase(path: ":memory:")
+        try targetDb.restoreBackupPayload(decodedPayload)
+        let restoredSnap = try targetDb.loadWorkspaceSnapshot()
+        XCTAssertEqual(restoredSnap.allOpenTasks.first(where: { $0.id == pinnedTask.id })?.isPinned, true)
+        XCTAssertEqual(restoredSnap.allOpenTasks.first(where: { $0.id == normalTask.id })?.isPinned, false)
+
+        // Legacy backup JSON without isPinned / tagSortMode / viewSortMode decodes resiliently with defaults
+        let legacyTaskDtoData = #"{"id":"legacy-1","title":"Legacy","scheduleState":"INBOX","createdAt":1,"updatedAt":1}"#.data(using: .utf8)!
+        let decodedLegacyDto = try JSONDecoder().decode(BackupTaskDto.self, from: legacyTaskDtoData)
+        XCTAssertFalse(decodedLegacyDto.isPinned)
+
+        let legacyAppPrefsData = #"{"language":"en"}"#.data(using: .utf8)!
+        let decodedLegacyPrefs = try JSONDecoder().decode(AppPreferences.self, from: legacyAppPrefsData)
+        XCTAssertEqual(decodedLegacyPrefs.tagSortMode, "alpha")
+        XCTAssertEqual(decodedLegacyPrefs.viewSortMode, "manual")
+
+        // Verify all 22 v25_* localization keys across all 5 supported languages
+        let plainV25Keys = [
+            "v25_pin_task", "v25_unpin_task", "v25_pinned_badge",
+            "v25_tags_search_placeholder", "v25_tags_assign_search_placeholder", "v25_tags_no_matches",
+            "v25_tags_sort_alpha", "v25_tags_sort_most_used", "v25_tags_sort_manual",
+            "v25_tags_merge_action",
+            "v25_view_sort_label", "v25_view_sort_manual", "v25_view_sort_deadline", "v25_view_sort_duration", "v25_view_sort_alpha",
+            "v25_copy_suffix",
+            "v25_batch_pin", "v25_batch_tags", "v25_batch_duplicate", "v25_batch_someday"
+        ]
+        for lang in [AppLanguage.en, .de, .fr, .it, .es] {
+            let langKeys = ThingsStrings.shared.keys(for: lang.rawValue)
+            for key in plainV25Keys {
+                XCTAssertTrue(langKeys.contains(key), "Missing \(key) in \(lang.rawValue)")
+                XCTAssertFalse(ThingsStrings.shared.text(key, lang: lang).isEmpty)
+            }
+            XCTAssertTrue(langKeys.contains("v25_tags_merge_target_prompt"))
+            XCTAssertTrue(langKeys.contains("v25_tags_merged_toast"))
+            XCTAssertTrue(
+                ThingsStrings.shared.format("v25_tags_merge_target_prompt", lang: lang, "WIP").contains("WIP")
+            )
+            let mergedToast = ThingsStrings.shared.format("v25_tags_merged_toast", lang: lang, "WIP", "Active")
+            XCTAssertTrue(mergedToast.contains("WIP") && mergedToast.contains("Active"))
+        }
+    }
 }
+
 
 

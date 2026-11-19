@@ -111,6 +111,7 @@ data class TaskItem(
     val areaId: String?,
     val recurrenceRule: RecurrenceRule?,
     val sortOrder: Double,
+    val isPinned: Boolean = false,
     val checklistItems: List<ChecklistItem> = emptyList(),
     val tags: List<Tag> = emptyList(),
     val attachments: List<TaskAttachment> = emptyList(),
@@ -118,6 +119,103 @@ data class TaskItem(
     val updatedAt: Long,
     val isDeleted: Boolean = false
 )
+
+fun sortTasksForView(tasks: List<TaskItem>, sortMode: String): List<TaskItem> {
+    if (tasks.size <= 1) return tasks
+    val normalizedMode = sortMode.trim().lowercase(java.util.Locale.ROOT)
+    return tasks.sortedWith { a, b ->
+        if (a.isPinned != b.isPinned) {
+            return@sortedWith if (a.isPinned) -1 else 1
+        }
+        val modeCmp = when (normalizedMode) {
+            "deadline" -> {
+                val aDl = a.deadline
+                val bDl = b.deadline
+                when {
+                    aDl != null && bDl != null -> {
+                        val dlCmp = aDl.compareTo(bDl)
+                        if (dlCmp != 0) dlCmp else a.sortOrder.compareTo(b.sortOrder)
+                    }
+                    aDl != null -> -1
+                    bDl != null -> 1
+                    else -> a.sortOrder.compareTo(b.sortOrder)
+                }
+            }
+            "duration" -> {
+                val aDur = a.durationMinutes?.takeIf { it > 0 }
+                val bDur = b.durationMinutes?.takeIf { it > 0 }
+                when {
+                    aDur != null && bDur != null -> {
+                        val durCmp = aDur.compareTo(bDur)
+                        if (durCmp != 0) durCmp else a.sortOrder.compareTo(b.sortOrder)
+                    }
+                    aDur != null -> -1
+                    bDur != null -> 1
+                    else -> a.sortOrder.compareTo(b.sortOrder)
+                }
+            }
+            "alpha" -> {
+                val alphaCmp = a.title.lowercase(java.util.Locale.ROOT)
+                    .compareTo(b.title.lowercase(java.util.Locale.ROOT))
+                if (alphaCmp != 0) alphaCmp else a.sortOrder.compareTo(b.sortOrder)
+            }
+            else -> {
+                val orderCmp = a.sortOrder.compareTo(b.sortOrder)
+                if (orderCmp != 0) orderCmp else a.createdAt.compareTo(b.createdAt)
+            }
+        }
+        if (modeCmp != 0) {
+            modeCmp
+        } else {
+            val createdCmp = a.createdAt.compareTo(b.createdAt)
+            if (createdCmp != 0) createdCmp else a.id.compareTo(b.id)
+        }
+    }
+}
+
+fun sortTagsForMode(
+    tags: List<Tag>,
+    mode: String,
+    usageCounts: Map<String, Int> = emptyMap()
+): List<Tag> {
+    if (tags.size <= 1) return tags
+    val normalizedMode = mode.trim().lowercase(java.util.Locale.ROOT)
+    return tags.sortedWith { a, b ->
+        val cmp = when (normalizedMode) {
+            "most_used" -> {
+                val countA = usageCounts[a.id] ?: 0
+                val countB = usageCounts[b.id] ?: 0
+                val countCmp = countB.compareTo(countA)
+                if (countCmp != 0) {
+                    countCmp
+                } else {
+                    a.title.lowercase(java.util.Locale.ROOT)
+                        .compareTo(b.title.lowercase(java.util.Locale.ROOT))
+                }
+            }
+            "manual" -> {
+                val orderCmp = a.sortOrder.compareTo(b.sortOrder)
+                if (orderCmp != 0) {
+                    orderCmp
+                } else {
+                    val createdCmp = a.createdAt.compareTo(b.createdAt)
+                    if (createdCmp != 0) {
+                        createdCmp
+                    } else {
+                        a.title.lowercase(java.util.Locale.ROOT)
+                            .compareTo(b.title.lowercase(java.util.Locale.ROOT))
+                    }
+                }
+            }
+            else -> {
+                val alphaCmp = a.title.lowercase(java.util.Locale.ROOT)
+                    .compareTo(b.title.lowercase(java.util.Locale.ROOT))
+                if (alphaCmp != 0) alphaCmp else a.sortOrder.compareTo(b.sortOrder)
+            }
+        }
+        if (cmp != 0) cmp else a.id.compareTo(b.id)
+    }
+}
 
 data class DeviceCalendarInfo(
     val id: String,

@@ -109,6 +109,7 @@ data class TaskEntity(
     val areaId: String? = null,
     val recurrenceRuleJson: String? = null,
     val sortOrder: Double,
+    val isPinned: Boolean = false,
     val tagIdsJson: String = "[]",
     val createdAt: Long,
     val updatedAt: Long,

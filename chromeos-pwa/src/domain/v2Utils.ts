@@ -1,16 +1,21 @@
 import {
   startOfDayEpoch,
+  type AreaRecord,
   type CalendarEventItem,
   type ChecklistItemRecord,
   type HeadingRecord,
   type ProjectRecord,
+  type ProjectTemplate,
   type ProjectTemplateBlueprint,
   type ProjectTemplateHeadingBlueprint,
   type ProjectTemplateTaskBlueprint,
   type ScheduleState,
   type SupportedLang,
+  type TagRecord,
+  type TagSortMode,
   type TaskRecord,
-  type TaskStatus
+  type TaskStatus,
+  type ViewSortMode
 } from './types.ts';
 
 export const STALLED_PROJECT_THRESHOLD_DAYS = 14;
@@ -266,7 +271,12 @@ export function buildDailyTimeline(
     }
   }
 
-  unscheduledTasks.sort((a, b) => a.sortOrder - b.sortOrder);
+  unscheduledTasks.sort((a, b) => {
+    if (Boolean(b.isPinned) !== Boolean(a.isPinned)) {
+      return a.isPinned ? -1 : 1;
+    }
+    return a.sortOrder - b.sortOrder;
+  });
 
   return {
     allDayEvents,
@@ -2307,5 +2317,119 @@ export function resolveTopBarLayoutTier(workspaceWidthPx: number): TopBarLayoutT
   return 'wrap';
 }
 
+/**
+ * Pure task view sorter (v2.5.0):
+ * - Always places `isPinned === true` first regardless of `sortMode`.
+ * - `'manual'`: `sortOrder ASC, createdAt ASC`
+ * - `'deadline'`: `deadline != null` first (`deadline ASC`), then `null`, tie-break `sortOrder ASC`
+ * - `'duration'`: `(durationMinutes != null && durationMinutes > 0)` first (`durationMinutes ASC`), then others, tie-break `sortOrder ASC`
+ * - `'alpha'`: `a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })`, tie-break `sortOrder ASC`
+ */
+export function sortTasksForView(
+  tasks: TaskRecord[],
+  sortMode: ViewSortMode = 'manual'
+): TaskRecord[] {
+  return [...tasks].sort((a, b) => {
+    const aPinned = Boolean(a.isPinned);
+    const bPinned = Boolean(b.isPinned);
+    if (bPinned !== aPinned) {
+      return aPinned ? -1 : 1;
+    }
 
+    if (sortMode === 'deadline') {
+      const aHasDl = a.deadline != null && Number.isFinite(a.deadline);
+      const bHasDl = b.deadline != null && Number.isFinite(b.deadline);
+      if (aHasDl !== bHasDl) {
+        return aHasDl ? -1 : 1;
+      }
+      if (aHasDl && bHasDl && a.deadline !== b.deadline) {
+        return a.deadline! - b.deadline!;
+      }
+      return a.sortOrder - b.sortOrder || a.createdAt - b.createdAt;
+    }
 
+    if (sortMode === 'duration') {
+      const aHasDur =
+        a.durationMinutes != null &&
+        Number.isFinite(a.durationMinutes) &&
+        a.durationMinutes > 0;
+      const bHasDur =
+        b.durationMinutes != null &&
+        Number.isFinite(b.durationMinutes) &&
+        b.durationMinutes > 0;
+      if (aHasDur !== bHasDur) {
+        return aHasDur ? -1 : 1;
+      }
+      if (aHasDur && bHasDur && a.durationMinutes !== b.durationMinutes) {
+        return a.durationMinutes! - b.durationMinutes!;
+      }
+      return a.sortOrder - b.sortOrder || a.createdAt - b.createdAt;
+    }
+
+    if (sortMode === 'alpha') {
+      const cmp = a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+      if (cmp !== 0) return cmp;
+      return a.sortOrder - b.sortOrder || a.createdAt - b.createdAt;
+    }
+
+    // 'manual'
+    return a.sortOrder - b.sortOrder || a.createdAt - b.createdAt;
+  });
+}
+
+/**
+ * Pure tag sorter (v2.5.0) across `'alpha'`, `'most_used'`, and `'manual'` modes.
+ */
+export function sortTagsForMode(
+  tags: TagRecord[],
+  mode: TagSortMode,
+  usageCounts: ReadonlyMap<string, number>
+): TagRecord[] {
+  return [...tags].sort((a, b) => {
+    if (mode === 'most_used') {
+      const countDiff = (usageCounts.get(b.id) ?? 0) - (usageCounts.get(a.id) ?? 0);
+      if (countDiff !== 0) return countDiff;
+      const titleCmp = a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+      if (titleCmp !== 0) return titleCmp;
+      return a.sortOrder - b.sortOrder || a.id.localeCompare(b.id);
+    }
+
+    if (mode === 'manual') {
+      if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+      const titleCmp = a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+      if (titleCmp !== 0) return titleCmp;
+      return a.id.localeCompare(b.id);
+    }
+
+    // 'alpha'
+    const titleCmp = a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+    if (titleCmp !== 0) return titleCmp;
+    return a.sortOrder - b.sortOrder || a.id.localeCompare(b.id);
+  });
+}
+
+/**
+ * Computes active tag usage counts across non-deleted tasks, projects, areas, and project templates.
+ */
+export function computeTagUsageCounts(params: {
+  tasks: readonly Pick<TaskRecord, 'tagIds' | 'isDeleted'>[];
+  projects?: readonly Pick<ProjectRecord, 'tagIds' | 'isDeleted'>[];
+  areas?: readonly Pick<AreaRecord, 'tagIds' | 'isDeleted'>[];
+  projectTemplates?: readonly Pick<ProjectTemplate, 'tagIds' | 'isDeleted'>[];
+}): Map<string, number> {
+  const counts = new Map<string, number>();
+  const tally = (rows: readonly { tagIds?: string[]; isDeleted: boolean }[] | undefined) => {
+    if (!rows) return;
+    for (const r of rows) {
+      if (r.isDeleted || !Array.isArray(r.tagIds)) continue;
+      for (const tid of new Set(r.tagIds)) {
+        counts.set(tid, (counts.get(tid) ?? 0) + 1);
+      }
+    }
+  };
+  tally(params.tasks);
+  tally(params.projects);
+  tally(params.areas);
+  tally(params.projectTemplates);
+  return counts;
+}

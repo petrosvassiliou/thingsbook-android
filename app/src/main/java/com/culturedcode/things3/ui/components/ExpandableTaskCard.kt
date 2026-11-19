@@ -63,6 +63,7 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.LocalOffer
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.CircularProgressIndicator
@@ -181,6 +182,8 @@ private fun PointerEvent.isRightClickTrigger(previousButtonsSecondary: Boolean):
 fun ExpandableTaskCard(
     task: TaskItem,
     allTags: List<Tag> = emptyList(),
+    tagSortMode: String = "alpha",
+    tagUsageCounts: Map<String, Int> = emptyMap(),
     allAreas: List<Area> = emptyList(),
     allProjects: List<Project> = emptyList(),
     allHeadings: List<Heading> = emptyList(),
@@ -216,6 +219,7 @@ fun ExpandableTaskCard(
     onShowMessage: ((String) -> Unit)? = null,
     onTriggerGeminiMagicBreakdown: () -> Unit,
     onDeleteTask: () -> Unit,
+    onTogglePin: (() -> Unit)? = null,
     onDuplicateTask: (() -> Unit)? = null,
     onStartFocusTimer: (() -> Unit)? = null,
     externalDialogTriggerToken: Int = 0,
@@ -610,7 +614,14 @@ fun ExpandableTaskCard(
                             onExpandToggle()
                         }
                     },
-                    onLongClick = if (suppressCustomContextMenu) {
+                    onLongClick = if (isExpanded || isCompletingAnim) {
+                        null
+                    } else if (task.status == TaskStatus.OPEN && onToggleSelection != null) {
+                        {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onToggleSelection.invoke()
+                        }
+                    } else if (suppressCustomContextMenu) {
                         null
                     } else {
                         {
@@ -699,6 +710,40 @@ fun ExpandableTaskCard(
                                 .weight(1f)
                                 .padding(top = 3.dp)
                         )
+                    }
+
+                    if (!isExpanded && task.isPinned && !isCompletingAnim) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        val pinnedTooltip = if (onTogglePin != null) {
+                            stringResource(R.string.v25_unpin_task)
+                        } else {
+                            stringResource(R.string.v25_pinned_badge)
+                        }
+                        ThingsHoverTooltip(
+                            text = pinnedTooltip,
+                            enableTouchLongPress = false
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.PushPin,
+                                contentDescription = stringResource(R.string.v25_pinned_badge),
+                                tint = colors.thingsBlue.copy(alpha = 0.88f),
+                                modifier = Modifier
+                                    .padding(top = 4.dp)
+                                    .size(14.dp)
+                                    .let { base ->
+                                        if (onTogglePin != null) {
+                                            base
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .clickable {
+                                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    onTogglePin()
+                                                }
+                                        } else {
+                                            base
+                                        }
+                                    }
+                            )
+                        }
                     }
 
                     if (!isExpanded && collapsedTrailingContent != null && !isCompletingAnim) {
@@ -801,6 +846,7 @@ fun ExpandableTaskCard(
                         onOpenTimeblockDialog = if (onUpdateTimeblock != null) ({ showTimeblockDialog = true }) else null,
                         onOpenMoveDialog = { showMoveDialog = true },
                         onOpenTagPickerDialog = { showTagPickerDialog = true },
+                        onTogglePin = onTogglePin,
                         onDuplicateTask = onDuplicateTask,
                         onStartFocusTimer = onStartFocusTimer,
                         onDeleteTask = onDeleteTask,
@@ -825,6 +871,7 @@ fun ExpandableTaskCard(
                 onOpenTagPickerDialog = { showTagPickerDialog = true },
                 onTriggerGeminiMagicBreakdown = onTriggerGeminiMagicBreakdown,
                 onStartFocusTimer = onStartFocusTimer,
+                onTogglePin = onTogglePin,
                 onDuplicateTask = onDuplicateTask,
                 onDeleteTask = onDeleteTask,
                 onDismiss = { showContextMenu = false }
@@ -846,6 +893,8 @@ fun ExpandableTaskCard(
     TaskCardDialogsHost(
         task = task,
         allTags = allTags,
+        tagSortMode = tagSortMode,
+        tagUsageCounts = tagUsageCounts,
         allAreas = allAreas,
         allProjects = allProjects,
         allHeadings = allHeadings,
@@ -1201,6 +1250,7 @@ private fun ExpandedTaskCardBody(
     onOpenTimeblockDialog: (() -> Unit)? = null,
     onOpenMoveDialog: () -> Unit,
     onOpenTagPickerDialog: () -> Unit,
+    onTogglePin: (() -> Unit)? = null,
     onDuplicateTask: (() -> Unit)? = null,
     onStartFocusTimer: (() -> Unit)? = null,
     onDeleteTask: () -> Unit,
@@ -1839,6 +1889,33 @@ private fun ExpandedTaskCardBody(
                             )
                         }
 
+                        if (onTogglePin != null) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = stringResource(
+                                            if (task.isPinned) R.string.v25_unpin_task else R.string.v25_pin_task
+                                        ),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colors.primaryText
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.PushPin,
+                                        contentDescription = null,
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showInlineMoreMenu = false
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onTogglePin()
+                                }
+                            )
+                        }
+
                         if (onDuplicateTask != null) {
                             DropdownMenuItem(
                                 text = {
@@ -1932,6 +2009,7 @@ private fun TaskContextDropdownMenu(
     onOpenTagPickerDialog: () -> Unit,
     onTriggerGeminiMagicBreakdown: () -> Unit,
     onStartFocusTimer: (() -> Unit)? = null,
+    onTogglePin: (() -> Unit)? = null,
     onDuplicateTask: (() -> Unit)? = null,
     onDeleteTask: () -> Unit,
     onDismiss: () -> Unit
@@ -1990,6 +2068,31 @@ private fun TaskContextDropdownMenu(
                 onClick = {
                     onDismiss()
                     onToggleSelection()
+                }
+            )
+        }
+        if (onTogglePin != null) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = stringResource(
+                            if (task.isPinned) R.string.v25_unpin_task else R.string.v25_pin_task
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.primaryText
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.PushPin,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    onDismiss()
+                    onTogglePin()
                 }
             )
         }
@@ -2260,6 +2363,8 @@ private fun TaskContextDropdownMenu(
 private fun TaskCardDialogsHost(
     task: TaskItem,
     allTags: List<Tag>,
+    tagSortMode: String = "alpha",
+    tagUsageCounts: Map<String, Int> = emptyMap(),
     allAreas: List<Area>,
     allProjects: List<Project>,
     allHeadings: List<Heading>,
@@ -2342,6 +2447,8 @@ private fun TaskCardDialogsHost(
         TaskTagPickerDialog(
             allTags = allTags,
             selectedTagIds = task.tags.map { it.id },
+            tagSortMode = tagSortMode,
+            tagUsageCounts = tagUsageCounts,
             onUpdateSelectedTags = { updatedIds ->
                 onUpdateTaskTags?.invoke(updatedIds)
             },

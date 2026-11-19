@@ -152,6 +152,21 @@ public struct TaskRowCardView: View {
 
             // Trailing metadata badges
             HStack(spacing: 6) {
+                if task.isPinned {
+                    HStack(spacing: 3.5) {
+                        Image(systemName: "pin.fill")
+                            .font(.system(size: 9.5, weight: .semibold))
+                        Text(store.tr("v25_pinned_badge"))
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2.5)
+                    .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.12)))
+                    .thingsTooltip(store.tr("v25_pinned_badge"))
+                }
+
                 if !task.attachments.isEmpty {
                     HStack(spacing: 3) {
                         Image(systemName: "paperclip")
@@ -267,18 +282,7 @@ public struct TaskRowCardView: View {
             isHoveringRow = hovering
         }
         .onTapGesture {
-            if NSEvent.modifierFlags.contains(.command) {
-                if store.selectedTaskIds.contains(task.id) {
-                    store.selectedTaskIds.remove(task.id)
-                } else {
-                    store.selectedTaskIds.insert(task.id)
-                }
-            } else {
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                    store.selectedTaskIds = [task.id]
-                    store.expandedTaskId = task.id
-                }
-            }
+            store.handleTaskRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
         }
     }
 
@@ -737,6 +741,18 @@ public struct TaskRowCardView: View {
                     Menu {
                         Button {
                             commitDraftEditsIfNeeded()
+                            store.setTasksPinned([latestTask.id], isPinned: !latestTask.isPinned)
+                        } label: {
+                            Label(
+                                store.tr(latestTask.isPinned ? "v25_unpin_task" : "v25_pin_task"),
+                                systemImage: latestTask.isPinned ? "pin.slash" : "pin"
+                            )
+                        }
+
+                        Divider()
+
+                        Button {
+                            commitDraftEditsIfNeeded()
                             store.pickAndAttachFiles(taskId: task.id)
                         } label: {
                             Label(store.tr("action_attach_file"), systemImage: "paperclip")
@@ -767,7 +783,11 @@ public struct TaskRowCardView: View {
 
                         Button {
                             commitDraftEditsIfNeeded(commitPendingChecklist: true)
-                            _ = try? store.database.duplicateTask(task.id)
+                            if let copy = try? store.database.duplicateTask(task.id, copySuffix: store.tr("v25_copy_suffix")) {
+                                store.selectedTaskIds = [copy.id]
+                                store.lastSelectedTaskId = copy.id
+                                store.expandedTaskId = copy.id
+                            }
                         } label: {
                             Label(store.tr("action_duplicate_todo"), systemImage: "plus.square.on.square")
                         }
@@ -843,59 +863,111 @@ public struct TaskRowCardView: View {
 
     @ViewBuilder
     private var taskContextMenu: some View {
+        let isMultiTarget = store.selectedTaskIds.contains(task.id) && store.selectedTaskIds.count > 1
+        let multiCandidates = (store.allOpenTasks + store.logbookTasks).filter { store.selectedTaskIds.contains($0.id) }
+        let allPinned = isMultiTarget
+            ? (!multiCandidates.isEmpty && multiCandidates.allSatisfy(\.isPinned))
+            : latestTask.isPinned
+
         Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
-            store.toggleTaskCompletion(latestTask)
+            if isMultiTarget {
+                store.completeSelectedTasks()
+            } else {
+                store.toggleTaskCompletion(latestTask)
+            }
         }
-        Button(task.status == .canceled ? store.tr("action_reopen_todo") : store.tr("action_cancel_todo")) {
-            store.cancelTask(latestTask)
+        if !isMultiTarget {
+            Button(task.status == .canceled ? store.tr("action_reopen_todo") : store.tr("action_cancel_todo")) {
+                store.cancelTask(latestTask)
+            }
+        }
+        Button {
+            if isMultiTarget {
+                store.togglePinForSelectedTasks()
+            } else {
+                store.setTasksPinned([latestTask.id], isPinned: !latestTask.isPinned)
+            }
+        } label: {
+            Label(
+                store.tr(allPinned ? "v25_unpin_task" : "v25_pin_task"),
+                systemImage: allPinned ? "pin.slash" : "pin"
+            )
         }
         Divider()
         Button(store.tr("view_today")) {
-            var copy = latestTask
-            copy.scheduleState = .today
-            copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
-            store.updateTask(copy)
+            if isMultiTarget {
+                store.scheduleSelectedTasks(.today)
+            } else {
+                var copy = latestTask
+                copy.scheduleState = .today
+                copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
+                store.updateTask(copy)
+            }
         }
         Button(store.tr("view_this_evening")) {
-            var copy = latestTask
-            copy.scheduleState = .thisEvening
-            copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
-            store.updateTask(copy)
+            if isMultiTarget {
+                store.scheduleSelectedTasks(.thisEvening)
+            } else {
+                var copy = latestTask
+                copy.scheduleState = .thisEvening
+                copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
+                store.updateTask(copy)
+            }
         }
         Button(store.tr("view_someday")) {
-            var copy = latestTask
-            copy.scheduleState = .someday
-            copy.whenDate = nil
-            store.updateTask(copy)
+            if isMultiTarget {
+                store.scheduleSelectedTasks(.someday)
+            } else {
+                var copy = latestTask
+                copy.scheduleState = .someday
+                copy.whenDate = nil
+                store.updateTask(copy)
+            }
         }
-        Menu(store.tr("v2_timeblock_title")) {
-            Button("09:00 · 30m") { store.setTaskTimeblock(latestTask.id, startMinutes: 9 * 60, durationMinutes: 30) }
-            Button("11:00 · 45m") { store.setTaskTimeblock(latestTask.id, startMinutes: 11 * 60, durationMinutes: 45) }
-            Button("14:00 · 60m") { store.setTaskTimeblock(latestTask.id, startMinutes: 14 * 60, durationMinutes: 60) }
-            Button("16:00 · 45m") { store.setTaskTimeblock(latestTask.id, startMinutes: 16 * 60, durationMinutes: 45) }
-            if latestTask.scheduledStartMinutes != nil || latestTask.durationMinutes != nil {
-                Divider()
-                Button(store.tr("v2_timeblock_clear"), role: .destructive) {
-                    store.setTaskTimeblock(latestTask.id, startMinutes: nil, durationMinutes: nil)
+        if !isMultiTarget {
+            Menu(store.tr("v2_timeblock_title")) {
+                Button("09:00 · 30m") { store.setTaskTimeblock(latestTask.id, startMinutes: 9 * 60, durationMinutes: 30) }
+                Button("11:00 · 45m") { store.setTaskTimeblock(latestTask.id, startMinutes: 11 * 60, durationMinutes: 45) }
+                Button("14:00 · 60m") { store.setTaskTimeblock(latestTask.id, startMinutes: 14 * 60, durationMinutes: 60) }
+                Button("16:00 · 45m") { store.setTaskTimeblock(latestTask.id, startMinutes: 16 * 60, durationMinutes: 45) }
+                if latestTask.scheduledStartMinutes != nil || latestTask.durationMinutes != nil {
+                    Divider()
+                    Button(store.tr("v2_timeblock_clear"), role: .destructive) {
+                        store.setTaskTimeblock(latestTask.id, startMinutes: nil, durationMinutes: nil)
+                    }
                 }
             }
         }
         Divider()
-        Button(store.tr("action_attach_file")) {
-            store.pickAndAttachFiles(taskId: task.id)
-        }
-        Button(store.tr("action_focus_timer")) {
-            store.startFocusTimer(for: latestTask)
+        if !isMultiTarget {
+            Button(store.tr("action_attach_file")) {
+                store.pickAndAttachFiles(taskId: task.id)
+            }
+            Button(store.tr("action_focus_timer")) {
+                store.startFocusTimer(for: latestTask)
+            }
         }
         Button(store.tr("action_duplicate_todo")) {
-            _ = try? store.database.duplicateTask(task.id)
+            if isMultiTarget {
+                store.duplicateSelectedTasks()
+            } else if let copy = try? store.database.duplicateTask(task.id, copySuffix: store.tr("v25_copy_suffix")) {
+                store.selectedTaskIds = [copy.id]
+                store.lastSelectedTaskId = copy.id
+            }
         }
-        Button(store.tr("context_select_task")) {
-            store.selectedTaskIds.insert(task.id)
+        if !isMultiTarget {
+            Button(store.tr("context_select_task")) {
+                store.selectedTaskIds.insert(task.id)
+                store.lastSelectedTaskId = task.id
+            }
         }
         Divider()
         Button(role: .destructive) {
-            store.deleteTask(latestTask)
+            if isMultiTarget {
+                store.deleteSelectedTasks()
+            } else {
+                store.deleteTask(latestTask)
+            }
         } label: {
             Text(store.tr("action_delete"))
         }

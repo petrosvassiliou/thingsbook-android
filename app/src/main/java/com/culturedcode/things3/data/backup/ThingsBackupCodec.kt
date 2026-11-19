@@ -119,6 +119,7 @@ data class BackupTaskDto(
     val areaId: String? = null,
     val recurrenceRuleJson: String? = null,
     val sortOrder: Double = 0.0,
+    val isPinned: Boolean = false,
     val tagIdsJson: String = "[]",
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L
@@ -196,7 +197,9 @@ data class BackupPreferencesDto(
     val selectedCalendarIds: List<String>? = null,
     val groupTodayByProjectOrArea: Boolean? = null,
     val lastWeeklyReviewAt: Long? = null,
-    val includeBetaUpdates: Boolean? = null
+    val includeBetaUpdates: Boolean? = null,
+    val tagSortMode: String? = null,
+    val viewSortMode: String? = null
 )
 
 data class BackupSummary(

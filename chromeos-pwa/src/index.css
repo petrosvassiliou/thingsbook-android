@@ -3459,5 +3459,49 @@ button.v2-stalled-pill:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
+/* ==================== v2.5.0 Pinning, Batch Tags & View Sorting ==================== */
+
+.things-checkbox.indeterminate {
+  background: var(--things-blue-soft);
+  border-color: var(--things-blue);
+  border-style: solid;
+  color: var(--things-blue);
+}
+
+.task-pin-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--things-blue);
+  flex-shrink: 0;
+  transform: translateY(1.5px);
+}
+
+.view-sort-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4.5px 9.5px;
+  border-radius: var(--radius-xs);
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  white-space: nowrap;
+}
+
+.view-sort-pill:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.view-sort-pill.active {
+  background: var(--things-blue-soft);
+  border-color: rgba(36, 139, 253, 0.34);
+  color: var(--things-blue);
+}
+
 
 

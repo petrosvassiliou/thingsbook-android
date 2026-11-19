@@ -401,7 +401,7 @@ public struct SidebarView: View {
                 store.markProjectReviewed(proj.id)
             }
             Button(store.tr("action_duplicate_project")) {
-                if let copy = try? store.database.duplicateProject(proj.id, copySuffix: store.tr("macos_copy_suffix")) {
+                if let copy = try? store.database.duplicateProject(proj.id, copySuffix: store.tr("v25_copy_suffix")) {
                     store.selectedDestination = .project(copy.id)
                 }
             }

@@ -21,6 +21,8 @@ import {
   Moon,
   MoreHorizontal,
   Paperclip,
+  Pin,
+  PinOff,
   Plus,
   Repeat,
   RotateCcw,
@@ -1307,6 +1309,25 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                     <button
                       type="button"
                       className="dropdown-item"
+                      data-testid="task-pin-btn"
+                      onClick={() => {
+                        setInlineMoreMenuOpen(false);
+                        flushDraftsIfNeeded();
+                        void localDb.upsertTask({ id: task.id, isPinned: !task.isPinned });
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        {task.isPinned ? (
+                          <PinOff size={14} style={{ color: 'var(--things-blue)' }} />
+                        ) : (
+                          <Pin size={14} style={{ color: 'var(--things-blue)' }} />
+                        )}
+                        <span>{task.isPinned ? t.unpinTask : t.pinTask}</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="dropdown-item"
                       data-testid="task-duplicate-btn"
                       onClick={() => {
                         setInlineMoreMenuOpen(false);
@@ -1417,7 +1438,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             e.clientX,
             e.clientY,
             256,
-            510,
+            540,
             window.innerWidth,
             window.innerHeight,
             12
@@ -1434,6 +1455,11 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 
         <div className="task-row-body">
           <div className="task-row-title-line">
+            {task.isPinned && (
+              <span className="task-pin-indicator" title={t.pinnedBadge} data-testid="task-pin-indicator">
+                <Pin size={12.5} />
+              </span>
+            )}
             <span
               className={`task-row-title ${
                 animStage === 'strike' || animStage === 'glide'
@@ -1721,6 +1747,19 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                   <span>{t.actionFocusTimerMinutes(focusDurationMins)}</span>
                 </button>
               )}
+
+              {/* 9b. Pin to Top / Unpin */}
+              <button
+                type="button"
+                className="context-menu-item"
+                onClick={() => {
+                  setCtxMenu(null);
+                  void localDb.upsertTask({ id: task.id, isPinned: !task.isPinned });
+                }}
+              >
+                {task.isPinned ? <PinOff size={14} /> : <Pin size={14} />}
+                <span>{task.isPinned ? t.unpinTask : t.pinTask}</span>
+              </button>
 
               {/* 10. Duplicate To-Do */}
               <button

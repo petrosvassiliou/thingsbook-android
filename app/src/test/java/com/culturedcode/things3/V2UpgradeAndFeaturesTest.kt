@@ -761,9 +761,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(83, BuildConfig.VERSION_CODE)
-        assertEquals("2.1.3", BuildConfig.VERSION_NAME)
-        assertFalse("Final 2.1.3 release must not contain pre-release hyphen", BuildConfig.VERSION_NAME.contains("-"))
+        assertEquals(85, BuildConfig.VERSION_CODE)
+        assertEquals("2.1.4", BuildConfig.VERSION_NAME)
+        assertFalse("Final 2.1.4 release must not contain pre-release hyphen", BuildConfig.VERSION_NAME.contains("-"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -1793,6 +1793,26 @@ class V2UpgradeAndFeaturesTest {
         assertTrue(cardSource.contains("R.string.action_more_options"))
         assertTrue(cardSource.contains("if (task.attachments.isNotEmpty())"))
         assertFalse("Removed legacy BottomActionIcon helper", cardSource.contains("private fun BottomActionIcon("))
+    }
+
+    @Test
+    fun `v2_1_4 Android switches app language live in place without Activity recreation or screen flash`() {
+        val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
+        val manifestXml = File(appSrcMain, "AndroidManifest.xml").readText()
+        assertTrue(
+            "MainActivity must declare locale|layoutDirection in android:configChanges to prevent Activity recreation flash",
+            manifestXml.contains("locale|layoutDirection")
+        )
+
+        val mainActivityKt = File(appSrcMain, "java/com/culturedcode/things3/MainActivity.kt").readText()
+        assertTrue(mainActivityKt.contains("ProvideLiveAppLocale("))
+        assertTrue(mainActivityKt.contains("override fun onConfigurationChanged("))
+
+        val tooltipKt = File(appSrcMain, "java/com/culturedcode/things3/ui/components/ThingsTooltip.kt").readText()
+        assertTrue(tooltipKt.contains("ApplyInheritedLiveAppLocaleIfNeeded"))
+
+        val settingsKt = File(appSrcMain, "java/com/culturedcode/things3/ui/components/ThingsSettingsModal.kt").readText()
+        assertTrue(settingsKt.contains("LocalLiveAppLocaleOverride.current?.languageTag"))
     }
 }
 

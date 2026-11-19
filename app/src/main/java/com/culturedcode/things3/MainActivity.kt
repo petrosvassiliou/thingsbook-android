@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -26,7 +27,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -38,6 +41,7 @@ import com.culturedcode.things3.data.repository.syncDataStore
 import com.culturedcode.things3.ui.components.SmartViewType
 import com.culturedcode.things3.ui.components.ThingsTooltipHostBox
 import com.culturedcode.things3.ui.screens.ThingsSmartViewScreen
+import com.culturedcode.things3.ui.theme.ProvideLiveAppLocale
 import com.culturedcode.things3.ui.theme.Things3Theme
 import com.culturedcode.things3.ui.viewmodel.ThingsbookViewModel
 import com.culturedcode.things3.ui.widget.ThingsbookWidgetProvider
@@ -52,6 +56,8 @@ import java.util.Locale
 class MainActivity : AppCompatActivity() {
 
     private var launchIntentState by mutableStateOf<Intent?>(null)
+    private var systemConfigRevision by mutableIntStateOf(0)
+    private var externalLocaleSyncCallback: (() -> Unit)? = null
     var hardwareKeyShortcutHandler: ((android.view.KeyEvent) -> Boolean)? = null
 
     private val notificationPermissionLauncher = registerForActivityResult(
@@ -83,15 +89,23 @@ class MainActivity : AppCompatActivity() {
         launchIntentState = intent
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        systemConfigRevision += 1
+        externalLocaleSyncCallback?.invoke()
+    }
+
     override fun onResume() {
         super.onResume()
         activeActivityRef = WeakReference(this)
+        externalLocaleSyncCallback?.invoke()
     }
 
     override fun onDestroy() {
         if (activeActivityRef?.get() === this) {
             activeActivityRef = null
         }
+        externalLocaleSyncCallback = null
         super.onDestroy()
     }
 
@@ -100,6 +114,10 @@ class MainActivity : AppCompatActivity() {
             setContent {
                 Things3Theme {
                     val viewModel: ThingsbookViewModel = hiltViewModel()
+                    val appLanguageTag by viewModel.appLanguageTag.collectAsState()
+                    LaunchedEffect(viewModel) {
+                        externalLocaleSyncCallback = { viewModel.syncAppLanguageFromSystemIfIdle() }
+                    }
                     val currentIntent = launchIntentState
                     LaunchedEffect(currentIntent) {
                         if (currentIntent != null) {
@@ -154,11 +172,16 @@ class MainActivity : AppCompatActivity() {
                             launchIntentState = null
                         }
                     }
-                    ThingsTooltipHostBox(modifier = Modifier.fillMaxSize()) {
-                        ThingsSmartViewScreen(
-                            viewModel = viewModel,
-                            modifier = Modifier.fillMaxSize()
-                        )
+                    ProvideLiveAppLocale(
+                        languageTag = appLanguageTag,
+                        systemConfigRevision = systemConfigRevision
+                    ) {
+                        ThingsTooltipHostBox(modifier = Modifier.fillMaxSize()) {
+                            ThingsSmartViewScreen(
+                                viewModel = viewModel,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
                     }
                 }
             }

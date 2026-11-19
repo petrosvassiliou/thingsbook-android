@@ -408,9 +408,9 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.1.3")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.1.3")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 83)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.1.4")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.1.4")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 85)
         XCTAssertFalse(AppUpdateService.currentVersionIsPrerelease)
         let ultraCompact = MacToolbarLayoutMetrics.compute(detailWidth: 506.0, isSidebarCollapsed: false)
         XCTAssertEqual(ultraCompact.usableWidth, 450.0)

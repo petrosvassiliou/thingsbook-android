@@ -175,7 +175,8 @@ fun ThingsSettingsModal(
         }
     }
 
-    val currentLocaleTag = AppCompatDelegate.getApplicationLocales().toLanguageTags()
+    val currentLocaleTag = com.culturedcode.things3.ui.theme.LocalLiveAppLocaleOverride.current?.languageTag
+        ?: AppCompatDelegate.getApplicationLocales().toLanguageTags()
 
     Dialog(
         onDismissRequest = onDismiss,

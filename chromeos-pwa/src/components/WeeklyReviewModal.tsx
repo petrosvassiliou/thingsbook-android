@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Archive,
@@ -44,6 +44,7 @@ interface WeeklyReviewModalProps {
   lang: SupportedLang;
   t: TranslationStrings;
   onOpenProject: (projectId: string) => void;
+  onOpenTask?: (task: TaskRecord) => void;
   onCompleteReview: () => void;
   onClose: () => void;
 }
@@ -58,11 +59,33 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
   lang,
   t,
   onOpenProject,
+  onOpenTask,
   onCompleteReview,
   onClose
 }) => {
   const [step, setStep] = useState<WeeklyReviewStep>(initialStep);
   const [nextActionDrafts, setNextActionDrafts] = useState<Record<string, string>>({});
+  const [feedbackText, setFeedbackText] = useState<string | null>(null);
+  const feedbackTimerRef = useRef<number | null>(null);
+
+  const showFeedback = (label: string) => {
+    if (feedbackTimerRef.current != null) {
+      window.clearTimeout(feedbackTimerRef.current);
+    }
+    setFeedbackText(label);
+    feedbackTimerRef.current = window.setTimeout(() => {
+      setFeedbackText(null);
+      feedbackTimerRef.current = null;
+    }, 2800);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (feedbackTimerRef.current != null) {
+        window.clearTimeout(feedbackTimerRef.current);
+      }
+    };
+  }, []);
 
   const todayEpoch = startOfDayEpoch();
   const tomorrowEpoch = addDaysLocal(todayEpoch, 1);
@@ -92,17 +115,19 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
     [tasks]
   );
 
-  // Step 2: Overdue or Due-Soon Tasks
+  // Step 2: Today, Overdue, or Due-Soon Tasks
   const urgentTasks = useMemo(
     () =>
       tasks
         .filter((tk) => {
           if (tk.isDeleted || tk.status !== 'OPEN') return false;
           if (tk.projectId && !activeProjectIds.has(tk.projectId)) return false;
+          const inToday =
+            tk.scheduleState === 'TODAY' || tk.scheduleState === 'THIS_EVENING';
           const whenOverdue = tk.whenDate != null && daysBetweenToday(tk.whenDate) < 0;
           const deadlineDueSoonOrOverdue =
             tk.deadline != null && daysBetweenToday(tk.deadline) <= 3;
-          return whenOverdue || deadlineDueSoonOrOverdue;
+          return inToday || whenOverdue || deadlineDueSoonOrOverdue;
         })
         .sort((a, b) => {
           const aKey = a.deadline ?? a.whenDate ?? Number.MAX_SAFE_INTEGER;
@@ -154,7 +179,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
     ).length;
   }, [tasks, reviewOpenedAt]);
 
-  const handleAddNextAction = async (projectId: string) => {
+  const handleAddNextAction = async (projectId: string, projectTitle: string) => {
     const raw = (nextActionDrafts[projectId] ?? '').trim();
     if (!raw) return;
     setNextActionDrafts((prev) => ({ ...prev, [projectId]: '' }));
@@ -165,6 +190,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
       whenDate: todayEpoch
     });
     await localDb.markProjectReviewed(projectId);
+    showFeedback(`${projectTitle} → ${t.viewToday}`);
   };
 
   const stepsMeta: Array<{
@@ -203,6 +229,68 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
 
   const formatShortDate = (ms: number) =>
     new Intl.DateTimeFormat(lang, { month: 'short', day: 'numeric' }).format(new Date(ms));
+
+  const plus7Label =
+    lang === 'de'
+      ? '+7 T.'
+      : lang === 'fr'
+        ? '+7 j'
+        : lang === 'it'
+          ? '+7 gg'
+          : lang === 'es'
+            ? '+7 d'
+            : '+7d';
+
+  const renderScheduleBadge = (tk: TaskRecord) => {
+    const whenDiff = tk.whenDate != null ? daysBetweenToday(tk.whenDate) : null;
+    if (tk.scheduleState === 'TODAY') {
+      return (
+        <span className="meta-badge">
+          <Star size={10} fill="var(--today-star)" style={{ color: 'var(--today-star)' }} />
+          <span>{t.viewToday}</span>
+        </span>
+      );
+    }
+    if (tk.scheduleState === 'THIS_EVENING') {
+      return (
+        <span className="meta-badge">
+          <Moon size={10} />
+          <span>{t.viewThisEvening}</span>
+        </span>
+      );
+    }
+    if (tk.scheduleState === 'UPCOMING') {
+      return (
+        <span className="meta-badge">
+          <CalendarDays size={10} />
+          <span>
+            {whenDiff === 1
+              ? t.dateTomorrow
+              : tk.whenDate != null
+                ? formatShortDate(tk.whenDate)
+                : t.viewUpcoming}
+          </span>
+        </span>
+      );
+    }
+    if (tk.scheduleState === 'SOMEDAY') {
+      return (
+        <span className="meta-badge">
+          <Archive size={10} />
+          <span>{t.viewSomeday}</span>
+        </span>
+      );
+    }
+    if (tk.scheduleState === 'ANYTIME') {
+      return (
+        <span className="meta-badge">
+          <Layers size={10} />
+          <span>{t.viewAnytime}</span>
+        </span>
+      );
+    }
+    return null;
+  };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -250,11 +338,44 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
           })}
         </div>
 
-        <div className="v2-review-step-banner">
-          <div style={{ fontWeight: 650, fontSize: 13.8 }}>{activeMeta.title}</div>
-          <div style={{ fontSize: 12.2, color: 'var(--text-secondary)', marginTop: 2 }}>
-            {activeMeta.desc}
+        <div
+          className="v2-review-step-banner"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap'
+          }}
+        >
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontWeight: 650, fontSize: 13.8 }}>{activeMeta.title}</div>
+            <div style={{ fontSize: 12.2, color: 'var(--text-secondary)', marginTop: 2 }}>
+              {activeMeta.desc}
+            </div>
           </div>
+          {feedbackText && (
+            <span
+              data-testid="weekly-review-feedback-pill"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 10px',
+                borderRadius: 999,
+                fontSize: 11.8,
+                fontWeight: 650,
+                color: 'var(--logbook-green)',
+                background: 'rgba(46, 160, 67, 0.14)',
+                maxWidth: '100%'
+              }}
+            >
+              <Check size={12} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {feedbackText}
+              </span>
+            </span>
+          )}
         </div>
 
         {/* Step Body */}
@@ -269,100 +390,127 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                 </div>
               ) : (
                 <div className="v2-review-list">
-                  {inboxTasks.map((tk) => (
-                    <div key={tk.id} className="v2-review-item-card">
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 13.8 }}>
-                          {tk.title || t.placeholderTodoTitle}
+                  {inboxTasks.map((tk) => {
+                    const displayTitle = tk.title || t.placeholderTodoTitle;
+                    return (
+                      <div key={tk.id} className="v2-review-item-card">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onOpenTask) {
+                              onClose();
+                              onOpenTask(tk);
+                            }
+                          }}
+                          style={{
+                            flex: 1,
+                            minWidth: 0,
+                            background: 'transparent',
+                            border: 'none',
+                            padding: 0,
+                            textAlign: 'left',
+                            color: 'inherit',
+                            cursor: onOpenTask ? 'pointer' : 'default'
+                          }}
+                        >
+                          <div style={{ fontWeight: 600, fontSize: 13.8 }}>{displayTitle}</div>
+                          {tk.notes.trim() && (
+                            <div className="v2-review-item-notes">
+                              {tk.notes.trim().split('\n')[0]}
+                            </div>
+                          )}
+                        </button>
+                        <div className="v2-review-actions-wrap">
+                          <button
+                            type="button"
+                            className="chip-btn"
+                            onClick={() => {
+                              void localDb.upsertTask({
+                                id: tk.id,
+                                scheduleState: 'TODAY',
+                                whenDate: todayEpoch
+                              });
+                              showFeedback(`${displayTitle} → ${t.viewToday}`);
+                            }}
+                          >
+                            <Star
+                              size={11.5}
+                              fill="var(--today-star)"
+                              style={{ color: 'var(--today-star)' }}
+                            />
+                            <span>{t.viewToday}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="chip-btn"
+                            onClick={() => {
+                              void localDb.upsertTask({
+                                id: tk.id,
+                                scheduleState: 'THIS_EVENING',
+                                whenDate: todayEpoch
+                              });
+                              showFeedback(`${displayTitle} → ${t.viewThisEvening}`);
+                            }}
+                          >
+                            <Moon size={11.5} />
+                            <span>{t.viewThisEvening}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="chip-btn"
+                            onClick={() => {
+                              void localDb.upsertTask({
+                                id: tk.id,
+                                scheduleState: 'UPCOMING',
+                                whenDate: tomorrowEpoch
+                              });
+                              showFeedback(`${displayTitle} → ${t.dateTomorrow}`);
+                            }}
+                          >
+                            <CalendarDays size={11.5} />
+                            <span>{t.dateTomorrow}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="chip-btn"
+                            onClick={() => {
+                              void localDb.upsertTask({
+                                id: tk.id,
+                                scheduleState: 'SOMEDAY',
+                                whenDate: null
+                              });
+                              showFeedback(`${displayTitle} → ${t.viewSomeday}`);
+                            }}
+                          >
+                            <Archive size={11.5} />
+                            <span>{t.viewSomeday}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="chip-btn active"
+                            title={t.actionComplete}
+                            onClick={() => {
+                              void localDb.upsertTask({ id: tk.id, status: 'COMPLETED' });
+                              showFeedback(`${displayTitle} → ${t.actionComplete}`);
+                            }}
+                          >
+                            <Check size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            className="chip-btn urgent"
+                            title={t.actionDelete}
+                            onClick={() => {
+                              void localDb.softDeleteTasks([tk.id]);
+                              showFeedback(`${displayTitle} → ${t.actionDelete}`);
+                            }}
+                          >
+                            <Trash2 size={12} />
+                          </button>
                         </div>
-                        {tk.notes.trim() && (
-                          <div className="v2-review-item-notes">
-                            {tk.notes.trim().split('\n')[0]}
-                          </div>
-                        )}
                       </div>
-                      <div className="v2-review-actions-wrap">
-                        <button
-                          type="button"
-                          className="chip-btn"
-                          onClick={() =>
-                            void localDb.upsertTask({
-                              id: tk.id,
-                              scheduleState: 'TODAY',
-                              whenDate: todayEpoch
-                            })
-                          }
-                        >
-                          <Star
-                            size={11.5}
-                            fill="var(--today-star)"
-                            style={{ color: 'var(--today-star)' }}
-                          />
-                          <span>{t.viewToday}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="chip-btn"
-                          onClick={() =>
-                            void localDb.upsertTask({
-                              id: tk.id,
-                              scheduleState: 'THIS_EVENING',
-                              whenDate: todayEpoch
-                            })
-                          }
-                        >
-                          <Moon size={11.5} />
-                          <span>{t.viewThisEvening}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="chip-btn"
-                          onClick={() =>
-                            void localDb.upsertTask({
-                              id: tk.id,
-                              scheduleState: 'UPCOMING',
-                              whenDate: tomorrowEpoch
-                            })
-                          }
-                        >
-                          <CalendarDays size={11.5} />
-                          <span>{t.dateTomorrow}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="chip-btn"
-                          onClick={() =>
-                            void localDb.upsertTask({
-                              id: tk.id,
-                              scheduleState: 'SOMEDAY',
-                              whenDate: null
-                            })
-                          }
-                        >
-                          <Archive size={11.5} />
-                          <span>{t.viewSomeday}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="chip-btn active"
-                          title={t.actionComplete}
-                          onClick={() =>
-                            void localDb.upsertTask({ id: tk.id, status: 'COMPLETED' })
-                          }
-                        >
-                          <Check size={12} />
-                        </button>
-                        <button
-                          type="button"
-                          className="chip-btn urgent"
-                          title={t.actionDelete}
-                          onClick={() => void localDb.softDeleteTasks([tk.id])}
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </>
@@ -379,6 +527,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
               ) : (
                 <div className="v2-review-list">
                   {urgentTasks.map((tk) => {
+                    const displayTitle = tk.title || t.placeholderTodoTitle;
                     const proj = tk.projectId ? projectsMap.get(tk.projectId) : undefined;
                     const area = proj?.areaId
                       ? areasMap.get(proj.areaId)
@@ -388,13 +537,39 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                     const ctxLabel = proj ? proj.title : area ? area.title : '';
                     const dlDiff =
                       tk.deadline != null ? daysBetweenToday(tk.deadline) : null;
+                    const whenDiff =
+                      tk.whenDate != null ? daysBetweenToday(tk.whenDate) : null;
+                    const isTodaySelected =
+                      tk.scheduleState === 'TODAY' ||
+                      tk.scheduleState === 'THIS_EVENING' ||
+                      whenDiff === 0;
+                    const isTomorrowSelected =
+                      tk.scheduleState === 'UPCOMING' && whenDiff === 1;
+                    const isPlus7Selected =
+                      tk.scheduleState === 'UPCOMING' && whenDiff === 7;
 
                     return (
                       <div key={tk.id} className="v2-review-item-card">
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 600, fontSize: 13.8 }}>
-                            {tk.title || t.placeholderTodoTitle}
-                          </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onOpenTask) {
+                              onClose();
+                              onOpenTask(tk);
+                            }
+                          }}
+                          style={{
+                            flex: 1,
+                            minWidth: 0,
+                            background: 'transparent',
+                            border: 'none',
+                            padding: 0,
+                            textAlign: 'left',
+                            color: 'inherit',
+                            cursor: onOpenTask ? 'pointer' : 'default'
+                          }}
+                        >
+                          <div style={{ fontWeight: 600, fontSize: 13.8 }}>{displayTitle}</div>
                           <div
                             style={{
                               display: 'flex',
@@ -409,6 +584,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                                 {ctxLabel}
                               </span>
                             )}
+                            {renderScheduleBadge(tk)}
                             {tk.deadline != null && dlDiff != null && (
                               <span className={`meta-badge ${dlDiff <= 2 ? 'urgent' : ''}`}>
                                 <Flag size={10} />
@@ -422,73 +598,79 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                                 </span>
                               </span>
                             )}
-                            {tk.whenDate != null && daysBetweenToday(tk.whenDate) < 0 && (
-                              <span className="meta-badge">
-                                <CalendarDays size={10} />
-                                <span>{formatShortDate(tk.whenDate)}</span>
-                              </span>
-                            )}
                           </div>
-                        </div>
+                        </button>
 
                         <div className="v2-review-actions-wrap">
                           <button
                             type="button"
-                            className="chip-btn"
-                            onClick={() =>
+                            className={`chip-btn ${isTodaySelected ? 'active' : ''}`}
+                            aria-pressed={isTodaySelected}
+                            onClick={() => {
                               void localDb.upsertTask({
                                 id: tk.id,
                                 scheduleState: 'TODAY',
                                 whenDate: todayEpoch
-                              })
-                            }
+                              });
+                              showFeedback(`${displayTitle} → ${t.viewToday}`);
+                            }}
                           >
-                            <Star
-                              size={11.5}
-                              fill="var(--today-star)"
-                              style={{ color: 'var(--today-star)' }}
-                            />
+                            {isTodaySelected ? (
+                              <Check size={11.5} />
+                            ) : (
+                              <Star
+                                size={11.5}
+                                fill="var(--today-star)"
+                                style={{ color: 'var(--today-star)' }}
+                              />
+                            )}
                             <span>{t.viewToday}</span>
                           </button>
                           <button
                             type="button"
-                            className="chip-btn"
-                            onClick={() =>
+                            className={`chip-btn ${isTomorrowSelected ? 'active' : ''}`}
+                            aria-pressed={isTomorrowSelected}
+                            onClick={() => {
                               void localDb.upsertTask({
                                 id: tk.id,
                                 scheduleState: 'UPCOMING',
                                 whenDate: tomorrowEpoch,
-                                ...(tk.deadline != null && daysBetweenToday(tk.deadline) < 0
+                                ...(tk.deadline != null && tk.deadline < tomorrowEpoch
                                   ? { deadline: tomorrowEpoch }
                                   : {})
-                              })
-                            }
+                              });
+                              showFeedback(`${displayTitle} → ${t.dateTomorrow}`);
+                            }}
                           >
-                            <CalendarDays size={11.5} />
+                            {isTomorrowSelected ? <Check size={11.5} /> : <CalendarDays size={11.5} />}
                             <span>{t.dateTomorrow}</span>
                           </button>
                           <button
                             type="button"
-                            className="chip-btn"
-                            onClick={() =>
+                            className={`chip-btn ${isPlus7Selected ? 'active' : ''}`}
+                            aria-pressed={isPlus7Selected}
+                            onClick={() => {
                               void localDb.upsertTask({
                                 id: tk.id,
                                 scheduleState: 'UPCOMING',
                                 whenDate: nextWeekEpoch,
-                                ...(tk.deadline != null && daysBetweenToday(tk.deadline) < 0
+                                ...(tk.deadline != null && tk.deadline < nextWeekEpoch
                                   ? { deadline: nextWeekEpoch }
                                   : {})
-                              })
-                            }
+                              });
+                              showFeedback(`${displayTitle} → ${plus7Label}`);
+                            }}
                           >
-                            <span>+7d</span>
+                            {isPlus7Selected && <Check size={11.5} />}
+                            <span>{plus7Label}</span>
                           </button>
                           <button
                             type="button"
                             className="chip-btn active"
-                            onClick={() =>
-                              void localDb.upsertTask({ id: tk.id, status: 'COMPLETED' })
-                            }
+                            onClick={() => {
+                              void localDb.upsertTask({ id: tk.id, status: 'COMPLETED' });
+                              showFeedback(`${displayTitle} → ${t.actionComplete}`);
+                            }}
                           >
                             <Check size={12} />
                             <span>{t.actionComplete}</span>
@@ -570,24 +752,26 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                               type="button"
                               className="chip-btn active"
                               data-testid={`mark-reviewed-${st.project.id}`}
-                              onClick={() =>
-                                void localDb.markProjectReviewed(st.project.id)
-                              }
+                              onClick={() => {
+                                void localDb.markProjectReviewed(st.project.id);
+                                showFeedback(`${st.project.title} → ${t.weeklyReviewMarkReviewed}`);
+                              }}
                             >
                               <span>{t.weeklyReviewMarkReviewed}</span>
                             </button>
                             <button
                               type="button"
                               className="chip-btn"
-                              onClick={() =>
+                              onClick={() => {
                                 void localDb.upsertProject({
                                   id: st.project.id,
                                   scheduleState: 'SOMEDAY',
                                   whenDate: null,
                                   lastReviewedAt: Date.now(),
                                   immediateSync: true
-                                })
-                              }
+                                });
+                                showFeedback(`${st.project.title} → ${t.viewSomeday}`);
+                              }}
                             >
                               <Archive size={11.5} />
                               <span>{t.weeklyReviewMoveSomeday}</span>
@@ -599,7 +783,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                           className="v2-stalled-inline-form"
                           onSubmit={(e) => {
                             e.preventDefault();
-                            void handleAddNextAction(st.project.id);
+                            void handleAddNextAction(st.project.id, st.project.title);
                           }}
                         >
                           <input
@@ -665,21 +849,41 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                 <div className="v2-review-list">
                   {somedayProjects.map((proj) => (
                     <div key={`sd-proj-${proj.id}`} className="v2-review-item-card">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onOpenProject(proj.id);
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          flex: 1,
+                          minWidth: 0,
+                          background: 'transparent',
+                          border: 'none',
+                          padding: 0,
+                          textAlign: 'left',
+                          color: 'inherit',
+                          cursor: 'pointer'
+                        }}
+                      >
                         <Folder size={15} style={{ color: 'var(--someday-amber)', flexShrink: 0 }} />
                         <span style={{ fontWeight: 650, fontSize: 13.6 }}>{proj.title}</span>
-                      </div>
+                      </button>
                       <div className="v2-review-actions-wrap">
                         <button
                           type="button"
                           className="chip-btn active"
-                          onClick={() =>
+                          onClick={() => {
                             void localDb.upsertProject({
                               id: proj.id,
                               scheduleState: 'ANYTIME',
                               lastReviewedAt: Date.now()
-                            })
-                          }
+                            });
+                            showFeedback(`${proj.title} → ${t.viewAnytime}`);
+                          }}
                         >
                           <Layers size={11.5} />
                           <span>{t.weeklyReviewActivateAnytime}</span>
@@ -688,47 +892,72 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                     </div>
                   ))}
 
-                  {somedayTasks.map((tk) => (
-                    <div key={tk.id} className="v2-review-item-card">
-                      <div style={{ flex: 1, minWidth: 0, fontWeight: 560, fontSize: 13.6 }}>
-                        {tk.title || t.placeholderTodoTitle}
-                      </div>
-                      <div className="v2-review-actions-wrap">
+                  {somedayTasks.map((tk) => {
+                    const displayTitle = tk.title || t.placeholderTodoTitle;
+                    return (
+                      <div key={tk.id} className="v2-review-item-card">
                         <button
                           type="button"
-                          className="chip-btn"
-                          onClick={() =>
-                            void localDb.upsertTask({
-                              id: tk.id,
-                              scheduleState: 'TODAY',
-                              whenDate: todayEpoch
-                            })
-                          }
+                          onClick={() => {
+                            if (onOpenTask) {
+                              onClose();
+                              onOpenTask(tk);
+                            }
+                          }}
+                          style={{
+                            flex: 1,
+                            minWidth: 0,
+                            fontWeight: 560,
+                            fontSize: 13.6,
+                            background: 'transparent',
+                            border: 'none',
+                            padding: 0,
+                            textAlign: 'left',
+                            color: 'inherit',
+                            cursor: onOpenTask ? 'pointer' : 'default'
+                          }}
                         >
-                          <Star
-                            size={11.5}
-                            fill="var(--today-star)"
-                            style={{ color: 'var(--today-star)' }}
-                          />
-                          <span>{t.weeklyReviewActivateToday}</span>
+                          {displayTitle}
                         </button>
-                        <button
-                          type="button"
-                          className="chip-btn"
-                          onClick={() =>
-                            void localDb.upsertTask({
-                              id: tk.id,
-                              scheduleState: 'ANYTIME',
-                              whenDate: null
-                            })
-                          }
-                        >
-                          <Layers size={11.5} />
-                          <span>{t.weeklyReviewActivateAnytime}</span>
-                        </button>
+                        <div className="v2-review-actions-wrap">
+                          <button
+                            type="button"
+                            className="chip-btn"
+                            onClick={() => {
+                              void localDb.upsertTask({
+                                id: tk.id,
+                                scheduleState: 'TODAY',
+                                whenDate: todayEpoch
+                              });
+                              showFeedback(`${displayTitle} → ${t.viewToday}`);
+                            }}
+                          >
+                            <Star
+                              size={11.5}
+                              fill="var(--today-star)"
+                              style={{ color: 'var(--today-star)' }}
+                            />
+                            <span>{t.weeklyReviewActivateToday}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="chip-btn"
+                            onClick={() => {
+                              void localDb.upsertTask({
+                                id: tk.id,
+                                scheduleState: 'ANYTIME',
+                                whenDate: null
+                              });
+                              showFeedback(`${displayTitle} → ${t.viewAnytime}`);
+                            }}
+                          >
+                            <Layers size={11.5} />
+                            <span>{t.weeklyReviewActivateAnytime}</span>
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </>

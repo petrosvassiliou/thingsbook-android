@@ -761,9 +761,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(73, BuildConfig.VERSION_CODE)
-        assertEquals("2.1.0", BuildConfig.VERSION_NAME)
-        assertFalse("Final 2.1.0 release must not contain pre-release hyphen", BuildConfig.VERSION_NAME.contains("-"))
+        assertEquals(74, BuildConfig.VERSION_CODE)
+        assertEquals("2.1.1", BuildConfig.VERSION_NAME)
+        assertFalse("Final 2.1.1 release must not contain pre-release hyphen", BuildConfig.VERSION_NAME.contains("-"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),

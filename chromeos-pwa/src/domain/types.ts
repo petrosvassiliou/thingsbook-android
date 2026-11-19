@@ -1,5 +1,5 @@
-export const APP_VERSION = '2.1.0';
-export const APP_BUILD_CODE = 73;
+export const APP_VERSION = '2.1.1';
+export const APP_BUILD_CODE = 74;
 export const MAX_AREAS = 8;
 
 export type ScheduleState =

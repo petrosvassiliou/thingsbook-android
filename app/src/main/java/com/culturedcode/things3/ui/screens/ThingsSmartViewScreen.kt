@@ -2845,6 +2845,12 @@ private fun ThingsModalsOverlay(
             onScheduleTask = { task, schedule, whenDate ->
                 viewModel.updateTaskSchedule(task, schedule, whenDate)
             },
+            onScheduleTaskWithOptionalDeadline = { task, schedule, whenDate, newDeadline ->
+                viewModel.updateTaskScheduleAndOptionalDeadline(task, schedule, whenDate, newDeadline)
+            },
+            onOpenTask = { task ->
+                viewModel.openTaskFromWeeklyReview(task)
+            },
             onCompleteTask = { taskId ->
                 viewModel.updateTaskStatus(taskId, TaskStatus.COMPLETED)
             },

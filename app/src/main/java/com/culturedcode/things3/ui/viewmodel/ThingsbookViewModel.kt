@@ -619,6 +619,49 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
+    fun updateTaskScheduleAndOptionalDeadline(
+        task: TaskItem,
+        newState: ScheduleState,
+        newWhenDate: Long?,
+        newDeadline: Long? = null
+    ) {
+        safeVmScope.launch {
+            if (newDeadline != null) {
+                repository.updateTaskScheduleAndDeadline(
+                    taskId = task.id,
+                    newState = newState,
+                    newWhenDate = newWhenDate,
+                    newDeadline = newDeadline
+                )
+            } else {
+                repository.updateTaskSchedule(
+                    taskId = task.id,
+                    newState = newState,
+                    newWhenDate = newWhenDate
+                )
+            }
+        }
+    }
+
+    fun openTaskFromWeeklyReview(task: TaskItem) {
+        _isWeeklyReviewModalOpen.value = false
+        _selectedFilterTagId.value = null
+        _navigationTarget.value = when {
+            task.projectId != null -> ActiveNavigationTarget.ProjectDetail(task.projectId)
+            task.areaId != null -> ActiveNavigationTarget.AreaDetail(task.areaId)
+            task.scheduleState == ScheduleState.TODAY || task.scheduleState == ScheduleState.THIS_EVENING ->
+                ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
+            task.scheduleState == ScheduleState.UPCOMING ->
+                ActiveNavigationTarget.SmartView(SmartViewType.UPCOMING)
+            task.scheduleState == ScheduleState.SOMEDAY ->
+                ActiveNavigationTarget.SmartView(SmartViewType.SOMEDAY)
+            task.scheduleState == ScheduleState.ANYTIME ->
+                ActiveNavigationTarget.SmartView(SmartViewType.ANYTIME)
+            else -> ActiveNavigationTarget.SmartView(SmartViewType.INBOX)
+        }
+        _expandedTaskId.value = task.id
+    }
+
     fun quickMoveTaskToThisEveningAndCollapse(
         task: TaskItem,
         latestTitle: String,

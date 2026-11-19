@@ -749,6 +749,7 @@ public final class ThingsbookStore: ObservableObject {
 
     public func updateTask(_ task: TaskItem, tagIds: [String]? = nil) {
         try? database.updateTask(task, tagIds: tagIds)
+        reloadSnapshot()
         NotificationReminderService.shared.syncTaskReminder(task, lang: preferences.language)
         if preferences.calendarEventsEnabled {
             Task { await refreshCalendarEvents() }

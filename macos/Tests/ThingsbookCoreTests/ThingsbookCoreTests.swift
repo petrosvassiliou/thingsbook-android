@@ -408,9 +408,9 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.1.0")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.1.0")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 73)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.1.1")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.1.1")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 74)
         XCTAssertFalse(AppUpdateService.currentVersionIsPrerelease)
         XCTAssertEqual(
             FirebaseCloudSyncService.deriveUidWakeTopic(uid: " user-abc-123 "),

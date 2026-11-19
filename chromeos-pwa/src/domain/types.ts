@@ -1,5 +1,5 @@
-export const APP_VERSION = '3.0.0-alpha.10';
-export const APP_BUILD_CODE = 86;
+export const APP_VERSION = '3.0.0-alpha.11';
+export const APP_BUILD_CODE = 88;
 export const MAX_AREAS = 8;
 
 export type ScheduleState =
@@ -17,6 +17,26 @@ export type ProjectStatus = 'ACTIVE' | 'COMPLETED' | 'CANCELED';
 export type RecurrenceMode = 'FIXED_SCHEDULE' | 'AFTER_COMPLETION';
 
 export type RecurrenceUnit = 'DAYS' | 'WEEKS' | 'MONTHS' | 'YEARS';
+
+export type EffortLevel = 'QUICK_WIN' | 'MEDIUM' | 'DEEP_FOCUS';
+
+export type TagSortMode = 'alpha' | 'most_used' | 'manual';
+
+export type ViewSortMode = 'manual' | 'deadline' | 'duration' | 'effort' | 'alpha';
+
+export type ProjectViewMode = 'list' | 'board' | 'roadmap';
+
+export interface SavedPerspective {
+  id: string;
+  title: string;
+  categoryIds: string[];
+  effortLevel: EffortLevel | null;
+  maxDurationMinutes: number | null;
+  dueWindow: 'ANY' | 'TODAY' | 'NEXT_7_DAYS' | 'OVERDUE';
+  areaId: string | null;
+  actionableOnly: boolean;
+  sortOrder: number;
+}
 
 export interface RecurrenceRule {
   mode: RecurrenceMode;
@@ -70,6 +90,8 @@ export interface ProjectRecord {
   lastReviewedAt?: number | null;
   sortOrder: number;
   tagIds: string[];
+  workspaceId?: string | null;
+  viewMode?: ProjectViewMode | null;
   createdAt: number;
   updatedAt: number;
   isDeleted: boolean;
@@ -85,6 +107,7 @@ export interface HeadingRecord {
   id: string;
   projectId: string;
   title: string;
+  startDate?: number | null;
   endDate?: number | null;
   sortOrder: number;
   isArchived: boolean;
@@ -105,6 +128,11 @@ export interface TaskRecord {
   reminderTime: number | null;
   scheduledStartMinutes?: number | null;
   durationMinutes?: number | null;
+  isPinned?: boolean;
+  effortLevel?: EffortLevel | null;
+  blockedByTaskIds?: string[];
+  workspaceId?: string | null;
+  assigneeId?: string | null;
   completedAt: number | null;
   projectId: string | null;
   headingId: string | null;
@@ -201,7 +229,10 @@ export type SmartViewType =
 export type ActiveNavigation =
   | { kind: 'smart'; view: SmartViewType }
   | { kind: 'area'; areaId: string }
-  | { kind: 'project'; projectId: string };
+  | { kind: 'project'; projectId: string }
+  | { kind: 'perspective'; perspectiveId: string };
+
+export type NavSelection = ActiveNavigation;
 
 export type CloudSyncStatus = 'OFFLINE' | 'SYNCING' | 'SYNCED';
 
@@ -229,6 +260,9 @@ export interface AppPreferences {
   biometricAppLockEnabled: boolean;
   appLockPinHash: string;
   appLockWebAuthnCredId: string;
+  tagSortMode?: TagSortMode;
+  viewSortMode?: ViewSortMode;
+  savedPerspectives?: SavedPerspective[];
 }
 
 export type AppSettings = AppPreferences;

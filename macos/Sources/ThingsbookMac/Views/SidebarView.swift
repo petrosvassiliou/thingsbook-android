@@ -104,6 +104,9 @@ public struct SidebarView: View {
                         weeklyReviewMiniCard
                     }
 
+                    // 2.5 Custom Saved Perspectives (v3.0)
+                    perspectivesSection
+
                     // 3. Areas -> Nested Projects Hierarchy (Workspace Folders + Linear Progress)
                     if !store.areas.isEmpty {
                         Divider()
@@ -167,6 +170,13 @@ public struct SidebarView: View {
                         Label(store.tr("entity_new_area"), systemImage: "folder")
                     }
                     .disabled(store.areas.count >= ThingsSQLiteDatabase.maxAreas)
+
+                    Button {
+                        store.editingPerspective = nil
+                        store.isPerspectiveEditorPresented = true
+                    } label: {
+                        Label(store.tr("v30_perspective_new"), systemImage: "line.3.horizontal.decrease.circle")
+                    }
 
                     Divider()
 
@@ -585,7 +595,7 @@ public struct SidebarView: View {
                 store.markProjectReviewed(proj.id)
             }
             Button(store.tr("action_duplicate_project")) {
-                if let copy = try? store.database.duplicateProject(proj.id, copySuffix: store.tr("macos_copy_suffix")) {
+                if let copy = try? store.database.duplicateProject(proj.id, copySuffix: store.tr("v25_copy_suffix")) {
                     store.selectedDestination = .project(copy.id)
                 }
             }
@@ -597,6 +607,100 @@ public struct SidebarView: View {
                 store.deleteProjectWithUndo(proj)
             } label: {
                 Text(store.tr("macos_delete_project"))
+            }
+        }
+    }
+
+    private var perspectivesSection: some View {
+        let perspectives = store.sortedPerspectives
+        return VStack(alignment: .leading, spacing: 3) {
+            Divider()
+                .padding(.vertical, 3)
+                .padding(.horizontal, 4)
+
+            HStack(spacing: 6) {
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text(store.tr("v30_perspectives_section"))
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Spacer()
+
+                Button {
+                    store.editingPerspective = nil
+                    store.isPerspectiveEditorPresented = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(.plain)
+                .thingsTooltip(store.tr("v30_perspective_new"))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+
+            ForEach(perspectives) { perspective in
+                perspectiveRow(perspective)
+            }
+        }
+    }
+
+    private func perspectiveRow(_ perspective: SavedPerspective) -> some View {
+        let dest = NavigationDestination.perspective(perspective.id)
+        let selected = store.selectedDestination == dest
+        let count = store.tasksForPerspective(perspective).count
+
+        return Button {
+            store.selectedDestination = dest
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: selected ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .secondary)
+                    .frame(width: 18)
+
+                Text(perspective.title)
+                    .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .primary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 4)
+
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .secondary)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5.5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.15) : Color.clear)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(selected ? ThingsMacPalette.accentBlue.opacity(0.28) : Color.clear, lineWidth: 0.8)
+            )
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .thingsTooltip(perspective.title)
+        .contextMenu {
+            Button(store.tr("v30_perspective_edit")) {
+                store.editingPerspective = perspective
+                store.isPerspectiveEditorPresented = true
+            }
+            Divider()
+            Button(role: .destructive) {
+                store.deletePerspective(perspective.id)
+            } label: {
+                Text(store.tr("v30_perspective_delete"))
             }
         }
     }

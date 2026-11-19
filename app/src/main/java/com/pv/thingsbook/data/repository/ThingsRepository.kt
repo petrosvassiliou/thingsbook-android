@@ -33,6 +33,7 @@ import com.pv.thingsbook.data.local.entity.TaskWithDetails
 import com.pv.thingsbook.data.notifications.ReminderScheduler
 import com.pv.thingsbook.domain.model.Area
 import com.pv.thingsbook.domain.model.ChecklistItem
+import com.pv.thingsbook.domain.model.EffortLevel
 import com.pv.thingsbook.domain.model.Heading
 import com.pv.thingsbook.domain.model.Project
 import com.pv.thingsbook.domain.model.ProjectOutlineImporter
@@ -52,6 +53,7 @@ import com.pv.thingsbook.domain.model.TaskItem
 import com.pv.thingsbook.domain.model.TaskStatus
 import com.pv.thingsbook.domain.model.TemplateHeadingBlueprint
 import com.pv.thingsbook.domain.model.TemplateTaskBlueprint
+import com.pv.thingsbook.domain.model.wouldCreateDependencyCycle
 import com.pv.thingsbook.domain.util.runCatchingCancellable
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -191,6 +193,11 @@ class ThingsRepository @Inject constructor(
             .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
             .catch { emit(emptyList()) }
 
+    fun observeAllOpenTasks(): Flow<List<TaskItem>> =
+        database.taskDao().observeAllOpenActiveTasks()
+            .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
+            .catch { emit(emptyList()) }
+
     fun observeLogbookTasks(): Flow<List<TaskItem>> =
         database.taskDao().observeLogbookTasks()
             .map { list -> list.mapNotNull { runCatching { it.toDomain() }.getOrNull() }.distinctBy { it.id } }
@@ -219,6 +226,8 @@ class ThingsRepository @Inject constructor(
                             lastReviewedAt = entity.lastReviewedAt,
                             sortOrder = entity.sortOrder,
                             tagIds = decodeStringList(entity.tagIdsJson),
+                            workspaceId = entity.workspaceId,
+                            viewMode = entity.viewMode,
                             createdAt = entity.createdAt,
                             updatedAt = entity.updatedAt,
                             isDeleted = entity.isDeleted
@@ -322,6 +331,7 @@ class ThingsRepository @Inject constructor(
                             id = it.id,
                             projectId = it.projectId,
                             title = it.title,
+                            startDate = it.startDate,
                             endDate = it.endDate,
                             sortOrder = it.sortOrder,
                             isArchived = it.isArchived,
@@ -375,6 +385,8 @@ class ThingsRepository @Inject constructor(
                             lastReviewedAt = entity.lastReviewedAt,
                             sortOrder = entity.sortOrder,
                             tagIds = decodeStringList(entity.tagIdsJson),
+                            workspaceId = entity.workspaceId,
+                            viewMode = entity.viewMode,
                             createdAt = entity.createdAt,
                             updatedAt = entity.updatedAt,
                             isDeleted = entity.isDeleted
@@ -417,6 +429,11 @@ class ThingsRepository @Inject constructor(
         areaId: String? = null,
         recurrenceRule: RecurrenceRule? = null,
         sortOrder: Double = 1000.0,
+        isPinned: Boolean? = null,
+        effortLevel: String? = null,
+        blockedByTaskIds: List<String>? = null,
+        workspaceId: String? = null,
+        assigneeId: String? = null,
         tagIds: List<String> = emptyList()
     ): String {
         val now = System.currentTimeMillis()
@@ -439,6 +456,20 @@ class ThingsRepository @Inject constructor(
 
         val resolvedStartMins = scheduledStartMinutes ?: if (preserveExistingTimeblock) existing?.scheduledStartMinutes else null
         val resolvedDurationMins = durationMinutes ?: if (preserveExistingTimeblock) existing?.durationMinutes else null
+        val resolvedIsPinned = isPinned ?: existing?.isPinned ?: false
+        val resolvedEffortLevel = if (effortLevel != null) {
+            EffortLevel.normalize(effortLevel)
+        } else {
+            existing?.effortLevel
+        }
+        val resolvedBlockedByJson = if (blockedByTaskIds != null) {
+            val cleanBlockers = blockedByTaskIds.map { it.trim() }.filter { it.isNotEmpty() && it != id }.distinct()
+            json.encodeToString(cleanBlockers)
+        } else {
+            existing?.blockedByJson ?: "[]"
+        }
+        val resolvedWorkspaceId = workspaceId ?: existing?.workspaceId
+        val resolvedAssigneeId = assigneeId ?: existing?.assigneeId
 
         val entity = TaskEntity(
             id = id,
@@ -457,6 +488,11 @@ class ThingsRepository @Inject constructor(
             areaId = areaId,
             recurrenceRuleJson = recurrenceRule?.let { json.encodeToString(it) },
             sortOrder = if (sortOrder.isFinite()) sortOrder else 1000.0,
+            isPinned = resolvedIsPinned,
+            effortLevel = resolvedEffortLevel,
+            blockedByJson = resolvedBlockedByJson,
+            workspaceId = resolvedWorkspaceId,
+            assigneeId = resolvedAssigneeId,
             tagIdsJson = json.encodeToString(tagIds),
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
@@ -484,6 +520,113 @@ class ThingsRepository @Inject constructor(
         return id
     }
 
+    suspend fun setTasksPinned(taskIds: Collection<String>, isPinned: Boolean) {
+        val distinctIds = taskIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (distinctIds.isEmpty()) return
+        val now = System.currentTimeMillis()
+        var mutated = false
+        database.withTransaction {
+            val existingTasks = distinctIds.chunked(500).flatMap { chunk ->
+                database.taskDao().getByIds(chunk)
+            }
+            val updated = existingTasks.mapNotNull { task ->
+                if (task.isDeleted || task.isPinned == isPinned) {
+                    null
+                } else {
+                    task.copy(
+                        isPinned = isPinned,
+                        updatedAt = maxOf(now, task.updatedAt + 1L),
+                        isDirty = true
+                    )
+                }
+            }
+            if (updated.isNotEmpty()) {
+                database.taskDao().upsertAll(updated)
+                mutated = true
+            }
+        }
+        if (mutated) {
+            syncRepository.triggerBackgroundSync()
+        }
+    }
+
+    suspend fun updateTaskEffortAndDuration(
+        taskId: String,
+        effortLevel: String? = null,
+        durationMinutes: Int? = null,
+        updateEffort: Boolean = true,
+        updateDuration: Boolean = true
+    ) {
+        val existing = database.taskDao().getById(taskId) ?: return
+        if (existing.isDeleted) return
+        val nextEffort = if (updateEffort) EffortLevel.normalize(effortLevel) else existing.effortLevel
+        val nextDuration = if (updateDuration) durationMinutes?.takeIf { it > 0 }?.coerceIn(1, 1440) else existing.durationMinutes
+        if (nextEffort == existing.effortLevel && nextDuration == existing.durationMinutes) return
+        val now = System.currentTimeMillis()
+        database.taskDao().upsert(
+            existing.copy(
+                effortLevel = nextEffort,
+                durationMinutes = nextDuration,
+                updatedAt = maxOf(now, existing.updatedAt + 1L),
+                isDirty = true
+            )
+        )
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun updateTaskBlockedBy(taskId: String, blockerIds: List<String>): Boolean {
+        val cleanTaskId = taskId.trim()
+        if (cleanTaskId.isEmpty()) return false
+        val now = System.currentTimeMillis()
+        var hadCycle = false
+        var mutated = false
+
+        database.withTransaction {
+            val existing = database.taskDao().getById(cleanTaskId) ?: return@withTransaction
+            if (existing.isDeleted) return@withTransaction
+
+            val allNonDeleted = database.taskDao().getAllNonDeletedTasksList()
+            val validTaskIds = allNonDeleted.mapTo(HashSet()) { it.id }
+            val blockedByMap = HashMap<String, List<String>>(allNonDeleted.size)
+            for (t in allNonDeleted) {
+                if (t.id != cleanTaskId) {
+                    blockedByMap[t.id] = decodeStringList(t.blockedByJson)
+                }
+            }
+
+            val accepted = mutableListOf<String>()
+            blockedByMap[cleanTaskId] = accepted
+
+            for (rawCandidate in blockerIds) {
+                val cand = rawCandidate.trim()
+                if (cand.isEmpty()) continue
+                if (cand !in validTaskIds && cand != cleanTaskId) continue
+                if (wouldCreateDependencyCycle(cleanTaskId, cand, blockedByMap)) {
+                    hadCycle = true
+                } else if (cand !in accepted) {
+                    accepted += cand
+                }
+            }
+
+            val encoded = json.encodeToString(accepted)
+            if (encoded != existing.blockedByJson) {
+                database.taskDao().upsert(
+                    existing.copy(
+                        blockedByJson = encoded,
+                        updatedAt = maxOf(now, existing.updatedAt + 1L),
+                        isDirty = true
+                    )
+                )
+                mutated = true
+            }
+        }
+
+        if (mutated) {
+            syncRepository.triggerBackgroundSync()
+        }
+        return !hadCycle
+    }
+
     private suspend fun silentlyPurgeTaskEntities(targets: List<TaskEntity>, now: Long) {
         if (targets.isEmpty()) return
         for (target in targets) {
@@ -503,6 +646,11 @@ class ThingsRepository @Inject constructor(
                         tagIdsJson = "[]",
                         scheduledStartMinutes = null,
                         durationMinutes = null,
+                        isPinned = false,
+                        effortLevel = null,
+                        blockedByJson = "[]",
+                        workspaceId = null,
+                        assigneeId = null,
                         isDeleted = true,
                         updatedAt = tombstoneAt,
                         isDirty = true
@@ -654,6 +802,8 @@ class ThingsRepository @Inject constructor(
             deadline = nextDeadlineEpoch,
             reminderTime = nextReminderTime,
             completedAt = null,
+            isPinned = false,
+            blockedByJson = "[]",
             createdAt = existingById?.createdAt ?: now,
             updatedAt = if (existingById != null) maxOf(now, existingById.updatedAt + 1L) else now,
             isDeleted = false,
@@ -1300,7 +1450,9 @@ class ThingsRepository @Inject constructor(
         scheduleState: ScheduleState = ScheduleState.ANYTIME,
         whenDate: Long? = null,
         deadline: Long? = null,
-        tagIds: List<String> = emptyList()
+        tagIds: List<String> = emptyList(),
+        workspaceId: String? = null,
+        viewMode: String? = null
     ): String {
         val trimmedTitle = title.trim()
         if (trimmedTitle.isEmpty()) return id
@@ -1325,6 +1477,8 @@ class ThingsRepository @Inject constructor(
             lastReviewedAt = if (existing != null) existing.lastReviewedAt else now,
             sortOrder = existing?.sortOrder ?: (maxSort + 1000.0),
             tagIdsJson = json.encodeToString(tagIds),
+            workspaceId = workspaceId ?: existing?.workspaceId,
+            viewMode = viewMode ?: existing?.viewMode,
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
             isDeleted = false,
@@ -1532,6 +1686,7 @@ class ThingsRepository @Inject constructor(
         projectId: String,
         title: String,
         sortOrder: Double,
+        startDate: Long? = null,
         endDate: Long? = null
     ): String {
         val now = System.currentTimeMillis()
@@ -1541,6 +1696,7 @@ class ThingsRepository @Inject constructor(
                 id = id,
                 projectId = projectId,
                 title = title,
+                startDate = startDate,
                 endDate = endDate,
                 sortOrder = if (sortOrder.isFinite()) sortOrder else 1000.0,
                 isArchived = false,
@@ -1562,6 +1718,19 @@ class ThingsRepository @Inject constructor(
         database.headingDao().upsert(
             existing.copy(
                 title = trimmed,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun updateHeadingStartDate(headingId: String, startDate: Long?) {
+        val existing = database.headingDao().getById(headingId) ?: return
+        val now = System.currentTimeMillis()
+        database.headingDao().upsert(
+            existing.copy(
+                startDate = startDate,
                 updatedAt = now,
                 isDirty = true
             )
@@ -2019,6 +2188,13 @@ class ThingsRepository @Inject constructor(
                     areaId = null,
                     tagIdsJson = "[]",
                     reminderTime = null,
+                    scheduledStartMinutes = null,
+                    durationMinutes = null,
+                    isPinned = false,
+                    effortLevel = null,
+                    blockedByJson = "[]",
+                    workspaceId = null,
+                    assigneeId = null,
                     isDeleted = true,
                     updatedAt = now,
                     isDirty = true
@@ -2057,6 +2233,8 @@ class ThingsRepository @Inject constructor(
                     title = "",
                     notes = "",
                     tagIdsJson = "[]",
+                    workspaceId = null,
+                    viewMode = null,
                     isDeleted = true,
                     updatedAt = now,
                     isDirty = true
@@ -2138,6 +2316,8 @@ class ThingsRepository @Inject constructor(
             status = TaskStatus.OPEN,
             completedAt = null,
             reminderTime = existing.reminderTime?.takeIf { it > now },
+            isPinned = false,
+            blockedByJson = "[]",
             sortOrder = existing.sortOrder + 10.0,
             createdAt = now,
             updatedAt = now,
@@ -2215,11 +2395,16 @@ class ThingsRepository @Inject constructor(
             val existingTasks = database.taskDao().getAllNonDeletedTasksList()
                 .filter { it.projectId == projectId && it.status == TaskStatus.OPEN }
                 .sortedBy { it.sortOrder }
+            val taskIdMap = existingTasks.associate { it.id to UUID.randomUUID().toString() }
 
             for (task in existingTasks) {
-                val newTaskId = UUID.randomUUID().toString()
+                val newTaskId = taskIdMap.getValue(task.id)
                 val taskTagIds = decodeStringList(task.tagIdsJson)
                 val mappedHeadingId = task.headingId?.let { headingIdMap[it] }
+                val remappedBlockers = decodeStringList(task.blockedByJson)
+                    .mapNotNull { taskIdMap[it] }
+                    .filter { it != newTaskId }
+                    .distinct()
                 val clonedTask = task.copy(
                     id = newTaskId,
                     projectId = newProjectId,
@@ -2227,6 +2412,8 @@ class ThingsRepository @Inject constructor(
                     status = TaskStatus.OPEN,
                     completedAt = null,
                     reminderTime = null,
+                    isPinned = false,
+                    blockedByJson = json.encodeToString(remappedBlockers),
                     createdAt = now,
                     updatedAt = now,
                     isDeleted = false,
@@ -2260,30 +2447,317 @@ class ThingsRepository @Inject constructor(
         id: String = UUID.randomUUID().toString(),
         title: String,
         shortcut: String? = null,
-        parentTagId: String? = null
+        parentTagId: String? = null,
+        allowClearShortcut: Boolean = false
     ): String {
         val trimmedTitle = title.trim()
         if (trimmedTitle.isEmpty()) return id
         val now = System.currentTimeMillis()
-        val existingById = database.tagDao().getById(id)
-        val existing = existingById ?: database.tagDao().getAllNonDeletedTagsList()
-            .firstOrNull { it.title.trim().equals(trimmedTitle, ignoreCase = true) }
+        val activeTags = database.tagDao().getAllNonDeletedTagsList()
+        val existingById = database.tagDao().getById(id)?.takeIf { !it.isDeleted }
+        val collidingActive = activeTags.firstOrNull {
+            it.id != id && it.title.trim().equals(trimmedTitle, ignoreCase = true)
+        }
+
+        if (existingById != null && collidingActive != null) {
+            val cleanShortcut = shortcut?.trim()?.takeIf { it.isNotEmpty() }
+            if (cleanShortcut != null && collidingActive.shortcut.isNullOrBlank()) {
+                database.tagDao().upsert(
+                    collidingActive.copy(
+                        shortcut = cleanShortcut,
+                        updatedAt = maxOf(now, collidingActive.updatedAt + 1L),
+                        isDirty = true
+                    )
+                )
+            }
+            mergeTags(sourceTagId = existingById.id, targetTagId = collidingActive.id)
+            return collidingActive.id
+        }
+
+        val existing = existingById ?: collidingActive
         val resolvedId = existing?.id ?: id
         val cleanShortcut = shortcut?.trim()?.takeIf { it.isNotEmpty() }
+        val resolvedShortcut = when {
+            allowClearShortcut -> cleanShortcut
+            cleanShortcut != null -> cleanShortcut
+            else -> existing?.shortcut
+        }
+        val nextSortOrder = (activeTags.maxOfOrNull { it.sortOrder.takeIf(Double::isFinite) ?: 0.0 } ?: 0.0) + 1000.0
         val tagEntity = TagEntity(
             id = resolvedId,
             title = if (existingById == null && existing != null) existing.title else trimmedTitle,
             parentTagId = parentTagId ?: existing?.parentTagId,
-            shortcut = cleanShortcut ?: existing?.shortcut,
-            sortOrder = existing?.sortOrder ?: (now % 100_000).toDouble(),
+            shortcut = resolvedShortcut,
+            sortOrder = existing?.sortOrder?.takeIf(Double::isFinite) ?: nextSortOrder,
             createdAt = existing?.createdAt ?: now,
-            updatedAt = now,
+            updatedAt = maxOf(now, (existing?.updatedAt ?: 0L) + 1L),
             isDeleted = false,
             isDirty = true
         )
         database.tagDao().upsert(tagEntity)
         syncRepository.triggerBackgroundSync()
         return resolvedId
+    }
+
+    suspend fun mergeTags(sourceTagId: String, targetTagId: String): Boolean {
+        val srcId = sourceTagId.trim()
+        val dstId = targetTagId.trim()
+        if (srcId.isEmpty() || dstId.isEmpty() || srcId == dstId) return false
+        val source = database.tagDao().getById(srcId)?.takeIf { !it.isDeleted } ?: return false
+        val target = database.tagDao().getById(dstId)?.takeIf { !it.isDeleted } ?: return false
+        val now = System.currentTimeMillis()
+
+        fun remapIds(ids: Collection<String>): Pair<List<String>, Boolean> {
+            var changed = false
+            val out = mutableListOf<String>()
+            for (raw in ids) {
+                val mapped = if (raw == srcId) dstId else raw
+                if (mapped != raw) changed = true
+                if (mapped !in out) {
+                    out += mapped
+                } else {
+                    changed = true
+                }
+            }
+            return out to changed
+        }
+
+        database.withTransaction {
+            val taskCrossRefsByTask = database.taskDao().getAllTaskTagCrossRefs()
+                .groupBy({ it.taskId }, { it.tagId })
+            val projCrossRefsByProject = database.projectDao().getAllProjectTagCrossRefs()
+                .groupBy({ it.projectId }, { it.tagId })
+
+            val candidateTasks = (database.taskDao().getAllNonDeletedTasksList() +
+                database.taskDao().getDeletedTasksList()).distinctBy { it.id }
+            for (task in candidateTasks) {
+                val jsonTags = decodeStringList(task.tagIdsJson)
+                val crossRefTags = taskCrossRefsByTask[task.id].orEmpty()
+                if (srcId in jsonTags || srcId in crossRefTags) {
+                    val combined = LinkedHashSet<String>(jsonTags).apply { addAll(crossRefTags) }
+                    val (nextTags, _) = remapIds(combined)
+                    database.taskDao().upsertTaskWithTags(
+                        task.copy(
+                            tagIdsJson = json.encodeToString(nextTags),
+                            updatedAt = maxOf(now, task.updatedAt + 1L),
+                            isDirty = true
+                        ),
+                        nextTags
+                    )
+                }
+            }
+
+            val candidateProjects = (database.projectDao().getAllNonDeletedProjectsList() +
+                database.projectDao().getDeletedProjectsList()).distinctBy { it.id }
+            for (proj in candidateProjects) {
+                val jsonTags = decodeStringList(proj.tagIdsJson)
+                val crossRefTags = projCrossRefsByProject[proj.id].orEmpty()
+                if (srcId in jsonTags || srcId in crossRefTags) {
+                    val combined = LinkedHashSet<String>(jsonTags).apply { addAll(crossRefTags) }
+                    val (nextTags, _) = remapIds(combined)
+                    database.projectDao().upsertProjectWithTags(
+                        proj.copy(
+                            tagIdsJson = json.encodeToString(nextTags),
+                            updatedAt = maxOf(now, proj.updatedAt + 1L),
+                            isDirty = true
+                        ),
+                        nextTags
+                    )
+                }
+            }
+
+            val updatedAreas = database.areaDao().getActiveAreasList().mapNotNull { area ->
+                val (nextTags, changed) = remapIds(decodeStringList(area.tagIdsJson))
+                if (changed) {
+                    area.copy(
+                        tagIdsJson = json.encodeToString(nextTags),
+                        updatedAt = maxOf(now, area.updatedAt + 1L),
+                        isDirty = true
+                    )
+                } else null
+            }
+            if (updatedAreas.isNotEmpty()) {
+                database.areaDao().upsertAll(updatedAreas)
+            }
+
+            val updatedTemplates = database.projectTemplateDao().getAllNonDeletedTemplatesList().mapNotNull { tpl ->
+                val (nextTplTags, tplTagsChanged) = remapIds(decodeStringList(tpl.tagIdsJson))
+                val blueprintMayContainSrc = tpl.blueprintJson.contains(srcId)
+                var nextBlueprintJson = tpl.blueprintJson
+                var bpChanged = false
+                if (blueprintMayContainSrc) {
+                    val bp = ProjectTemplateCodec.decodeBlueprint(tpl.blueprintJson, tpl.title, tpl.notes)
+                    val (bpTags, bpRootChanged) = remapIds(bp.tagIds)
+                    val nextUnheaded = bp.unheadedTasks.map { tb ->
+                        val (tTags, tc) = remapIds(tb.tagIds)
+                        if (tc) {
+                            bpChanged = true
+                            tb.copy(tagIds = tTags)
+                        } else tb
+                    }
+                    val nextHeadings = bp.headings.map { hb ->
+                        hb.copy(
+                            tasks = hb.tasks.map { tb ->
+                                val (tTags, tc) = remapIds(tb.tagIds)
+                                if (tc) {
+                                    bpChanged = true
+                                    tb.copy(tagIds = tTags)
+                                } else tb
+                            }
+                        )
+                    }
+                    if (bpRootChanged || bpChanged) {
+                        bpChanged = true
+                        nextBlueprintJson = ProjectTemplateCodec.encodeBlueprint(
+                            bp.copy(
+                                tagIds = bpTags,
+                                unheadedTasks = nextUnheaded,
+                                headings = nextHeadings
+                            )
+                        )
+                    }
+                }
+                if (tplTagsChanged || bpChanged) {
+                    tpl.copy(
+                        tagIdsJson = json.encodeToString(nextTplTags),
+                        blueprintJson = nextBlueprintJson,
+                        updatedAt = maxOf(now, tpl.updatedAt + 1L),
+                        isDirty = true
+                    )
+                } else null
+            }
+            if (updatedTemplates.isNotEmpty()) {
+                database.projectTemplateDao().upsertAll(updatedTemplates)
+            }
+
+            val childTags = database.tagDao().getAllNonDeletedTagsList().mapNotNull { child ->
+                if (child.id != srcId && child.parentTagId == srcId) {
+                    child.copy(
+                        parentTagId = if (child.id != target.id) target.id else null,
+                        updatedAt = maxOf(now, child.updatedAt + 1L),
+                        isDirty = true
+                    )
+                } else null
+            }
+            if (childTags.isNotEmpty()) {
+                database.tagDao().upsertAll(childTags)
+            }
+
+            database.tagDao().deleteTaskTagCrossRefsForTag(srcId)
+            database.tagDao().deleteProjectTagCrossRefsForTag(srcId)
+
+            if (target.shortcut.isNullOrBlank() && !source.shortcut.isNullOrBlank()) {
+                database.tagDao().upsert(
+                    target.copy(
+                        shortcut = source.shortcut,
+                        updatedAt = maxOf(now, target.updatedAt + 1L),
+                        isDirty = true
+                    )
+                )
+            }
+
+            database.tagDao().upsert(
+                source.copy(
+                    shortcut = null,
+                    isDeleted = true,
+                    updatedAt = maxOf(now, source.updatedAt + 1L),
+                    isDirty = true
+                )
+            )
+        }
+        syncRepository.triggerBackgroundSync()
+        return true
+    }
+
+    suspend fun moveTag(tagId: String, moveUp: Boolean) {
+        val tags = database.tagDao().getAllNonDeletedTagsList().sortedWith(
+            compareBy<TagEntity> { it.sortOrder }
+                .thenBy { it.createdAt }
+                .thenBy { it.title.lowercase(Locale.ROOT) }
+                .thenBy { it.id }
+        )
+        val index = tags.indexOfFirst { it.id == tagId }
+        if (index == -1) return
+        val targetIndex = if (moveUp) index - 1 else index + 1
+        if (targetIndex !in tags.indices) return
+
+        val now = System.currentTimeMillis()
+        val strictlyOrdered = tags.zipWithNext().all { (a, b) -> b.sortOrder > a.sortOrder }
+        if (strictlyOrdered) {
+            val current = tags[index]
+            val neighbor = tags[targetIndex]
+            database.tagDao().upsertAll(
+                listOf(
+                    current.copy(
+                        sortOrder = neighbor.sortOrder,
+                        updatedAt = maxOf(now, current.updatedAt + 1L),
+                        isDirty = true
+                    ),
+                    neighbor.copy(
+                        sortOrder = current.sortOrder,
+                        updatedAt = maxOf(now, neighbor.updatedAt + 1L),
+                        isDirty = true
+                    )
+                )
+            )
+        } else {
+            val reordered = tags.toMutableList()
+            val moved = reordered.removeAt(index)
+            reordered.add(targetIndex, moved)
+            val updates = reordered.mapIndexedNotNull { idx, tag ->
+                val desiredOrder = (idx + 1) * 1000.0
+                if (tag.sortOrder != desiredOrder) {
+                    tag.copy(
+                        sortOrder = desiredOrder,
+                        updatedAt = maxOf(now, tag.updatedAt + 1L),
+                        isDirty = true
+                    )
+                } else null
+            }
+            if (updates.isNotEmpty()) {
+                database.tagDao().upsertAll(updates)
+            }
+        }
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun batchUpdateTasksTags(
+        taskIds: Collection<String>,
+        tagIdsToAdd: Set<String>,
+        tagIdsToRemove: Set<String>
+    ) {
+        val distinctTaskIds = taskIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (distinctTaskIds.isEmpty() || (tagIdsToAdd.isEmpty() && tagIdsToRemove.isEmpty())) return
+        val now = System.currentTimeMillis()
+        var mutated = false
+        database.withTransaction {
+            val validTagIds = database.tagDao().getAllNonDeletedTagsList().mapTo(HashSet()) { it.id }
+            val cleanAddIds = tagIdsToAdd.filter { it in validTagIds }
+            val tasks = distinctTaskIds.chunked(500).flatMap { chunk ->
+                database.taskDao().getByIds(chunk)
+            }
+            for (task in tasks) {
+                if (task.isDeleted) continue
+                val currentTags = decodeStringList(task.tagIdsJson)
+                val nextTags = (currentTags.filterNot { it in tagIdsToRemove } + cleanAddIds)
+                    .filter { it in validTagIds }
+                    .distinct()
+                if (nextTags != currentTags) {
+                    database.taskDao().upsertTaskWithTags(
+                        task.copy(
+                            tagIdsJson = json.encodeToString(nextTags),
+                            updatedAt = maxOf(now, task.updatedAt + 1L),
+                            isDirty = true
+                        ),
+                        nextTags
+                    )
+                    mutated = true
+                }
+            }
+        }
+        if (mutated) {
+            syncRepository.triggerBackgroundSync()
+        }
     }
 
     suspend fun softDeleteTag(tagId: String) {
@@ -3303,6 +3777,8 @@ class ThingsRepository @Inject constructor(
                         lastReviewedAt = p.lastReviewedAt,
                         sortOrder = if (p.sortOrder.isFinite()) p.sortOrder else 0.0,
                         tagIdsJson = p.tagIdsJson,
+                        workspaceId = p.workspaceId,
+                        viewMode = p.viewMode,
                         createdAt = p.createdAt,
                         updatedAt = p.updatedAt
                     )
@@ -3312,6 +3788,7 @@ class ThingsRepository @Inject constructor(
                         id = h.id,
                         projectId = h.projectId,
                         title = h.title,
+                        startDate = h.startDate,
                         endDate = h.endDate,
                         sortOrder = if (h.sortOrder.isFinite()) h.sortOrder else 0.0,
                         isArchived = h.isArchived,
@@ -3331,6 +3808,11 @@ class ThingsRepository @Inject constructor(
                         reminderTime = t.reminderTime,
                         scheduledStartMinutes = t.scheduledStartMinutes,
                         durationMinutes = t.durationMinutes,
+                        isPinned = t.isPinned,
+                        effortLevel = t.effortLevel,
+                        blockedByJson = t.blockedByJson,
+                        workspaceId = t.workspaceId,
+                        assigneeId = t.assigneeId,
                         completedAt = t.completedAt,
                         projectId = t.projectId,
                         headingId = t.headingId,
@@ -3490,6 +3972,8 @@ class ThingsRepository @Inject constructor(
                     lastReviewedAt = p.lastReviewedAt,
                     sortOrder = if (p.sortOrder.isFinite()) p.sortOrder else 0.0,
                     tagIdsJson = json.encodeToString(combinedTagIds),
+                    workspaceId = p.workspaceId?.trim()?.takeIf { it.isNotEmpty() },
+                    viewMode = p.viewMode?.trim()?.takeIf { it.isNotEmpty() },
                     createdAt = p.createdAt.takeIf { it > 0L } ?: now,
                     updatedAt = p.updatedAt.takeIf { it > 0L } ?: now,
                     isDeleted = false,
@@ -3512,6 +3996,7 @@ class ThingsRepository @Inject constructor(
                     id = h.id,
                     projectId = h.projectId,
                     title = h.title,
+                    startDate = h.startDate,
                     endDate = h.endDate,
                     sortOrder = if (h.sortOrder.isFinite()) h.sortOrder else 0.0,
                     isArchived = h.isArchived,
@@ -3527,6 +4012,10 @@ class ThingsRepository @Inject constructor(
             .filter { it.tagId in validTagIds }
             .groupBy({ it.taskId }, { it.tagId })
 
+        val validPayloadTaskIds = payload.tasks
+            .filter { it.id.isNotBlank() }
+            .mapTo(HashSet()) { it.id }
+
         val restoredTasks = payload.tasks
             .filter { it.id.isNotBlank() }
             .distinctBy { it.id }
@@ -3540,6 +4029,9 @@ class ThingsRepository @Inject constructor(
                 val cleanAreaId = t.areaId?.takeIf { it in validAreaIds }
                 val combinedTagIds = (decodeStringList(t.tagIdsJson) + explicitTaskTagsByTask[t.id].orEmpty())
                     .filter { it in validTagIds }
+                    .distinct()
+                val cleanBlockedByIds = decodeStringList(t.blockedByJson)
+                    .filter { it in validPayloadTaskIds && it != t.id }
                     .distinct()
                 val validRecurrenceJson = t.recurrenceRuleJson?.takeIf { raw ->
                     raw.isNotBlank() && runCatching { json.decodeFromString<RecurrenceRule>(raw) }.isSuccess
@@ -3566,6 +4058,11 @@ class ThingsRepository @Inject constructor(
                     reminderTime = t.reminderTime,
                     scheduledStartMinutes = t.scheduledStartMinutes?.takeIf { it in 0..1439 },
                     durationMinutes = t.durationMinutes?.takeIf { it in 1..1440 },
+                    isPinned = t.isPinned,
+                    effortLevel = EffortLevel.normalize(t.effortLevel),
+                    blockedByJson = json.encodeToString(cleanBlockedByIds),
+                    workspaceId = t.workspaceId?.trim()?.takeIf { it.isNotEmpty() },
+                    assigneeId = t.assigneeId?.trim()?.takeIf { it.isNotEmpty() },
                     completedAt = t.completedAt,
                     projectId = cleanProjectId,
                     headingId = cleanHeadingId,
@@ -3724,6 +4221,11 @@ class ThingsRepository @Inject constructor(
         reminderTime = task.reminderTime,
         scheduledStartMinutes = task.scheduledStartMinutes,
         durationMinutes = task.durationMinutes,
+        isPinned = task.isPinned,
+        effortLevel = task.effortLevel,
+        blockedByTaskIds = decodeStringList(task.blockedByJson),
+        workspaceId = task.workspaceId,
+        assigneeId = task.assigneeId,
         completedAt = task.completedAt,
         projectId = task.projectId,
         headingId = task.headingId,
@@ -3807,6 +4309,8 @@ class ThingsRepository @Inject constructor(
         lastReviewedAt = project.lastReviewedAt,
         sortOrder = project.sortOrder,
         tagIds = decodeStringList(project.tagIdsJson),
+        workspaceId = project.workspaceId,
+        viewMode = project.viewMode,
         totalTaskCount = totalTaskCount,
         completedTaskCount = completedTaskCount,
         createdAt = project.createdAt,

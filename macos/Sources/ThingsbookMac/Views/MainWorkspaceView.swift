@@ -22,6 +22,7 @@ public struct MainWorkspaceView: View {
     @GestureState private var isMagicPlusGestureActive = false
     @State private var isQuickFindHovered = false
     @State private var isLanguagePopoverOpen = false
+    @State private var isBatchTagPopoverOpen = false
     @State private var decryptPasswordInput = ""
     @State private var decryptError: String?
 
@@ -201,6 +202,9 @@ public struct MainWorkspaceView: View {
         }
         .sheet(isPresented: $store.isTagManagerPresented) {
             ManageTagsSheetView(store: store)
+        }
+        .sheet(isPresented: $store.isPerspectiveEditorPresented) {
+            PerspectiveEditorSheetView(store: store, existingPerspective: store.editingPerspective)
         }
         .sheet(isPresented: $store.isBackupPasswordSheetPresented) {
             backupDecryptSheet
@@ -521,6 +525,8 @@ public struct MainWorkspaceView: View {
                         store.newProjectDefaultAreaId = aid
                     case .project(let pid):
                         store.newProjectDefaultAreaId = store.project(byId: pid)?.areaId
+                    case .perspective(let pid):
+                        store.newProjectDefaultAreaId = store.perspective(byId: pid)?.areaId
                     default:
                         store.newProjectDefaultAreaId = nil
                     }
@@ -562,42 +568,139 @@ public struct MainWorkspaceView: View {
     // MARK: - Bottom Multi-Select, Undo & Toast Banners
 
     private var multiSelectBar: some View {
-        HStack(spacing: 12) {
+        let selectedCandidates = (store.allOpenTasks + store.logbookTasks).filter { store.selectedTaskIds.contains($0.id) }
+        let allSelectedPinned = !selectedCandidates.isEmpty && selectedCandidates.allSatisfy(\.isPinned)
+
+        return HStack(spacing: 11) {
             Text(store.trf("multiselect_count", store.selectedTaskIds.count))
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(.white)
+                .fixedSize(horizontal: true, vertical: false)
 
             Divider()
                 .frame(height: 14)
                 .overlay(Color.white.opacity(0.25))
 
-            Button(store.tr("view_today")) {
-                let sod = DateEpochConverter.startOfDayMillis(for: Date())
-                for id in store.selectedTaskIds {
-                    if var t = store.allOpenTasks.first(where: { $0.id == id }) {
-                        t.scheduleState = .today
-                        t.whenDate = sod
-                        store.updateTask(t)
-                    }
+            Button {
+                store.completeSelectedTasks()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle")
+                        .font(.system(size: 11.5, weight: .semibold))
+                    Text(store.tr("action_complete"))
+                        .font(.system(size: 12, weight: .semibold))
                 }
             }
-            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(ThingsMacPalette.logbookGreen)
+            .fixedSize(horizontal: true, vertical: false)
+            .buttonStyle(.plain)
+            .thingsTooltip("\(store.tr("action_complete")) (⌘K)")
+
+            Button {
+                store.scheduleSelectedTasks(.today)
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(store.tr("view_today"))
+                        .font(.system(size: 12, weight: .semibold))
+                }
+            }
             .foregroundStyle(ThingsMacPalette.todayYellow)
             .fixedSize(horizontal: true, vertical: false)
             .buttonStyle(.plain)
-            .thingsTooltip("\(store.tr("action_when")): \(store.tr("view_today"))")
+            .thingsTooltip("\(store.tr("action_when")): \(store.tr("view_today")) (⌘T)")
 
-            Button(store.tr("action_delete")) {
-                store.deleteSelectedTasks()
+            Button {
+                store.scheduleSelectedTasks(.someday)
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "archivebox.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(store.tr("v25_batch_someday"))
+                        .font(.system(size: 12, weight: .semibold))
+                }
             }
-            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(ThingsMacPalette.somedayAmber)
+            .fixedSize(horizontal: true, vertical: false)
+            .buttonStyle(.plain)
+            .thingsTooltip("\(store.tr("action_when")): \(store.tr("view_someday")) (⌘O)")
+
+            Button {
+                store.togglePinForSelectedTasks()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: allSelectedPinned ? "pin.slash.fill" : "pin.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(store.tr("v25_batch_pin"))
+                        .font(.system(size: 12, weight: .semibold))
+                }
+            }
+            .foregroundStyle(allSelectedPinned ? ThingsMacPalette.accentBlue : .white.opacity(0.92))
+            .fixedSize(horizontal: true, vertical: false)
+            .buttonStyle(.plain)
+            .thingsTooltip("\(store.tr(allSelectedPinned ? "v25_unpin_task" : "v25_pin_task")) (⇧⌘P)")
+
+            Button {
+                isBatchTagPopoverOpen.toggle()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "tag.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(store.tr("v25_batch_tags"))
+                        .font(.system(size: 12, weight: .semibold))
+                }
+            }
+            .foregroundStyle(.white.opacity(0.92))
+            .fixedSize(horizontal: true, vertical: false)
+            .buttonStyle(.plain)
+            .thingsTooltip(store.tr("v25_batch_tags"))
+            .popover(isPresented: $isBatchTagPopoverOpen, arrowEdge: .bottom) {
+                let tagState = store.batchTagSelectionState()
+                TagPickerPopoverView(
+                    store: store,
+                    selectedTagIds: tagState.allSelected,
+                    partialSelectedTagIds: tagState.partialSelected,
+                    onToggleTag: { tagId in
+                        store.batchToggleTagOnSelectedTasks(tagId)
+                    }
+                )
+            }
+
+            Button {
+                store.duplicateSelectedTasks()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "plus.square.on.square")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(store.tr("v25_batch_duplicate"))
+                        .font(.system(size: 12, weight: .semibold))
+                }
+            }
+            .foregroundStyle(.white.opacity(0.92))
+            .fixedSize(horizontal: true, vertical: false)
+            .buttonStyle(.plain)
+            .thingsTooltip("\(store.tr("v25_batch_duplicate")) (⌘D)")
+
+            Button {
+                store.deleteSelectedTasks()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(store.tr("action_delete"))
+                        .font(.system(size: 12, weight: .semibold))
+                }
+            }
             .foregroundStyle(ThingsMacPalette.upcomingRed)
             .fixedSize(horizontal: true, vertical: false)
             .buttonStyle(.plain)
-            .thingsTooltip(store.tr("action_delete"))
+            .thingsTooltip("\(store.tr("action_delete")) (⌘⌫)")
 
             Button {
+                isBatchTagPopoverOpen = false
                 store.selectedTaskIds.removeAll()
+                store.lastSelectedTaskId = nil
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundStyle(.white.opacity(0.75))
@@ -616,6 +719,9 @@ public struct MainWorkspaceView: View {
                 )
                 .shadow(color: .black.opacity(0.22), radius: 12, y: 4)
         )
+        .onDisappear {
+            isBatchTagPopoverOpen = false
+        }
     }
 
     private func undoPillBanner(_ undo: UndoBannerState) -> some View {

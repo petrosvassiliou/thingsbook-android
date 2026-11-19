@@ -17,11 +17,15 @@ import {
   Flag,
   FolderInput,
   GripVertical,
+  Hourglass,
   LayoutGrid,
+  Link2,
   Mic,
   Moon,
   MoreHorizontal,
   Paperclip,
+  Pin,
+  PinOff,
   Plus,
   Repeat,
   RotateCcw,
@@ -30,7 +34,8 @@ import {
   Timer,
   Trash2,
   X,
-  XCircle
+  XCircle,
+  Zap
 } from 'lucide-react';
 import {
   daysBetweenToday,
@@ -38,6 +43,7 @@ import {
   type AreaRecord,
   type AttachmentRecord,
   type ChecklistItemRecord,
+  type EffortLevel,
   type ProjectRecord,
   type SupportedLang,
   type TagRecord,
@@ -46,11 +52,14 @@ import {
 } from '../domain/types';
 import {
   DEFAULT_TIMEBLOCK_DURATION_MINUTES,
+  STANDALONE_DURATION_PRESETS,
   TIMEBLOCK_DURATION_PRESETS,
   TIMEBLOCK_QUICK_START_MINUTES,
   computeClampedContextMenuPosition,
   formatMinutesAsClock,
+  formatStandaloneDuration,
   formatTimeblockRange,
+  isTaskActivelyBlocked,
   parseClockToMinutes,
   shouldAutoFocusTitleOnExpand,
   shouldShowQuickThisEveningPill
@@ -211,6 +220,8 @@ interface TaskItemProps {
   areasMap: Map<string, AreaRecord>;
   projectsMap: Map<string, ProjectRecord>;
   tagsMap: Map<string, TagRecord>;
+  openTaskIdSet?: ReadonlySet<string>;
+  tasksByIdMap?: ReadonlyMap<string, TaskRecord>;
   checklistItems: ChecklistItemRecord[];
   attachments: AttachmentRecord[];
   lang: SupportedLang;
@@ -225,6 +236,7 @@ interface TaskItemProps {
   onOpenRepeatModal: (taskId: string) => void;
   onOpenMoveModal: (taskId: string) => void;
   onOpenTagsModal: (taskId: string) => void;
+  onOpenDependenciesModal?: (taskId: string) => void;
   onStartFocusTimer: (
     taskId: string,
     taskTitle: string,
@@ -234,6 +246,9 @@ interface TaskItemProps {
   onDropReorder: (draggedTaskId: string, targetTaskId: string) => void;
   onToast: (msg: string) => void;
 }
+
+const EMPTY_OPEN_ID_SET: ReadonlySet<string> = new Set();
+const EMPTY_TASKS_MAP: ReadonlyMap<string, TaskRecord> = new Map();
 
 export const TaskItem: React.FC<TaskItemProps> = ({
   task,
@@ -247,6 +262,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   areasMap,
   projectsMap,
   tagsMap,
+  openTaskIdSet = EMPTY_OPEN_ID_SET,
+  tasksByIdMap = EMPTY_TASKS_MAP,
   checklistItems,
   attachments,
   lang,
@@ -261,6 +278,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   onOpenRepeatModal,
   onOpenMoveModal,
   onOpenTagsModal,
+  onOpenDependenciesModal,
   onStartFocusTimer,
   onDuplicateTask,
   onDropReorder,
@@ -278,6 +296,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [statusMenuFlipUp, setStatusMenuFlipUp] = useState(false);
   const [timeblockOpen, setTimeblockOpen] = useState(false);
+  const [effortDurationOpen, setEffortDurationOpen] = useState(false);
   const [inlineMoreMenuOpen, setInlineMoreMenuOpen] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{
     anchorX: number;
@@ -309,6 +328,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     setTitleDraft(task.title);
     setNotesDraft(task.notes);
     setTimeblockOpen(false);
+    setEffortDurationOpen(false);
     setInlineMoreMenuOpen(false);
   } else {
     if (prevServerTitle !== task.title) {
@@ -595,6 +615,41 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     task.scheduledStartMinutes != null
       ? formatTimeblockRange(task.scheduledStartMinutes, task.durationMinutes)
       : '';
+  const standaloneDurationLabel =
+    task.scheduledStartMinutes == null &&
+    task.durationMinutes != null &&
+    Number.isFinite(task.durationMinutes) &&
+    task.durationMinutes > 0
+      ? formatStandaloneDuration(task.durationMinutes)
+      : '';
+  const anyDurationLabel =
+    task.durationMinutes != null && Number.isFinite(task.durationMinutes) && task.durationMinutes > 0
+      ? formatStandaloneDuration(task.durationMinutes)
+      : '';
+  const effortDisplayLabel =
+    task.effortLevel === 'QUICK_WIN'
+      ? `⚡ ${t.effortQuickWin}`
+      : task.effortLevel === 'MEDIUM'
+        ? t.effortMedium
+        : task.effortLevel === 'DEEP_FOCUS'
+          ? `🧠 ${t.effortDeepFocus}`
+          : '';
+  const activeBlockerIds = (task.blockedByTaskIds || []).filter(
+    (bid) => bid && bid !== task.id && openTaskIdSet.has(bid)
+  );
+  const isActivelyBlocked = isTaskActivelyBlocked(task, openTaskIdSet);
+  const firstBlockerTitle =
+    activeBlockerIds.length === 1
+      ? (tasksByIdMap.get(activeBlockerIds[0])?.title?.trim() ?? '')
+      : '';
+  const blockedSummaryLabel = isActivelyBlocked
+    ? activeBlockerIds.length === 1 && firstBlockerTitle
+      ? t.waitingOnNamedBadge(firstBlockerTitle)
+      : t.waitingOnBadge(activeBlockerIds.length)
+    : '';
+  const totalBlockerCount = (task.blockedByTaskIds || []).filter(
+    (bid) => bid && bid !== task.id
+  ).length;
   const focusDurationMins =
     task.durationMinutes != null && task.durationMinutes > 0 ? task.durationMinutes : 25;
 
@@ -1020,6 +1075,87 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           </div>
         )}
 
+        {/* v3.0 Inline Standalone Duration & Effort Panel */}
+        {effortDurationOpen && (
+          <div
+            className="v2-timeblock-panel"
+            data-testid="task-effort-duration-panel"
+            style={{ marginLeft: 31 }}
+          >
+            <div className="v2-timeblock-row">
+              <span className="v2-timeblock-label">{t.durationLabel}</span>
+              <div className="v2-timeblock-slots">
+                {STANDALONE_DURATION_PRESETS.map((dur) => {
+                  const label = formatStandaloneDuration(dur);
+                  return (
+                    <button
+                      key={dur}
+                      type="button"
+                      className={`chip-btn ${task.durationMinutes === dur ? 'active' : ''}`}
+                      data-testid={`task-duration-chip-${dur}`}
+                      title={`${t.durationLabel}: ${label}`}
+                      onClick={() =>
+                        void localDb.upsertTask({
+                          id: task.id,
+                          durationMinutes: task.durationMinutes === dur ? null : dur
+                        })
+                      }
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              {task.durationMinutes != null && (
+                <button
+                  type="button"
+                  className="chip-btn urgent"
+                  style={{ marginLeft: 'auto' }}
+                  title={t.durationClear}
+                  onClick={() =>
+                    void localDb.upsertTask({
+                      id: task.id,
+                      durationMinutes: null
+                    })
+                  }
+                >
+                  <X size={11.5} />
+                  <span>{t.actionClear}</span>
+                </button>
+              )}
+            </div>
+
+            <div className="v2-timeblock-row" style={{ marginTop: 8 }}>
+              <span className="v2-timeblock-label">{t.effortLabel}</span>
+              <div className="v2-timeblock-slots">
+                {(
+                  [
+                    [null, t.effortNone],
+                    ['QUICK_WIN', `⚡ ${t.effortQuickWin}`],
+                    ['MEDIUM', t.effortMedium],
+                    ['DEEP_FOCUS', `🧠 ${t.effortDeepFocus}`]
+                  ] as Array<[EffortLevel | null, string]>
+                ).map(([lvl, label]) => (
+                  <button
+                    key={lvl ?? 'none'}
+                    type="button"
+                    className={`chip-btn ${(task.effortLevel ?? null) === lvl ? 'active' : ''}`}
+                    data-testid={`task-effort-chip-${lvl ?? 'none'}`}
+                    onClick={() =>
+                      void localDb.upsertTask({
+                        id: task.id,
+                        effortLevel: lvl
+                      })
+                    }
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* v2.1 Unified Single Footer Row: Labeled Metadata Pills on Left + [Focus, ⋯ Menu, ✓ Done] on Right */}
         <div className="task-card-unified-footer" data-testid="task-unified-footer">
           <div className="task-card-chips-row">
@@ -1109,6 +1245,58 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 {timeblockRangeLabel ? `🕐 ${timeblockRangeLabel}` : `⏱️ ${t.actionTimeblock}`}
               </span>
             </button>
+
+            {/* 1c. v3.0 Standalone Duration & Effort Chip */}
+            <button
+              type="button"
+              data-testid="task-effort-duration-chip"
+              className={`chip-btn ${
+                Boolean(anyDurationLabel) || task.effortLevel != null || effortDurationOpen
+                  ? 'active'
+                  : ''
+              }`}
+              title={`${t.durationLabel} / ${t.effortLabel}`}
+              onClick={() => {
+                flushDraftsIfNeeded();
+                setEffortDurationOpen((v) => !v);
+              }}
+            >
+              {task.effortLevel != null ? <Zap size={12} /> : <Hourglass size={12} />}
+              <span>
+                {anyDurationLabel && effortDisplayLabel
+                  ? `${anyDurationLabel} · ${effortDisplayLabel}`
+                  : anyDurationLabel
+                    ? anyDurationLabel
+                    : effortDisplayLabel
+                      ? effortDisplayLabel
+                      : `${t.durationLabel} · ${t.effortLabel}`}
+              </span>
+            </button>
+
+            {/* 1d. v3.0 Waiting On / Dependencies Chip */}
+            {onOpenDependenciesModal && (
+              <button
+                type="button"
+                data-testid="task-waiting-on-chip"
+                className={`chip-btn ${
+                  isActivelyBlocked ? 'urgent' : totalBlockerCount > 0 ? 'active' : ''
+                }`}
+                title={t.waitingOnLabel}
+                onClick={() => {
+                  flushDraftsIfNeeded();
+                  onOpenDependenciesModal(task.id);
+                }}
+              >
+                <Link2 size={12} />
+                <span>
+                  {blockedSummaryLabel
+                    ? blockedSummaryLabel
+                    : totalBlockerCount > 0
+                      ? `${t.dependencyModalTitle} (${totalBlockerCount})`
+                      : t.waitingOnLabel}
+                </span>
+              </button>
+            )}
 
             {/* 2. Reminder Pill (when set) */}
             {task.reminderTime != null && (
@@ -1260,7 +1448,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                       left: 'auto',
                       top: 'auto',
                       bottom: 'calc(100% + 6px)',
-                      minWidth: 215,
+                      minWidth: 220,
                       zIndex: 90
                     }}
                     onClick={(e) => e.stopPropagation()}
@@ -1304,6 +1492,42 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                         <span>{t.voiceDictationLabel}</span>
                       </span>
                     </button>
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      data-testid="task-pin-btn"
+                      onClick={() => {
+                        setInlineMoreMenuOpen(false);
+                        flushDraftsIfNeeded();
+                        void localDb.upsertTask({ id: task.id, isPinned: !task.isPinned });
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        {task.isPinned ? (
+                          <PinOff size={14} style={{ color: 'var(--things-blue)' }} />
+                        ) : (
+                          <Pin size={14} style={{ color: 'var(--things-blue)' }} />
+                        )}
+                        <span>{task.isPinned ? t.unpinTask : t.pinTask}</span>
+                      </span>
+                    </button>
+                    {onOpenDependenciesModal && (
+                      <button
+                        type="button"
+                        className="dropdown-item"
+                        data-testid="task-more-waiting-on-btn"
+                        onClick={() => {
+                          setInlineMoreMenuOpen(false);
+                          flushDraftsIfNeeded();
+                          onOpenDependenciesModal(task.id);
+                        }}
+                      >
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                          <Link2 size={14} style={{ color: 'var(--things-blue)' }} />
+                          <span>{t.waitingOnLabel}</span>
+                        </span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="dropdown-item"
@@ -1367,6 +1591,9 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     task.scheduleState === 'THIS_EVENING' ||
     showCollapsedSchedulePill ||
     Boolean(timeblockRangeLabel) ||
+    Boolean(standaloneDurationLabel) ||
+    Boolean(effortDisplayLabel) ||
+    isActivelyBlocked ||
     task.recurrenceRule != null ||
     task.reminderTime != null ||
     activeChecklists.length > 0 ||
@@ -1378,8 +1605,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     <>
       <div
         className={`task-row ${isSelected ? 'selected' : ''} ${
-          animStage === 'glide' ? 'stage-glide' : ''
-        } ${dragOver ? 'drag-over-row' : ''}`}
+          isActivelyBlocked ? 'blocked' : ''
+        } ${animStage === 'glide' ? 'stage-glide' : ''} ${dragOver ? 'drag-over-row' : ''}`}
         data-task-id={task.id}
         draggable
         onDragStart={(e) => {
@@ -1416,8 +1643,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           const initial = computeClampedContextMenuPosition(
             e.clientX,
             e.clientY,
-            256,
-            510,
+            264,
+            620,
             window.innerWidth,
             window.innerHeight,
             12
@@ -1434,6 +1661,15 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 
         <div className="task-row-body">
           <div className="task-row-title-line">
+            {task.isPinned && (
+              <span
+                className="task-pin-indicator"
+                title={t.pinnedBadge}
+                data-testid="task-pin-indicator"
+              >
+                <Pin size={12.5} />
+              </span>
+            )}
             <span
               className={`task-row-title ${
                 animStage === 'strike' || animStage === 'glide'
@@ -1464,6 +1700,18 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           {/* Ordered Second-Row Badges */}
           {hasSecondRowBadges && (
             <div className="task-row-badges-second">
+              {/* 0. Active Blocker ("Waiting on…") Badge */}
+              {isActivelyBlocked && (
+                <span
+                  className="meta-badge blocked-badge"
+                  data-testid="task-row-waiting-badge"
+                  title={blockedSummaryLabel}
+                >
+                  <Link2 size={10.5} />
+                  <span>{blockedSummaryLabel}</span>
+                </span>
+              )}
+
               {/* 1. Schedule State Badge (This Evening everywhere; Today / Upcoming / Someday in Project & Area views) */}
               {task.scheduleState === 'THIS_EVENING' ? (
                 <span className="meta-badge evening" title={t.viewThisEvening}>
@@ -1489,14 +1737,34 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 ) : null
               ) : null}
 
-              {/* 1b. v2.0 Timeblock Range Pill */}
-              {timeblockRangeLabel && (
+              {/* 1b. v2.0 Timeblock Range Pill OR v3.0 Standalone Duration Pill */}
+              {timeblockRangeLabel ? (
                 <span
                   className="meta-badge v2-timeblock-pill"
                   data-testid="task-row-timeblock-pill"
                   title={`${t.actionTimeblock}: ${timeblockRangeLabel}`}
                 >
                   <span>🕐 {timeblockRangeLabel}</span>
+                </span>
+              ) : standaloneDurationLabel ? (
+                <span
+                  className="meta-badge duration-badge"
+                  data-testid="task-row-duration-pill"
+                  title={`${t.durationLabel}: ${standaloneDurationLabel}`}
+                >
+                  <Hourglass size={10} />
+                  <span>{standaloneDurationLabel}</span>
+                </span>
+              ) : null}
+
+              {/* 1c. v3.0 Effort Pill */}
+              {effortDisplayLabel && (
+                <span
+                  className={`meta-badge effort-badge effort-${(task.effortLevel || '').toLowerCase()}`}
+                  data-testid="task-row-effort-pill"
+                  title={`${t.effortLabel}: ${effortDisplayLabel}`}
+                >
+                  <span>{effortDisplayLabel}</span>
                 </span>
               )}
 
@@ -1680,7 +1948,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 <span>{t.ctxMoveContainer}</span>
               </button>
 
-              {/* 7. Assign Tags */}
+              {/* 7. Assign Categories */}
               <button
                 type="button"
                 className="context-menu-item"
@@ -1692,6 +1960,82 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 <LayoutGrid size={14} />
                 <span>{t.ctxAssignTags}</span>
               </button>
+
+              {/* 7b. Waiting On… (Dependencies) */}
+              {onOpenDependenciesModal && (
+                <button
+                  type="button"
+                  className="context-menu-item"
+                  onClick={() => {
+                    setCtxMenu(null);
+                    onOpenDependenciesModal(task.id);
+                  }}
+                >
+                  <Link2 size={14} />
+                  <span>{t.waitingOnLabel}</span>
+                </button>
+              )}
+
+              {/* 7c. Quick Standalone Duration & Effort Strips */}
+              <div className="context-menu-divider" />
+              <div className="context-menu-inline-chips" aria-label={t.durationLabel}>
+                {STANDALONE_DURATION_PRESETS.map((dur) => (
+                  <button
+                    key={dur}
+                    type="button"
+                    className={`chip-btn ${task.durationMinutes === dur ? 'active' : ''}`}
+                    style={{ padding: '2px 6px', fontSize: 11 }}
+                    onClick={() => {
+                      setCtxMenu(null);
+                      void localDb.upsertTask({
+                        id: task.id,
+                        durationMinutes: task.durationMinutes === dur ? null : dur
+                      });
+                    }}
+                  >
+                    {formatStandaloneDuration(dur)}
+                  </button>
+                ))}
+                {task.durationMinutes != null && (
+                  <button
+                    type="button"
+                    className="chip-btn urgent"
+                    style={{ padding: '2px 6px', fontSize: 11 }}
+                    title={t.durationClear}
+                    onClick={() => {
+                      setCtxMenu(null);
+                      void localDb.upsertTask({ id: task.id, durationMinutes: null });
+                    }}
+                  >
+                    <X size={10.5} />
+                  </button>
+                )}
+              </div>
+
+              <div className="context-menu-inline-chips" aria-label={t.effortLabel}>
+                {(
+                  [
+                    [null, t.effortNone],
+                    ['QUICK_WIN', '⚡'],
+                    ['MEDIUM', t.effortMedium],
+                    ['DEEP_FOCUS', '🧠']
+                  ] as Array<[EffortLevel | null, string]>
+                ).map(([lvl, label]) => (
+                  <button
+                    key={lvl ?? 'none'}
+                    type="button"
+                    className={`chip-btn ${(task.effortLevel ?? null) === lvl ? 'active' : ''}`}
+                    style={{ padding: '2px 7px', fontSize: 11 }}
+                    onClick={() => {
+                      setCtxMenu(null);
+                      void localDb.upsertTask({ id: task.id, effortLevel: lvl });
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="context-menu-divider" />
 
               {/* 8. Magic Breakdown (Gemini ✨) */}
               <button
@@ -1721,6 +2065,19 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                   <span>{t.actionFocusTimerMinutes(focusDurationMins)}</span>
                 </button>
               )}
+
+              {/* 9b. Pin to Top / Unpin */}
+              <button
+                type="button"
+                className="context-menu-item"
+                onClick={() => {
+                  setCtxMenu(null);
+                  void localDb.upsertTask({ id: task.id, isPinned: !task.isPinned });
+                }}
+              >
+                {task.isPinned ? <PinOff size={14} /> : <Pin size={14} />}
+                <span>{task.isPinned ? t.unpinTask : t.pinTask}</span>
+              </button>
 
               {/* 10. Duplicate To-Do */}
               <button

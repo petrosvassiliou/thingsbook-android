@@ -46,12 +46,16 @@ public final class ThingsbookStore: ObservableObject {
     @Published public var preferences: AppPreferences {
         didSet {
             preferences.save()
+            if oldValue.viewSortMode != preferences.viewSortMode {
+                applyViewSortToLoadedTasks()
+            }
         }
     }
     @Published public var selectedDestination: NavigationDestination = .smartView(.today) {
         didSet {
             selectedFilterTagId = nil
             selectedTaskIds.removeAll()
+            lastSelectedTaskId = nil
             expandedTaskId = nil
         }
     }
@@ -80,6 +84,7 @@ public final class ThingsbookStore: ObservableObject {
     // MARK: - Selection, Filtering & Magic Plus Drag-to-Insert
     @Published public var selectedFilterTagId: String? = nil
     @Published public var selectedTaskIds: Set<String> = []
+    @Published public var lastSelectedTaskId: String? = nil
     @Published public var expandedTaskId: String? = nil
     @Published public var collapsedHeadingIds: Set<String> = []
     @Published public var magicPlusActiveDrop: MacMagicPlusResolvedDrop? = nil
@@ -109,6 +114,8 @@ public final class ThingsbookStore: ObservableObject {
     @Published public var editingArea: Area? = nil
     @Published public var isAreaManagerPresented = false
     @Published public var isTagManagerPresented = false
+    @Published public var isPerspectiveEditorPresented = false
+    @Published public var editingPerspective: SavedPerspective? = nil
 
     // MARK: - Undo, Focus Timer, Sync, Calendar, Lock & Updates
     @Published public var undoBanner: UndoBannerState? = nil
@@ -143,6 +150,7 @@ public final class ThingsbookStore: ObservableObject {
         if editingArea != nil { return "editArea" }
         if isAreaManagerPresented { return "areaManager" }
         if isTagManagerPresented { return "tagManager" }
+        if isPerspectiveEditorPresented { return "perspectiveEditor" }
         if isBackupPasswordSheetPresented { return "backupPassword" }
         return nil
     }
@@ -243,18 +251,19 @@ public final class ThingsbookStore: ObservableObject {
 
     public func reloadSnapshot() {
         guard let snap = try? database.loadWorkspaceSnapshot() else { return }
+        let sortMode = preferences.viewSortMode
         self.areas = snap.areas
         self.projects = snap.projects
         self.projectTemplates = snap.projectTemplates
         self.headingsByProject = snap.headingsByProject
         self.projectAttachments = snap.projectAttachments
         self.tags = snap.tags
-        self.inboxTasks = snap.inboxTasks
-        self.todayDaytimeTasks = snap.todayDaytimeTasks
-        self.thisEveningTasks = snap.thisEveningTasks
-        self.upcomingTasks = snap.upcomingTasks
-        self.anytimeTasks = snap.anytimeTasks
-        self.somedayTasks = snap.somedayTasks
+        self.inboxTasks = TaskViewSorter.sort(snap.inboxTasks, mode: sortMode)
+        self.todayDaytimeTasks = TaskViewSorter.sort(snap.todayDaytimeTasks, mode: sortMode)
+        self.thisEveningTasks = TaskViewSorter.sort(snap.thisEveningTasks, mode: sortMode)
+        self.upcomingTasks = sortUpcomingTasksByDayBucket(snap.upcomingTasks, mode: sortMode)
+        self.anytimeTasks = TaskViewSorter.sort(snap.anytimeTasks, mode: sortMode)
+        self.somedayTasks = TaskViewSorter.sort(snap.somedayTasks, mode: sortMode)
         self.logbookTasks = snap.logbookTasks
         self.trashedTasks = snap.trashedTasks
         self.trashedProjects = snap.trashedProjects
@@ -267,6 +276,27 @@ public final class ThingsbookStore: ObservableObject {
             preferences: preferences,
             todayTaskCount: snap.todayDaytimeTasks.count + snap.thisEveningTasks.count
         )
+    }
+
+    public func applyViewSortToLoadedTasks() {
+        let sortMode = preferences.viewSortMode
+        inboxTasks = TaskViewSorter.sort(inboxTasks, mode: sortMode)
+        todayDaytimeTasks = TaskViewSorter.sort(todayDaytimeTasks, mode: sortMode)
+        thisEveningTasks = TaskViewSorter.sort(thisEveningTasks, mode: sortMode)
+        upcomingTasks = sortUpcomingTasksByDayBucket(upcomingTasks, mode: sortMode)
+        anytimeTasks = TaskViewSorter.sort(anytimeTasks, mode: sortMode)
+        somedayTasks = TaskViewSorter.sort(somedayTasks, mode: sortMode)
+    }
+
+    private func sortUpcomingTasksByDayBucket(_ list: [TaskItem], mode: String) -> [TaskItem] {
+        let todayEpochDay = DateEpochConverter.epochDay(for: Date())
+        let grouped = Dictionary(grouping: list) { task -> Int in
+            guard let w = task.whenDate else { return Int.max }
+            return max(todayEpochDay + 1, DateEpochConverter.epochDay(forMillis: w))
+        }
+        return grouped.keys.sorted().flatMap { day in
+            TaskViewSorter.sort(grouped[day] ?? [], mode: mode)
+        }
     }
 
     public func deleteSampleTasks() {
@@ -286,6 +316,147 @@ public final class ThingsbookStore: ObservableObject {
         todayDaytimeTasks.count + thisEveningTasks.count
     }
 
+    public var openTaskIds: Set<String> {
+        Set(allOpenTasks.map(\.id))
+    }
+
+    public func isTaskActivelyBlocked(_ task: TaskItem) -> Bool {
+        TaskDependencyGraph.isActivelyBlocked(task, openTaskIds: openTaskIds)
+    }
+
+    public func activeBlockers(for task: TaskItem) -> [TaskItem] {
+        let ids = TaskDependencyGraph.activeBlockerIds(for: task, openTaskIds: openTaskIds)
+        guard !ids.isEmpty else { return [] }
+        let byId = Dictionary(uniqueKeysWithValues: allOpenTasks.map { ($0.id, $0) })
+        return ids.compactMap { byId[$0] }
+    }
+
+    public func blockedByBadgeText(for task: TaskItem) -> String? {
+        let blockers = activeBlockers(for: task)
+        guard !blockers.isEmpty else { return nil }
+        if blockers.count == 1 {
+            let trimmed = blockers[0].title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let label = trimmed.isEmpty ? tr("macos_untitled_todo") : trimmed
+            return trf("v30_blocked_by_badge", label)
+        }
+        return trf("v30_blocked_by_count_badge", blockers.count)
+    }
+
+    public func todayCapacitySummary() -> (plannedMinutes: Int, freeMinutes: Int, pillText: String)? {
+        var seen = Set<String>()
+        let todayTasks = (todayDaytimeTasks + thisEveningTasks).filter { seen.insert($0.id).inserted }
+        let cal = Calendar.current
+        let sod = cal.startOfDay(for: Date())
+        let dayStart = cal.date(byAdding: .hour, value: 9, to: sod) ?? sod
+        let dayEnd = cal.date(byAdding: .hour, value: 17, to: sod) ?? sod.addingTimeInterval(8 * 3600)
+        let dayStartMs = Int64(dayStart.timeIntervalSince1970 * 1000.0)
+        let dayEndMs = Int64(dayEnd.timeIntervalSince1970 * 1000.0)
+
+        let cap = TodayCapacityCalculator.compute(
+            tasks: todayTasks,
+            calendarEvents: todayTimelineCalendarEvents(),
+            dayStartMillis: dayStartMs,
+            dayEndMillis: dayEndMs
+        )
+        guard cap.plannedMinutes > 0 else { return nil }
+        let plannedStr = TodayCapacityCalculator.formatMinutes(cap.plannedMinutes)
+        let pillText: String
+        if preferences.calendarEventsEnabled {
+            pillText = trf(
+                "v30_today_capacity_summary",
+                plannedStr,
+                TodayCapacityCalculator.formatMinutes(cap.freeMinutes)
+            )
+        } else {
+            pillText = trf("v30_today_planned_only", plannedStr)
+        }
+        return (cap.plannedMinutes, cap.freeMinutes, pillText)
+    }
+
+    public var tagUsageCounts: [String: Int] {
+        var counts: [String: Int] = [:]
+        for task in allOpenTasks {
+            for tid in Set(task.tagIds) {
+                counts[tid, default: 0] += 1
+            }
+        }
+        for proj in projects where !proj.isDeleted && proj.status == .active {
+            for tid in Set(proj.tagIds) {
+                counts[tid, default: 0] += 1
+            }
+        }
+        for area in areas where !area.isDeleted {
+            for tid in Set(area.tagIds) {
+                counts[tid, default: 0] += 1
+            }
+        }
+        for tmpl in projectTemplates where !tmpl.isDeleted {
+            for tid in Set(tmpl.tagIds) {
+                counts[tid, default: 0] += 1
+            }
+        }
+        return counts
+    }
+
+    public var sortedTags: [Tag] {
+        TagListSorter.sort(tags, mode: preferences.tagSortMode, usageCounts: tagUsageCounts)
+    }
+
+    public var sortedPerspectives: [SavedPerspective] {
+        preferences.savedPerspectives.sorted {
+            if $0.sortOrder != $1.sortOrder { return $0.sortOrder < $1.sortOrder }
+            return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+        }
+    }
+
+    public func perspective(byId id: String?) -> SavedPerspective? {
+        guard let id else { return nil }
+        return preferences.savedPerspectives.first { $0.id == id }
+    }
+
+    public func tasksForPerspective(_ perspective: SavedPerspective) -> [TaskItem] {
+        let projectsById = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, $0) })
+        let todayMs = DateEpochConverter.startOfDayMillis(for: Date())
+        let matched = PerspectiveFilterEngine.filter(
+            tasks: allOpenTasks,
+            perspective: perspective,
+            openTaskIds: openTaskIds,
+            todayEpochMillis: todayMs,
+            projectsById: projectsById
+        )
+        return filterTasksByActiveTag(TaskViewSorter.sort(matched, mode: preferences.viewSortMode))
+    }
+
+    public func savePerspective(_ perspective: SavedPerspective) {
+        var copy = perspective
+        let cleanTitle = copy.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTitle.isEmpty else { return }
+        copy.title = cleanTitle
+        var next = preferences.savedPerspectives
+        if let idx = next.firstIndex(where: { $0.id == copy.id }) {
+            next[idx] = copy
+        } else {
+            let maxOrd = next.map(\.sortOrder).max() ?? 0.0
+            copy.sortOrder = maxOrd + 100.0
+            next.append(copy)
+        }
+        preferences.savedPerspectives = next
+        editingPerspective = nil
+        isPerspectiveEditorPresented = false
+        selectedDestination = .perspective(copy.id)
+    }
+
+    public func deletePerspective(_ perspectiveId: String) {
+        preferences.savedPerspectives.removeAll { $0.id == perspectiveId }
+        if selectedDestination == .perspective(perspectiveId) {
+            selectedDestination = .smartView(.today)
+        }
+        if editingPerspective?.id == perspectiveId {
+            editingPerspective = nil
+            isPerspectiveEditorPresented = false
+        }
+    }
+
     public func filterTasksByActiveTag(_ list: [TaskItem]) -> [TaskItem] {
         guard let filterTagId = selectedFilterTagId else { return list }
         return list.filter { $0.tagIds.contains(filterTagId) }
@@ -293,7 +464,10 @@ public final class ThingsbookStore: ObservableObject {
 
     public func tasksForProject(_ projectId: String) -> [TaskItem] {
         filterTasksByActiveTag(
-            allOpenTasks.filter { $0.projectId == projectId }.sorted { $0.sortOrder < $1.sortOrder }
+            TaskViewSorter.sort(
+                allOpenTasks.filter { $0.projectId == projectId },
+                mode: preferences.viewSortMode
+            )
         )
     }
 
@@ -303,7 +477,10 @@ public final class ThingsbookStore: ObservableObject {
 
     public func looseTasksForArea(_ areaId: String) -> [TaskItem] {
         filterTasksByActiveTag(
-            allOpenTasks.filter { $0.areaId == areaId && $0.projectId == nil }.sorted { $0.sortOrder < $1.sortOrder }
+            TaskViewSorter.sort(
+                allOpenTasks.filter { $0.areaId == areaId && $0.projectId == nil },
+                mode: preferences.viewSortMode
+            )
         )
     }
 
@@ -323,6 +500,130 @@ public final class ThingsbookStore: ObservableObject {
     public func area(byId id: String?) -> Area? {
         guard let id else { return nil }
         return areas.first { $0.id == id }
+    }
+
+    private func containerGroupKey(for task: TaskItem) -> String {
+        if let pid = task.projectId, let proj = project(byId: pid) {
+            if let aid = proj.areaId, let area = area(byId: aid) {
+                return "\(area.title) › \(proj.title)"
+            }
+            return proj.title
+        }
+        if let aid = task.areaId, let area = area(byId: aid) {
+            return area.title
+        }
+        return tr("macos_today_unassigned")
+    }
+
+    private func containerGroupedTasks(_ tasks: [TaskItem]) -> [TaskItem] {
+        let grouped = Dictionary(grouping: tasks, by: containerGroupKey(for:))
+        return grouped.keys.sorted().flatMap { key in
+            TaskViewSorter.sort(grouped[key] ?? [], mode: preferences.viewSortMode)
+        }
+    }
+
+    public func currentVisibleTaskIdsInOrder() -> [String] {
+        switch selectedDestination {
+        case .smartView(let sv):
+            switch sv {
+            case .inbox:
+                return filterTasksByActiveTag(inboxTasks).map(\.id)
+            case .today:
+                let daytime = filterTasksByActiveTag(todayDaytimeTasks)
+                let evening = filterTasksByActiveTag(thisEveningTasks)
+                if todayViewMode == .list && preferences.groupTodayByProjectOrArea {
+                    return (containerGroupedTasks(daytime) + evening).map(\.id)
+                }
+                return (daytime + evening).map(\.id)
+            case .upcoming:
+                return filterTasksByActiveTag(upcomingTasks).map(\.id)
+            case .anytime:
+                return containerGroupedTasks(filterTasksByActiveTag(anytimeTasks)).map(\.id)
+            case .someday:
+                return filterTasksByActiveTag(somedayTasks).map(\.id)
+            case .logbook:
+                return filterTasksByActiveTag(logbookTasks).map(\.id)
+            case .trash:
+                return trashedTasks.map(\.id)
+            }
+        case .project(let pid):
+            let open = tasksForProject(pid)
+            let headings = headingsByProject[pid] ?? []
+            var ordered = TaskViewSorter.sort(open.filter { $0.headingId == nil }, mode: preferences.viewSortMode).map(\.id)
+            for heading in headings where !collapsedHeadingIds.contains(heading.id) {
+                let sec = TaskViewSorter.sort(open.filter { $0.headingId == heading.id }, mode: preferences.viewSortMode)
+                ordered.append(contentsOf: sec.map(\.id))
+            }
+            return ordered
+        case .area(let aid):
+            return looseTasksForArea(aid).map(\.id)
+        case .perspective(let pid):
+            guard let p = perspective(byId: pid) else { return [] }
+            return tasksForPerspective(p).map(\.id)
+        }
+    }
+
+    public func orderedTaskIds(matching set: Set<String>) -> [String] {
+        guard !set.isEmpty else { return [] }
+        let visible = currentVisibleTaskIdsInOrder().filter { set.contains($0) }
+        if visible.count == set.count {
+            return visible
+        }
+        let seen = Set(visible)
+        let remainder = set.subtracting(seen).sorted()
+        return visible + remainder
+    }
+
+    public func handleRowClick(taskId: String, modifiers: NSEvent.ModifierFlags = NSEvent.modifierFlags) {
+        let isShift = modifiers.contains(.shift)
+        let isCmd = modifiers.contains(.command)
+
+        if isShift {
+            let visible = currentVisibleTaskIdsInOrder()
+            let anchorId = lastSelectedTaskId ?? expandedTaskId ?? selectedTaskIds.first
+            if let anchorId,
+               let aIdx = visible.firstIndex(of: anchorId),
+               let bIdx = visible.firstIndex(of: taskId) {
+                let low = min(aIdx, bIdx)
+                let high = max(aIdx, bIdx)
+                let rangeIds = Set(visible[low...high])
+                withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
+                    if isCmd {
+                        selectedTaskIds.formUnion(rangeIds)
+                    } else {
+                        selectedTaskIds = rangeIds
+                    }
+                    if selectedTaskIds.count > 1 {
+                        expandedTaskId = nil
+                    }
+                }
+                if lastSelectedTaskId == nil {
+                    lastSelectedTaskId = anchorId
+                }
+                return
+            }
+        }
+
+        if isCmd {
+            withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
+                if selectedTaskIds.contains(taskId) {
+                    selectedTaskIds.remove(taskId)
+                } else {
+                    selectedTaskIds.insert(taskId)
+                    lastSelectedTaskId = taskId
+                }
+                if selectedTaskIds.count > 1 {
+                    expandedTaskId = nil
+                }
+            }
+            return
+        }
+
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+            selectedTaskIds = [taskId]
+            lastSelectedTaskId = taskId
+            expandedTaskId = taskId
+        }
     }
 
     // MARK: - v2.0 Weekly Review, Stalled Projects, Templates & Timeblocking
@@ -497,6 +798,9 @@ public final class ThingsbookStore: ObservableObject {
         var projId: String? = nil
         var areaId: String? = nil
         var firstCurrentOrder: Double? = nil
+        var perspectiveTagIds: [String] = []
+        var perspectiveEffort: String? = nil
+        var perspectiveMaxDuration: Int? = nil
 
         switch selectedDestination {
         case .smartView(let sv):
@@ -540,10 +844,32 @@ public final class ThingsbookStore: ObservableObject {
             sched = .anytime
             areaId = aid
             firstCurrentOrder = looseTasksForArea(aid).map(\.sortOrder).min()
+        case .perspective(let pid):
+            if let p = perspective(byId: pid) {
+                let dw = p.dueWindow.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                if dw == "TODAY" {
+                    sched = .today
+                    whenMillis = todayEpoch
+                } else if dw == "SOMEDAY" {
+                    sched = .someday
+                } else if dw == "INBOX" {
+                    sched = .inbox
+                } else {
+                    sched = .anytime
+                }
+                areaId = p.areaId
+                perspectiveTagIds = p.categoryIds
+                perspectiveEffort = TaskEffortLevel.normalized(p.effortLevel)?.rawValue
+                perspectiveMaxDuration = p.maxDurationMinutes
+                firstCurrentOrder = tasksForPerspective(p).map(\.sortOrder).min()
+            } else {
+                sched = .anytime
+                firstCurrentOrder = anytimeTasks.map(\.sortOrder).min()
+            }
         }
 
-        var tagIds: [String] = []
-        if let activeTag = selectedFilterTagId {
+        var tagIds: [String] = perspectiveTagIds
+        if let activeTag = selectedFilterTagId, !tagIds.contains(activeTag) {
             tagIds.append(activeTag)
         }
 
@@ -567,8 +893,16 @@ public final class ThingsbookStore: ObservableObject {
             tagIds: tagIds,
             sortOrder: targetSortOrder
         ) {
+            if perspectiveEffort != nil || perspectiveMaxDuration != nil {
+                try? database.setTaskEffortAndDuration(
+                    taskId: created.id,
+                    effortLevel: perspectiveEffort,
+                    durationMinutes: perspectiveMaxDuration
+                )
+            }
             withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
                 selectedTaskIds = [created.id]
+                lastSelectedTaskId = created.id
                 expandedTaskId = created.id
             }
         }
@@ -585,8 +919,47 @@ public final class ThingsbookStore: ObservableObject {
         }
     }
 
+    public func updateHeadingStartDate(_ headingId: String, startDate: Int64?) {
+        try? database.updateHeadingStartDate(headingId, startDate: startDate)
+    }
+
     public func updateHeadingEndDate(_ headingId: String, endDate: Int64?) {
         try? database.updateHeadingEndDate(headingId, endDate: endDate)
+    }
+
+    public func setTaskStandaloneDuration(_ taskId: String, durationMinutes: Int?) {
+        let existingEffort = (allOpenTasks + logbookTasks).first(where: { $0.id == taskId })?.effortLevel
+        try? database.setTaskEffortAndDuration(
+            taskId: taskId,
+            effortLevel: existingEffort,
+            durationMinutes: durationMinutes
+        )
+    }
+
+    public func setTaskEffort(_ taskId: String, effortLevel: String?) {
+        let existingDuration = (allOpenTasks + logbookTasks).first(where: { $0.id == taskId })?.durationMinutes
+        try? database.setTaskEffortAndDuration(
+            taskId: taskId,
+            effortLevel: effortLevel,
+            durationMinutes: existingDuration
+        )
+    }
+
+    public func setTaskEffortAndDuration(_ taskId: String, effortLevel: String?, durationMinutes: Int?) {
+        try? database.setTaskEffortAndDuration(
+            taskId: taskId,
+            effortLevel: effortLevel,
+            durationMinutes: durationMinutes
+        )
+    }
+
+    @discardableResult
+    public func setTaskBlockedBy(_ taskId: String, blockedByTaskIds: [String]) -> Bool {
+        let ok = (try? database.setTaskBlockedBy(taskId: taskId, blockedByTaskIds: blockedByTaskIds)) ?? false
+        if !ok {
+            showToast(tr("v30_blocked_by_cycle_warning"))
+        }
+        return ok
     }
 
     public func updateMagicPlusDrag(locationInDetail: CGPoint) {
@@ -853,18 +1226,177 @@ public final class ThingsbookStore: ObservableObject {
         }
     }
 
+    public func setTasksPinned(_ taskIds: [String], isPinned: Bool) {
+        guard !taskIds.isEmpty else { return }
+        try? database.setTasksPinned(taskIds, isPinned: isPinned)
+    }
+
+    public func togglePinForSelectedTasks() {
+        let ids = Array(selectedTaskIds)
+        guard !ids.isEmpty else { return }
+        let candidates = (allOpenTasks + logbookTasks).filter { selectedTaskIds.contains($0.id) }
+        let shouldPin = candidates.isEmpty ? true : !candidates.allSatisfy(\.isPinned)
+        setTasksPinned(ids, isPinned: shouldPin)
+    }
+
+    public func togglePinForSelectedOrExpandedTasks() {
+        let ids: [String]
+        if !selectedTaskIds.isEmpty {
+            ids = Array(selectedTaskIds)
+        } else if let exp = expandedTaskId {
+            ids = [exp]
+        } else {
+            return
+        }
+        let candidates = (allOpenTasks + logbookTasks).filter { ids.contains($0.id) }
+        let shouldPin = candidates.isEmpty ? true : !candidates.allSatisfy(\.isPinned)
+        setTasksPinned(ids, isPinned: shouldPin)
+    }
+
+    public func completeSelectedTasks() {
+        let ids = orderedTaskIds(matching: selectedTaskIds)
+        guard !ids.isEmpty else { return }
+        for id in ids {
+            guard allOpenTasks.contains(where: { $0.id == id }) else { continue }
+            if focusTimer?.taskId == id {
+                stopFocusTimer()
+            }
+            NotificationReminderService.shared.cancelTaskReminder(taskId: id)
+            let spawnedId = (try? database.setTaskStatus(taskId: id, status: .completed)) ?? nil
+            if let spawnedId {
+                reloadSnapshot()
+                if let spawnedTask = allOpenTasks.first(where: { $0.id == spawnedId }) {
+                    NotificationReminderService.shared.syncTaskReminder(spawnedTask, lang: preferences.language)
+                }
+            }
+        }
+        reloadSnapshot()
+        selectedTaskIds.removeAll()
+        if let exp = expandedTaskId, ids.contains(exp) {
+            expandedTaskId = nil
+        }
+    }
+
+    public func scheduleSelectedTasks(_ preset: ScheduleState) {
+        let resolved = WhenScheduleResolver.resolvePresetSelection(
+            preset: preset,
+            reminderEnabled: false,
+            reminderHour: 9,
+            reminderMinute: 0
+        )
+        let ids = Array(selectedTaskIds)
+        guard !ids.isEmpty else { return }
+        for id in ids {
+            if var t = allOpenTasks.first(where: { $0.id == id }) {
+                t.scheduleState = resolved.scheduleState
+                t.whenDate = resolved.whenDateEpochMillis
+                updateTask(t)
+            }
+        }
+    }
+
+    public func batchTagSelectionState() -> (allSelected: Set<String>, partialSelected: Set<String>) {
+        let selectedTasks = allOpenTasks.filter { selectedTaskIds.contains($0.id) }
+        guard !selectedTasks.isEmpty else { return ([], []) }
+        var counts: [String: Int] = [:]
+        for t in selectedTasks {
+            for tid in Set(t.tagIds) {
+                counts[tid, default: 0] += 1
+            }
+        }
+        var allSet = Set<String>()
+        var partialSet = Set<String>()
+        for (tid, cnt) in counts {
+            if cnt == selectedTasks.count {
+                allSet.insert(tid)
+            } else if cnt > 0 {
+                partialSet.insert(tid)
+            }
+        }
+        return (allSet, partialSet)
+    }
+
+    public func batchToggleTagOnSelectedTasks(_ tagId: String) {
+        let ids = Array(selectedTaskIds)
+        guard !ids.isEmpty else { return }
+        let state = batchTagSelectionState()
+        if state.allSelected.contains(tagId) {
+            try? database.batchUpdateTasksTags(ids, addTagIds: [], removeTagIds: [tagId])
+        } else {
+            try? database.batchUpdateTasksTags(ids, addTagIds: [tagId], removeTagIds: [])
+        }
+    }
+
+    public func duplicateSelectedTasks() {
+        let orderedIds = orderedTaskIds(matching: selectedTaskIds)
+        guard !orderedIds.isEmpty else { return }
+        let copySuffix = tr("v25_copy_suffix")
+        if let copies = try? database.duplicateTasks(orderedIds, copySuffix: copySuffix), !copies.isEmpty {
+            selectedTaskIds = Set(copies.map(\.id))
+            lastSelectedTaskId = copies.last?.id
+            if copies.count == 1 {
+                expandedTaskId = copies[0].id
+            } else {
+                expandedTaskId = nil
+            }
+        }
+    }
+
     public func duplicateSelectedOrExpandedTask() {
-        let targetId = expandedTaskId ?? selectedTaskIds.first
-        guard let targetId else { return }
-        if let copy = try? database.duplicateTask(targetId) {
-            selectedTaskIds = [copy.id]
-            expandedTaskId = copy.id
+        let copySuffix = tr("v25_copy_suffix")
+        if let expId = expandedTaskId {
+            if let copy = try? database.duplicateTask(expId, copySuffix: copySuffix) {
+                selectedTaskIds = [copy.id]
+                lastSelectedTaskId = copy.id
+                expandedTaskId = copy.id
+            }
+            return
+        }
+        if !selectedTaskIds.isEmpty {
+            duplicateSelectedTasks()
+            return
+        }
+        if case .project(let pid) = selectedDestination {
+            if let copy = try? database.duplicateProject(pid, copySuffix: copySuffix) {
+                selectedDestination = .project(copy.id)
+            }
+        }
+    }
+
+    public func moveTagOrder(_ tagId: String, moveUp: Bool) {
+        try? database.moveTagOrder(tagId, moveUp: moveUp)
+    }
+
+    public func mergeTag(sourceTag: Tag, into targetTag: Tag) {
+        guard sourceTag.id != targetTag.id else { return }
+        if selectedFilterTagId == sourceTag.id {
+            selectedFilterTagId = targetTag.id
+        }
+        if (try? database.mergeTags(sourceTagId: sourceTag.id, into: targetTag.id)) == true {
+            var updatedPerspectives = preferences.savedPerspectives
+            var didRemapPerspectives = false
+            for idx in updatedPerspectives.indices where updatedPerspectives[idx].categoryIds.contains(sourceTag.id) {
+                var nextCats = updatedPerspectives[idx].categoryIds.filter { $0 != sourceTag.id }
+                if !nextCats.contains(targetTag.id) {
+                    nextCats.append(targetTag.id)
+                }
+                updatedPerspectives[idx].categoryIds = nextCats
+                didRemapPerspectives = true
+            }
+            if didRemapPerspectives {
+                preferences.savedPerspectives = updatedPerspectives
+            }
+            showToast(trf("v25_tags_merged_toast", sourceTag.title, targetTag.title))
         }
     }
 
     public func applyTagShortcut(_ char: String) {
         let lower = char.lowercased()
         guard let matchedTag = tags.first(where: { $0.shortcut?.lowercased() == lower }) else { return }
+        if selectedTaskIds.count > 1 {
+            batchToggleTagOnSelectedTasks(matchedTag.id)
+            return
+        }
         let targetIds = !selectedTaskIds.isEmpty ? Array(selectedTaskIds) : (expandedTaskId.map { [$0] } ?? [])
         for id in targetIds {
             if let task = allOpenTasks.first(where: { $0.id == id }) {
@@ -1204,8 +1736,19 @@ public final class ThingsbookStore: ObservableObject {
             if let dm = payload.preferences.dailyDigestMinute { prefs.dailyDigestMinute = dm }
             if let gt = payload.preferences.groupTodayByProjectOrArea { prefs.groupTodayByProjectOrArea = gt }
             if let ib = payload.preferences.includeBetaUpdates { prefs.includeBetaUpdates = ib }
+            if let tsm = payload.preferences.tagSortMode, !tsm.isEmpty { prefs.tagSortMode = tsm }
+            if let vsm = payload.preferences.viewSortMode, !vsm.isEmpty { prefs.viewSortMode = vsm }
+            if let rawPerspJson = payload.preferences.savedPerspectivesJson,
+               let pData = rawPerspJson.data(using: .utf8),
+               let decodedPerspectives = try? JSONDecoder().decode([SavedPerspective].self, from: pData) {
+                prefs.savedPerspectives = decodedPerspectives
+            }
             if let tag = payload.preferences.languageTag {
                 prefs.language = tag.isEmpty ? .system : (AppLanguage(rawValue: tag) ?? .system)
+            }
+            if case .perspective(let activePid) = selectedDestination,
+               !prefs.savedPerspectives.contains(where: { $0.id == activePid }) {
+                selectedDestination = .smartView(.today)
             }
             self.preferences = prefs
             reloadSnapshot()

@@ -1038,20 +1038,34 @@ public struct MoveDestinationPopoverView: View {
 public struct TagPickerPopoverView: View {
     @ObservedObject var store: ThingsbookStore
     let selectedTagIds: Set<String>
+    let partialSelectedTagIds: Set<String>
     let onToggleTag: (String) -> Void
     @Environment(\.dismiss) private var dismiss
 
     @State private var searchQuery = ""
     @State private var newTagShortcut = ""
 
+    public init(
+        store: ThingsbookStore,
+        selectedTagIds: Set<String>,
+        partialSelectedTagIds: Set<String> = [],
+        onToggleTag: @escaping (String) -> Void
+    ) {
+        self.store = store
+        self.selectedTagIds = selectedTagIds
+        self.partialSelectedTagIds = partialSelectedTagIds
+        self.onToggleTag = onToggleTag
+    }
+
     private var cleanQuery: String {
         searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var filteredTags: [Tag] {
-        guard !cleanQuery.isEmpty else { return store.tags }
+        let base = store.sortedTags
+        guard !cleanQuery.isEmpty else { return base }
         let q = cleanQuery.lowercased()
-        return store.tags.filter { tag in
+        return base.filter { tag in
             tag.title.lowercased().contains(q) || (tag.shortcut?.lowercased().contains(q) == true)
         }
     }
@@ -1062,7 +1076,9 @@ public struct TagPickerPopoverView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let usageCounts = store.tagUsageCounts
+
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: "square.grid.2x2")
                     .font(.system(size: 11.5, weight: .semibold))
@@ -1089,7 +1105,7 @@ public struct TagPickerPopoverView: View {
                         .font(.system(size: 11.5))
                         .foregroundStyle(.secondary)
 
-                    TextField(store.tr("tags_search_or_create_placeholder"), text: $searchQuery)
+                    TextField(store.tr("v25_tags_assign_search_placeholder"), text: $searchQuery)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12.5))
                         .onSubmit(submitSearchOrCreate)
@@ -1157,7 +1173,7 @@ public struct TagPickerPopoverView: View {
                     }
 
                     if filteredTags.isEmpty && !store.tags.isEmpty {
-                        Text(store.tr("tags_no_filter_matches"))
+                        Text(store.tr("v25_tags_no_matches"))
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .center)
@@ -1166,16 +1182,27 @@ public struct TagPickerPopoverView: View {
 
                     ForEach(filteredTags) { tag in
                         let isChecked = selectedTagIds.contains(tag.id)
+                        let isPartial = !isChecked && partialSelectedTagIds.contains(tag.id)
+                        let count = usageCounts[tag.id] ?? 0
                         HStack {
                             Button {
                                 onToggleTag(tag.id)
                             } label: {
                                 HStack(spacing: 8) {
-                                    Image(systemName: isChecked ? "checkmark.circle.fill" : "circle")
-                                        .foregroundStyle(isChecked ? ThingsMacPalette.accentBlue : .secondary)
+                                    Image(systemName: isChecked ? "checkmark.circle.fill" : (isPartial ? "minus.circle.fill" : "circle"))
+                                        .foregroundStyle((isChecked || isPartial) ? ThingsMacPalette.accentBlue : .secondary)
                                     Text(tag.title)
                                         .font(.system(size: 13))
+                                        .lineLimit(1)
                                     Spacer()
+                                    if count > 0 {
+                                        Text("\(count)")
+                                            .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                                            .foregroundStyle(.secondary)
+                                            .padding(.horizontal, 5.5)
+                                            .padding(.vertical, 1)
+                                            .background(Capsule().fill(Color.primary.opacity(0.055)))
+                                    }
                                     if let sc = tag.shortcut, !sc.isEmpty {
                                         Text("⌃\(sc.uppercased())")
                                             .font(.system(size: 10.5, weight: .medium, design: .monospaced))
@@ -1208,15 +1235,19 @@ public struct TagPickerPopoverView: View {
             .frame(height: 220)
         }
         .padding(12)
-        .frame(width: 310)
+        .frame(width: 318)
     }
 
     private func submitSearchOrCreate() {
         let clean = cleanQuery
         guard !clean.isEmpty else { return }
+        let shortcutArg = newTagShortcut.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : newTagShortcut
         if let existing = exactMatch {
+            if let shortcutArg {
+                _ = try? store.database.createOrUpdateTag(title: clean, shortcut: shortcutArg)
+            }
             onToggleTag(existing.id)
-        } else if let created = try? store.database.createOrUpdateTag(title: clean, shortcut: newTagShortcut) {
+        } else if let created = try? store.database.createOrUpdateTag(title: clean, shortcut: shortcutArg) {
             onToggleTag(created.id)
         }
         searchQuery = ""
@@ -1603,13 +1634,22 @@ public struct ManageTagsSheetView: View {
     @State private var editTitleDraft = ""
     @State private var editShortcutDraft = ""
 
+    private var trimmedFilter: String {
+        filterQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private var normalizedFilter: String {
-        filterQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        trimmedFilter.lowercased()
+    }
+
+    private var sortedAllTags: [Tag] {
+        store.sortedTags
     }
 
     private var filteredTags: [Tag] {
-        guard !normalizedFilter.isEmpty else { return store.tags }
-        return store.tags.filter { tag in
+        let base = sortedAllTags
+        guard !normalizedFilter.isEmpty else { return base }
+        return base.filter { tag in
             tag.title.lowercased().contains(normalizedFilter)
                 || (tag.shortcut?.lowercased().contains(normalizedFilter) == true)
         }
@@ -1620,7 +1660,10 @@ public struct ManageTagsSheetView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let usageCounts = store.tagUsageCounts
+        let manualOrderedIds = TagListSorter.sort(store.tags, mode: "manual", usageCounts: [:]).map(\.id)
+
+        return VStack(alignment: .leading, spacing: 13) {
             HStack {
                 Label(store.tr("tags_manage_title"), systemImage: "square.grid.2x2.fill")
                     .font(.system(size: 16, weight: .semibold))
@@ -1642,6 +1685,7 @@ public struct ManageTagsSheetView: View {
                 TextField(store.tr("tags_shortcut_placeholder"), text: $newTagShortcut)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 78)
+                    .onSubmit(addTag)
 
                 Button(store.tr("tags_add_button")) {
                     addTag()
@@ -1650,38 +1694,50 @@ public struct ManageTagsSheetView: View {
                 .disabled(newTagTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
 
-                TextField(store.tr("tags_filter_placeholder"), text: $filterQuery)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .disabled(store.tags.isEmpty)
+                    TextField(store.tr("v25_tags_search_placeholder"), text: $filterQuery)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                        .disabled(store.tags.isEmpty)
 
-                if !filterQuery.isEmpty {
-                    Button {
-                        filterQuery = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.tertiary)
+                    if !filterQuery.isEmpty {
+                        Button {
+                            filterQuery = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.primary.opacity(0.05))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.75)
+                )
+                .opacity(store.tags.isEmpty ? 0.55 : 1.0)
+
+                Picker("", selection: $store.preferences.tagSortMode) {
+                    Text(store.tr("v25_tags_sort_alpha")).tag("alpha")
+                    Text(store.tr("v25_tags_sort_most_used")).tag("most_used")
+                    Text(store.tr("v25_tags_sort_manual")).tag("manual")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 210)
+                .disabled(store.tags.isEmpty)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.primary.opacity(0.05))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.75)
-            )
-            .opacity(store.tags.isEmpty ? 0.55 : 1.0)
 
             ZStack(alignment: .topLeading) {
                 if store.tags.isEmpty {
@@ -1691,7 +1747,7 @@ public struct ManageTagsSheetView: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, 28)
                 } else if filteredTags.isEmpty {
-                    Text(store.tr("tags_no_filter_matches"))
+                    Text(store.tr("v25_tags_no_matches"))
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -1700,6 +1756,9 @@ public struct ManageTagsSheetView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 7) {
                             ForEach(filteredTags) { tag in
+                                let usageCount = usageCounts[tag.id] ?? 0
+                                let manualIdx = manualOrderedIds.firstIndex(of: tag.id)
+
                                 HStack(spacing: 10) {
                                     Image(systemName: "square.grid.2x2.fill")
                                         .font(.system(size: 12))
@@ -1715,6 +1774,9 @@ public struct ManageTagsSheetView: View {
                                         TextField("⌃", text: $editShortcutDraft)
                                             .textFieldStyle(.roundedBorder)
                                             .frame(width: 44)
+                                            .onSubmit {
+                                                commitTagEdit(tag)
+                                            }
 
                                         Button(store.tr("action_save")) {
                                             commitTagEdit(tag)
@@ -1729,6 +1791,14 @@ public struct ManageTagsSheetView: View {
                                     } else {
                                         Text(tag.title)
                                             .font(.system(size: 13.5, weight: .medium))
+                                            .lineLimit(1)
+
+                                        Text("\(usageCount)")
+                                            .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                                            .foregroundStyle(.secondary)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Capsule().fill(Color.primary.opacity(0.06)))
 
                                         if let sc = tag.shortcut, !sc.isEmpty {
                                             Text("⌃\(sc.uppercased())")
@@ -1741,6 +1811,26 @@ public struct ManageTagsSheetView: View {
 
                                         Spacer()
 
+                                        if store.preferences.tagSortMode == "manual" {
+                                            Button {
+                                                store.moveTagOrder(tag.id, moveUp: true)
+                                            } label: {
+                                                Image(systemName: "arrow.up")
+                                                    .font(.system(size: 11, weight: .semibold))
+                                            }
+                                            .buttonStyle(.borderless)
+                                            .disabled(!trimmedFilter.isEmpty || manualIdx == nil || manualIdx == 0)
+
+                                            Button {
+                                                store.moveTagOrder(tag.id, moveUp: false)
+                                            } label: {
+                                                Image(systemName: "arrow.down")
+                                                    .font(.system(size: 11, weight: .semibold))
+                                            }
+                                            .buttonStyle(.borderless)
+                                            .disabled(!trimmedFilter.isEmpty || manualIdx == nil || manualIdx == manualOrderedIds.count - 1)
+                                        }
+
                                         Button {
                                             editingTagId = tag.id
                                             editTitleDraft = tag.title
@@ -1751,6 +1841,25 @@ public struct ManageTagsSheetView: View {
                                         }
                                         .buttonStyle(.borderless)
                                         .thingsTooltip(store.tr("tags_edit_title"))
+
+                                        if store.tags.count >= 2 {
+                                            let mergeTargets = sortedAllTags.filter { $0.id != tag.id }
+                                            Menu {
+                                                Section(store.trf("v25_tags_merge_target_prompt", tag.title)) {
+                                                    ForEach(mergeTargets) { target in
+                                                        Button(target.title) {
+                                                            store.mergeTag(sourceTag: tag, into: target)
+                                                        }
+                                                    }
+                                                }
+                                            } label: {
+                                                Image(systemName: "arrow.triangle.merge")
+                                                    .font(.system(size: 12))
+                                            }
+                                            .menuStyle(.borderlessButton)
+                                            .fixedSize()
+                                            .thingsTooltip(store.tr("v25_tags_merge_action"))
+                                        }
 
                                         Button(role: .destructive) {
                                             if store.selectedFilterTagId == tag.id {
@@ -1771,6 +1880,7 @@ public struct ManageTagsSheetView: View {
                                 .thingsCardSurface(cornerRadius: 9)
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
@@ -1785,13 +1895,14 @@ public struct ManageTagsSheetView: View {
             }
         }
         .padding(20)
-        .frame(width: 480)
+        .frame(width: 530)
     }
 
     private func addTag() {
         let clean = newTagTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return }
-        _ = try? store.database.createOrUpdateTag(title: clean, shortcut: newTagShortcut)
+        let shortcutArg = newTagShortcut.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : newTagShortcut
+        _ = try? store.database.createOrUpdateTag(title: clean, shortcut: shortcutArg)
         newTagTitle = ""
         newTagShortcut = ""
     }
@@ -1799,11 +1910,12 @@ public struct ManageTagsSheetView: View {
     private func commitTagEdit(_ tag: Tag) {
         let clean = editTitleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return }
+        let shortcutArg = editShortcutDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : editShortcutDraft
         _ = try? store.database.createOrUpdateTag(
             id: tag.id,
             title: clean,
             parentTagId: tag.parentTagId,
-            shortcut: editShortcutDraft
+            shortcut: shortcutArg
         )
         editingTagId = nil
     }
@@ -1962,5 +2074,407 @@ public struct TimeblockPopoverView: View {
         if let updated = Calendar.current.date(from: comps) {
             customTimeDate = updated
         }
+    }
+}
+
+// MARK: - v3.0 Task Dependencies ("Waiting On…") Popover
+
+public struct DependenciesPopoverView: View {
+    @ObservedObject var store: ThingsbookStore
+    let task: TaskItem
+    let onChanged: (([String]) -> Void)?
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchQuery = ""
+
+    public init(
+        store: ThingsbookStore,
+        task: TaskItem,
+        onChanged: (([String]) -> Void)? = nil
+    ) {
+        self.store = store
+        self.task = task
+        self.onChanged = onChanged
+    }
+
+    private var liveTask: TaskItem {
+        store.allOpenTasks.first(where: { $0.id == task.id }) ?? task
+    }
+
+    private var cleanQuery: String {
+        searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public var body: some View {
+        let currentTask = liveTask
+        let selectedIds = Set(currentTask.blockedByTaskIds)
+        let blockedByMap = Dictionary(uniqueKeysWithValues: store.allOpenTasks.map { ($0.id, $0.blockedByTaskIds) })
+        let candidates: [TaskItem] = {
+            let base = store.allOpenTasks.filter { $0.id != currentTask.id }
+            let filtered: [TaskItem]
+            if cleanQuery.isEmpty {
+                filtered = base
+            } else {
+                let q = cleanQuery.lowercased()
+                filtered = base.filter { item in
+                    if item.title.lowercased().contains(q) { return true }
+                    if let pid = item.projectId,
+                       let projTitle = store.project(byId: pid)?.title.lowercased(),
+                       projTitle.contains(q) {
+                        return true
+                    }
+                    return false
+                }
+            }
+            return filtered.sorted { lhs, rhs in
+                let lSel = selectedIds.contains(lhs.id)
+                let rSel = selectedIds.contains(rhs.id)
+                if lSel != rSel { return lSel && !rSel }
+                if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
+                return lhs.id < rhs.id
+            }
+        }()
+
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Label(store.tr("v30_blocked_by_dialog_title"), systemImage: "hourglass")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                if !selectedIds.isEmpty {
+                    Button(store.tr("action_clear")) {
+                        if store.setTaskBlockedBy(currentTask.id, blockedByTaskIds: []) {
+                            onChanged?([])
+                        }
+                    }
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(ThingsMacPalette.upcomingRed)
+                    .buttonStyle(.plain)
+                }
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                TextField(store.tr("v30_blocked_by_search_placeholder"), text: $searchQuery)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12.5))
+                if !searchQuery.isEmpty {
+                    Button {
+                        searchQuery = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5.5)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.primary.opacity(0.05))
+            )
+
+            ScrollView {
+                if candidates.isEmpty {
+                    VStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.tertiary)
+                        Text(store.tr("v30_blocked_by_none_available"))
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 160)
+                    .padding(.vertical, 16)
+                } else {
+                    LazyVStack(alignment: .leading, spacing: 3) {
+                        ForEach(candidates) { candidate in
+                            let isSelected = selectedIds.contains(candidate.id)
+                            let wouldCycle = !isSelected && TaskDependencyGraph.wouldCreateCycle(
+                                taskId: currentTask.id,
+                                candidateBlockerId: candidate.id,
+                                blockedByMap: blockedByMap
+                            )
+                            let displayTitle = candidate.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? store.tr("macos_untitled_todo")
+                                : candidate.title
+                            let projectSubtitle = candidate.projectId.flatMap { store.project(byId: $0)?.title }
+
+                            Button {
+                                guard !wouldCycle else { return }
+                                var nextIds = currentTask.blockedByTaskIds
+                                if isSelected {
+                                    nextIds.removeAll { $0 == candidate.id }
+                                } else if !nextIds.contains(candidate.id) {
+                                    nextIds.append(candidate.id)
+                                }
+                                if store.setTaskBlockedBy(currentTask.id, blockedByTaskIds: nextIds) {
+                                    onChanged?(nextIds)
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(
+                                        systemName: isSelected
+                                            ? "checkmark.circle.fill"
+                                            : (wouldCycle ? "exclamationmark.triangle.fill" : "circle")
+                                    )
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(
+                                        isSelected
+                                            ? ThingsMacPalette.accentBlue
+                                            : (wouldCycle ? ThingsMacPalette.todayGold : .secondary)
+                                    )
+
+                                    VStack(alignment: .leading, spacing: 1.5) {
+                                        Text(displayTitle)
+                                            .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
+                                            .foregroundStyle(wouldCycle ? .secondary : .primary)
+                                            .lineLimit(1)
+
+                                        if wouldCycle {
+                                            Text(store.tr("v30_blocked_by_cycle_warning"))
+                                                .font(.system(size: 10.5))
+                                                .foregroundStyle(ThingsMacPalette.todayGold)
+                                                .lineLimit(2)
+                                        } else if let projectSubtitle, !projectSubtitle.isEmpty {
+                                            Text(projectSubtitle)
+                                                .font(.system(size: 10.5))
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                        }
+                                    }
+
+                                    Spacer(minLength: 4)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5.5)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .fill(isSelected ? ThingsMacPalette.accentBlue.opacity(0.11) : Color.clear)
+                                )
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(wouldCycle)
+                        }
+                    }
+                }
+            }
+            .frame(height: 230)
+        }
+        .padding(13)
+        .frame(width: 312)
+    }
+}
+
+// MARK: - v3.0 Custom Saved Perspective Editor Sheet
+
+public struct PerspectiveEditorSheetView: View {
+    @ObservedObject var store: ThingsbookStore
+    let existingPerspective: SavedPerspective?
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var title: String
+    @State private var selectedCategoryIds: Set<String>
+    @State private var selectedEffort: String
+    @State private var selectedMaxDuration: Int
+    @State private var selectedDueWindow: String
+    @State private var selectedAreaId: String
+    @State private var actionableOnly: Bool
+
+    public init(store: ThingsbookStore, existingPerspective: SavedPerspective?) {
+        self.store = store
+        self.existingPerspective = existingPerspective
+
+        _title = State(initialValue: existingPerspective?.title ?? "")
+        _selectedCategoryIds = State(initialValue: Set(existingPerspective?.categoryIds ?? []))
+        _selectedEffort = State(initialValue: TaskEffortLevel.normalized(existingPerspective?.effortLevel)?.rawValue ?? "")
+        _selectedMaxDuration = State(initialValue: existingPerspective?.maxDurationMinutes ?? 0)
+        _selectedDueWindow = State(initialValue: (existingPerspective?.dueWindow ?? "ANY").uppercased())
+        _selectedAreaId = State(initialValue: existingPerspective?.areaId ?? "")
+        _actionableOnly = State(initialValue: existingPerspective?.actionableOnly ?? false)
+    }
+
+    private var canSave: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                Text(store.tr(existingPerspective == nil ? "v30_perspective_new" : "v30_perspective_edit"))
+                    .font(.system(size: 15, weight: .bold))
+                Spacer()
+            }
+
+            TextField(store.tr("v30_perspective_title_placeholder"), text: $title)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 13.5, weight: .medium))
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                GridRow {
+                    Text(store.tr("action_when"))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    Picker("", selection: $selectedDueWindow) {
+                        Text(store.tr("tags_filter_all")).tag("ANY")
+                        Text(store.tr("view_today")).tag("TODAY")
+                        Text(store.tr("view_upcoming")).tag("UPCOMING")
+                        Text(store.tr("view_anytime")).tag("ANYTIME")
+                        Text(store.tr("view_someday")).tag("SOMEDAY")
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                GridRow {
+                    Text(store.tr("v30_effort_label"))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    Picker("", selection: $selectedEffort) {
+                        Text(store.tr("v30_effort_none")).tag("")
+                        Text(store.tr("v30_effort_quick_win")).tag(TaskEffortLevel.quickWin.rawValue)
+                        Text(store.tr("v30_effort_medium")).tag(TaskEffortLevel.medium.rawValue)
+                        Text(store.tr("v30_effort_deep_focus")).tag(TaskEffortLevel.deepFocus.rawValue)
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                GridRow {
+                    Text(store.tr("v30_perspective_max_duration"))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    Picker("", selection: $selectedMaxDuration) {
+                        Text(store.tr("v30_perspective_any_duration")).tag(0)
+                        Text("≤ 15m").tag(15)
+                        Text("≤ 30m").tag(30)
+                        Text("≤ 1h").tag(60)
+                        Text("≤ 2h").tag(120)
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if !store.areas.isEmpty {
+                    GridRow {
+                        Text(store.tr("entity_area"))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.secondary)
+
+                        Picker("", selection: $selectedAreaId) {
+                            Text(store.tr("tags_filter_all")).tag("")
+                            ForEach(store.areas) { area in
+                                Text(area.title).tag(area.id)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+
+            if !store.sortedTags.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(store.tr("action_tags"))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(store.sortedTags) { tag in
+                                let selected = selectedCategoryIds.contains(tag.id)
+                                Button {
+                                    if selected {
+                                        selectedCategoryIds.remove(tag.id)
+                                    } else {
+                                        selectedCategoryIds.insert(tag.id)
+                                    }
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: selected ? "checkmark.circle.fill" : "tag")
+                                            .font(.system(size: 10.5))
+                                        Text(tag.title)
+                                            .font(.system(size: 11.5, weight: selected ? .semibold : .medium))
+                                    }
+                                    .foregroundStyle(selected ? Color.white : Color.primary)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 4.5)
+                                    .background(
+                                        Capsule(style: .continuous)
+                                            .fill(selected ? ThingsMacPalette.accentBlue : Color.primary.opacity(0.06))
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+
+            Toggle(store.tr("v30_perspective_actionable_only"), isOn: $actionableOnly)
+                .toggleStyle(.checkbox)
+                .font(.system(size: 12.5))
+
+            Divider()
+
+            HStack {
+                if let existing = existingPerspective {
+                    Button(role: .destructive) {
+                        store.deletePerspective(existing.id)
+                        dismiss()
+                    } label: {
+                        Text(store.tr("v30_perspective_delete"))
+                    }
+                }
+
+                Spacer()
+
+                Button(store.tr("action_cancel")) {
+                    store.editingPerspective = nil
+                    store.isPerspectiveEditorPresented = false
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button(store.tr("v30_perspective_save")) {
+                    let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !cleanTitle.isEmpty else { return }
+                    let model = SavedPerspective(
+                        id: existingPerspective?.id ?? UUID().uuidString,
+                        title: cleanTitle,
+                        categoryIds: store.sortedTags.map(\.id).filter { selectedCategoryIds.contains($0) },
+                        effortLevel: selectedEffort.isEmpty ? nil : selectedEffort,
+                        maxDurationMinutes: selectedMaxDuration > 0 ? selectedMaxDuration : nil,
+                        dueWindow: selectedDueWindow,
+                        areaId: selectedAreaId.isEmpty ? nil : selectedAreaId,
+                        actionableOnly: actionableOnly,
+                        sortOrder: existingPerspective?.sortOrder ?? 0.0
+                    )
+                    store.savePerspective(model)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canSave)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(18)
+        .frame(width: 420)
     }
 }

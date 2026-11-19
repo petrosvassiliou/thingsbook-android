@@ -13,12 +13,14 @@ import {
   type AttachmentRecord,
   type ChecklistItemRecord,
   type DetachedProjectTaskSnapshot,
+  type EffortLevel,
   type HeadingRecord,
   type ProjectRecord,
   type ProjectStatus,
   type ProjectTemplate,
   type ProjectTemplateBlueprint,
   type ProjectTemplateTaskBlueprint,
+  type ProjectViewMode,
   type RecurrenceRule,
   type ScheduleState,
   type SupportedLang,
@@ -27,13 +29,22 @@ import {
   type TaskStatus,
   type ThingsbookStatistics
 } from '../domain/types.ts';
-import { buildProjectTemplateBlueprint } from '../domain/v2Utils.ts';
+import {
+  buildProjectTemplateBlueprint,
+  wouldCreateDependencyCycle
+} from '../domain/v2Utils.ts';
 import {
   buildBackupPayloadFromEntities,
   decodeThingsBackup,
   encodeThingsBackup,
   inspectThingsBackup,
   normalizeBackupPayloadToEntities,
+  normalizeEffortLevel,
+  normalizeProjectViewMode,
+  normalizeTagSortMode,
+  normalizeViewSortMode,
+  safeParseBlockedByTaskIds,
+  safeParseSavedPerspectives,
   summarizeBackupPayload,
   type BackupInspection,
   type BackupPreferencesDto,
@@ -51,7 +62,11 @@ import {
   mergeMonotonicReviewTimestamp,
   normalizeRecurringTitleKey,
   planRecurringDeduplication,
-  resolveMergedHeadingEndDate
+  resolveMergedHeadingEndDate,
+  resolveMergedHeadingStartDate,
+  type RemoteHeadingWithHints,
+  type RemoteProjectWithHints,
+  type RemoteTaskWithHints
 } from './syncUtils.ts';
 import {
   SAMPLE_AREA_IDS,
@@ -135,7 +150,7 @@ export function computeStatistics(
   };
 }
 
-const DEFAULT_PREFS: AppPreferences = {
+export const DEFAULT_PREFS: AppPreferences = {
   language: 'system',
   themeMode: 'system',
   sidebarVisible: true,
@@ -154,17 +169,26 @@ const DEFAULT_PREFS: AppPreferences = {
   groupTodayByProjectOrArea: false,
   biometricAppLockEnabled: false,
   appLockPinHash: '',
-  appLockWebAuthnCredId: ''
+  appLockWebAuthnCredId: '',
+  tagSortMode: 'alpha',
+  viewSortMode: 'manual',
+  savedPerspectives: []
 };
 
 export function loadPreferences(): AppPreferences {
   try {
     const raw = localStorage.getItem(PREFS_STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_PREFS };
-    const parsed = JSON.parse(raw);
-    return { ...DEFAULT_PREFS, ...parsed };
+    if (!raw) return { ...DEFAULT_PREFS, savedPerspectives: [] };
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      ...DEFAULT_PREFS,
+      ...(parsed as Partial<AppPreferences>),
+      tagSortMode: normalizeTagSortMode(parsed?.tagSortMode),
+      viewSortMode: normalizeViewSortMode(parsed?.viewSortMode),
+      savedPerspectives: safeParseSavedPerspectives(parsed?.savedPerspectives)
+    };
   } catch {
-    return { ...DEFAULT_PREFS };
+    return { ...DEFAULT_PREFS, savedPerspectives: [] };
   }
 }
 
@@ -396,6 +420,11 @@ export class ThingsLocalDb {
         tagIds: [],
         scheduledStartMinutes: null,
         durationMinutes: null,
+        isPinned: false,
+        effortLevel: null,
+        blockedByTaskIds: [],
+        workspaceId: null,
+        assigneeId: null,
         isDeleted: true,
         purgedFromTrash: true,
         isDirty: true,
@@ -444,6 +473,9 @@ export class ThingsLocalDb {
             enrich.durationMinutes !== undefined ? enrich.durationMinutes : winner.durationMinutes,
           deadline: enrich.deadline !== undefined ? enrich.deadline : winner.deadline,
           reminderTime: enrich.reminderTime !== undefined ? enrich.reminderTime : winner.reminderTime,
+          isPinned: enrich.isPinned !== undefined ? enrich.isPinned : winner.isPinned,
+          effortLevel:
+            enrich.effortLevel !== undefined ? enrich.effortLevel : winner.effortLevel,
           updatedAt: Math.max(now, winner.updatedAt + 1, enrich.minUpdatedAt),
           isDirty: true
         });
@@ -655,12 +687,19 @@ export class ThingsLocalDb {
     reminderTime?: number | null;
     scheduledStartMinutes?: number | null;
     durationMinutes?: number | null;
+    isPinned?: boolean;
+    effortLevel?: EffortLevel | null;
+    blockedByTaskIds?: string[];
+    workspaceId?: string | null;
+    assigneeId?: string | null;
     projectId?: string | null;
     headingId?: string | null;
     areaId?: string | null;
     recurrenceRule?: RecurrenceRule | null;
     sortOrder?: number;
     tagIds?: string[];
+    addTagIds?: string[];
+    removeTagIds?: string[];
     suppressUndo?: boolean;
   }): Promise<TaskRecord> {
     const db = await this.getDb();
@@ -671,6 +710,40 @@ export class ThingsLocalDb {
 
     const tx = db.transaction('tasks', 'readwrite');
     const existing = (await tx.store.get(id)) as TaskRecord | undefined;
+
+    let resolvedBlockedBy: string[];
+    if (params.blockedByTaskIds !== undefined) {
+      const candidates = safeParseBlockedByTaskIds(params.blockedByTaskIds, id);
+      if (candidates.length === 0) {
+        resolvedBlockedBy = [];
+      } else {
+        const allTasksInStore = (await tx.store.getAll()) as TaskRecord[];
+        const blockedByMap = new Map<string, readonly string[]>();
+        const existingIdSet = new Set<string>();
+        for (const t of allTasksInStore) {
+          if (t.isDeleted) continue;
+          existingIdSet.add(t.id);
+          if (t.id !== id && Array.isArray(t.blockedByTaskIds) && t.blockedByTaskIds.length > 0) {
+            blockedByMap.set(t.id, t.blockedByTaskIds);
+          }
+        }
+        const clean: string[] = [];
+        for (const bid of candidates) {
+          if (existingIdSet.size > 0 && !existingIdSet.has(bid)) {
+            // Allow referencing known non-deleted tasks; if store already has tasks and bid is deleted, skip deleted
+            const maybeDeleted = allTasksInStore.find((t) => t.id === bid);
+            if (maybeDeleted?.isDeleted) continue;
+          }
+          if (!wouldCreateDependencyCycle(id, bid, blockedByMap)) {
+            clean.push(bid);
+            blockedByMap.set(id, clean);
+          }
+        }
+        resolvedBlockedBy = clean;
+      }
+    } else {
+      resolvedBlockedBy = safeParseBlockedByTaskIds(existing?.blockedByTaskIds, id);
+    }
 
     const status = params.status ?? existing?.status ?? 'OPEN';
     const projectId = (params.projectId !== undefined ? params.projectId : existing?.projectId) || null;
@@ -760,6 +833,32 @@ export class ThingsLocalDb {
         ? Math.max(5, Math.min(720, Math.trunc(rawDuration)))
         : null;
 
+    let resolvedTagIds = Array.from(
+      new Set(params.tagIds !== undefined ? params.tagIds : (existing?.tagIds ?? []))
+    );
+    if (params.addTagIds && params.addTagIds.length > 0) {
+      for (const tid of params.addTagIds) {
+        if (!resolvedTagIds.includes(tid)) resolvedTagIds.push(tid);
+      }
+    }
+    if (params.removeTagIds && params.removeTagIds.length > 0) {
+      const rem = new Set(params.removeTagIds);
+      resolvedTagIds = resolvedTagIds.filter((tid) => !rem.has(tid));
+    }
+
+    const resolvedEffort =
+      params.effortLevel !== undefined
+        ? normalizeEffortLevel(params.effortLevel)
+        : (existing?.effortLevel ?? null);
+    const resolvedWorkspaceId =
+      params.workspaceId !== undefined
+        ? params.workspaceId?.trim() || null
+        : (existing?.workspaceId ?? null);
+    const resolvedAssigneeId =
+      params.assigneeId !== undefined
+        ? params.assigneeId?.trim() || null
+        : (existing?.assigneeId ?? null);
+
     const record: TaskRecord = {
       id,
       title: resolvedTitle,
@@ -774,6 +873,11 @@ export class ThingsLocalDb {
           : null,
       scheduledStartMinutes,
       durationMinutes,
+      isPinned: params.isPinned !== undefined ? Boolean(params.isPinned) : Boolean(existing?.isPinned),
+      effortLevel: resolvedEffort,
+      blockedByTaskIds: resolvedBlockedBy,
+      workspaceId: resolvedWorkspaceId,
+      assigneeId: resolvedAssigneeId,
       completedAt,
       projectId,
       headingId,
@@ -783,7 +887,7 @@ export class ThingsLocalDb {
         params.sortOrder !== undefined && Number.isFinite(params.sortOrder)
           ? params.sortOrder
           : (existing?.sortOrder ?? 1000),
-      tagIds: params.tagIds !== undefined ? params.tagIds : (existing?.tagIds ?? []),
+      tagIds: resolvedTagIds,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       isDeleted: false,
@@ -857,12 +961,19 @@ export class ThingsLocalDb {
     reminderTime?: number | null;
     scheduledStartMinutes?: number | null;
     durationMinutes?: number | null;
+    isPinned?: boolean;
+    effortLevel?: EffortLevel | null;
+    blockedByTaskIds?: string[];
+    workspaceId?: string | null;
+    assigneeId?: string | null;
     projectId?: string | null;
     headingId?: string | null;
     areaId?: string | null;
     recurrenceRule?: RecurrenceRule | null;
     sortOrder?: number;
     tagIds?: string[];
+    addTagIds?: string[];
+    removeTagIds?: string[];
   }): Promise<TaskRecord> {
     return this.enqueueWrite(async () => {
       const record = await this.upsertTaskUnlocked(params);
@@ -880,9 +991,17 @@ export class ThingsLocalDb {
       whenDate?: number | null;
       scheduledStartMinutes?: number | null;
       durationMinutes?: number | null;
+      isPinned?: boolean;
+      effortLevel?: EffortLevel | null;
+      blockedByTaskIds?: string[];
+      workspaceId?: string | null;
+      assigneeId?: string | null;
       projectId?: string | null;
       headingId?: string | null;
       areaId?: string | null;
+      tagIds?: string[];
+      addTagIds?: string[];
+      removeTagIds?: string[];
     }
   ): Promise<void> {
     if (taskIds.length === 0) return;
@@ -985,6 +1104,8 @@ export class ThingsLocalDb {
       whenDate: nextWhen,
       deadline: nextDeadline,
       reminderTime: nextReminder,
+      isPinned: false,
+      blockedByTaskIds: [],
       sortOrder: completedTask.sortOrder + 0.01,
       createdAt: existingById?.createdAt ?? now,
       updatedAt: nextUpdatedAt,
@@ -1656,46 +1777,123 @@ export class ThingsLocalDb {
   }
 
   async duplicateTask(taskId: string, copySuffix = 'Copy'): Promise<string | null> {
+    const ids = await this.batchDuplicateTasks([taskId], copySuffix);
+    return ids[0] ?? null;
+  }
+
+  async batchDuplicateTasks(taskIds: string[], copySuffix = 'Copy'): Promise<string[]> {
+    const uniqueIds = Array.from(new Set(taskIds.filter(Boolean)));
+    if (uniqueIds.length === 0) return [];
+
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
-      const existing = (await db.get('tasks', taskId)) as TaskRecord | undefined;
-      if (!existing || existing.isDeleted) return null;
       const now = Date.now();
-      const newId = crypto.randomUUID();
-      const trimmed = existing.title.trim();
-      const newTitle = trimmed ? `${trimmed} (${copySuffix})` : existing.title;
-      await db.put('tasks', {
-        ...existing,
-        id: newId,
-        title: newTitle,
-        status: 'OPEN',
-        completedAt: null,
-        reminderTime:
-          existing.reminderTime != null && existing.reminderTime > now
-            ? existing.reminderTime
-            : null,
-        sortOrder: existing.sortOrder + 10.0,
-        createdAt: now,
-        updatedAt: now,
-        isDeleted: false,
-        isDirty: true
-      });
-      const allChk = (await db.getAll('checklist_items')) as ChecklistItemRecord[];
-      for (const c of allChk.filter((x) => x.taskId === taskId && !x.isDeleted)) {
-        await db.put('checklist_items', {
-          ...c,
-          id: crypto.randomUUID(),
-          taskId: newId,
-          isCompleted: false,
-          createdAt: now,
-          updatedAt: now,
-          isDeleted: false,
-          isDirty: true
-        });
+      const tx = db.transaction(['tasks', 'checklist_items'], 'readwrite');
+      const taskStore = tx.objectStore('tasks');
+      const chkStore = tx.objectStore('checklist_items');
+
+      const allTasks = (await taskStore.getAll()) as TaskRecord[];
+      const taskById = new Map(allTasks.map((t) => [t.id, t]));
+      const allChk = (await chkStore.getAll()) as ChecklistItemRecord[];
+
+      const validSources = uniqueIds
+        .map((id) => taskById.get(id))
+        .filter((t): t is TaskRecord => Boolean(t && !t.isDeleted));
+      if (validSources.length === 0) {
+        await tx.done;
+        return [];
       }
+
+      validSources.sort((a, b) => {
+        if (Boolean(b.isPinned) !== Boolean(a.isPinned)) {
+          return a.isPinned ? -1 : 1;
+        }
+        return a.sortOrder - b.sortOrder || a.createdAt - b.createdAt;
+      });
+
+      const bucketKeyOf = (t: TaskRecord): string =>
+        `${t.projectId ?? ''}\u001F${t.headingId ?? ''}\u001F${t.areaId ?? ''}\u001F${t.isPinned ? '1' : '0'}`;
+
+      const sourcesByBucket = new Map<string, TaskRecord[]>();
+      for (const src of validSources) {
+        const bKey = bucketKeyOf(src);
+        const list = sourcesByBucket.get(bKey);
+        if (list) list.push(src);
+        else sourcesByBucket.set(bKey, [src]);
+      }
+
+      const copySortOrderById = new Map<string, number>();
+      for (const [bKey, group] of sourcesByBucket.entries()) {
+        const lastSourceOrder = group.reduce((m, x) => Math.max(m, x.sortOrder), -Infinity);
+        let nextCeiling: number | null = null;
+        for (const candidate of allTasks) {
+          if (candidate.isDeleted) continue;
+          if (bucketKeyOf(candidate) !== bKey) continue;
+          if (candidate.sortOrder > lastSourceOrder) {
+            if (nextCeiling === null || candidate.sortOrder < nextCeiling) {
+              nextCeiling = candidate.sortOrder;
+            }
+          }
+        }
+        const count = group.length;
+        const rawStep =
+          nextCeiling !== null ? (nextCeiling - lastSourceOrder) / (count + 1) : 10.0;
+        const step = rawStep > 1e-7 ? rawStep : 0.0001;
+        for (let i = 0; i < count; i++) {
+          copySortOrderById.set(group[i].id, lastSourceOrder + step * (i + 1));
+        }
+      }
+
+      const createdIds: string[] = [];
+      for (let i = 0; i < validSources.length; i++) {
+        const src = validSources[i];
+        const newId = crypto.randomUUID();
+        const trimmed = src.title.trim();
+        const newTitle = trimmed ? `${trimmed} (${copySuffix})` : src.title;
+        const copyTs = now + i;
+        await taskStore.put({
+          ...src,
+          id: newId,
+          title: newTitle,
+          status: 'OPEN',
+          completedAt: null,
+          reminderTime: src.reminderTime != null && src.reminderTime > now ? src.reminderTime : null,
+          isPinned: Boolean(src.isPinned),
+          effortLevel: src.effortLevel ?? null,
+          blockedByTaskIds: safeParseBlockedByTaskIds(src.blockedByTaskIds, newId),
+          workspaceId: src.workspaceId ?? null,
+          assigneeId: src.assigneeId ?? null,
+          sortOrder: copySortOrderById.get(src.id) ?? src.sortOrder + (i + 1) * 10,
+          createdAt: copyTs,
+          updatedAt: copyTs,
+          isDeleted: false,
+          purgedFromTrash: false,
+          isDirty: true
+        } satisfies TaskRecord);
+
+        const srcChecklists = allChk
+          .filter((c) => c.taskId === src.id && !c.isDeleted)
+          .sort((a, b) => a.sortOrder - b.sortOrder);
+        for (const c of srcChecklists) {
+          await chkStore.put({
+            ...c,
+            id: crypto.randomUUID(),
+            taskId: newId,
+            isCompleted: false,
+            createdAt: copyTs,
+            updatedAt: copyTs,
+            isDeleted: false,
+            isDirty: true
+          } satisfies ChecklistItemRecord);
+        }
+
+        createdIds.push(newId);
+      }
+
+      await tx.done;
       await this.refreshSnapshot();
       this.triggerSync();
-      return newId;
+      return createdIds;
     });
   }
 
@@ -1858,6 +2056,8 @@ export class ThingsLocalDb {
     deadline?: number | null;
     lastReviewedAt?: number | null;
     tagIds?: string[];
+    workspaceId?: string | null;
+    viewMode?: ProjectViewMode | null;
     sortOrder?: number;
     immediateSync?: boolean;
   }): Promise<ProjectRecord> {
@@ -1895,6 +2095,14 @@ export class ThingsLocalDb {
             ? params.sortOrder
             : (existing?.sortOrder ?? now),
         tagIds: params.tagIds !== undefined ? params.tagIds : (existing?.tagIds ?? []),
+        workspaceId:
+          params.workspaceId !== undefined
+            ? params.workspaceId?.trim() || null
+            : (existing?.workspaceId ?? null),
+        viewMode:
+          params.viewMode !== undefined
+            ? normalizeProjectViewMode(params.viewMode)
+            : (existing?.viewMode ?? null),
         createdAt: existing?.createdAt ?? now,
         updatedAt: nextUpdatedAt,
         isDeleted: false,
@@ -2547,6 +2755,7 @@ export class ThingsLocalDb {
     id?: string;
     projectId: string;
     title: string;
+    startDate?: number | null;
     endDate?: number | null;
     sortOrder?: number;
   }): Promise<HeadingRecord> {
@@ -2556,12 +2765,15 @@ export class ThingsLocalDb {
       const id = params.id || crypto.randomUUID();
       const tx = db.transaction('headings', 'readwrite');
       const existing = (await tx.store.get(id)) as HeadingRecord | undefined;
+      const resolvedStartDate =
+        params.startDate !== undefined ? params.startDate : (existing?.startDate ?? null);
       const resolvedEndDate =
         params.endDate !== undefined ? params.endDate : (existing?.endDate ?? null);
       const record: HeadingRecord = {
         id,
         projectId: params.projectId,
         title: params.title,
+        startDate: resolvedStartDate,
         endDate: resolvedEndDate,
         sortOrder: params.sortOrder ?? existing?.sortOrder ?? now,
         isArchived: existing?.isArchived ?? false,
@@ -2575,6 +2787,28 @@ export class ThingsLocalDb {
       await this.refreshSnapshot();
       this.triggerSync();
       return record;
+    });
+  }
+
+  async updateHeadingStartDate(headingId: string, startDate: number | null): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const tx = db.transaction('headings', 'readwrite');
+      const existing = (await tx.store.get(headingId)) as HeadingRecord | undefined;
+      if (!existing || existing.isDeleted) {
+        await tx.done;
+        return;
+      }
+      await tx.store.put({
+        ...existing,
+        startDate,
+        updatedAt: now,
+        isDirty: true
+      });
+      await tx.done;
+      await this.refreshSnapshot();
+      this.triggerSync();
     });
   }
 
@@ -2717,31 +2951,263 @@ export class ThingsLocalDb {
     });
   }
 
+  private async mergeTagsUnlocked(
+    db: IDBPDatabase,
+    sourceTagId: string,
+    targetTagId: string,
+    now = Date.now()
+  ): Promise<TagRecord | null> {
+    if (!sourceTagId || !targetTagId || sourceTagId === targetTagId) return null;
+    const tx = db.transaction(
+      ['tags', 'tasks', 'projects', 'areas', 'projectTemplates'],
+      'readwrite'
+    );
+    const tagStore = tx.objectStore('tags');
+    const source = (await tagStore.get(sourceTagId)) as TagRecord | undefined;
+    const target = (await tagStore.get(targetTagId)) as TagRecord | undefined;
+    if (!source || source.isDeleted || !target || target.isDeleted) {
+      await tx.done;
+      return null;
+    }
+
+    const remapTagList = (ids: string[] | undefined): { next: string[]; changed: boolean } => {
+      const raw = ids || [];
+      let changed = false;
+      const out: string[] = [];
+      for (const id of raw) {
+        const mapped = id === sourceTagId ? targetTagId : id;
+        if (mapped !== id) changed = true;
+        if (!out.includes(mapped)) {
+          out.push(mapped);
+        } else {
+          changed = true;
+        }
+      }
+      return { next: out, changed };
+    };
+
+    for (const storeName of ['tasks', 'projects', 'areas', 'projectTemplates'] as const) {
+      const store = tx.objectStore(storeName);
+      const rows = (await store.getAll()) as Array<{
+        id: string;
+        tagIds?: string[];
+        updatedAt: number;
+        isDeleted: boolean;
+      }>;
+      for (const row of rows) {
+        if (row.isDeleted) continue;
+        const { next, changed } = remapTagList(row.tagIds);
+        if (changed) {
+          await store.put({
+            ...row,
+            tagIds: next,
+            updatedAt: Math.max(now, row.updatedAt + 1),
+            isDirty: true
+          });
+        }
+      }
+    }
+
+    let finalTarget = target;
+    const allTags = (await tagStore.getAll()) as TagRecord[];
+    for (const tg of allTags) {
+      if (tg.isDeleted || tg.id === sourceTagId) continue;
+      if (tg.id === targetTagId && tg.parentTagId === sourceTagId) {
+        finalTarget = {
+          ...tg,
+          parentTagId:
+            source.parentTagId && source.parentTagId !== targetTagId ? source.parentTagId : null,
+          updatedAt: Math.max(now, tg.updatedAt + 1),
+          isDirty: true
+        };
+        await tagStore.put(finalTarget);
+      } else if (tg.id !== targetTagId && tg.parentTagId === sourceTagId) {
+        await tagStore.put({
+          ...tg,
+          parentTagId: targetTagId,
+          updatedAt: Math.max(now, tg.updatedAt + 1),
+          isDirty: true
+        });
+      }
+    }
+
+    await tagStore.put({
+      ...source,
+      parentTagId: null,
+      shortcut: null,
+      isDeleted: true,
+      updatedAt: Math.max(now, source.updatedAt + 1),
+      isDirty: true
+    });
+
+    await tx.done;
+
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const prefs = loadPreferences();
+        if (prefs.savedPerspectives && prefs.savedPerspectives.length > 0) {
+          let prefsChanged = false;
+          const nextPerspectives = prefs.savedPerspectives.map((p) => {
+            const { next, changed } = remapTagList(p.categoryIds);
+            if (!changed) return p;
+            prefsChanged = true;
+            return { ...p, categoryIds: next };
+          });
+          if (prefsChanged) {
+            savePreferences({ ...prefs, savedPerspectives: nextPerspectives });
+          }
+        }
+      } catch {
+        // ignore localStorage access issues
+      }
+    }
+
+    return finalTarget;
+  }
+
+  async mergeTags(sourceTagId: string, targetTagId: string): Promise<boolean> {
+    if (!sourceTagId || !targetTagId || sourceTagId === targetTagId) return false;
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const merged = await this.mergeTagsUnlocked(db, sourceTagId, targetTagId, Date.now());
+      if (!merged) return false;
+      await this.refreshSnapshot();
+      this.triggerSync();
+      return true;
+    });
+  }
+
+  async moveTagOrder(tagId: string, direction: 'up' | 'down'): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const tx = db.transaction('tags', 'readwrite');
+      const allTags = (await tx.store.getAll()) as TagRecord[];
+      const active = allTags
+        .filter((tg) => !tg.isDeleted)
+        .sort(
+          (a, b) =>
+            a.sortOrder - b.sortOrder ||
+            a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }) ||
+            a.id.localeCompare(b.id)
+        );
+      const idx = active.findIndex((tg) => tg.id === tagId);
+      const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (idx < 0 || swapIdx < 0 || swapIdx >= active.length) {
+        await tx.done;
+        return;
+      }
+
+      const a = active[idx];
+      const b = active[swapIdx];
+      const hasAnyDuplicateOrder =
+        new Set(active.map((tg) => tg.sortOrder)).size < active.length;
+
+      if (hasAnyDuplicateOrder || a.sortOrder === b.sortOrder) {
+        const reordered = [...active];
+        [reordered[idx], reordered[swapIdx]] = [reordered[swapIdx], reordered[idx]];
+        for (let i = 0; i < reordered.length; i++) {
+          const nextOrder = (i + 1) * 1000;
+          const item = reordered[i];
+          if (item.sortOrder !== nextOrder || item.id === a.id || item.id === b.id) {
+            await tx.store.put({
+              ...item,
+              sortOrder: nextOrder,
+              updatedAt: Math.max(now, item.updatedAt + 1),
+              isDirty: true
+            });
+          }
+        }
+      } else {
+        await tx.store.put({
+          ...a,
+          sortOrder: b.sortOrder,
+          updatedAt: Math.max(now, a.updatedAt + 1),
+          isDirty: true
+        });
+        await tx.store.put({
+          ...b,
+          sortOrder: a.sortOrder,
+          updatedAt: Math.max(now, b.updatedAt + 1),
+          isDirty: true
+        });
+      }
+
+      await tx.done;
+      await this.refreshSnapshot();
+      this.triggerSync();
+    });
+  }
+
   async upsertTag(params: {
     id?: string;
-    title: string;
+    title?: string;
     shortcut?: string | null;
     parentTagId?: string | null;
+    sortOrder?: number;
   }): Promise<TagRecord> {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
       const now = Date.now();
-      const trimmedTitle = params.title.trim();
+
+      if (params.id && params.title !== undefined) {
+        const probeTrim = params.title.trim();
+        const probeNorm = probeTrim.toLowerCase();
+        if (probeNorm.length > 0) {
+          const allTagsSnapshot = (await db.getAll('tags')) as TagRecord[];
+          const collisionTarget = allTagsSnapshot.find(
+            (tg) =>
+              !tg.isDeleted &&
+              tg.id !== params.id &&
+              tg.title.trim().toLowerCase() === probeNorm
+          );
+          if (collisionTarget) {
+            const merged = await this.mergeTagsUnlocked(db, params.id, collisionTarget.id, now);
+            await this.refreshSnapshot();
+            this.triggerSync();
+            return merged ?? collisionTarget;
+          }
+        }
+      }
+
       const tx = db.transaction('tags', 'readwrite');
       const allTags = (await tx.store.getAll()) as TagRecord[];
-      const sameTitleActive = !params.id
-        ? allTags.find(
-            (tg) => !tg.isDeleted && tg.title.trim().toLowerCase() === trimmedTitle.toLowerCase()
-          )
+      const activeTags = allTags.filter((tg) => !tg.isDeleted);
+      const existingById = params.id
+        ? ((await tx.store.get(params.id)) as TagRecord | undefined)
         : undefined;
+      const trimmedTitle =
+        params.title !== undefined ? params.title.trim() : (existingById?.title ?? '');
+      const normTitle = trimmedTitle.toLowerCase();
+      const sameTitleActive =
+        !params.id && normTitle.length > 0
+          ? activeTags.find((tg) => tg.title.trim().toLowerCase() === normTitle)
+          : undefined;
       const id = params.id || sameTitleActive?.id || crypto.randomUUID();
-      const existing = sameTitleActive ?? ((await tx.store.get(id)) as TagRecord | undefined);
+      const existing = sameTitleActive ?? existingById;
+      const maxSortOrder = activeTags.reduce(
+        (m, tg) => (Number.isFinite(tg.sortOrder) && tg.sortOrder > m ? tg.sortOrder : m),
+        0
+      );
+      const resolvedShortcut =
+        params.shortcut !== undefined
+          ? params.shortcut != null && params.shortcut.trim().length > 0
+            ? params.shortcut.trim().toUpperCase().slice(0, 1)
+            : null
+          : (existing?.shortcut ?? null);
+
       const record: TagRecord = {
         id,
         title: trimmedTitle,
-        shortcut: params.shortcut !== undefined ? params.shortcut : (existing?.shortcut ?? null),
-        parentTagId: params.parentTagId !== undefined ? params.parentTagId : (existing?.parentTagId ?? null),
-        sortOrder: existing?.sortOrder ?? (now % 100000),
+        shortcut: resolvedShortcut,
+        parentTagId:
+          params.parentTagId !== undefined ? params.parentTagId : (existing?.parentTagId ?? null),
+        sortOrder:
+          params.sortOrder !== undefined && Number.isFinite(params.sortOrder)
+            ? params.sortOrder
+            : existing
+              ? existing.sortOrder
+              : maxSortOrder + 1000,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
         isDeleted: false,
@@ -3258,9 +3724,9 @@ export class ThingsLocalDb {
   async applyRemoteDeltas(batch: {
     tags?: TagRecord[];
     areas?: AreaRecord[];
-    projects?: ProjectRecord[];
-    headings?: Array<HeadingRecord & { omittedEndDate?: boolean }>;
-    tasks?: Array<TaskRecord & { omittedTimeblockFields?: boolean }>;
+    projects?: RemoteProjectWithHints[];
+    headings?: RemoteHeadingWithHints[];
+    tasks?: RemoteTaskWithHints[];
     checklistItems?: ChecklistItemRecord[];
     attachments?: AttachmentRecord[];
     projectTemplates?: ProjectTemplate[];
@@ -3323,18 +3789,31 @@ export class ThingsLocalDb {
 
       if (batch.projects && batch.projects.length > 0) {
         const projStore = tx.objectStore('projects');
-        for (const remote of batch.projects) {
-          if (!remote.id) continue;
+        for (const remoteWithHint of batch.projects) {
+          if (!remoteWithHint.id) continue;
+          const { omittedV30ProjectFields, ...remote } = remoteWithHint;
           const clampedTs = clampUpdatedAt(remote.updatedAt);
           const local = (await projStore.get(remote.id)) as ProjectRecord | undefined;
           const mergedLastReviewed: number | null = remote.isDeleted
             ? (remote.lastReviewedAt ?? null)
             : mergeMonotonicReviewTimestamp(local?.lastReviewedAt, remote.lastReviewedAt);
           if (shouldRemoteWin(local, remote.updatedAt)) {
+            const keepLocalV30Proj =
+              Boolean(omittedV30ProjectFields) && !remote.isDeleted && local !== undefined;
             await projStore.put({
               ...remote,
               updatedAt: clampedTs,
               lastReviewedAt: mergedLastReviewed,
+              workspaceId: remote.isDeleted
+                ? null
+                : keepLocalV30Proj
+                  ? (local?.workspaceId ?? null)
+                  : (remote.workspaceId ?? null),
+              viewMode: remote.isDeleted
+                ? null
+                : keepLocalV30Proj
+                  ? (local?.viewMode ?? null)
+                  : (remote.viewMode ?? null),
               purgedFromTrash: Boolean(
                 remote.purgedFromTrash || (remote.isDeleted && local?.purgedFromTrash)
               ),
@@ -3364,14 +3843,20 @@ export class ThingsLocalDb {
         const headingStore = tx.objectStore('headings');
         for (const remoteWithHint of batch.headings) {
           if (!remoteWithHint.id) continue;
-          const { omittedEndDate: _omittedEndDate, ...remote } = remoteWithHint;
+          const {
+            omittedStartDate: _omittedStartDate,
+            omittedEndDate: _omittedEndDate,
+            ...remote
+          } = remoteWithHint;
           const clampedTs = clampUpdatedAt(remote.updatedAt);
           const local = (await headingStore.get(remote.id)) as HeadingRecord | undefined;
           if (shouldRemoteWin(local, remote.updatedAt)) {
             await headingStore.put({
               ...remote,
+              startDate: resolveMergedHeadingStartDate(local, remoteWithHint),
               endDate: resolveMergedHeadingEndDate(local, remoteWithHint),
-              updatedAt: clampedTs
+              updatedAt: clampedTs,
+              isDirty: false
             });
           }
           if (clampedTs > maxUpdatedAt) {
@@ -3383,6 +3868,7 @@ export class ThingsLocalDb {
       if (batch.tasks && batch.tasks.length > 0) {
         const taskStore = tx.objectStore('tasks');
         const existingAllTasks = (await taskStore.getAll()) as TaskRecord[];
+        const liveBlockedByMap = new Map<string, readonly string[]>();
         const openSeriesTaskIds = new Map<string, Set<string>>();
         const registerOpenSeries = (tk: Pick<TaskRecord, 'id' | 'title' | 'status' | 'isDeleted' | 'projectId' | 'recurrenceRule'>) => {
           if (tk.isDeleted || tk.status !== 'OPEN') return;
@@ -3394,12 +3880,26 @@ export class ThingsLocalDb {
           if (set) set.add(tk.id);
           else openSeriesTaskIds.set(key, new Set([tk.id]));
         };
-        for (const tk of existingAllTasks) registerOpenSeries(tk);
+        for (const tk of existingAllTasks) {
+          registerOpenSeries(tk);
+          if (!tk.isDeleted && Array.isArray(tk.blockedByTaskIds) && tk.blockedByTaskIds.length > 0) {
+            liveBlockedByMap.set(tk.id, tk.blockedByTaskIds);
+          }
+        }
         for (const tk of batch.tasks) registerOpenSeries(tk);
 
         for (const remoteWithHint of batch.tasks) {
           if (!remoteWithHint.id) continue;
-          const { omittedTimeblockFields, ...remote } = remoteWithHint;
+          const {
+            omittedTimeblockFields,
+            omittedPinnedField,
+            omittedV30TaskFields,
+            omittedEffortField,
+            omittedBlockedByField,
+            omittedWorkspaceField,
+            omittedAssigneeField,
+            ...remote
+          } = remoteWithHint;
           const clampedTs = clampUpdatedAt(remote.updatedAt);
           const local = (await taskStore.get(remote.id)) as TaskRecord | undefined;
 
@@ -3444,6 +3944,47 @@ export class ThingsLocalDb {
               (remote.scheduleState === 'TODAY' ||
                 remote.scheduleState === 'THIS_EVENING' ||
                 remote.scheduleState === 'UPCOMING');
+            const resolvedPinned = remote.isDeleted
+              ? false
+              : omittedPinnedField
+                ? Boolean(local?.isPinned)
+                : Boolean(remote.isPinned);
+
+            const resolvedEffort = remote.isDeleted
+              ? null
+              : (omittedV30TaskFields || omittedEffortField) && local !== undefined
+                ? (local.effortLevel ?? null)
+                : normalizeEffortLevel(remote.effortLevel);
+
+            let resolvedBlockedBy: string[] = [];
+            if (!remote.isDeleted) {
+              const rawCandidates =
+                (omittedV30TaskFields || omittedBlockedByField) && local !== undefined
+                  ? safeParseBlockedByTaskIds(local.blockedByTaskIds, remote.id)
+                  : safeParseBlockedByTaskIds(remote.blockedByTaskIds, remote.id);
+              liveBlockedByMap.delete(remote.id);
+              for (const bid of rawCandidates) {
+                if (!wouldCreateDependencyCycle(remote.id, bid, liveBlockedByMap)) {
+                  resolvedBlockedBy.push(bid);
+                  liveBlockedByMap.set(remote.id, resolvedBlockedBy);
+                }
+              }
+              liveBlockedByMap.set(remote.id, resolvedBlockedBy);
+            } else {
+              liveBlockedByMap.delete(remote.id);
+            }
+
+            const resolvedWorkspaceId = remote.isDeleted
+              ? null
+              : (omittedV30TaskFields || omittedWorkspaceField) && local !== undefined
+                ? (local.workspaceId ?? null)
+                : (remote.workspaceId ?? null);
+
+            const resolvedAssigneeId = remote.isDeleted
+              ? null
+              : (omittedV30TaskFields || omittedAssigneeField) && local !== undefined
+                ? (local.assigneeId ?? null)
+                : (remote.assigneeId ?? null);
 
             await taskStore.put({
               ...remote,
@@ -3454,6 +3995,11 @@ export class ThingsLocalDb {
               durationMinutes: keepLocalTimeblock
                 ? (local?.durationMinutes ?? null)
                 : (remote.durationMinutes ?? null),
+              isPinned: resolvedPinned,
+              effortLevel: resolvedEffort,
+              blockedByTaskIds: resolvedBlockedBy,
+              workspaceId: resolvedWorkspaceId,
+              assigneeId: resolvedAssigneeId,
               purgedFromTrash: Boolean(
                 remote.purgedFromTrash || (remote.isDeleted && local?.purgedFromTrash)
               ),
@@ -3595,7 +4141,10 @@ export class ThingsLocalDb {
         selectedCalendarIds: prefs.selectedCalendarIds,
         groupTodayByProjectOrArea: prefs.groupTodayByProjectOrArea,
         includeBetaUpdates: Boolean(prefs.includeBetaUpdates),
-        lastWeeklyReviewAt: prefs.lastWeeklyReviewAt || 0
+        lastWeeklyReviewAt: prefs.lastWeeklyReviewAt || 0,
+        tagSortMode: prefs.tagSortMode ?? 'alpha',
+        viewSortMode: prefs.viewSortMode ?? 'manual',
+        savedPerspectivesJson: JSON.stringify(prefs.savedPerspectives ?? [])
       },
       appVersionName: `${APP_VERSION}-chromeos`
     });

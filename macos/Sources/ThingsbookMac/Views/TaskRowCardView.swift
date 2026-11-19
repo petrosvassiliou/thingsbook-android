@@ -19,6 +19,8 @@ public struct TaskRowCardView: View {
     @State private var isTagPopoverOpen = false
     @State private var isTimeblockPopoverOpen = false
     @State private var isCollapsedTimeblockPopoverOpen = false
+    @State private var isDependenciesPopoverOpen = false
+    @State private var isCollapsedDependenciesPopoverOpen = false
     @State private var isGeneratingChecklist = false
     @State private var isEditingNotes = false
     @State private var isHoveringRow = false
@@ -101,7 +103,9 @@ public struct TaskRowCardView: View {
     // MARK: - Collapsed Things-for-Mac Row
 
     private var collapsedRow: some View {
-        HStack(alignment: .center, spacing: 12) {
+        let isActivelyBlocked = store.isTaskActivelyBlocked(task)
+
+        return HStack(alignment: .center, spacing: 12) {
             ThingsCheckboxButton(
                 status: task.status,
                 isSomeday: task.scheduleState == .someday,
@@ -112,6 +116,13 @@ public struct TaskRowCardView: View {
 
             VStack(alignment: .leading, spacing: 2.5) {
                 HStack(spacing: 6) {
+                    if task.isPinned {
+                        Image(systemName: "pin.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(ThingsMacPalette.todayGold)
+                            .thingsTooltip(store.tr("v25_pinned_badge"))
+                    }
+
                     if task.scheduleState == .thisEvening && store.selectedDestination != .smartView(.today) {
                         Image(systemName: "moon.fill")
                             .font(.system(size: 10.5))
@@ -152,6 +163,55 @@ public struct TaskRowCardView: View {
 
             // Trailing metadata badges
             HStack(spacing: 6) {
+                if let blockedBadge = store.blockedByBadgeText(for: task) {
+                    Button {
+                        isCollapsedDependenciesPopoverOpen = true
+                    } label: {
+                        HStack(spacing: 3.5) {
+                            Image(systemName: "hourglass")
+                                .font(.system(size: 10, weight: .semibold))
+                            Text(blockedBadge)
+                                .font(.system(size: 11, weight: .semibold))
+                                .lineLimit(1)
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .foregroundStyle(ThingsMacPalette.somedayAmber)
+                        .padding(.horizontal, 7.5)
+                        .padding(.vertical, 2.5)
+                        .background(Capsule().fill(ThingsMacPalette.somedayAmber.opacity(0.14)))
+                    }
+                    .buttonStyle(.plain)
+                    .thingsTooltip(blockedBadge)
+                    .popover(isPresented: $isCollapsedDependenciesPopoverOpen) {
+                        DependenciesPopoverView(store: store, task: latestTask)
+                    }
+                }
+
+                if let effort = task.resolvedEffort {
+                    let tint = effortTint(for: effort)
+                    let label = effortLocalizedTitle(for: effort)
+                    Menu {
+                        effortMenuItems(for: latestTask)
+                    } label: {
+                        HStack(spacing: 3.5) {
+                            Image(systemName: effort.sfSymbol)
+                                .font(.system(size: 10, weight: .semibold))
+                            Text(label)
+                                .font(.system(size: 11, weight: .semibold))
+                                .lineLimit(1)
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .foregroundStyle(tint)
+                        .padding(.horizontal, 7.5)
+                        .padding(.vertical, 2.5)
+                        .background(Capsule().fill(tint.opacity(0.12)))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .thingsTooltip("\(store.tr("v30_effort_label")): \(label)")
+                }
+
                 if !task.attachments.isEmpty {
                     HStack(spacing: 3) {
                         Image(systemName: "paperclip")
@@ -166,7 +226,7 @@ public struct TaskRowCardView: View {
                     .thingsTooltip("\(store.tr("attachments_section_title")): \(task.attachments.count)")
                 }
 
-                if let tbPill = task.formattedTimeblockPill {
+                if task.scheduledStartMinutes != nil, let tbPill = task.formattedTimeblockPill {
                     Button {
                         isCollapsedTimeblockPopoverOpen = true
                     } label: {
@@ -192,6 +252,26 @@ public struct TaskRowCardView: View {
                             store.setTaskTimeblock(latestTask.id, startMinutes: startMins, durationMinutes: durMins)
                         }
                     }
+                } else if let durPill = task.formattedStandaloneDurationPill {
+                    Menu {
+                        durationMenuItems(for: latestTask)
+                    } label: {
+                        HStack(spacing: 3.5) {
+                            Image(systemName: "timer")
+                                .font(.system(size: 10, weight: .semibold))
+                            Text(durPill)
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .foregroundStyle(ThingsMacPalette.anytimeTeal)
+                        .padding(.horizontal, 7.5)
+                        .padding(.vertical, 2.5)
+                        .background(Capsule().fill(ThingsMacPalette.anytimeTeal.opacity(0.12)))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .thingsTooltip("\(store.tr("v30_duration_label")): \(durPill)")
                 }
 
                 if let rem = task.reminderTime {
@@ -252,6 +332,7 @@ public struct TaskRowCardView: View {
                 }
             }
         }
+        .opacity(isActivelyBlocked ? 0.62 : 1.0)
         .padding(.horizontal, 12)
         .padding(.vertical, 8.5)
         .background(
@@ -267,18 +348,7 @@ public struct TaskRowCardView: View {
             isHoveringRow = hovering
         }
         .onTapGesture {
-            if NSEvent.modifierFlags.contains(.command) {
-                if store.selectedTaskIds.contains(task.id) {
-                    store.selectedTaskIds.remove(task.id)
-                } else {
-                    store.selectedTaskIds.insert(task.id)
-                }
-            } else {
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                    store.selectedTaskIds = [task.id]
-                    store.expandedTaskId = task.id
-                }
-            }
+            store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
         }
     }
 
@@ -318,6 +388,18 @@ public struct TaskRowCardView: View {
                     }
 
                 Spacer()
+
+                Button {
+                    commitDraftEditsIfNeeded()
+                    store.setTasksPinned([latestTask.id], isPinned: !latestTask.isPinned)
+                } label: {
+                    Image(systemName: latestTask.isPinned ? "pin.fill" : "pin")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(latestTask.isPinned ? ThingsMacPalette.todayGold : .secondary)
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .thingsTooltip(store.tr(latestTask.isPinned ? "v25_unpin_task" : "v25_pin_task"))
 
                 if rowVoiceController.isRecording {
                     Button {
@@ -596,9 +678,11 @@ public struct TaskRowCardView: View {
                     }
 
                     ThingsActionChipButton(
-                        title: latestTask.formattedTimeblockPill ?? store.tr("v2_timeblock_title"),
+                        title: latestTask.scheduledStartMinutes != nil
+                            ? (latestTask.formattedTimeblockPill ?? store.tr("v2_timeblock_title"))
+                            : store.tr("v2_timeblock_title"),
                         systemImage: "clock.badge.checkmark",
-                        isActive: latestTask.formattedTimeblockPill != nil,
+                        isActive: latestTask.scheduledStartMinutes != nil,
                         activeTint: ThingsMacPalette.anytimeTeal,
                         helpText: timeblockButtonTooltip
                     ) {
@@ -618,6 +702,59 @@ public struct TaskRowCardView: View {
                             copy.durationMinutes = durMins
                             store.updateTask(copy)
                         }
+                    }
+
+                    let currentDuration = (latestTask.durationMinutes ?? 0) > 0 ? latestTask.durationMinutes : nil
+                    Menu {
+                        durationMenuItems(for: latestTask, commitDraftsFirst: true)
+                    } label: {
+                        actionMenuChipLabel(
+                            title: currentDuration.map { TaskItem.formatCompactDuration($0) } ?? store.tr("v30_duration_label"),
+                            systemImage: "timer",
+                            isActive: currentDuration != nil,
+                            activeTint: ThingsMacPalette.anytimeTeal
+                        )
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .thingsTooltip(
+                        currentDuration.map { "\(store.tr("v30_duration_label")): \(TaskItem.formatCompactDuration($0))" }
+                            ?? store.tr("v30_duration_label")
+                    )
+
+                    let currentEffort = latestTask.resolvedEffort
+                    Menu {
+                        effortMenuItems(for: latestTask, commitDraftsFirst: true)
+                    } label: {
+                        actionMenuChipLabel(
+                            title: currentEffort.map { effortLocalizedTitle(for: $0) } ?? store.tr("v30_effort_label"),
+                            systemImage: currentEffort?.sfSymbol ?? "bolt",
+                            isActive: currentEffort != nil,
+                            activeTint: currentEffort.map { effortTint(for: $0) } ?? ThingsMacPalette.accentBlue
+                        )
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .thingsTooltip(
+                        currentEffort.map { "\(store.tr("v30_effort_label")): \(effortLocalizedTitle(for: $0))" }
+                            ?? store.tr("v30_effort_label")
+                    )
+
+                    let blockedChipLabel = store.blockedByBadgeText(for: latestTask)
+                    ThingsActionChipButton(
+                        title: blockedChipLabel ?? store.tr("v30_blocked_by_action"),
+                        systemImage: "hourglass",
+                        isActive: blockedChipLabel != nil || !latestTask.blockedByTaskIds.isEmpty,
+                        activeTint: ThingsMacPalette.somedayAmber,
+                        helpText: blockedChipLabel ?? store.tr("v30_blocked_by_label")
+                    ) {
+                        commitDraftEditsIfNeeded()
+                        isDependenciesPopoverOpen = true
+                    }
+                    .popover(isPresented: $isDependenciesPopoverOpen) {
+                        DependenciesPopoverView(store: store, task: latestTask)
                     }
 
                     ThingsActionChipButton(
@@ -766,8 +903,18 @@ public struct TaskRowCardView: View {
                         }
 
                         Button {
+                            commitDraftEditsIfNeeded()
+                            store.setTasksPinned([latestTask.id], isPinned: !latestTask.isPinned)
+                        } label: {
+                            Label(
+                                store.tr(latestTask.isPinned ? "v25_unpin_task" : "v25_pin_task"),
+                                systemImage: latestTask.isPinned ? "pin.slash" : "pin"
+                            )
+                        }
+
+                        Button {
                             commitDraftEditsIfNeeded(commitPendingChecklist: true)
-                            _ = try? store.database.duplicateTask(task.id)
+                            _ = try? store.database.duplicateTask(task.id, copySuffix: store.tr("v25_copy_suffix"))
                         } label: {
                             Label(store.tr("action_duplicate_todo"), systemImage: "plus.square.on.square")
                         }
@@ -843,61 +990,204 @@ public struct TaskRowCardView: View {
 
     @ViewBuilder
     private var taskContextMenu: some View {
-        Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
-            store.toggleTaskCompletion(latestTask)
+        let isBatchContext = store.selectedTaskIds.count > 1 && store.selectedTaskIds.contains(task.id)
+
+        if isBatchContext {
+            Button(store.tr("action_complete")) {
+                store.completeSelectedTasks()
+            }
+            Button(store.tr("view_today")) {
+                store.scheduleSelectedTasks(.today)
+            }
+            Button(store.tr("v25_batch_someday")) {
+                store.scheduleSelectedTasks(.someday)
+            }
+            Button(store.tr("v25_batch_pin")) {
+                store.togglePinForSelectedTasks()
+            }
+            Button(store.tr("v25_batch_duplicate")) {
+                store.duplicateSelectedTasks()
+            }
+            Divider()
+            Button(role: .destructive) {
+                store.deleteSelectedTasks()
+            } label: {
+                Text(store.tr("action_delete"))
+            }
+        } else {
+            Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
+                store.toggleTaskCompletion(latestTask)
+            }
+            Button(task.status == .canceled ? store.tr("action_reopen_todo") : store.tr("action_cancel_todo")) {
+                store.cancelTask(latestTask)
+            }
+            Button(store.tr(latestTask.isPinned ? "v25_unpin_task" : "v25_pin_task")) {
+                store.setTasksPinned([latestTask.id], isPinned: !latestTask.isPinned)
+            }
+            Divider()
+            Button(store.tr("view_today")) {
+                var copy = latestTask
+                copy.scheduleState = .today
+                copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
+                store.updateTask(copy)
+            }
+            Button(store.tr("view_this_evening")) {
+                var copy = latestTask
+                copy.scheduleState = .thisEvening
+                copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
+                store.updateTask(copy)
+            }
+            Button(store.tr("view_someday")) {
+                var copy = latestTask
+                copy.scheduleState = .someday
+                copy.whenDate = nil
+                store.updateTask(copy)
+            }
+            Menu(store.tr("v30_duration_label")) {
+                durationMenuItems(for: latestTask)
+            }
+            Menu(store.tr("v30_effort_label")) {
+                effortMenuItems(for: latestTask)
+            }
+            Button(store.tr("v30_blocked_by_action")) {
+                if isExpanded {
+                    isDependenciesPopoverOpen = true
+                } else {
+                    isCollapsedDependenciesPopoverOpen = true
+                }
+            }
+            Menu(store.tr("v2_timeblock_title")) {
+                Button("09:00 · 30m") { store.setTaskTimeblock(latestTask.id, startMinutes: 9 * 60, durationMinutes: 30) }
+                Button("11:00 · 45m") { store.setTaskTimeblock(latestTask.id, startMinutes: 11 * 60, durationMinutes: 45) }
+                Button("14:00 · 60m") { store.setTaskTimeblock(latestTask.id, startMinutes: 14 * 60, durationMinutes: 60) }
+                Button("16:00 · 45m") { store.setTaskTimeblock(latestTask.id, startMinutes: 16 * 60, durationMinutes: 45) }
+                if latestTask.scheduledStartMinutes != nil || latestTask.durationMinutes != nil {
+                    Divider()
+                    Button(store.tr("v2_timeblock_clear"), role: .destructive) {
+                        store.setTaskTimeblock(latestTask.id, startMinutes: nil, durationMinutes: nil)
+                    }
+                }
+            }
+            Divider()
+            Button(store.tr("action_attach_file")) {
+                store.pickAndAttachFiles(taskId: task.id)
+            }
+            Button(store.tr("action_focus_timer")) {
+                store.startFocusTimer(for: latestTask)
+            }
+            Button(store.tr("action_duplicate_todo")) {
+                _ = try? store.database.duplicateTask(task.id, copySuffix: store.tr("v25_copy_suffix"))
+            }
+            Button(store.tr("context_select_task")) {
+                store.selectedTaskIds.insert(task.id)
+                store.lastSelectedTaskId = task.id
+            }
+            Divider()
+            Button(role: .destructive) {
+                store.deleteTask(latestTask)
+            } label: {
+                Text(store.tr("action_delete"))
+            }
         }
-        Button(task.status == .canceled ? store.tr("action_reopen_todo") : store.tr("action_cancel_todo")) {
-            store.cancelTask(latestTask)
+    }
+
+    private func actionMenuChipLabel(
+        title: String,
+        systemImage: String,
+        isActive: Bool,
+        activeTint: Color
+    ) -> some View {
+        HStack(spacing: 5.5) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11.5, weight: .semibold))
+            Text(title)
+                .font(.system(size: 12, weight: isActive ? .semibold : .medium))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
-        Divider()
-        Button(store.tr("view_today")) {
-            var copy = latestTask
-            copy.scheduleState = .today
-            copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
-            store.updateTask(copy)
-        }
-        Button(store.tr("view_this_evening")) {
-            var copy = latestTask
-            copy.scheduleState = .thisEvening
-            copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
-            store.updateTask(copy)
-        }
-        Button(store.tr("view_someday")) {
-            var copy = latestTask
-            copy.scheduleState = .someday
-            copy.whenDate = nil
-            store.updateTask(copy)
-        }
-        Menu(store.tr("v2_timeblock_title")) {
-            Button("09:00 · 30m") { store.setTaskTimeblock(latestTask.id, startMinutes: 9 * 60, durationMinutes: 30) }
-            Button("11:00 · 45m") { store.setTaskTimeblock(latestTask.id, startMinutes: 11 * 60, durationMinutes: 45) }
-            Button("14:00 · 60m") { store.setTaskTimeblock(latestTask.id, startMinutes: 14 * 60, durationMinutes: 60) }
-            Button("16:00 · 45m") { store.setTaskTimeblock(latestTask.id, startMinutes: 16 * 60, durationMinutes: 45) }
-            if latestTask.scheduledStartMinutes != nil || latestTask.durationMinutes != nil {
-                Divider()
-                Button(store.tr("v2_timeblock_clear"), role: .destructive) {
-                    store.setTaskTimeblock(latestTask.id, startMinutes: nil, durationMinutes: nil)
+        .foregroundStyle(isActive ? activeTint : Color.primary.opacity(0.88))
+        .padding(.horizontal, 10.5)
+        .padding(.vertical, 5.5)
+        .background(
+            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                .fill(isActive ? activeTint.opacity(0.11) : ThingsMacPalette.subtleContainer)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .strokeBorder(
+                            isActive ? activeTint.opacity(0.28) : Color.primary.opacity(0.10),
+                            lineWidth: 0.8
+                        )
+                )
+        )
+    }
+
+    @ViewBuilder
+    private func durationMenuItems(for targetTask: TaskItem, commitDraftsFirst: Bool = false) -> some View {
+        let presets = [5, 15, 30, 60, 120, 240]
+        ForEach(presets, id: \.self) { mins in
+            let isCurrent = targetTask.durationMinutes == mins
+            Button {
+                if commitDraftsFirst { commitDraftEditsIfNeeded() }
+                store.setTaskStandaloneDuration(targetTask.id, durationMinutes: mins)
+            } label: {
+                if isCurrent {
+                    Label(TaskItem.formatCompactDuration(mins), systemImage: "checkmark")
+                } else {
+                    Text(TaskItem.formatCompactDuration(mins))
                 }
             }
         }
-        Divider()
-        Button(store.tr("action_attach_file")) {
-            store.pickAndAttachFiles(taskId: task.id)
+        if (targetTask.durationMinutes ?? 0) > 0 {
+            Divider()
+            Button(store.tr("v30_duration_clear"), role: .destructive) {
+                if commitDraftsFirst { commitDraftEditsIfNeeded() }
+                store.setTaskStandaloneDuration(targetTask.id, durationMinutes: nil)
+            }
         }
-        Button(store.tr("action_focus_timer")) {
-            store.startFocusTimer(for: latestTask)
+    }
+
+    @ViewBuilder
+    private func effortMenuItems(for targetTask: TaskItem, commitDraftsFirst: Bool = false) -> some View {
+        ForEach(TaskEffortLevel.allCases, id: \.rawValue) { level in
+            let isCurrent = targetTask.resolvedEffort == level
+            Button {
+                if commitDraftsFirst { commitDraftEditsIfNeeded() }
+                store.setTaskEffort(targetTask.id, effortLevel: level.rawValue)
+            } label: {
+                Label(
+                    effortLocalizedTitle(for: level),
+                    systemImage: isCurrent ? "checkmark" : level.sfSymbol
+                )
+            }
         }
-        Button(store.tr("action_duplicate_todo")) {
-            _ = try? store.database.duplicateTask(task.id)
+        if targetTask.resolvedEffort != nil {
+            Divider()
+            Button(store.tr("v30_effort_none")) {
+                if commitDraftsFirst { commitDraftEditsIfNeeded() }
+                store.setTaskEffort(targetTask.id, effortLevel: nil)
+            }
         }
-        Button(store.tr("context_select_task")) {
-            store.selectedTaskIds.insert(task.id)
+    }
+
+    private func effortLocalizedTitle(for effort: TaskEffortLevel) -> String {
+        switch effort {
+        case .quickWin:
+            return store.tr("v30_effort_quick_win")
+        case .medium:
+            return store.tr("v30_effort_medium")
+        case .deepFocus:
+            return store.tr("v30_effort_deep_focus")
         }
-        Divider()
-        Button(role: .destructive) {
-            store.deleteTask(latestTask)
-        } label: {
-            Text(store.tr("action_delete"))
+    }
+
+    private func effortTint(for effort: TaskEffortLevel) -> Color {
+        switch effort {
+        case .quickWin:
+            return ThingsMacPalette.anytimeTeal
+        case .medium:
+            return ThingsMacPalette.accentBlue
+        case .deepFocus:
+            return ThingsMacPalette.eveningPurple
         }
     }
 

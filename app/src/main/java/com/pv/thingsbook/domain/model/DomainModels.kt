@@ -1,5 +1,43 @@
 package com.pv.thingsbook.domain.model
 
+import kotlinx.serialization.Serializable
+import java.util.Locale
+
+object EffortLevel {
+    const val QUICK_WIN = "QUICK_WIN"
+    const val MEDIUM = "MEDIUM"
+    const val DEEP_FOCUS = "DEEP_FOCUS"
+
+    val ALL: List<String> = listOf(QUICK_WIN, MEDIUM, DEEP_FOCUS)
+
+    fun normalize(raw: String?): String? = when (raw?.trim()?.uppercase(Locale.ROOT)) {
+        QUICK_WIN -> QUICK_WIN
+        MEDIUM -> MEDIUM
+        DEEP_FOCUS -> DEEP_FOCUS
+        else -> null
+    }
+
+    fun sortRank(raw: String?): Int = when (normalize(raw)) {
+        QUICK_WIN -> 0
+        MEDIUM -> 1
+        DEEP_FOCUS -> 2
+        else -> 3
+    }
+}
+
+@Serializable
+data class SavedPerspective(
+    val id: String,
+    val title: String,
+    val categoryIds: List<String> = emptyList(),
+    val effortLevel: String? = null,
+    val maxDurationMinutes: Int? = null,
+    val dueWindow: String = "ANY",
+    val areaId: String? = null,
+    val actionableOnly: Boolean = false,
+    val sortOrder: Double = 0.0
+)
+
 data class Area(
     val id: String,
     val title: String,
@@ -23,6 +61,8 @@ data class Project(
     val lastReviewedAt: Long? = null,
     val sortOrder: Double,
     val tagIds: List<String>,
+    val workspaceId: String? = null,
+    val viewMode: String? = null,
     val totalTaskCount: Int = 0,
     val completedTaskCount: Int = 0,
     val createdAt: Long,
@@ -41,6 +81,7 @@ data class Heading(
     val id: String,
     val projectId: String,
     val title: String,
+    val startDate: Long? = null,
     val endDate: Long? = null,
     val sortOrder: Double,
     val isArchived: Boolean = false,
@@ -112,6 +153,11 @@ data class TaskItem(
     val areaId: String?,
     val recurrenceRule: RecurrenceRule?,
     val sortOrder: Double,
+    val isPinned: Boolean = false,
+    val effortLevel: String? = null,
+    val blockedByTaskIds: List<String> = emptyList(),
+    val workspaceId: String? = null,
+    val assigneeId: String? = null,
     val checklistItems: List<ChecklistItem> = emptyList(),
     val tags: List<Tag> = emptyList(),
     val attachments: List<TaskAttachment> = emptyList(),
@@ -119,6 +165,278 @@ data class TaskItem(
     val updatedAt: Long,
     val isDeleted: Boolean = false
 )
+
+fun formatDurationCompact(minutes: Int): String {
+    val safeMins = minutes.coerceAtLeast(1)
+    val hours = safeMins / 60
+    val rem = safeMins % 60
+    return when {
+        hours == 0 -> "${rem}m"
+        rem == 0 -> "${hours}h"
+        else -> "${hours}h ${rem}m"
+    }
+}
+
+fun formatDurationCompact(minutes: Int?): String? =
+    minutes?.takeIf { it > 0 }?.let { formatDurationCompact(it) }
+
+fun wouldCreateDependencyCycle(
+    taskId: String,
+    candidateBlockerId: String,
+    blockedByMap: Map<String, List<String>>
+): Boolean {
+    val cleanTaskId = taskId.trim()
+    val cleanCandidateId = candidateBlockerId.trim()
+    if (cleanTaskId.isEmpty() || cleanCandidateId.isEmpty()) return true
+    if (cleanTaskId == cleanCandidateId) return true
+
+    val visited = HashSet<String>()
+    val queue = ArrayDeque<String>()
+    queue.addLast(cleanCandidateId)
+    while (queue.isNotEmpty()) {
+        val current = queue.removeFirst()
+        if (current == cleanTaskId) return true
+        if (!visited.add(current)) continue
+        val upstreamBlockers = blockedByMap[current].orEmpty()
+        for (next in upstreamBlockers) {
+            val trimmedNext = next.trim()
+            if (trimmedNext.isEmpty()) continue
+            if (trimmedNext == cleanTaskId) return true
+            if (trimmedNext !in visited) {
+                queue.addLast(trimmedNext)
+            }
+        }
+    }
+    return false
+}
+
+fun isTaskActivelyBlocked(task: TaskItem, openTaskIds: Set<String>): Boolean {
+    return task.blockedByTaskIds.any { it in openTaskIds }
+}
+
+fun sortTasksForView(
+    tasks: List<TaskItem>,
+    sortMode: String,
+    openTaskIds: Set<String> = emptySet()
+): List<TaskItem> {
+    if (tasks.size <= 1) return tasks
+    val normalizedMode = sortMode.trim().lowercase(Locale.ROOT)
+    return tasks.sortedWith { a, b ->
+        if (a.isPinned != b.isPinned) {
+            return@sortedWith if (a.isPinned) -1 else 1
+        }
+        val modeCmp = when (normalizedMode) {
+            "deadline" -> {
+                val aDl = a.deadline
+                val bDl = b.deadline
+                when {
+                    aDl != null && bDl != null -> {
+                        val dlCmp = aDl.compareTo(bDl)
+                        if (dlCmp != 0) dlCmp else a.sortOrder.compareTo(b.sortOrder)
+                    }
+                    aDl != null -> -1
+                    bDl != null -> 1
+                    else -> a.sortOrder.compareTo(b.sortOrder)
+                }
+            }
+            "duration" -> {
+                val aDur = a.durationMinutes?.takeIf { it > 0 }
+                val bDur = b.durationMinutes?.takeIf { it > 0 }
+                when {
+                    aDur != null && bDur != null -> {
+                        val durCmp = aDur.compareTo(bDur)
+                        if (durCmp != 0) durCmp else a.sortOrder.compareTo(b.sortOrder)
+                    }
+                    aDur != null -> -1
+                    bDur != null -> 1
+                    else -> a.sortOrder.compareTo(b.sortOrder)
+                }
+            }
+            "effort" -> {
+                val rankA = EffortLevel.sortRank(a.effortLevel)
+                val rankB = EffortLevel.sortRank(b.effortLevel)
+                val effortCmp = rankA.compareTo(rankB)
+                if (effortCmp != 0) effortCmp else a.sortOrder.compareTo(b.sortOrder)
+            }
+            "alpha" -> {
+                val alphaCmp = a.title.lowercase(Locale.ROOT)
+                    .compareTo(b.title.lowercase(Locale.ROOT))
+                if (alphaCmp != 0) alphaCmp else a.sortOrder.compareTo(b.sortOrder)
+            }
+            else -> {
+                val orderCmp = a.sortOrder.compareTo(b.sortOrder)
+                if (orderCmp != 0) orderCmp else a.createdAt.compareTo(b.createdAt)
+            }
+        }
+        if (modeCmp != 0) {
+            modeCmp
+        } else {
+            val createdCmp = a.createdAt.compareTo(b.createdAt)
+            if (createdCmp != 0) createdCmp else a.id.compareTo(b.id)
+        }
+    }
+}
+
+fun sortTagsForMode(
+    tags: List<Tag>,
+    mode: String,
+    usageCounts: Map<String, Int> = emptyMap()
+): List<Tag> {
+    if (tags.size <= 1) return tags
+    val normalizedMode = mode.trim().lowercase(Locale.ROOT)
+    return tags.sortedWith { a, b ->
+        val cmp = when (normalizedMode) {
+            "most_used", "usage" -> {
+                val countA = usageCounts[a.id] ?: 0
+                val countB = usageCounts[b.id] ?: 0
+                val countCmp = countB.compareTo(countA)
+                if (countCmp != 0) {
+                    countCmp
+                } else {
+                    a.title.lowercase(Locale.ROOT)
+                        .compareTo(b.title.lowercase(Locale.ROOT))
+                }
+            }
+            "manual" -> {
+                val orderCmp = a.sortOrder.compareTo(b.sortOrder)
+                if (orderCmp != 0) {
+                    orderCmp
+                } else {
+                    val createdCmp = a.createdAt.compareTo(b.createdAt)
+                    if (createdCmp != 0) {
+                        createdCmp
+                    } else {
+                        a.title.lowercase(Locale.ROOT)
+                            .compareTo(b.title.lowercase(Locale.ROOT))
+                    }
+                }
+            }
+            else -> {
+                val alphaCmp = a.title.lowercase(Locale.ROOT)
+                    .compareTo(b.title.lowercase(Locale.ROOT))
+                if (alphaCmp != 0) alphaCmp else a.sortOrder.compareTo(b.sortOrder)
+            }
+        }
+        if (cmp != 0) cmp else a.id.compareTo(b.id)
+    }
+}
+
+fun filterTasksForPerspective(
+    tasks: List<TaskItem>,
+    perspective: SavedPerspective,
+    openTaskIds: Set<String>,
+    todayEpochMillis: Long
+): List<TaskItem> {
+    val endOfToday = todayEpochMillis + 86_400_000L - 1L
+    val endOfNext7Days = todayEpochMillis + 8L * 86_400_000L - 1L
+    val requiredCategoryIds = perspective.categoryIds.map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+    val requiredEffort = EffortLevel.normalize(perspective.effortLevel)
+    val maxDur = perspective.maxDurationMinutes?.takeIf { it > 0 }
+    val requiredAreaId = perspective.areaId?.trim()?.takeIf { it.isNotEmpty() }
+    val normalizedWindow = perspective.dueWindow.trim().uppercase(Locale.ROOT)
+
+    return tasks.filter { task ->
+        if (task.isDeleted || task.status != TaskStatus.OPEN) return@filter false
+        if (perspective.actionableOnly && isTaskActivelyBlocked(task, openTaskIds)) return@filter false
+        if (requiredAreaId != null && task.areaId != requiredAreaId) return@filter false
+        if (requiredEffort != null && EffortLevel.normalize(task.effortLevel) != requiredEffort) return@filter false
+        if (maxDur != null) {
+            val dur = task.durationMinutes
+            if (dur == null || dur <= 0 || dur > maxDur) return@filter false
+        }
+        if (requiredCategoryIds.isNotEmpty()) {
+            val hasMatchingCategory = task.tags.any { it.id in requiredCategoryIds }
+            if (!hasMatchingCategory) return@filter false
+        }
+        when (normalizedWindow) {
+            "", "ANY", "ALL" -> true
+            "TODAY" -> {
+                task.scheduleState == ScheduleState.TODAY ||
+                    task.scheduleState == ScheduleState.THIS_EVENING ||
+                    (task.whenDate != null && task.whenDate <= endOfToday) ||
+                    (task.deadline != null && task.deadline <= endOfToday)
+            }
+            "OVERDUE" -> {
+                (task.deadline != null && task.deadline < todayEpochMillis) ||
+                    (task.whenDate != null && task.whenDate < todayEpochMillis)
+            }
+            "NEXT_7_DAYS", "WEEK", "UPCOMING_7_DAYS" -> {
+                val effectiveDate = task.deadline ?: task.whenDate
+                task.scheduleState == ScheduleState.TODAY ||
+                    task.scheduleState == ScheduleState.THIS_EVENING ||
+                    (effectiveDate != null && effectiveDate <= endOfNext7Days)
+            }
+            "HAS_DEADLINE", "DEADLINE" -> task.deadline != null
+            "NONE", "NO_DATE", "UNSCHEDULED" -> {
+                task.whenDate == null &&
+                    task.deadline == null &&
+                    task.scheduleState != ScheduleState.TODAY &&
+                    task.scheduleState != ScheduleState.THIS_EVENING
+            }
+            else -> true
+        }
+    }
+}
+
+fun computeTodayCapacitySummary(
+    tasks: List<TaskItem>,
+    calendarEvents: List<CalendarEventItem>,
+    dayStartMillis: Long,
+    dayEndMillis: Long
+): Pair<Int, Int> {
+    val plannedTaskMinutes = tasks
+        .asSequence()
+        .filter { !it.isDeleted && it.status == TaskStatus.OPEN }
+        .sumOf { task ->
+            val explicitDur = task.durationMinutes?.takeIf { it > 0 }
+            when {
+                explicitDur != null -> explicitDur
+                task.scheduledStartMinutes != null -> 30
+                else -> 0
+            }
+        }
+        .coerceAtLeast(0)
+
+    val workdayStartMs = dayStartMillis + 9L * 60L * 60_000L
+    val rawWorkdayEndMs = dayStartMillis + 17L * 60L * 60_000L
+    val workdayEndMs = if (dayEndMillis > workdayStartMs) {
+        minOf(dayEndMillis, rawWorkdayEndMs)
+    } else {
+        rawWorkdayEndMs
+    }
+    val totalWorkdayMinutes = ((workdayEndMs - workdayStartMs) / 60_000L).toInt().coerceIn(0, 480)
+
+    val clippedIntervals = calendarEvents
+        .asSequence()
+        .filter { !it.isAllDay && it.endMillis > it.startMillis }
+        .mapNotNull { ev ->
+            val s = maxOf(ev.startMillis, workdayStartMs)
+            val e = minOf(ev.endMillis, workdayEndMs)
+            if (e > s) s to e else null
+        }
+        .sortedBy { it.first }
+        .toList()
+
+    var busyCalendarMillis = 0L
+    if (clippedIntervals.isNotEmpty()) {
+        var curStart = clippedIntervals[0].first
+        var curEnd = clippedIntervals[0].second
+        for (i in 1 until clippedIntervals.size) {
+            val (nextStart, nextEnd) = clippedIntervals[i]
+            if (nextStart <= curEnd) {
+                curEnd = maxOf(curEnd, nextEnd)
+            } else {
+                busyCalendarMillis += (curEnd - curStart)
+                curStart = nextStart
+                curEnd = nextEnd
+            }
+        }
+        busyCalendarMillis += (curEnd - curStart)
+    }
+    val busyCalendarMinutes = (busyCalendarMillis / 60_000L).toInt().coerceAtLeast(0)
+    val freeWorkdayMinutes = (totalWorkdayMinutes - busyCalendarMinutes - plannedTaskMinutes).coerceAtLeast(0)
+    return plannedTaskMinutes to freeWorkdayMinutes
+}
 
 data class DeviceCalendarInfo(
     val id: String,

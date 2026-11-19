@@ -41,6 +41,8 @@ public struct Project: Identifiable, Equatable, Hashable, Codable, Sendable {
     public var lastReviewedAt: Int64?
     public var sortOrder: Double
     public var tagIds: [String]
+    public var workspaceId: String?
+    public var viewMode: String?
     public var totalTaskCount: Int
     public var completedTaskCount: Int
     public var createdAt: Int64
@@ -60,6 +62,8 @@ public struct Project: Identifiable, Equatable, Hashable, Codable, Sendable {
         lastReviewedAt: Int64? = nil,
         sortOrder: Double = 1000.0,
         tagIds: [String] = [],
+        workspaceId: String? = nil,
+        viewMode: String? = nil,
         totalTaskCount: Int = 0,
         completedTaskCount: Int = 0,
         createdAt: Int64,
@@ -78,6 +82,8 @@ public struct Project: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.lastReviewedAt = lastReviewedAt
         self.sortOrder = sortOrder
         self.tagIds = tagIds
+        self.workspaceId = workspaceId
+        self.viewMode = viewMode
         self.totalTaskCount = totalTaskCount
         self.completedTaskCount = completedTaskCount
         self.createdAt = createdAt
@@ -87,7 +93,8 @@ public struct Project: Identifiable, Equatable, Hashable, Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, areaId, title, notes, status, scheduleState, whenDate, deadline, completedAt
-        case lastReviewedAt, sortOrder, tagIds, totalTaskCount, completedTaskCount, createdAt, updatedAt, isDeleted
+        case lastReviewedAt, sortOrder, tagIds, workspaceId, viewMode
+        case totalTaskCount, completedTaskCount, createdAt, updatedAt, isDeleted
     }
 
     public init(from decoder: Decoder) throws {
@@ -104,6 +111,8 @@ public struct Project: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.lastReviewedAt = try c.decodeIfPresent(Int64.self, forKey: .lastReviewedAt)
         self.sortOrder = try c.decodeIfPresent(Double.self, forKey: .sortOrder) ?? 1000.0
         self.tagIds = try c.decodeIfPresent([String].self, forKey: .tagIds) ?? []
+        self.workspaceId = try c.decodeIfPresent(String.self, forKey: .workspaceId)
+        self.viewMode = try c.decodeIfPresent(String.self, forKey: .viewMode)
         self.totalTaskCount = try c.decodeIfPresent(Int.self, forKey: .totalTaskCount) ?? 0
         self.completedTaskCount = try c.decodeIfPresent(Int.self, forKey: .completedTaskCount) ?? 0
         self.createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
@@ -123,6 +132,7 @@ public struct Heading: Identifiable, Equatable, Hashable, Codable, Sendable {
     public var title: String
     public var sortOrder: Double
     public var isArchived: Bool
+    public var startDate: Int64?
     public var endDate: Int64?
     public var createdAt: Int64
     public var updatedAt: Int64
@@ -134,6 +144,7 @@ public struct Heading: Identifiable, Equatable, Hashable, Codable, Sendable {
         title: String,
         sortOrder: Double,
         isArchived: Bool = false,
+        startDate: Int64? = nil,
         endDate: Int64? = nil,
         createdAt: Int64,
         updatedAt: Int64,
@@ -144,6 +155,7 @@ public struct Heading: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.title = title
         self.sortOrder = sortOrder
         self.isArchived = isArchived
+        self.startDate = startDate
         self.endDate = endDate
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -151,7 +163,7 @@ public struct Heading: Identifiable, Equatable, Hashable, Codable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, projectId, title, sortOrder, isArchived, endDate, createdAt, updatedAt, isDeleted
+        case id, projectId, title, sortOrder, isArchived, startDate, endDate, createdAt, updatedAt, isDeleted
     }
 
     public init(from decoder: Decoder) throws {
@@ -161,6 +173,7 @@ public struct Heading: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
         self.sortOrder = try c.decodeIfPresent(Double.self, forKey: .sortOrder) ?? 0
         self.isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
+        self.startDate = try c.decodeIfPresent(Int64.self, forKey: .startDate)
         self.endDate = try c.decodeIfPresent(Int64.self, forKey: .endDate)
         self.createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
         self.updatedAt = try c.decodeIfPresent(Int64.self, forKey: .updatedAt) ?? 0
@@ -305,6 +318,11 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
     public var areaId: String?
     public var recurrenceRule: RecurrenceRule?
     public var sortOrder: Double
+    public var isPinned: Bool
+    public var effortLevel: String?
+    public var blockedByTaskIds: [String]
+    public var workspaceId: String?
+    public var assigneeId: String?
     public var checklistItems: [ChecklistItem]
     public var tags: [Tag]
     public var attachments: [TaskAttachment]
@@ -329,6 +347,11 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         areaId: String? = nil,
         recurrenceRule: RecurrenceRule? = nil,
         sortOrder: Double = 1000.0,
+        isPinned: Bool = false,
+        effortLevel: String? = nil,
+        blockedByTaskIds: [String] = [],
+        workspaceId: String? = nil,
+        assigneeId: String? = nil,
         checklistItems: [ChecklistItem] = [],
         tags: [Tag] = [],
         attachments: [TaskAttachment] = [],
@@ -352,6 +375,11 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.areaId = areaId
         self.recurrenceRule = recurrenceRule
         self.sortOrder = sortOrder
+        self.isPinned = isPinned
+        self.effortLevel = effortLevel
+        self.blockedByTaskIds = blockedByTaskIds
+        self.workspaceId = workspaceId
+        self.assigneeId = assigneeId
         self.checklistItems = checklistItems
         self.tags = tags
         self.attachments = attachments
@@ -363,7 +391,8 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id, title, notes, status, scheduleState, whenDate, deadline, reminderTime
         case scheduledStartMinutes, durationMinutes, completedAt, projectId, headingId, areaId
-        case recurrenceRule, sortOrder, checklistItems, tags, attachments, createdAt, updatedAt, isDeleted
+        case recurrenceRule, sortOrder, isPinned, effortLevel, blockedByTaskIds, workspaceId, assigneeId
+        case checklistItems, tags, attachments, createdAt, updatedAt, isDeleted
     }
 
     public init(from decoder: Decoder) throws {
@@ -384,6 +413,11 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.areaId = try c.decodeIfPresent(String.self, forKey: .areaId)
         self.recurrenceRule = try c.decodeIfPresent(RecurrenceRule.self, forKey: .recurrenceRule)
         self.sortOrder = try c.decodeIfPresent(Double.self, forKey: .sortOrder) ?? 1000.0
+        self.isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+        self.effortLevel = try c.decodeIfPresent(String.self, forKey: .effortLevel)
+        self.blockedByTaskIds = try c.decodeIfPresent([String].self, forKey: .blockedByTaskIds) ?? []
+        self.workspaceId = try c.decodeIfPresent(String.self, forKey: .workspaceId)
+        self.assigneeId = try c.decodeIfPresent(String.self, forKey: .assigneeId)
         self.checklistItems = try c.decodeIfPresent([ChecklistItem].self, forKey: .checklistItems) ?? []
         self.tags = try c.decodeIfPresent([Tag].self, forKey: .tags) ?? []
         self.attachments = try c.decodeIfPresent([TaskAttachment].self, forKey: .attachments) ?? []
@@ -396,9 +430,18 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         tags.map(\.id)
     }
 
+    public var resolvedEffort: TaskEffortLevel? {
+        TaskEffortLevel.normalized(effortLevel)
+    }
+
     public var effectiveDurationMinutes: Int {
         if let d = durationMinutes, d > 0 { return d }
         return 30
+    }
+
+    public var formattedStandaloneDurationPill: String? {
+        guard scheduledStartMinutes == nil, let dur = durationMinutes, dur > 0 else { return nil }
+        return Self.formatCompactDuration(dur)
     }
 
     public var formattedTimeblockPill: String? {
@@ -409,9 +452,22 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
             return "\(Self.formatMinutesOfDay(clampedStart))–\(Self.formatMinutesOfDay(end)) · \(dur)m"
         }
         if let dur = durationMinutes, dur > 0 {
-            return "\(dur)m"
+            return Self.formatCompactDuration(dur)
         }
         return nil
+    }
+
+    public static func formatCompactDuration(_ minutes: Int) -> String {
+        let clamped = max(0, minutes)
+        if clamped < 60 {
+            return "\(clamped)m"
+        }
+        let h = clamped / 60
+        let m = clamped % 60
+        if m == 0 {
+            return "\(h)h"
+        }
+        return "\(h)h \(m)m"
     }
 
     public static func formatMinutesOfDay(_ minutes: Int) -> String {
@@ -1595,6 +1651,76 @@ public struct DatabaseStatistics: Equatable, Sendable {
     }
 }
 
+public struct SavedPerspective: Codable, Identifiable, Equatable, Hashable, Sendable {
+    public var id: String
+    public var title: String
+    public var categoryIds: [String]
+    public var effortLevel: String?
+    public var maxDurationMinutes: Int?
+    public var dueWindow: String
+    public var areaId: String?
+    public var actionableOnly: Bool
+    public var sortOrder: Double
+
+    public init(
+        id: String = UUID().uuidString,
+        title: String,
+        categoryIds: [String] = [],
+        effortLevel: String? = nil,
+        maxDurationMinutes: Int? = nil,
+        dueWindow: String = "ANY",
+        areaId: String? = nil,
+        actionableOnly: Bool = false,
+        sortOrder: Double = 0.0
+    ) {
+        self.id = id
+        self.title = title
+        self.categoryIds = categoryIds
+        self.effortLevel = effortLevel
+        self.maxDurationMinutes = maxDurationMinutes
+        self.dueWindow = dueWindow
+        self.areaId = areaId
+        self.actionableOnly = actionableOnly
+        self.sortOrder = sortOrder
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, categoryIds, tagIds, effortLevel, maxDurationMinutes, dueWindow, areaId, actionableOnly, sortOrder
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? UUID().uuidString
+        self.title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
+        if let cats = try? c.decodeIfPresent([String].self, forKey: .categoryIds) {
+            self.categoryIds = cats
+        } else if let tags = try? c.decodeIfPresent([String].self, forKey: .tagIds) {
+            self.categoryIds = tags
+        } else {
+            self.categoryIds = []
+        }
+        self.effortLevel = try? c.decodeIfPresent(String.self, forKey: .effortLevel)
+        self.maxDurationMinutes = try? c.decodeIfPresent(Int.self, forKey: .maxDurationMinutes)
+        self.dueWindow = (try? c.decodeIfPresent(String.self, forKey: .dueWindow)) ?? "ANY"
+        self.areaId = try? c.decodeIfPresent(String.self, forKey: .areaId)
+        self.actionableOnly = (try? c.decodeIfPresent(Bool.self, forKey: .actionableOnly)) ?? false
+        self.sortOrder = (try? c.decodeIfPresent(Double.self, forKey: .sortOrder)) ?? 0.0
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(title, forKey: .title)
+        try c.encode(categoryIds, forKey: .categoryIds)
+        try c.encodeIfPresent(effortLevel, forKey: .effortLevel)
+        try c.encodeIfPresent(maxDurationMinutes, forKey: .maxDurationMinutes)
+        try c.encode(dueWindow, forKey: .dueWindow)
+        try c.encodeIfPresent(areaId, forKey: .areaId)
+        try c.encode(actionableOnly, forKey: .actionableOnly)
+        try c.encode(sortOrder, forKey: .sortOrder)
+    }
+}
+
 public struct AppPreferences: Codable, Equatable, Sendable {
     public var localOnlyDbMode: Bool
     public var sidebarVisible: Bool
@@ -1610,6 +1736,9 @@ public struct AppPreferences: Codable, Equatable, Sendable {
     public var includeBetaUpdates: Bool
     public var hideSampleSetupBanner: Bool
     public var menuBarSelectedProjectId: String?
+    public var tagSortMode: String
+    public var viewSortMode: String
+    public var savedPerspectives: [SavedPerspective]
 
     public init(
         localOnlyDbMode: Bool = false,
@@ -1625,7 +1754,10 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         autoUpdateCheckEnabled: Bool = true,
         includeBetaUpdates: Bool = AppUpdateService.currentVersionIsPrerelease,
         hideSampleSetupBanner: Bool = false,
-        menuBarSelectedProjectId: String? = nil
+        menuBarSelectedProjectId: String? = nil,
+        tagSortMode: String = "alpha",
+        viewSortMode: String = "manual",
+        savedPerspectives: [SavedPerspective] = []
     ) {
         self.localOnlyDbMode = localOnlyDbMode
         self.sidebarVisible = sidebarVisible
@@ -1641,6 +1773,9 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         self.includeBetaUpdates = includeBetaUpdates
         self.hideSampleSetupBanner = hideSampleSetupBanner
         self.menuBarSelectedProjectId = menuBarSelectedProjectId
+        self.tagSortMode = tagSortMode
+        self.viewSortMode = viewSortMode
+        self.savedPerspectives = savedPerspectives
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -1648,6 +1783,7 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         case language, calendarEventsEnabled, selectedCalendarIds, groupTodayByProjectOrArea
         case biometricLockEnabled, autoUpdateCheckEnabled, includeBetaUpdates
         case hideSampleSetupBanner, menuBarSelectedProjectId
+        case tagSortMode, viewSortMode, savedPerspectives
     }
 
     public init(from decoder: Decoder) throws {
@@ -1666,6 +1802,9 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         self.includeBetaUpdates = try c.decodeIfPresent(Bool.self, forKey: .includeBetaUpdates) ?? AppUpdateService.currentVersionIsPrerelease
         self.hideSampleSetupBanner = try c.decodeIfPresent(Bool.self, forKey: .hideSampleSetupBanner) ?? false
         self.menuBarSelectedProjectId = try c.decodeIfPresent(String.self, forKey: .menuBarSelectedProjectId)
+        self.tagSortMode = try c.decodeIfPresent(String.self, forKey: .tagSortMode) ?? "alpha"
+        self.viewSortMode = try c.decodeIfPresent(String.self, forKey: .viewSortMode) ?? "manual"
+        self.savedPerspectives = try c.decodeIfPresent([SavedPerspective].self, forKey: .savedPerspectives) ?? []
     }
 
     private static let storageKey = "thingsbook_macos_preferences_v1"
@@ -2736,6 +2875,319 @@ public enum MacCalendarAppointmentStyleMetrics {
             && !showsInlineOpenInCalendarButton
     }
 }
+
+// MARK: - v2.5 & v3.0 Pure Helpers: Dependencies, Sorters, Perspectives & Capacity
+
+public enum TaskDependencyGraph {
+    public static func wouldCreateCycle(
+        taskId: String,
+        candidateBlockerId: String,
+        blockedByMap: [String: [String]]
+    ) -> Bool {
+        let cleanTaskId = taskId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanCandidateId = candidateBlockerId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTaskId.isEmpty, !cleanCandidateId.isEmpty else { return false }
+        if cleanTaskId == cleanCandidateId {
+            return true
+        }
+
+        var visited = Set<String>()
+        var stack: [String] = [cleanCandidateId]
+        while let current = stack.popLast() {
+            if current == cleanTaskId {
+                return true
+            }
+            if !visited.insert(current).inserted {
+                continue
+            }
+            if let upstream = blockedByMap[current] {
+                for nextId in upstream where !visited.contains(nextId) {
+                    stack.append(nextId)
+                }
+            }
+        }
+        return false
+    }
+
+    public static func activeBlockerIds(
+        for task: TaskItem,
+        openTaskIds: Set<String>
+    ) -> [String] {
+        guard !task.isDeleted, task.status == .open else { return [] }
+        var seen = Set<String>()
+        var result: [String] = []
+        for id in task.blockedByTaskIds {
+            if id != task.id, openTaskIds.contains(id), seen.insert(id).inserted {
+                result.append(id)
+            }
+        }
+        return result
+    }
+
+    public static func isActivelyBlocked(
+        _ task: TaskItem,
+        openTaskIds: Set<String>
+    ) -> Bool {
+        guard !task.isDeleted, task.status == .open else { return false }
+        return task.blockedByTaskIds.contains { $0 != task.id && openTaskIds.contains($0) }
+    }
+}
+
+public enum TaskViewSorter {
+    public static func sort(_ tasks: [TaskItem], mode: String) -> [TaskItem] {
+        let normalizedMode = mode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return tasks.sorted { lhs, rhs in
+            if lhs.isPinned != rhs.isPinned {
+                return lhs.isPinned && !rhs.isPinned
+            }
+            switch normalizedMode {
+            case "deadline":
+                switch (lhs.deadline, rhs.deadline) {
+                case let (l?, r?):
+                    if l != r { return l < r }
+                case (_?, nil):
+                    return true
+                case (nil, _?):
+                    return false
+                case (nil, nil):
+                    break
+                }
+            case "duration":
+                let lDur = (lhs.durationMinutes ?? 0) > 0 ? lhs.durationMinutes : nil
+                let rDur = (rhs.durationMinutes ?? 0) > 0 ? rhs.durationMinutes : nil
+                switch (lDur, rDur) {
+                case let (l?, r?):
+                    if l != r { return l < r }
+                case (_?, nil):
+                    return true
+                case (nil, _?):
+                    return false
+                case (nil, nil):
+                    break
+                }
+            case "effort":
+                let lEffort = lhs.resolvedEffort?.sortRank
+                let rEffort = rhs.resolvedEffort?.sortRank
+                switch (lEffort, rEffort) {
+                case let (l?, r?):
+                    if l != r { return l < r }
+                case (_?, nil):
+                    return true
+                case (nil, _?):
+                    return false
+                case (nil, nil):
+                    break
+                }
+            case "alpha":
+                let cmp = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
+                if cmp != .orderedSame {
+                    return cmp == .orderedAscending
+                }
+            default:
+                break
+            }
+            if lhs.sortOrder != rhs.sortOrder {
+                return lhs.sortOrder < rhs.sortOrder
+            }
+            if lhs.createdAt != rhs.createdAt {
+                return lhs.createdAt < rhs.createdAt
+            }
+            return lhs.id < rhs.id
+        }
+    }
+}
+
+public enum TagListSorter {
+    public static func sort(
+        _ tags: [Tag],
+        mode: String,
+        usageCounts: [String: Int] = [:]
+    ) -> [Tag] {
+        let normalizedMode = mode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return tags.sorted { lhs, rhs in
+            switch normalizedMode {
+            case "most_used":
+                let lCount = usageCounts[lhs.id] ?? 0
+                let rCount = usageCounts[rhs.id] ?? 0
+                if lCount != rCount {
+                    return lCount > rCount
+                }
+                let cmp = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
+                if cmp != .orderedSame {
+                    return cmp == .orderedAscending
+                }
+                if lhs.sortOrder != rhs.sortOrder {
+                    return lhs.sortOrder < rhs.sortOrder
+                }
+                return lhs.id < rhs.id
+            case "manual":
+                if lhs.sortOrder != rhs.sortOrder {
+                    return lhs.sortOrder < rhs.sortOrder
+                }
+                let cmp = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
+                if cmp != .orderedSame {
+                    return cmp == .orderedAscending
+                }
+                return lhs.id < rhs.id
+            default: // "alpha"
+                let cmp = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
+                if cmp != .orderedSame {
+                    return cmp == .orderedAscending
+                }
+                if lhs.sortOrder != rhs.sortOrder {
+                    return lhs.sortOrder < rhs.sortOrder
+                }
+                return lhs.id < rhs.id
+            }
+        }
+    }
+}
+
+public enum PerspectiveFilterEngine {
+    public static func filter(
+        tasks: [TaskItem],
+        perspective: SavedPerspective,
+        openTaskIds: Set<String>,
+        todayEpochMillis: Int64,
+        projectsById: [String: Project] = [:]
+    ) -> [TaskItem] {
+        let requiredCategories = Set(perspective.categoryIds.filter { !$0.isEmpty })
+        let requiredEffort = TaskEffortLevel.normalized(perspective.effortLevel)
+        let maxDuration = perspective.maxDurationMinutes.flatMap { $0 > 0 ? $0 : nil }
+        let requiredAreaId = perspective.areaId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedDueWindow = perspective.dueWindow.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let todayEpochDay = DateEpochConverter.epochDay(forMillis: todayEpochMillis)
+
+        return tasks.filter { task in
+            guard !task.isDeleted, task.status == .open else { return false }
+
+            if !requiredCategories.isEmpty {
+                let taskCatIds = Set(task.tagIds)
+                if taskCatIds.isDisjoint(with: requiredCategories) {
+                    return false
+                }
+            }
+
+            if let requiredEffort {
+                if task.resolvedEffort != requiredEffort {
+                    return false
+                }
+            }
+
+            if let maxDuration {
+                guard let dur = task.durationMinutes, dur > 0, dur <= maxDuration else {
+                    return false
+                }
+            }
+
+            if let requiredAreaId, !requiredAreaId.isEmpty {
+                let effectiveAreaId = task.areaId ?? task.projectId.flatMap { projectsById[$0]?.areaId }
+                if effectiveAreaId != requiredAreaId {
+                    return false
+                }
+            }
+
+            if perspective.actionableOnly {
+                if TaskDependencyGraph.isActivelyBlocked(task, openTaskIds: openTaskIds) {
+                    return false
+                }
+            }
+
+            switch normalizedDueWindow {
+            case "", "ANY", "ALL":
+                break
+            case "TODAY":
+                let inToday = task.scheduleState == .today
+                    || task.scheduleState == .thisEvening
+                    || (task.whenDate.map { DateEpochConverter.epochDay(forMillis: $0) <= todayEpochDay } == true)
+                    || (task.deadline.map { DateEpochConverter.epochDay(forMillis: $0) <= todayEpochDay } == true)
+                if !inToday { return false }
+            case "NEXT_7_DAYS", "WEEK", "UPCOMING_7_DAYS", "7_DAYS":
+                let horizon = todayEpochDay + 7
+                let inWeek = task.scheduleState == .today
+                    || task.scheduleState == .thisEvening
+                    || (task.whenDate.map { DateEpochConverter.epochDay(forMillis: $0) <= horizon } == true)
+                    || (task.deadline.map { DateEpochConverter.epochDay(forMillis: $0) <= horizon } == true)
+                if !inWeek { return false }
+            case "UPCOMING":
+                let inUpcoming = task.scheduleState == .upcoming
+                    || (task.whenDate.map { DateEpochConverter.epochDay(forMillis: $0) > todayEpochDay } == true)
+                    || (task.deadline.map { DateEpochConverter.epochDay(forMillis: $0) > todayEpochDay } == true)
+                if !inUpcoming { return false }
+            case "OVERDUE":
+                guard let dl = task.deadline, DateEpochConverter.epochDay(forMillis: dl) < todayEpochDay else {
+                    return false
+                }
+            case "DEADLINE", "HAS_DEADLINE", "WITH_DEADLINE":
+                if task.deadline == nil { return false }
+            case "ANYTIME":
+                if task.scheduleState != .anytime { return false }
+            case "SOMEDAY":
+                if task.scheduleState != .someday { return false }
+            case "INBOX":
+                if task.scheduleState != .inbox { return false }
+            default:
+                break
+            }
+
+            return true
+        }
+    }
+}
+
+public enum TodayCapacityCalculator {
+    public static func compute(
+        tasks: [TaskItem],
+        calendarEvents: [CalendarEventItem],
+        dayStartMillis: Int64,
+        dayEndMillis: Int64
+    ) -> (plannedMinutes: Int, freeMinutes: Int) {
+        let plannedMinutes = tasks.reduce(0) { acc, task in
+            guard !task.isDeleted, task.status == .open else { return acc }
+            if let dur = task.durationMinutes, dur > 0 {
+                return acc + dur
+            }
+            if task.scheduledStartMinutes != nil {
+                return acc + task.effectiveDurationMinutes
+            }
+            return acc
+        }
+
+        let totalWindowMinutes = max(0, Int((dayEndMillis - dayStartMillis) / 60_000))
+        guard totalWindowMinutes > 0 else {
+            return (plannedMinutes: plannedMinutes, freeMinutes: 0)
+        }
+
+        let clampedIntervals: [(Int64, Int64)] = calendarEvents
+            .filter { !$0.isAllDay }
+            .compactMap { ev in
+                let start = max(dayStartMillis, ev.startMillis)
+                let end = min(dayEndMillis, ev.endMillis)
+                return end > start ? (start, end) : nil
+            }
+            .sorted { $0.0 < $1.0 }
+
+        var mergedIntervals: [(Int64, Int64)] = []
+        for interval in clampedIntervals {
+            if let last = mergedIntervals.last, interval.0 <= last.1 {
+                mergedIntervals[mergedIntervals.count - 1] = (last.0, max(last.1, interval.1))
+            } else {
+                mergedIntervals.append(interval)
+            }
+        }
+
+        let busyEventMinutes = mergedIntervals.reduce(0) { acc, span in
+            acc + max(0, Int((span.1 - span.0) / 60_000))
+        }
+        let freeMinutes = max(0, totalWindowMinutes - busyEventMinutes - plannedMinutes)
+        return (plannedMinutes: plannedMinutes, freeMinutes: freeMinutes)
+    }
+
+    public static func formatMinutes(_ minutes: Int) -> String {
+        TaskItem.formatCompactDuration(minutes)
+    }
+}
+
 
 
 

@@ -30,7 +30,12 @@ import {
   type ThemeMode,
   type ThingsbookStatistics
 } from '../domain/types';
-import type { BackupInspection } from '../data/backupCodec';
+import {
+  normalizeTagSortMode,
+  normalizeViewSortMode,
+  safeParseSavedPerspectives,
+  type BackupInspection
+} from '../data/backupCodec';
 import {
   cloudSync,
   formatAuthErrorMessage,
@@ -315,6 +320,17 @@ const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
             (id): id is string => typeof id === 'string' && id.trim().length > 0
           );
           restoredPatch.calendarIdsInitialized = true;
+        }
+        if (p.tagSortMode != null) {
+          restoredPatch.tagSortMode = normalizeTagSortMode(p.tagSortMode);
+        }
+        if (p.viewSortMode != null) {
+          restoredPatch.viewSortMode = normalizeViewSortMode(p.viewSortMode);
+        }
+        if (p.savedPerspectivesJson != null || p.savedPerspectives != null) {
+          restoredPatch.savedPerspectives = safeParseSavedPerspectives(
+            p.savedPerspectivesJson ?? p.savedPerspectives
+          );
         }
         onRestoredPrefs(restoredPatch);
       }

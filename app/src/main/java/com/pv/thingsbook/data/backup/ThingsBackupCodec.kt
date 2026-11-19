@@ -86,6 +86,8 @@ data class BackupProjectDto(
     val lastReviewedAt: Long? = null,
     val sortOrder: Double = 0.0,
     val tagIdsJson: String = "[]",
+    val workspaceId: String? = null,
+    val viewMode: String? = null,
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L
 )
@@ -95,6 +97,7 @@ data class BackupHeadingDto(
     val id: String,
     val projectId: String,
     val title: String,
+    val startDate: Long? = null,
     val endDate: Long? = null,
     val sortOrder: Double = 0.0,
     val isArchived: Boolean = false,
@@ -120,6 +123,11 @@ data class BackupTaskDto(
     val areaId: String? = null,
     val recurrenceRuleJson: String? = null,
     val sortOrder: Double = 0.0,
+    val isPinned: Boolean = false,
+    val effortLevel: String? = null,
+    val blockedByJson: String = "[]",
+    val workspaceId: String? = null,
+    val assigneeId: String? = null,
     val tagIdsJson: String = "[]",
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L
@@ -197,7 +205,10 @@ data class BackupPreferencesDto(
     val selectedCalendarIds: List<String>? = null,
     val groupTodayByProjectOrArea: Boolean? = null,
     val lastWeeklyReviewAt: Long? = null,
-    val includeBetaUpdates: Boolean? = null
+    val includeBetaUpdates: Boolean? = null,
+    val tagSortMode: String? = null,
+    val viewSortMode: String? = null,
+    val savedPerspectivesJson: String? = null
 )
 
 data class BackupSummary(

@@ -1,23 +1,32 @@
 import {
   startOfDayEpoch,
+  type AreaRecord,
   type CalendarEventItem,
   type ChecklistItemRecord,
+  type EffortLevel,
   type HeadingRecord,
   type ProjectRecord,
+  type ProjectTemplate,
   type ProjectTemplateBlueprint,
   type ProjectTemplateHeadingBlueprint,
   type ProjectTemplateTaskBlueprint,
+  type SavedPerspective,
   type ScheduleState,
   type SupportedLang,
+  type TagRecord,
+  type TagSortMode,
   type TaskRecord,
-  type TaskStatus
+  type TaskStatus,
+  type ViewSortMode
 } from './types.ts';
 
 export const STALLED_PROJECT_THRESHOLD_DAYS = 14;
 export const STALLED_PROJECT_THRESHOLD_MS = STALLED_PROJECT_THRESHOLD_DAYS * 86_400_000;
 
 export const DEFAULT_TIMEBLOCK_DURATION_MINUTES = 30;
+export const DEFAULT_DAILY_CAPACITY_MINUTES = 480;
 export const TIMEBLOCK_DURATION_PRESETS = [15, 30, 45, 60, 90, 120] as const;
+export const STANDALONE_DURATION_PRESETS = [5, 15, 30, 60, 120, 240] as const;
 export const TIMEBLOCK_QUICK_START_MINUTES = [
   480, // 08:00
   540, // 09:00
@@ -266,7 +275,12 @@ export function buildDailyTimeline(
     }
   }
 
-  unscheduledTasks.sort((a, b) => a.sortOrder - b.sortOrder);
+  unscheduledTasks.sort((a, b) => {
+    if (Boolean(b.isPinned) !== Boolean(a.isPinned)) {
+      return a.isPinned ? -1 : 1;
+    }
+    return a.sortOrder - b.sortOrder;
+  });
 
   return {
     allDayEvents,
@@ -2324,6 +2338,387 @@ export function resolveTopBarLayoutTier(workspaceWidthPx: number): TopBarLayoutT
   }
   return 'wrap';
 }
+
+/**
+ * Formats standalone duration minutes into compact human-readable form ("15m", "45m", "1h", "1h 30m").
+ */
+export function formatStandaloneDuration(minutes: number): string {
+  const safe = Math.max(0, Math.trunc(Number.isFinite(minutes) ? minutes : 0));
+  if (safe < 60) return `${safe}m`;
+  const h = Math.floor(safe / 60);
+  const m = safe % 60;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+/**
+ * Returns `true` if adding `candidateBlockerId` to `taskId.blockedByTaskIds` would create a
+ * self-dependency or transitive cycle (`candidateBlockerId ->* taskId`).
+ */
+export function wouldCreateDependencyCycle(
+  taskId: string,
+  candidateBlockerId: string,
+  blockedByMap: ReadonlyMap<string, readonly string[]> | Record<string, readonly string[]>
+): boolean {
+  const self = String(taskId || '').trim();
+  const candidate = String(candidateBlockerId || '').trim();
+  if (!self || !candidate) return false;
+  if (self === candidate) return true;
+
+  const getDeps = (id: string): readonly string[] => {
+    if (blockedByMap instanceof Map) {
+      return blockedByMap.get(id) ?? [];
+    }
+    return (blockedByMap as Record<string, readonly string[]>)[id] ?? [];
+  };
+
+  const visited = new Set<string>();
+  const stack: string[] = [candidate];
+  while (stack.length > 0) {
+    const cur = stack.pop()!;
+    if (cur === self) return true;
+    if (visited.has(cur)) continue;
+    visited.add(cur);
+    const deps = getDeps(cur);
+    for (const dep of deps) {
+      const cleanDep = String(dep || '').trim();
+      if (!cleanDep) continue;
+      if (cleanDep === self) return true;
+      if (!visited.has(cleanDep)) {
+        stack.push(cleanDep);
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Returns `true` when `task` is open/non-deleted and has at least one non-self blocker ID
+ * currently present in `openTaskIdSet`.
+ */
+export function isTaskActivelyBlocked(
+  task: Pick<TaskRecord, 'id' | 'blockedByTaskIds'> & {
+    status?: TaskStatus;
+    isDeleted?: boolean;
+  },
+  openTaskIdSet: ReadonlySet<string>
+): boolean {
+  if (task.isDeleted) return false;
+  if (task.status !== undefined && task.status !== 'OPEN') return false;
+  if (!Array.isArray(task.blockedByTaskIds) || task.blockedByTaskIds.length === 0) return false;
+  for (const blockerId of task.blockedByTaskIds) {
+    if (blockerId && blockerId !== task.id && openTaskIdSet.has(blockerId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function effortSortRank(effort: EffortLevel | null | undefined): number {
+  switch (effort) {
+    case 'QUICK_WIN':
+      return 1;
+    case 'MEDIUM':
+      return 2;
+    case 'DEEP_FOCUS':
+      return 3;
+    default:
+      return 4;
+  }
+}
+
+/**
+ * Pure task view sorter (v2.5 + v3.0):
+ * - Always places `isPinned === true` first regardless of `sortMode`.
+ * - `'manual'`: `sortOrder ASC, createdAt ASC`
+ * - `'deadline'`: `deadline != null` first (`deadline ASC`), then `null`, tie-break `sortOrder ASC`
+ * - `'duration'`: `(durationMinutes != null && durationMinutes > 0)` first (`durationMinutes ASC`), then others, tie-break `sortOrder ASC`
+ * - `'effort'`: `QUICK_WIN` -> `MEDIUM` -> `DEEP_FOCUS` -> `null`, tie-break `sortOrder ASC`
+ * - `'alpha'`: `a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })`, tie-break `sortOrder ASC`
+ */
+export function sortTasksForView(
+  tasks: readonly TaskRecord[],
+  sortMode: ViewSortMode = 'manual'
+): TaskRecord[] {
+  return [...tasks].sort((a, b) => {
+    const aPinned = Boolean(a.isPinned);
+    const bPinned = Boolean(b.isPinned);
+    if (bPinned !== aPinned) {
+      return aPinned ? -1 : 1;
+    }
+
+    if (sortMode === 'deadline') {
+      const aHasDl = a.deadline != null && Number.isFinite(a.deadline);
+      const bHasDl = b.deadline != null && Number.isFinite(b.deadline);
+      if (aHasDl !== bHasDl) {
+        return aHasDl ? -1 : 1;
+      }
+      if (aHasDl && bHasDl && a.deadline !== b.deadline) {
+        return a.deadline! - b.deadline!;
+      }
+      return a.sortOrder - b.sortOrder || a.createdAt - b.createdAt;
+    }
+
+    if (sortMode === 'duration') {
+      const aHasDur =
+        a.durationMinutes != null &&
+        Number.isFinite(a.durationMinutes) &&
+        a.durationMinutes > 0;
+      const bHasDur =
+        b.durationMinutes != null &&
+        Number.isFinite(b.durationMinutes) &&
+        b.durationMinutes > 0;
+      if (aHasDur !== bHasDur) {
+        return aHasDur ? -1 : 1;
+      }
+      if (aHasDur && bHasDur && a.durationMinutes !== b.durationMinutes) {
+        return a.durationMinutes! - b.durationMinutes!;
+      }
+      return a.sortOrder - b.sortOrder || a.createdAt - b.createdAt;
+    }
+
+    if (sortMode === 'effort') {
+      const aRank = effortSortRank(a.effortLevel);
+      const bRank = effortSortRank(b.effortLevel);
+      if (aRank !== bRank) {
+        return aRank - bRank;
+      }
+      return a.sortOrder - b.sortOrder || a.createdAt - b.createdAt;
+    }
+
+    if (sortMode === 'alpha') {
+      const cmp = a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+      if (cmp !== 0) return cmp;
+      return a.sortOrder - b.sortOrder || a.createdAt - b.createdAt;
+    }
+
+    // 'manual'
+    return a.sortOrder - b.sortOrder || a.createdAt - b.createdAt;
+  });
+}
+
+/**
+ * Pure category/tag sorter across `'alpha'`, `'most_used'`, and `'manual'` modes.
+ */
+export function sortTagsForMode(
+  tags: readonly TagRecord[],
+  mode: TagSortMode,
+  usageCounts: ReadonlyMap<string, number>
+): TagRecord[] {
+  return [...tags].sort((a, b) => {
+    if (mode === 'most_used') {
+      const countDiff = (usageCounts.get(b.id) ?? 0) - (usageCounts.get(a.id) ?? 0);
+      if (countDiff !== 0) return countDiff;
+      const titleCmp = a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+      if (titleCmp !== 0) return titleCmp;
+      return a.sortOrder - b.sortOrder || a.id.localeCompare(b.id);
+    }
+
+    if (mode === 'manual') {
+      if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+      const titleCmp = a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+      if (titleCmp !== 0) return titleCmp;
+      return a.id.localeCompare(b.id);
+    }
+
+    // 'alpha'
+    const titleCmp = a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+    if (titleCmp !== 0) return titleCmp;
+    return a.sortOrder - b.sortOrder || a.id.localeCompare(b.id);
+  });
+}
+
+/**
+ * Computes active category/tag usage counts across non-deleted tasks, projects, areas, and templates.
+ * Supports both positional `computeTagUsageCounts(tasks, projects)` and object options.
+ */
+export function computeTagUsageCounts(
+  tasksOrParams:
+    | readonly Pick<TaskRecord, 'tagIds' | 'isDeleted'>[]
+    | {
+        tasks: readonly Pick<TaskRecord, 'tagIds' | 'isDeleted'>[];
+        projects?: readonly Pick<ProjectRecord, 'tagIds' | 'isDeleted'>[];
+        areas?: readonly Pick<AreaRecord, 'tagIds' | 'isDeleted'>[];
+        projectTemplates?: readonly Pick<ProjectTemplate, 'tagIds' | 'isDeleted'>[];
+      },
+  projects?: readonly Pick<ProjectRecord, 'tagIds' | 'isDeleted'>[],
+  areas?: readonly Pick<AreaRecord, 'tagIds' | 'isDeleted'>[],
+  projectTemplates?: readonly Pick<ProjectTemplate, 'tagIds' | 'isDeleted'>[]
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  const tally = (rows: readonly { tagIds?: string[]; isDeleted: boolean }[] | undefined) => {
+    if (!rows) return;
+    for (const r of rows) {
+      if (r.isDeleted || !Array.isArray(r.tagIds)) continue;
+      for (const tid of new Set(r.tagIds)) {
+        counts.set(tid, (counts.get(tid) ?? 0) + 1);
+      }
+    }
+  };
+  if (Array.isArray(tasksOrParams)) {
+    tally(tasksOrParams);
+    tally(projects);
+    tally(areas);
+    tally(projectTemplates);
+  } else {
+    const obj = tasksOrParams as {
+      tasks: readonly Pick<TaskRecord, 'tagIds' | 'isDeleted'>[];
+      projects?: readonly Pick<ProjectRecord, 'tagIds' | 'isDeleted'>[];
+      areas?: readonly Pick<AreaRecord, 'tagIds' | 'isDeleted'>[];
+      projectTemplates?: readonly Pick<ProjectTemplate, 'tagIds' | 'isDeleted'>[];
+    };
+    tally(obj.tasks);
+    tally(obj.projects);
+    tally(obj.areas);
+    tally(obj.projectTemplates);
+  }
+  return counts;
+}
+
+/**
+ * Evaluates open tasks against a user-saved Custom Perspective (`SavedPerspective`).
+ */
+export function filterTasksForPerspective(
+  tasks: readonly TaskRecord[],
+  perspective: SavedPerspective,
+  openTaskIdSet: ReadonlySet<string>,
+  todayStartMillis: number = startOfDayEpoch(),
+  projectsMap?: ReadonlyMap<string, Pick<ProjectRecord, 'areaId' | 'isDeleted'>>
+): TaskRecord[] {
+  const bounds = computeQuickFindDateBounds(todayStartMillis);
+  const requiredCategoryIds = Array.isArray(perspective.categoryIds)
+    ? perspective.categoryIds.filter(Boolean)
+    : [];
+
+  return tasks.filter((task) => {
+    if (task.isDeleted || task.status !== 'OPEN') return false;
+
+    if (perspective.actionableOnly) {
+      if (task.scheduleState === 'SOMEDAY') return false;
+      if (isTaskActivelyBlocked(task, openTaskIdSet)) return false;
+    }
+
+    if (requiredCategoryIds.length > 0) {
+      const taskTags = task.tagIds || [];
+      if (!requiredCategoryIds.some((cid) => taskTags.includes(cid))) {
+        return false;
+      }
+    }
+
+    if (perspective.effortLevel != null) {
+      if ((task.effortLevel ?? null) !== perspective.effortLevel) return false;
+    }
+
+    if (perspective.maxDurationMinutes != null && perspective.maxDurationMinutes > 0) {
+      const dur = task.durationMinutes;
+      if (dur == null || !Number.isFinite(dur) || dur <= 0 || dur > perspective.maxDurationMinutes) {
+        return false;
+      }
+    }
+
+    if (perspective.areaId != null) {
+      const effectiveAreaId =
+        task.areaId ??
+        (task.projectId ? (projectsMap?.get(task.projectId)?.areaId ?? null) : null);
+      if (effectiveAreaId !== perspective.areaId) return false;
+    }
+
+    if (perspective.dueWindow !== 'ANY') {
+      const isTodaySchedule =
+        task.scheduleState === 'TODAY' || task.scheduleState === 'THIS_EVENING';
+      if (perspective.dueWindow === 'TODAY') {
+        const matchesToday =
+          isTodaySchedule ||
+          (task.whenDate != null && task.whenDate < bounds.tomorrowStart) ||
+          (task.deadline != null && task.deadline < bounds.tomorrowStart);
+        if (!matchesToday) return false;
+      } else if (perspective.dueWindow === 'NEXT_7_DAYS') {
+        const matchesNext7 =
+          isTodaySchedule ||
+          (task.whenDate != null && task.whenDate < bounds.next7DaysEndExclusive) ||
+          (task.deadline != null && task.deadline < bounds.next7DaysEndExclusive);
+        if (!matchesNext7) return false;
+      } else if (perspective.dueWindow === 'OVERDUE') {
+        const matchesOverdue =
+          (task.deadline != null && task.deadline < bounds.todayStart) ||
+          (task.whenDate != null && task.whenDate < bounds.todayStart);
+        if (!matchesOverdue) return false;
+      }
+    }
+
+    return true;
+  });
+}
+
+export interface TodayCapacitySummary {
+  plannedMinutes: number;
+  freeMinutes: number;
+}
+
+/**
+ * Computes Today's planned task duration minutes and remaining free focus minutes
+ * against a standard 8h (480m) daily focus budget minus non-all-day calendar meetings.
+ */
+export function computeTodayCapacitySummary(
+  tasks: readonly TaskRecord[],
+  calendarEvents: readonly CalendarEventItem[] = [],
+  dayStartMillis: number = startOfDayEpoch(),
+  dayEndMillis: number = dayStartMillis + 86_400_000
+): TodayCapacitySummary {
+  const effectiveEnd =
+    Number.isFinite(dayEndMillis) && dayEndMillis > dayStartMillis
+      ? dayEndMillis
+      : dayStartMillis + 86_400_000;
+
+  let plannedMinutes = 0;
+  for (const task of tasks) {
+    if (task.isDeleted || task.status !== 'OPEN') continue;
+    if (task.durationMinutes != null && Number.isFinite(task.durationMinutes) && task.durationMinutes > 0) {
+      plannedMinutes += Math.trunc(task.durationMinutes);
+    } else if (task.scheduledStartMinutes != null && Number.isFinite(task.scheduledStartMinutes)) {
+      plannedMinutes += DEFAULT_TIMEBLOCK_DURATION_MINUTES;
+    }
+  }
+
+  const intervals: Array<[number, number]> = [];
+  for (const ev of calendarEvents) {
+    if (ev.isAllDay || (ev as { allDay?: boolean }).allDay) continue;
+    const s = Math.max(dayStartMillis, ev.startMillis);
+    const e = Math.min(effectiveEnd, ev.endMillis);
+    if (e > s) {
+      intervals.push([s, e]);
+    }
+  }
+
+  let calendarBusyMinutes = 0;
+  if (intervals.length > 0) {
+    intervals.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    let mergedMs = 0;
+    let [curStart, curEnd] = intervals[0];
+    for (let i = 1; i < intervals.length; i++) {
+      const [nextStart, nextEnd] = intervals[i];
+      if (nextStart <= curEnd) {
+        curEnd = Math.max(curEnd, nextEnd);
+      } else {
+        mergedMs += curEnd - curStart;
+        curStart = nextStart;
+        curEnd = nextEnd;
+      }
+    }
+    mergedMs += curEnd - curStart;
+    calendarBusyMinutes = Math.round(mergedMs / 60_000);
+  }
+
+  const freeMinutes = Math.max(
+    0,
+    DEFAULT_DAILY_CAPACITY_MINUTES - plannedMinutes - calendarBusyMinutes
+  );
+
+  return {
+    plannedMinutes,
+    freeMinutes
+  };
+}
+
 
 
 

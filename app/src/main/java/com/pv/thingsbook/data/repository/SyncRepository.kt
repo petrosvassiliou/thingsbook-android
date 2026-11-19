@@ -686,10 +686,16 @@ class SyncRepository @Inject constructor(
         if (shouldRemoteWin(local?.updatedAt, local?.isDirty == true, dto.updatedAt, nowMillis)) {
             val localWasPurged = local != null && local.isDeleted && local.title.isEmpty() && local.notes.isEmpty()
             val effectiveDto = if (dto.isDeleted && localWasPurged) dto.copy(purgedFromTrash = true) else dto
+            val baseEntity = effectiveDto.toEntity()
+            val keepLocalV30Proj = effectiveDto.omittedV30ProjectFields &&
+                !(effectiveDto.isDeleted && effectiveDto.purgedFromTrash) &&
+                local != null
             database.projectDao().upsertProjectWithTags(
-                effectiveDto.toEntity().copy(
+                baseEntity.copy(
                     updatedAt = clampedTs,
-                    lastReviewedAt = mergedLastReviewed
+                    lastReviewedAt = mergedLastReviewed,
+                    workspaceId = if (keepLocalV30Proj) local!!.workspaceId else baseEntity.workspaceId,
+                    viewMode = if (keepLocalV30Proj) local!!.viewMode else baseEntity.viewMode
                 ),
                 if (effectiveDto.isDeleted && effectiveDto.purgedFromTrash) emptyList() else effectiveDto.tagIds
             )
@@ -714,8 +720,14 @@ class SyncRepository @Inject constructor(
             } else {
                 dto.endDate
             }
+            val preservedStartDate = if (dto.omittedStartDate && local != null && !dto.isDeleted) {
+                local.startDate
+            } else {
+                dto.startDate
+            }
             database.headingDao().upsert(
                 dto.toEntity().copy(
+                    startDate = preservedStartDate,
                     endDate = preservedEndDate,
                     updatedAt = clamped
                 )
@@ -798,11 +810,22 @@ class SyncRepository @Inject constructor(
             (baseEntity.scheduleState == ScheduleState.TODAY ||
                 baseEntity.scheduleState == ScheduleState.THIS_EVENING ||
                 baseEntity.scheduleState == ScheduleState.UPCOMING)
+        val keepLocalPin = effectiveDto.omittedPinField &&
+            !(effectiveDto.isDeleted && effectiveDto.purgedFromTrash) &&
+            local != null
+        val keepLocalV30 = effectiveDto.omittedV30TaskFields &&
+            !(effectiveDto.isDeleted && effectiveDto.purgedFromTrash) &&
+            local != null
 
         val finalEntity = baseEntity.copy(
             updatedAt = clampedTs,
             scheduledStartMinutes = if (keepLocalTimeblock) local?.scheduledStartMinutes else baseEntity.scheduledStartMinutes,
-            durationMinutes = if (keepLocalTimeblock) local?.durationMinutes else baseEntity.durationMinutes
+            durationMinutes = if (keepLocalTimeblock) local?.durationMinutes else baseEntity.durationMinutes,
+            isPinned = if (keepLocalPin) local!!.isPinned else baseEntity.isPinned,
+            effortLevel = if (keepLocalV30) local!!.effortLevel else baseEntity.effortLevel,
+            blockedByJson = if (keepLocalV30) local!!.blockedByJson else baseEntity.blockedByJson,
+            workspaceId = if (keepLocalV30) local!!.workspaceId else baseEntity.workspaceId,
+            assigneeId = if (keepLocalV30) local!!.assigneeId else baseEntity.assigneeId
         )
         val effectiveTagIds = if (effectiveDto.isDeleted && effectiveDto.purgedFromTrash) emptyList() else effectiveDto.tagIds
         database.taskDao().upsertTaskWithTags(finalEntity, effectiveTagIds)
@@ -963,6 +986,11 @@ class SyncRepository @Inject constructor(
                         tagIdsJson = "[]",
                         scheduledStartMinutes = null,
                         durationMinutes = null,
+                        isPinned = false,
+                        effortLevel = null,
+                        blockedByJson = "[]",
+                        workspaceId = null,
+                        assigneeId = null,
                         isDeleted = true,
                         isDirty = true,
                         updatedAt = tombstoneAt

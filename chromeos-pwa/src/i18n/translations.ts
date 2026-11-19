@@ -361,6 +361,65 @@ export interface TranslationStrings {
   tagsFilterPlaceholder: string;
   tagsCreateFromSearch: (name: string) => string;
   tagsNoFilterMatches: string;
+  pinTask: string;
+  unpinTask: string;
+  pinnedBadge: string;
+  tagsSearchPlaceholder: string;
+  tagsAssignSearchPlaceholder: string;
+  tagsNoMatches: string;
+  tagsSortAlpha: string;
+  tagsSortMostUsed: string;
+  tagsSortManual: string;
+  tagsMergeAction: string;
+  tagsMergeTargetPrompt: (name: string) => string;
+  tagsMergedToast: (src: string, dst: string) => string;
+  viewSortLabel: string;
+  viewSortManual: string;
+  viewSortDeadline: string;
+  viewSortDuration: string;
+  viewSortEffort: string;
+  viewSortAlpha: string;
+  batchPin: string;
+  batchTags: string;
+  batchDuplicate: string;
+  batchSomeday: string;
+  effortLabel: string;
+  effortNone: string;
+  effortQuickWin: string;
+  effortMedium: string;
+  effortDeepFocus: string;
+  durationLabel: string;
+  durationClear: string;
+  todayCapacitySummary: (planned: string, free: string) => string;
+  waitingOnLabel: string;
+  waitingOnBadge: (count: number) => string;
+  waitingOnNamedBadge: (title: string) => string;
+  dependencyModalTitle: string;
+  dependencySearchPlaceholder: string;
+  dependencyCycleWarning: string;
+  dependencyEmpty: string;
+  dependencyClearAll: string;
+  perspectivesSectionTitle: string;
+  perspectiveNewTitle: string;
+  perspectiveEditTitle: string;
+  perspectiveNamePlaceholder: string;
+  perspectiveMaxDurationLabel: string;
+  perspectiveMaxDurationAny: string;
+  perspectiveDueWindowLabel: string;
+  perspectiveDueAny: string;
+  perspectiveDueToday: string;
+  perspectiveDueNext7Days: string;
+  perspectiveDueOverdue: string;
+  perspectiveAreaAll: string;
+  perspectiveActionableOnlyLabel: string;
+  perspectiveEmptyHint: string;
+  projectViewList: string;
+  projectViewBoard: string;
+  projectViewRoadmap: string;
+  phaseSetStartDate: string;
+  workspaceLabel: string;
+  assigneeLabel: string;
+  importAsanaPlannerLabel: string;
 }
 
 export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
@@ -742,7 +801,67 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     tagsSearchOrCreatePlaceholder: 'Search or create category…',
     tagsFilterPlaceholder: 'Filter categories…',
     tagsCreateFromSearch: (name) => `Create new category “${name}”`,
-    tagsNoFilterMatches: 'No matching categories'
+    tagsNoFilterMatches: 'No matching categories',
+    pinTask: 'Pin to Top',
+    unpinTask: 'Unpin',
+    pinnedBadge: 'Pinned',
+    tagsSearchPlaceholder: 'Filter categories…',
+    tagsAssignSearchPlaceholder: 'Search or create category…',
+    tagsNoMatches: 'No matching categories',
+    tagsSortAlpha: 'A–Z',
+    tagsSortMostUsed: 'Most Used',
+    tagsSortManual: 'Custom',
+    tagsMergeAction: 'Merge Into…',
+    tagsMergeTargetPrompt: (name) => `Merge “${name}” into:`,
+    tagsMergedToast: (src, dst) => `Merged “${src}” into “${dst ?? ''}”`,
+    viewSortLabel: 'Sort',
+    viewSortManual: 'Manual',
+    viewSortDeadline: 'By Deadline',
+    viewSortDuration: 'By Duration',
+    viewSortEffort: 'By Effort',
+    viewSortAlpha: 'Alphabetical A–Z',
+    batchPin: 'Pin',
+    batchTags: 'Categories',
+    batchDuplicate: 'Duplicate',
+    batchSomeday: 'Someday',
+    effortLabel: 'Effort',
+    effortNone: 'None',
+    effortQuickWin: 'Quick Win',
+    effortMedium: 'Medium',
+    effortDeepFocus: 'Deep Focus',
+    durationLabel: 'Duration',
+    durationClear: 'Clear duration',
+    todayCapacitySummary: (planned, free) => `${planned} planned · ${free ?? '0m'} free`,
+    waitingOnLabel: 'Waiting On…',
+    waitingOnBadge: (count) =>
+      count === 1 ? 'Waiting on 1 to-do' : `Waiting on ${count} to-dos`,
+    waitingOnNamedBadge: (title) => `Waiting on: ${title}`,
+    dependencyModalTitle: 'Waiting On',
+    dependencySearchPlaceholder: 'Search open to-dos…',
+    dependencyCycleWarning: 'Cannot select — would create a dependency cycle',
+    dependencyEmpty: 'No other open to-dos available',
+    dependencyClearAll: 'Clear blockers',
+    perspectivesSectionTitle: 'Perspectives',
+    perspectiveNewTitle: 'New Perspective',
+    perspectiveEditTitle: 'Edit Perspective',
+    perspectiveNamePlaceholder: 'Perspective name (e.g. Quick Wins, Deep Work)…',
+    perspectiveMaxDurationLabel: 'Max Duration',
+    perspectiveMaxDurationAny: 'Any duration',
+    perspectiveDueWindowLabel: 'Due Window',
+    perspectiveDueAny: 'Any time',
+    perspectiveDueToday: 'Today',
+    perspectiveDueNext7Days: 'Next 7 days',
+    perspectiveDueOverdue: 'Overdue',
+    perspectiveAreaAll: 'All Areas',
+    perspectiveActionableOnlyLabel: 'Actionable only (hide blocked & Someday)',
+    perspectiveEmptyHint: 'No to-dos match this perspective right now',
+    projectViewList: 'List',
+    projectViewBoard: 'Board',
+    projectViewRoadmap: 'Roadmap',
+    phaseSetStartDate: 'Set Start Date',
+    workspaceLabel: 'Workspace',
+    assigneeLabel: 'Assignee',
+    importAsanaPlannerLabel: 'Import from Asana / Microsoft Planner'
   },
   de: {
     appName: 'Thingsbook',
@@ -1125,7 +1244,67 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     tagsSearchOrCreatePlaceholder: 'Kategorie suchen oder neu erstellen…',
     tagsFilterPlaceholder: 'Kategorien filtern…',
     tagsCreateFromSearch: (name) => `Als neue Kategorie erstellen: „${name}“`,
-    tagsNoFilterMatches: 'Keine passenden Kategorien'
+    tagsNoFilterMatches: 'Keine passenden Kategorien',
+    pinTask: 'Oben anheften',
+    unpinTask: 'Lösen',
+    pinnedBadge: 'Angeheftet',
+    tagsSearchPlaceholder: 'Kategorien filtern…',
+    tagsAssignSearchPlaceholder: 'Kategorie suchen oder neu erstellen…',
+    tagsNoMatches: 'Keine passenden Kategorien',
+    tagsSortAlpha: 'A–Z',
+    tagsSortMostUsed: 'Meistgenutzt',
+    tagsSortManual: 'Manuell',
+    tagsMergeAction: 'Zusammenführen…',
+    tagsMergeTargetPrompt: (name) => `„${name}“ zusammenführen in:`,
+    tagsMergedToast: (src, dst) => `„${src}“ mit „${dst ?? ''}“ zusammengeführt`,
+    viewSortLabel: 'Sortieren',
+    viewSortManual: 'Manuell',
+    viewSortDeadline: 'Nach Frist',
+    viewSortDuration: 'Nach Dauer',
+    viewSortEffort: 'Nach Aufwand',
+    viewSortAlpha: 'Alphabetisch A–Z',
+    batchPin: 'Anheften',
+    batchTags: 'Kategorien',
+    batchDuplicate: 'Duplizieren',
+    batchSomeday: 'Irgendwann',
+    effortLabel: 'Aufwand',
+    effortNone: 'Ohne',
+    effortQuickWin: 'Schneller Erfolg',
+    effortMedium: 'Mittel',
+    effortDeepFocus: 'Tiefer Fokus',
+    durationLabel: 'Dauer',
+    durationClear: 'Dauer löschen',
+    todayCapacitySummary: (planned, free) => `${planned} geplant · ${free ?? '0m'} frei`,
+    waitingOnLabel: 'Wartet auf…',
+    waitingOnBadge: (count) =>
+      count === 1 ? 'Wartet auf 1 Aufgabe' : `Wartet auf ${count} Aufgaben`,
+    waitingOnNamedBadge: (title) => `Wartet auf: ${title}`,
+    dependencyModalTitle: 'Wartet auf',
+    dependencySearchPlaceholder: 'Offene Aufgaben durchsuchen…',
+    dependencyCycleWarning: 'Auswahl nicht möglich — würde einen Abhängigkeitszyklus erzeugen',
+    dependencyEmpty: 'Keine weiteren offenen Aufgaben verfügbar',
+    dependencyClearAll: 'Blockierer entfernen',
+    perspectivesSectionTitle: 'Perspektiven',
+    perspectiveNewTitle: 'Neue Perspektive',
+    perspectiveEditTitle: 'Perspektive bearbeiten',
+    perspectiveNamePlaceholder: 'Name der Perspektive (z. B. Schnelle Erfolge, Deep Work)…',
+    perspectiveMaxDurationLabel: 'Max. Dauer',
+    perspectiveMaxDurationAny: 'Beliebige Dauer',
+    perspectiveDueWindowLabel: 'Zeitfenster',
+    perspectiveDueAny: 'Jederzeit',
+    perspectiveDueToday: 'Heute',
+    perspectiveDueNext7Days: 'Nächste 7 Tage',
+    perspectiveDueOverdue: 'Überfällig',
+    perspectiveAreaAll: 'Alle Bereiche',
+    perspectiveActionableOnlyLabel: 'Nur ausführbare (Blockierte & Irgendwann ausblenden)',
+    perspectiveEmptyHint: 'Aktuell entsprechen keine Aufgaben dieser Perspektive',
+    projectViewList: 'Liste',
+    projectViewBoard: 'Board',
+    projectViewRoadmap: 'Roadmap',
+    phaseSetStartDate: 'Startdatum setzen',
+    workspaceLabel: 'Workspace',
+    assigneeLabel: 'Zuständig',
+    importAsanaPlannerLabel: 'Aus Asana / Microsoft Planner importieren'
   },
   fr: {
     appName: 'Thingsbook',
@@ -1506,7 +1685,67 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     tagsSearchOrCreatePlaceholder: 'Rechercher ou créer une catégorie…',
     tagsFilterPlaceholder: 'Filtrer les catégories…',
     tagsCreateFromSearch: (name) => `Créer la catégorie « ${name} »`,
-    tagsNoFilterMatches: 'Aucune catégorie correspondante'
+    tagsNoFilterMatches: 'Aucune catégorie correspondante',
+    pinTask: 'Épingler en haut',
+    unpinTask: 'Désépingler',
+    pinnedBadge: 'Épinglée',
+    tagsSearchPlaceholder: 'Filtrer les catégories…',
+    tagsAssignSearchPlaceholder: 'Rechercher ou créer une catégorie…',
+    tagsNoMatches: 'Aucune catégorie correspondante',
+    tagsSortAlpha: 'A–Z',
+    tagsSortMostUsed: 'Plus utilisées',
+    tagsSortManual: 'Personnalisé',
+    tagsMergeAction: 'Fusionner vers…',
+    tagsMergeTargetPrompt: (name) => `Fusionner « ${name} » dans :`,
+    tagsMergedToast: (src, dst) => `« ${src} » fusionnée dans « ${dst ?? ''} »`,
+    viewSortLabel: 'Trier',
+    viewSortManual: 'Manuel',
+    viewSortDeadline: 'Par échéance',
+    viewSortDuration: 'Par durée',
+    viewSortEffort: 'Par effort',
+    viewSortAlpha: 'Alphabétique A–Z',
+    batchPin: 'Épingler',
+    batchTags: 'Catégories',
+    batchDuplicate: 'Dupliquer',
+    batchSomeday: 'Un jour',
+    effortLabel: 'Effort',
+    effortNone: 'Aucun',
+    effortQuickWin: 'Gain rapide',
+    effortMedium: 'Moyen',
+    effortDeepFocus: 'Concentration',
+    durationLabel: 'Durée',
+    durationClear: 'Effacer la durée',
+    todayCapacitySummary: (planned, free) => `${planned} planifié · ${free ?? '0m'} libre`,
+    waitingOnLabel: 'En attente de…',
+    waitingOnBadge: (count) =>
+      count === 1 ? 'En attente d’1 tâche' : `En attente de ${count} tâches`,
+    waitingOnNamedBadge: (title) => `En attente de : ${title}`,
+    dependencyModalTitle: 'En attente de',
+    dependencySearchPlaceholder: 'Rechercher des tâches ouvertes…',
+    dependencyCycleWarning: 'Impossible — créerait une dépendance circulaire',
+    dependencyEmpty: 'Aucune autre tâche ouverte disponible',
+    dependencyClearAll: 'Retirer les blocages',
+    perspectivesSectionTitle: 'Perspectives',
+    perspectiveNewTitle: 'Nouvelle perspective',
+    perspectiveEditTitle: 'Modifier la perspective',
+    perspectiveNamePlaceholder: 'Nom de la perspective (ex. Gains rapides, Deep Work)…',
+    perspectiveMaxDurationLabel: 'Durée max.',
+    perspectiveMaxDurationAny: 'Toute durée',
+    perspectiveDueWindowLabel: 'Échéance',
+    perspectiveDueAny: 'À tout moment',
+    perspectiveDueToday: "Aujourd'hui",
+    perspectiveDueNext7Days: '7 prochains jours',
+    perspectiveDueOverdue: 'En retard',
+    perspectiveAreaAll: 'Tous les domaines',
+    perspectiveActionableOnlyLabel: 'Actionnables uniquement (masquer bloquées & Un jour)',
+    perspectiveEmptyHint: 'Aucune tâche ne correspond à cette perspective',
+    projectViewList: 'Liste',
+    projectViewBoard: 'Tableau',
+    projectViewRoadmap: 'Feuille de route',
+    phaseSetStartDate: 'Définir la date de début',
+    workspaceLabel: 'Espace de travail',
+    assigneeLabel: 'Responsable',
+    importAsanaPlannerLabel: 'Importer depuis Asana / Microsoft Planner'
   },
   it: {
     appName: 'Thingsbook',
@@ -1887,7 +2126,67 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     tagsSearchOrCreatePlaceholder: 'Cerca o crea categoria…',
     tagsFilterPlaceholder: 'Filtra categorie…',
     tagsCreateFromSearch: (name) => `Crea nuova categoria “${name}”`,
-    tagsNoFilterMatches: 'Nessuna categoria corrispondente'
+    tagsNoFilterMatches: 'Nessuna categoria corrispondente',
+    pinTask: 'Fissa in alto',
+    unpinTask: 'Rimuovi fissaggio',
+    pinnedBadge: 'Fissata',
+    tagsSearchPlaceholder: 'Filtra categorie…',
+    tagsAssignSearchPlaceholder: 'Cerca o crea categoria…',
+    tagsNoMatches: 'Nessuna categoria corrispondente',
+    tagsSortAlpha: 'A–Z',
+    tagsSortMostUsed: 'Più usate',
+    tagsSortManual: 'Personalizzato',
+    tagsMergeAction: 'Unisci in…',
+    tagsMergeTargetPrompt: (name) => `Unisci «${name}» in:`,
+    tagsMergedToast: (src, dst) => `«${src}» unita in «${dst ?? ''}»`,
+    viewSortLabel: 'Ordina',
+    viewSortManual: 'Manuale',
+    viewSortDeadline: 'Per scadenza',
+    viewSortDuration: 'Per durata',
+    viewSortEffort: 'Per impegno',
+    viewSortAlpha: 'Alfabetico A–Z',
+    batchPin: 'Fissa',
+    batchTags: 'Categorie',
+    batchDuplicate: 'Duplica',
+    batchSomeday: 'Prima o poi',
+    effortLabel: 'Impegno',
+    effortNone: 'Nessuno',
+    effortQuickWin: 'Vittoria rapida',
+    effortMedium: 'Medio',
+    effortDeepFocus: 'Focus profondo',
+    durationLabel: 'Durata',
+    durationClear: 'Cancella durata',
+    todayCapacitySummary: (planned, free) => `${planned} pianificati · ${free ?? '0m'} liberi`,
+    waitingOnLabel: 'In attesa di…',
+    waitingOnBadge: (count) =>
+      count === 1 ? 'In attesa di 1 attività' : `In attesa di ${count} attività`,
+    waitingOnNamedBadge: (title) => `In attesa di: ${title}`,
+    dependencyModalTitle: 'In attesa di',
+    dependencySearchPlaceholder: 'Cerca attività aperte…',
+    dependencyCycleWarning: 'Impossibile selezionare — creerebbe una dipendenza ciclica',
+    dependencyEmpty: 'Nessun’altra attività aperta disponibile',
+    dependencyClearAll: 'Rimuovi blocchi',
+    perspectivesSectionTitle: 'Prospettive',
+    perspectiveNewTitle: 'Nuova prospettiva',
+    perspectiveEditTitle: 'Modifica prospettiva',
+    perspectiveNamePlaceholder: 'Nome prospettiva (es. Vittorie rapide, Deep Work)…',
+    perspectiveMaxDurationLabel: 'Durata max.',
+    perspectiveMaxDurationAny: 'Qualsiasi durata',
+    perspectiveDueWindowLabel: 'Scadenza',
+    perspectiveDueAny: 'Qualsiasi momento',
+    perspectiveDueToday: 'Oggi',
+    perspectiveDueNext7Days: 'Prossimi 7 giorni',
+    perspectiveDueOverdue: 'Scadute',
+    perspectiveAreaAll: 'Tutte le aree',
+    perspectiveActionableOnlyLabel: 'Solo eseguibili (nascondi bloccate e Prima o poi)',
+    perspectiveEmptyHint: 'Nessuna attività corrisponde a questa prospettiva',
+    projectViewList: 'Elenco',
+    projectViewBoard: 'Bacheca',
+    projectViewRoadmap: 'Roadmap',
+    phaseSetStartDate: 'Imposta data di inizio',
+    workspaceLabel: 'Spazio di lavoro',
+    assigneeLabel: 'Assegnatario',
+    importAsanaPlannerLabel: 'Importa da Asana / Microsoft Planner'
   },
   es: {
     appName: 'Thingsbook',
@@ -2268,7 +2567,67 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     tagsSearchOrCreatePlaceholder: 'Buscar o crear categoría…',
     tagsFilterPlaceholder: 'Filtrar categorías…',
     tagsCreateFromSearch: (name) => `Crear nueva categoría «${name}»`,
-    tagsNoFilterMatches: 'Ninguna categoría coincidente'
+    tagsNoFilterMatches: 'Ninguna categoría coincidente',
+    pinTask: 'Fijar arriba',
+    unpinTask: 'Desfijar',
+    pinnedBadge: 'Fijada',
+    tagsSearchPlaceholder: 'Filtrar categorías…',
+    tagsAssignSearchPlaceholder: 'Buscar o crear categoría…',
+    tagsNoMatches: 'Ninguna categoría coincidente',
+    tagsSortAlpha: 'A–Z',
+    tagsSortMostUsed: 'Más usadas',
+    tagsSortManual: 'Personalizado',
+    tagsMergeAction: 'Fusionar en…',
+    tagsMergeTargetPrompt: (name) => `Fusionar «${name}» en:`,
+    tagsMergedToast: (src, dst) => `«${src}» fusionada en «${dst ?? ''}»`,
+    viewSortLabel: 'Ordenar',
+    viewSortManual: 'Manual',
+    viewSortDeadline: 'Por fecha límite',
+    viewSortDuration: 'Por duración',
+    viewSortEffort: 'Por esfuerzo',
+    viewSortAlpha: 'Alfabético A–Z',
+    batchPin: 'Fijar',
+    batchTags: 'Categorías',
+    batchDuplicate: 'Duplicar',
+    batchSomeday: 'Algún día',
+    effortLabel: 'Esfuerzo',
+    effortNone: 'Ninguno',
+    effortQuickWin: 'Victoria rápida',
+    effortMedium: 'Medio',
+    effortDeepFocus: 'Enfoque profundo',
+    durationLabel: 'Duración',
+    durationClear: 'Borrar duración',
+    todayCapacitySummary: (planned, free) => `${planned} planificado · ${free ?? '0m'} libre`,
+    waitingOnLabel: 'Esperando a…',
+    waitingOnBadge: (count) =>
+      count === 1 ? 'Esperando a 1 tarea' : `Esperando a ${count} tareas`,
+    waitingOnNamedBadge: (title) => `Esperando a: ${title}`,
+    dependencyModalTitle: 'Esperando a',
+    dependencySearchPlaceholder: 'Buscar tareas abiertas…',
+    dependencyCycleWarning: 'No se puede seleccionar — crearía una dependencia cíclica',
+    dependencyEmpty: 'No hay otras tareas abiertas disponibles',
+    dependencyClearAll: 'Quitar bloqueos',
+    perspectivesSectionTitle: 'Perspectivas',
+    perspectiveNewTitle: 'Nueva perspectiva',
+    perspectiveEditTitle: 'Editar perspectiva',
+    perspectiveNamePlaceholder: 'Nombre de la perspectiva (ej. Victorias rápidas, Deep Work)…',
+    perspectiveMaxDurationLabel: 'Duración máx.',
+    perspectiveMaxDurationAny: 'Cualquier duración',
+    perspectiveDueWindowLabel: 'Ventana de fecha',
+    perspectiveDueAny: 'En cualquier momento',
+    perspectiveDueToday: 'Hoy',
+    perspectiveDueNext7Days: 'Próximos 7 días',
+    perspectiveDueOverdue: 'Vencidas',
+    perspectiveAreaAll: 'Todas las áreas',
+    perspectiveActionableOnlyLabel: 'Solo accionables (ocultar bloqueadas y Algún día)',
+    perspectiveEmptyHint: 'Ninguna tarea coincide con esta perspectiva ahora mismo',
+    projectViewList: 'Lista',
+    projectViewBoard: 'Tablero',
+    projectViewRoadmap: 'Hoja de ruta',
+    phaseSetStartDate: 'Establecer fecha de inicio',
+    workspaceLabel: 'Espacio de trabajo',
+    assigneeLabel: 'Responsable',
+    importAsanaPlannerLabel: 'Importar desde Asana / Microsoft Planner'
   }
 };
 

@@ -1,11 +1,21 @@
 import type {
   AreaRecord,
   AttachmentRecord,
+  EffortLevel,
   HeadingRecord,
   ProjectRecord,
   RecurrenceRule,
   TaskRecord
 } from '../domain/types.ts';
+import {
+  normalizeEffortLevel,
+  normalizeProjectStatus,
+  normalizeProjectViewMode,
+  normalizeScheduleState,
+  normalizeTaskStatus,
+  safeParseBlockedByTaskIds,
+  safeParseRecurrence
+} from './backupCodec.ts';
 
 export const MAX_ATTACHMENT_INLINE_BYTES = 700_000;
 export const ATTACHMENT_BATCH_CHUNK_SIZE = 8;
@@ -116,6 +126,8 @@ export type RecurringDedupCandidate = Pick<
   | 'scheduledStartMinutes'
   | 'durationMinutes'
 > & {
+  isPinned?: boolean;
+  effortLevel?: EffortLevel | null;
   deadline?: number | null;
   reminderTime?: number | null;
   updatedAt?: number;
@@ -131,6 +143,8 @@ export interface RecurringWinnerEnrichment {
   durationMinutes?: number | null;
   deadline?: number | null;
   reminderTime?: number | null;
+  isPinned?: boolean;
+  effortLevel?: EffortLevel | null;
   minUpdatedAt: number;
 }
 
@@ -347,6 +361,17 @@ export function planRecurringDeduplication(
       const donorRem = losers.find((l) => l.reminderTime != null)?.reminderTime;
       if (donorRem != null) {
         patch.reminderTime = donorRem;
+        changed = true;
+      }
+    }
+    if (!winner.isPinned && losers.some((l) => Boolean(l.isPinned))) {
+      patch.isPinned = true;
+      changed = true;
+    }
+    if (winner.effortLevel == null) {
+      const donorEffort = losers.find((l) => l.effortLevel != null)?.effortLevel;
+      if (donorEffort != null) {
+        patch.effortLevel = donorEffort;
         changed = true;
       }
     }
@@ -715,6 +740,20 @@ export function buildLegacyCompatibleNtfyChunks(
 }
 
 /**
+ * Resolves the merged `startDate` for an incoming remote `headings` delta so older clients
+ * (which omit `startDate` from Firestore/ntfy payloads) preserve any existing local `startDate`.
+ */
+export function resolveMergedHeadingStartDate(
+  local: Pick<HeadingRecord, 'startDate'> | undefined,
+  remote: Pick<HeadingRecord, 'startDate' | 'isDeleted'> & { omittedStartDate?: boolean }
+): number | null {
+  if (remote.omittedStartDate && !remote.isDeleted && local !== undefined) {
+    return local.startDate ?? null;
+  }
+  return remote.startDate ?? null;
+}
+
+/**
  * Resolves the merged `endDate` for an incoming remote `headings` delta so `v2.x` clients
  * (which omit `endDate` from Firestore/ntfy payloads) preserve any existing local `endDate`
  * while `v3.0+` clients explicitly sending `endDate: null` or a timestamp apply cleanly.
@@ -728,3 +767,280 @@ export function resolveMergedHeadingEndDate(
   }
   return remote.endDate ?? null;
 }
+
+function syncFiniteNumber(v: unknown, fallback = 0): number {
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function syncNullableNumber(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
+function syncNullableString(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  return t.length > 0 ? t : null;
+}
+
+function syncStringList(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0);
+}
+
+export type RemoteProjectWithHints = ProjectRecord & {
+  omittedV30ProjectFields?: boolean;
+};
+
+export function projectToFirestoreMap(project: ProjectRecord): Record<string, unknown> {
+  return {
+    id: project.id,
+    areaId: project.areaId ?? null,
+    title: project.title,
+    notes: project.notes || '',
+    status: project.status,
+    scheduleState: project.scheduleState,
+    whenDate: project.whenDate != null ? Math.trunc(project.whenDate) : null,
+    deadline: project.deadline != null ? Math.trunc(project.deadline) : null,
+    completedAt: project.completedAt != null ? Math.trunc(project.completedAt) : null,
+    lastReviewedAt: project.lastReviewedAt != null ? Math.trunc(project.lastReviewedAt) : null,
+    sortOrder: syncFiniteNumber(project.sortOrder),
+    tagIds: project.tagIds || [],
+    workspaceId: project.isDeleted ? null : (project.workspaceId ?? null),
+    viewMode: project.isDeleted ? null : (project.viewMode ?? null),
+    createdAt: Math.trunc(syncFiniteNumber(project.createdAt)),
+    updatedAt: Math.trunc(syncFiniteNumber(project.updatedAt)),
+    isDeleted: Boolean(project.isDeleted),
+    purgedFromTrash: Boolean(project.purgedFromTrash)
+  };
+}
+
+export function projectFromFirestoreMap(map: Record<string, unknown>): RemoteProjectWithHints | null;
+export function projectFromFirestoreMap(
+  docId: string,
+  map: Record<string, unknown>
+): RemoteProjectWithHints;
+export function projectFromFirestoreMap(
+  mapOrDocId: Record<string, unknown> | string,
+  maybeMap?: Record<string, unknown>
+): RemoteProjectWithHints | null {
+  const map =
+    typeof mapOrDocId === 'string'
+      ? normalizeFirestoreDocWithId(mapOrDocId, maybeMap ?? {})
+      : mapOrDocId;
+  const id = syncNullableString(map.id);
+  if (!id) return null;
+  const title = typeof map.title === 'string' ? map.title : '';
+  const notes = typeof map.notes === 'string' ? map.notes : '';
+  const isDeleted = Boolean(map.isDeleted);
+  const omittedV30ProjectFields =
+    !Object.prototype.hasOwnProperty.call(map, 'workspaceId') &&
+    !Object.prototype.hasOwnProperty.call(map, 'viewMode');
+  return {
+    id,
+    areaId: syncNullableString(map.areaId),
+    title,
+    notes,
+    status: normalizeProjectStatus(typeof map.status === 'string' ? map.status : 'ACTIVE'),
+    scheduleState: normalizeScheduleState(
+      typeof map.scheduleState === 'string' ? map.scheduleState : 'ANYTIME',
+      'ANYTIME'
+    ),
+    whenDate: syncNullableNumber(map.whenDate),
+    deadline: syncNullableNumber(map.deadline),
+    completedAt: syncNullableNumber(map.completedAt),
+    lastReviewedAt: syncNullableNumber(map.lastReviewedAt),
+    sortOrder: syncFiniteNumber(map.sortOrder),
+    tagIds: syncStringList(map.tagIds),
+    workspaceId: syncNullableString(map.workspaceId),
+    viewMode: normalizeProjectViewMode(map.viewMode),
+    createdAt: Math.trunc(syncFiniteNumber(map.createdAt)),
+    updatedAt: Math.trunc(syncFiniteNumber(map.updatedAt)),
+    isDeleted,
+    isDirty: false,
+    purgedFromTrash: Boolean(map.purgedFromTrash || (isDeleted && !title && !notes)),
+    ...(omittedV30ProjectFields ? { omittedV30ProjectFields: true } : {})
+  };
+}
+
+export type RemoteHeadingWithHints = HeadingRecord & {
+  omittedStartDate?: boolean;
+  omittedEndDate?: boolean;
+};
+
+export function headingToFirestoreMap(heading: HeadingRecord): Record<string, unknown> {
+  return {
+    id: heading.id,
+    projectId: heading.projectId,
+    title: heading.title,
+    startDate: heading.isDeleted
+      ? null
+      : heading.startDate != null
+        ? Math.trunc(heading.startDate)
+        : null,
+    endDate: heading.isDeleted
+      ? null
+      : heading.endDate != null
+        ? Math.trunc(heading.endDate)
+        : null,
+    sortOrder: syncFiniteNumber(heading.sortOrder),
+    isArchived: Boolean(heading.isArchived),
+    createdAt: Math.trunc(syncFiniteNumber(heading.createdAt)),
+    updatedAt: Math.trunc(syncFiniteNumber(heading.updatedAt)),
+    isDeleted: Boolean(heading.isDeleted)
+  };
+}
+
+export function headingFromFirestoreMap(map: Record<string, unknown>): RemoteHeadingWithHints | null;
+export function headingFromFirestoreMap(
+  docId: string,
+  map: Record<string, unknown>
+): RemoteHeadingWithHints;
+export function headingFromFirestoreMap(
+  mapOrDocId: Record<string, unknown> | string,
+  maybeMap?: Record<string, unknown>
+): RemoteHeadingWithHints | null {
+  const map =
+    typeof mapOrDocId === 'string'
+      ? normalizeFirestoreDocWithId(mapOrDocId, maybeMap ?? {})
+      : mapOrDocId;
+  const id = syncNullableString(map.id);
+  const projectId = syncNullableString(map.projectId);
+  if (!id || !projectId) return null;
+  const omittedStartDate = !Object.prototype.hasOwnProperty.call(map, 'startDate');
+  const omittedEndDate = !Object.prototype.hasOwnProperty.call(map, 'endDate');
+  return {
+    id,
+    projectId,
+    title: typeof map.title === 'string' ? map.title : '',
+    startDate: syncNullableNumber(map.startDate),
+    endDate: syncNullableNumber(map.endDate),
+    sortOrder: syncFiniteNumber(map.sortOrder),
+    isArchived: Boolean(map.isArchived),
+    createdAt: Math.trunc(syncFiniteNumber(map.createdAt)),
+    updatedAt: Math.trunc(syncFiniteNumber(map.updatedAt)),
+    isDeleted: Boolean(map.isDeleted),
+    isDirty: false,
+    ...(omittedStartDate ? { omittedStartDate: true } : {}),
+    ...(omittedEndDate ? { omittedEndDate: true } : {})
+  };
+}
+
+export function taskToFirestoreMap(task: TaskRecord): Record<string, unknown> {
+  return {
+    id: task.id,
+    title: task.title,
+    notes: task.notes || '',
+    status: task.status,
+    scheduleState: task.scheduleState,
+    whenDate: task.whenDate != null ? Math.trunc(task.whenDate) : null,
+    deadline: task.deadline != null ? Math.trunc(task.deadline) : null,
+    reminderTime: task.reminderTime != null ? Math.trunc(task.reminderTime) : null,
+    scheduledStartMinutes:
+      task.scheduledStartMinutes != null ? Math.trunc(task.scheduledStartMinutes) : null,
+    durationMinutes:
+      task.durationMinutes != null ? Math.trunc(task.durationMinutes) : null,
+    isPinned: !task.isDeleted && Boolean(task.isPinned),
+    effortLevel: task.isDeleted ? null : (task.effortLevel ?? null),
+    blockedByTaskIds: task.isDeleted
+      ? []
+      : safeParseBlockedByTaskIds(task.blockedByTaskIds, task.id),
+    workspaceId: task.isDeleted ? null : (task.workspaceId ?? null),
+    assigneeId: task.isDeleted ? null : (task.assigneeId ?? null),
+    completedAt: task.completedAt != null ? Math.trunc(task.completedAt) : null,
+    projectId: task.projectId ?? null,
+    headingId: task.headingId ?? null,
+    areaId: task.areaId ?? null,
+    recurrenceRule: task.recurrenceRule ? JSON.stringify(task.recurrenceRule) : null,
+    sortOrder: syncFiniteNumber(task.sortOrder),
+    tagIds: task.tagIds || [],
+    createdAt: Math.trunc(syncFiniteNumber(task.createdAt)),
+    updatedAt: Math.trunc(syncFiniteNumber(task.updatedAt)),
+    isDeleted: Boolean(task.isDeleted),
+    purgedFromTrash: Boolean(task.purgedFromTrash)
+  };
+}
+
+export type RemoteTaskWithHints = TaskRecord & {
+  omittedTimeblockFields?: boolean;
+  omittedPinnedField?: boolean;
+  omittedV30TaskFields?: boolean;
+  omittedEffortField?: boolean;
+  omittedBlockedByField?: boolean;
+  omittedWorkspaceField?: boolean;
+  omittedAssigneeField?: boolean;
+};
+
+export function taskFromFirestoreMap(map: Record<string, unknown>): RemoteTaskWithHints | null;
+export function taskFromFirestoreMap(
+  docId: string,
+  map: Record<string, unknown>
+): RemoteTaskWithHints;
+export function taskFromFirestoreMap(
+  mapOrDocId: Record<string, unknown> | string,
+  maybeMap?: Record<string, unknown>
+): RemoteTaskWithHints | null {
+  const map =
+    typeof mapOrDocId === 'string'
+      ? normalizeFirestoreDocWithId(mapOrDocId, maybeMap ?? {})
+      : mapOrDocId;
+  const id = syncNullableString(map.id);
+  if (!id) return null;
+  const title = typeof map.title === 'string' ? map.title : '';
+  const notes = typeof map.notes === 'string' ? map.notes : '';
+  const isDeleted = Boolean(map.isDeleted);
+  const omittedTimeblockFields = !Object.prototype.hasOwnProperty.call(
+    map,
+    'scheduledStartMinutes'
+  );
+  const omittedPinnedField = !Object.prototype.hasOwnProperty.call(map, 'isPinned');
+  const omittedEffortField = !Object.prototype.hasOwnProperty.call(map, 'effortLevel');
+  const omittedBlockedByField = !Object.prototype.hasOwnProperty.call(map, 'blockedByTaskIds');
+  const omittedWorkspaceField = !Object.prototype.hasOwnProperty.call(map, 'workspaceId');
+  const omittedAssigneeField = !Object.prototype.hasOwnProperty.call(map, 'assigneeId');
+  const omittedV30TaskFields =
+    omittedEffortField && omittedBlockedByField && omittedWorkspaceField && omittedAssigneeField;
+
+  return {
+    id,
+    title,
+    notes,
+    status: normalizeTaskStatus(typeof map.status === 'string' ? map.status : 'OPEN'),
+    scheduleState: normalizeScheduleState(
+      typeof map.scheduleState === 'string' ? map.scheduleState : 'INBOX',
+      'INBOX'
+    ),
+    whenDate: syncNullableNumber(map.whenDate),
+    deadline: syncNullableNumber(map.deadline),
+    reminderTime: syncNullableNumber(map.reminderTime),
+    scheduledStartMinutes: syncNullableNumber(map.scheduledStartMinutes),
+    durationMinutes: syncNullableNumber(map.durationMinutes),
+    isPinned: Boolean(map.isPinned),
+    effortLevel: normalizeEffortLevel(map.effortLevel),
+    blockedByTaskIds: safeParseBlockedByTaskIds(map.blockedByTaskIds, id),
+    workspaceId: syncNullableString(map.workspaceId),
+    assigneeId: syncNullableString(map.assigneeId),
+    completedAt: syncNullableNumber(map.completedAt),
+    projectId: syncNullableString(map.projectId),
+    headingId: syncNullableString(map.headingId),
+    areaId: syncNullableString(map.areaId),
+    recurrenceRule: safeParseRecurrence(syncNullableString(map.recurrenceRule)),
+    sortOrder: syncFiniteNumber(map.sortOrder),
+    tagIds: syncStringList(map.tagIds),
+    createdAt: Math.trunc(syncFiniteNumber(map.createdAt)),
+    updatedAt: Math.trunc(syncFiniteNumber(map.updatedAt)),
+    isDeleted,
+    isDirty: false,
+    purgedFromTrash: Boolean(map.purgedFromTrash || (isDeleted && !title && !notes)),
+    ...(omittedTimeblockFields ? { omittedTimeblockFields: true } : {}),
+    ...(omittedPinnedField ? { omittedPinnedField: true } : {}),
+    ...(omittedV30TaskFields ? { omittedV30TaskFields: true } : {}),
+    ...(omittedEffortField && !omittedV30TaskFields ? { omittedEffortField: true } : {}),
+    ...(omittedBlockedByField && !omittedV30TaskFields ? { omittedBlockedByField: true } : {}),
+    ...(omittedWorkspaceField && !omittedV30TaskFields ? { omittedWorkspaceField: true } : {}),
+    ...(omittedAssigneeField && !omittedV30TaskFields ? { omittedAssigneeField: true } : {})
+  };
+}
+

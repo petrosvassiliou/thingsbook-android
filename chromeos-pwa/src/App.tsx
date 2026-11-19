@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDown,
   ArrowUp,
+  ArrowUpDown,
   Bell,
   CalendarDays,
   Check,
@@ -29,10 +30,13 @@ import {
   Milestone,
   Moon,
   PanelLeftClose,
+  Pin,
+  PinOff,
   Plus,
   Search,
   Settings,
   Share2,
+  SlidersHorizontal,
   Sparkles,
   Sun,
   Trash2,
@@ -51,19 +55,28 @@ import {
   type AppPreferences,
   type CalendarEventItem,
   type DeviceCalendarInfo,
+  type EffortLevel,
   type FocusTimerUiState,
   type HeadingRecord,
   type ProjectRecord,
   type QuickShareDraft,
+  type SavedPerspective,
   type SmartViewType,
   type SupportedLang,
   type TagRecord,
-  type TaskRecord
+  type TagSortMode,
+  type TaskRecord,
+  type ViewSortMode
 } from './domain/types';
 import {
+  computeTagUsageCounts,
+  computeTodayCapacitySummary,
   detectStalledProjects,
   evaluateProjectStalledStatus,
-  resolveTopBarLayoutTier
+  filterTasksForPerspective,
+  formatStandaloneDuration,
+  resolveTopBarLayoutTier,
+  sortTasksForView
 } from './domain/v2Utils';
 import {
   clearLastCalendarError,
@@ -105,8 +118,10 @@ import {
   CreateOrEditProjectModal,
   MoveTaskModal,
   NotificationSettingsModal,
+  PerspectiveModal,
   QuickCreateAreaModal,
   TagManagerModal,
+  TaskDependencyModal,
   TaskTagPickerModal
 } from './components/EntityModals';
 import { GeminiModal } from './components/GeminiModal';
@@ -256,6 +271,13 @@ export const App: React.FC = () => {
     areaId: string | null;
   }>({ open: false, tab: 'gallery', areaId: null });
   const [todayViewMode, setTodayViewMode] = useState<'list' | 'timeline'>('list');
+  const [viewSortDropdownOpen, setViewSortDropdownOpen] = useState(false);
+  const [batchTagPickerOpen, setBatchTagPickerOpen] = useState(false);
+  const [dependencyModalTaskId, setDependencyModalTaskId] = useState<string | null>(null);
+  const [perspectiveModalState, setPerspectiveModalState] = useState<{
+    open: boolean;
+    perspective: SavedPerspective | null;
+  }>({ open: false, perspective: null });
 
   // Android v1.7.0 Power Features State
   const [quickShareDraft, setQuickShareDraft] = useState<QuickShareDraft | null>(null);
@@ -938,6 +960,74 @@ export const App: React.FC = () => {
     [snapshot.projects, snapshot.tasks]
   );
 
+  // ==================== v2.5 + v3.0 Milestone 2 Derived State ====================
+  const tagSortMode: TagSortMode = prefs.tagSortMode ?? 'alpha';
+  const viewSortMode: ViewSortMode = prefs.viewSortMode ?? 'manual';
+  const savedPerspectives = useMemo<SavedPerspective[]>(
+    () =>
+      [...(prefs.savedPerspectives ?? [])].sort(
+        (a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title)
+      ),
+    [prefs.savedPerspectives]
+  );
+
+  const tasksByIdMap = useMemo(
+    () => new Map(snapshot.tasks.filter((tk) => !tk.isDeleted).map((tk) => [tk.id, tk])),
+    [snapshot.tasks]
+  );
+
+  const openTaskIdSet = useMemo(
+    () => new Set(openTasks.map((tk) => tk.id)),
+    [openTasks]
+  );
+
+  const tagUsageCounts = useMemo(
+    () =>
+      computeTagUsageCounts({
+        tasks: snapshot.tasks,
+        projects: snapshot.projects,
+        areas: snapshot.areas,
+        projectTemplates: snapshot.projectTemplates
+      }),
+    [snapshot.tasks, snapshot.projects, snapshot.areas, snapshot.projectTemplates]
+  );
+
+  const todayStartMs = useMemo(() => startOfDayEpoch(new Date(endOfToday)), [endOfToday]);
+
+  const perspectiveTasksMap = useMemo(() => {
+    const map = new Map<string, TaskRecord[]>();
+    for (const persp of savedPerspectives) {
+      map.set(
+        persp.id,
+        filterTasksForPerspective(
+          openInActiveProj,
+          persp,
+          openTaskIdSet,
+          todayStartMs,
+          allNonDeletedProjectsMap
+        )
+      );
+    }
+    return map;
+  }, [savedPerspectives, openInActiveProj, openTaskIdSet, todayStartMs, allNonDeletedProjectsMap]);
+
+  const perspectiveCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const [id, list] of perspectiveTasksMap.entries()) {
+      counts.set(id, list.length);
+    }
+    return counts;
+  }, [perspectiveTasksMap]);
+
+  useEffect(() => {
+    if (
+      activeNav.kind === 'perspective' &&
+      !savedPerspectives.some((p) => p.id === activeNav.perspectiveId)
+    ) {
+      setActiveNav({ kind: 'smart', view: 'TODAY' });
+    }
+  }, [activeNav, savedPerspectives]);
+
   // ==================== Calendar Integration State & Refresh (Android v1.6.21–v1.6.23 Parity) ====================
   const [hasCalendarPermission, setHasCalendarPermission] = useState<boolean>(() =>
     hasCalendarAccess()
@@ -964,6 +1054,17 @@ export const App: React.FC = () => {
       false
     );
   }, [prefs.calendarEventsEnabled, todayCalendarEvents, endOfToday, calendarNowMs]);
+
+  const todayCapacity = useMemo(
+    () =>
+      computeTodayCapacitySummary(
+        [...todayDaytimeTasks, ...todayEveningTasks],
+        activeTodayCalendarEvents,
+        todayStartMs,
+        endOfToday
+      ),
+    [todayDaytimeTasks, todayEveningTasks, activeTodayCalendarEvents, todayStartMs, endOfToday]
+  );
 
   const maxUpcomingHorizonEpochDay = useMemo(() => {
     const todayEpochDay = localEpochDayFromMs(endOfToday);
@@ -1244,6 +1345,9 @@ export const App: React.FC = () => {
         (tk) => tk.areaId === activeNav.areaId && tk.projectId == null
       );
     }
+    if (activeNav.kind === 'perspective') {
+      return perspectiveTasksMap.get(activeNav.perspectiveId) ?? [];
+    }
     return openTasks.filter((tk) => tk.projectId === activeNav.projectId);
   }, [
     activeNav,
@@ -1254,7 +1358,8 @@ export const App: React.FC = () => {
     anytimeTasks,
     somedayTasks,
     logbookTasks,
-    openTasks
+    openTasks,
+    perspectiveTasksMap
   ]);
 
   // Auto-prune completed/canceled/deleted/moved task IDs out of multi-selection (ThingsbookViewModel.kt v1.6.17+)
@@ -1297,12 +1402,72 @@ export const App: React.FC = () => {
     [selectedFilterTagId]
   );
 
+  const sortViewList = useCallback(
+    (list: TaskRecord[]) => sortTasksForView(list, viewSortMode),
+    [viewSortMode]
+  );
+
+  const orderedVisibleTaskIds = useMemo((): string[] => {
+    if (activeNav.kind === 'smart') {
+      if (activeNav.view === 'TODAY') {
+        return [
+          ...sortViewList(filterByTag(todayDaytimeTasks)),
+          ...sortViewList(filterByTag(todayEveningTasks))
+        ].map((tk) => tk.id);
+      }
+      if (activeNav.view === 'UPCOMING') {
+        const dayMap = new Map<number, TaskRecord[]>();
+        for (const tk of filterByTag(upcomingTasks)) {
+          const day = computeUpcomingTargetDate(tk);
+          const arr = dayMap.get(day) ?? [];
+          arr.push(tk);
+          dayMap.set(day, arr);
+        }
+        return Array.from(dayMap.entries())
+          .sort((a, b) => a[0] - b[0])
+          .flatMap(([, list]) => sortViewList(list).map((tk) => tk.id));
+      }
+      if (activeNav.view === 'LOGBOOK') {
+        return filterByTag(currentViewBaseTasks).map((tk) => tk.id);
+      }
+      if (activeNav.view === 'TRASH') {
+        return [];
+      }
+      return sortViewList(filterByTag(currentViewBaseTasks)).map((tk) => tk.id);
+    }
+    if (activeNav.kind === 'project') {
+      const projHeadings = snapshot.headings.filter(
+        (h) => !h.isDeleted && !h.isArchived && h.projectId === activeNav.projectId
+      );
+      const validHeadingIdSet = new Set(projHeadings.map((h) => h.id));
+      const visibleOpenProjTasks = filterByTag(currentViewBaseTasks);
+      const ungrouped = sortViewList(
+        visibleOpenProjTasks.filter((tk) => !tk.headingId || !validHeadingIdSet.has(tk.headingId))
+      );
+      const headed = projHeadings.flatMap((hd) =>
+        sortViewList(visibleOpenProjTasks.filter((tk) => tk.headingId === hd.id))
+      );
+      return [...ungrouped, ...headed].map((tk) => tk.id);
+    }
+    return sortViewList(filterByTag(currentViewBaseTasks)).map((tk) => tk.id);
+  }, [
+    activeNav,
+    sortViewList,
+    filterByTag,
+    todayDaytimeTasks,
+    todayEveningTasks,
+    upcomingTasks,
+    currentViewBaseTasks,
+    snapshot.headings
+  ]);
+
   const handleSelectNav = useCallback(
     (nav: ActiveNavigation, highlightTaskId?: string) => {
       setActiveNav(nav);
       setMobileDrawerOpen(false);
       setEditingAreaHeader(false);
       setProjectAreaDropdownOpen(false);
+      setViewSortDropdownOpen(false);
       setSelectedTaskIds([]);
       if (highlightTaskId) {
         setExpandedTaskId(highlightTaskId);
@@ -1342,6 +1507,18 @@ export const App: React.FC = () => {
     },
     [t.copySuffix]
   );
+
+  const handleBatchDuplicateSelected = useCallback(async () => {
+    if (selectedTaskIds.length === 0) return;
+    const selectedSet = new Set(selectedTaskIds);
+    const ordered = orderedVisibleTaskIds.filter((id) => selectedSet.has(id));
+    const targetIds = ordered.length > 0 ? ordered : [...selectedTaskIds];
+    const createdIds = await localDb.batchDuplicateTasks(targetIds, t.copySuffix);
+    if (createdIds.length > 0) {
+      setSelectedTaskIds(createdIds);
+      showToast(`✓ +${createdIds.length} ${t.entityTodos}`);
+    }
+  }, [selectedTaskIds, orderedVisibleTaskIds, t, showToast]);
 
   const handleDuplicateProject = useCallback(
     async (projectId: string) => {
@@ -1394,14 +1571,17 @@ export const App: React.FC = () => {
     [updatePrefs]
   );
 
-  // Preselected Area ID for New Project (current Area, or current Project's parent Area — v1.6.18 parity)
+  // Preselected Area ID for New Project (current Area, Project's parent Area, or Perspective's Area)
   const defaultAreaIdForNewProject = useMemo((): string | null => {
     if (activeNav.kind === 'area') return activeNav.areaId;
     if (activeNav.kind === 'project') {
       return allNonDeletedProjectsMap.get(activeNav.projectId)?.areaId ?? null;
     }
+    if (activeNav.kind === 'perspective') {
+      return savedPerspectives.find((p) => p.id === activeNav.perspectiveId)?.areaId ?? null;
+    }
     return null;
-  }, [activeNav, allNonDeletedProjectsMap]);
+  }, [activeNav, allNonDeletedProjectsMap, savedPerspectives]);
 
   // Create New To-Do at Top of Current Context (ThingsbookViewModel.createTaskAtPosition dropIndex=0 — v1.6.18 parity)
   const createNewTodoInCurrentContext = useCallback(
@@ -1413,6 +1593,8 @@ export const App: React.FC = () => {
       let projectId: string | null = null;
       let headingId: string | null = null;
       let areaId: string | null = null;
+      let extraTagIds: string[] = [];
+      let initialEffortLevel: EffortLevel | null = null;
       const isLogbookRedirect =
         activeNav.kind === 'smart' &&
         (activeNav.view === 'LOGBOOK' || activeNav.view === 'TRASH');
@@ -1451,6 +1633,23 @@ export const App: React.FC = () => {
         // When triggered via Ctrl+N or + To-Do (no explicit heading), force ungrouped top of project
         headingId = explicitHeadingId ?? null;
         scheduleState = 'ANYTIME';
+      } else if (activeNav.kind === 'perspective') {
+        const persp = savedPerspectives.find((p) => p.id === activeNav.perspectiveId);
+        if (persp) {
+          areaId = persp.areaId;
+          extraTagIds = persp.categoryIds;
+          initialEffortLevel = persp.effortLevel;
+          if (
+            persp.dueWindow === 'TODAY' ||
+            persp.dueWindow === 'OVERDUE' ||
+            persp.dueWindow === 'NEXT_7_DAYS'
+          ) {
+            scheduleState = 'TODAY';
+            whenDate = todayEpoch;
+          } else {
+            scheduleState = 'ANYTIME';
+          }
+        }
       }
 
       // Compute top-of-list sortOrder (index 0) within the target container
@@ -1478,6 +1677,13 @@ export const App: React.FC = () => {
         firstSortOrder != null && Number.isFinite(firstSortOrder) ? firstSortOrder : null
       );
 
+      const mergedTags = Array.from(
+        new Set([
+          ...extraTagIds,
+          ...(!isLogbookRedirect && selectedFilterTagId ? [selectedFilterTagId] : [])
+        ])
+      );
+
       const created = await localDb.upsertTask({
         title: '',
         scheduleState,
@@ -1485,7 +1691,8 @@ export const App: React.FC = () => {
         projectId,
         headingId,
         areaId,
-        tagIds: !isLogbookRedirect && selectedFilterTagId ? [selectedFilterTagId] : [],
+        tagIds: mergedTags,
+        effortLevel: initialEffortLevel,
         sortOrder: topSortOrder
       });
 
@@ -1504,7 +1711,8 @@ export const App: React.FC = () => {
       inboxTasks,
       todayDaytimeTasks,
       upcomingTasks,
-      selectedFilterTagId
+      selectedFilterTagId,
+      savedPerspectives
     ]
   );
 
@@ -1556,6 +1764,8 @@ export const App: React.FC = () => {
       let projectId: string | null = null;
       let headingId: string | null = null;
       let areaId: string | null = null;
+      let extraTagIds: string[] = [];
+      let initialEffortLevel: EffortLevel | null = null;
 
       if (activeNav.kind === 'smart') {
         if (activeNav.view === 'TODAY') {
@@ -1596,6 +1806,23 @@ export const App: React.FC = () => {
             return next;
           });
         }
+      } else if (activeNav.kind === 'perspective') {
+        const persp = savedPerspectives.find((p) => p.id === activeNav.perspectiveId);
+        if (persp) {
+          areaId = persp.areaId;
+          extraTagIds = persp.categoryIds;
+          initialEffortLevel = persp.effortLevel;
+          if (
+            persp.dueWindow === 'TODAY' ||
+            persp.dueWindow === 'OVERDUE' ||
+            persp.dueWindow === 'NEXT_7_DAYS'
+          ) {
+            scheduleState = 'TODAY';
+            whenDate = todayEpoch;
+          } else {
+            scheduleState = 'ANYTIME';
+          }
+        }
       }
 
       const sortOrder = computeMidpointSortOrder(
@@ -1610,14 +1837,17 @@ export const App: React.FC = () => {
         projectId,
         headingId,
         areaId,
-        tagIds: selectedFilterTagId ? [selectedFilterTagId] : [],
+        tagIds: Array.from(
+          new Set([...extraTagIds, ...(selectedFilterTagId ? [selectedFilterTagId] : [])])
+        ),
+        effortLevel: initialEffortLevel,
         sortOrder
       });
 
       setSelectedTaskIds([]);
       setExpandedTaskId(created.id);
     },
-    [activeNav, upcomingTasks, selectedFilterTagId]
+    [activeNav, upcomingTasks, selectedFilterTagId, savedPerspectives]
   );
 
   // Global Keyboard Shortcuts + Ordered Escape Stack (Android v1.7.0 MainActivity + ThingsSmartViewScreen parity)
@@ -1640,6 +1870,11 @@ export const App: React.FC = () => {
         if (pendingDeleteProject) return setPendingDeleteProject(null);
         if (emptyTrashConfirmOpen) return setEmptyTrashConfirmOpen(false);
         if (appLockSetupOpen) return setAppLockSetupOpen(false);
+        if (perspectiveModalState.open) {
+          return setPerspectiveModalState({ open: false, perspective: null });
+        }
+        if (dependencyModalTaskId) return setDependencyModalTaskId(null);
+        if (batchTagPickerOpen) return setBatchTagPickerOpen(false);
         if (whenModalTaskId) return setWhenModalTaskId(null);
         if (deadlineModalTarget) return setDeadlineModalTarget(null);
         if (repeatModalTaskId) return setRepeatModalTaskId(null);
@@ -1656,6 +1891,7 @@ export const App: React.FC = () => {
         if (magicFabOpen) return setMagicFabOpen(false);
         if (langDropdownOpen) return setLangDropdownOpen(false);
         if (projectAreaDropdownOpen) return setProjectAreaDropdownOpen(false);
+        if (viewSortDropdownOpen) return setViewSortDropdownOpen(false);
         if (quickFindOpen) return setQuickFindOpen(false);
         if (expandedTaskId) return setExpandedTaskId(null);
         if (selectedTaskIds.length > 0) return setSelectedTaskIds([]);
@@ -1717,11 +1953,16 @@ export const App: React.FC = () => {
           void localDb.performUndo();
           return;
         }
-        // Ctrl+D -> Duplicate expanded To-Do or active Project
+        // Ctrl+D -> Duplicate expanded To-Do, selected To-Dos, or active Project
         if (lower === 'd' && !e.shiftKey) {
           if (expandedTaskId) {
             e.preventDefault();
             void handleDuplicateTask(expandedTaskId);
+            return;
+          }
+          if (!inInput && selectedTaskIds.length > 0) {
+            e.preventDefault();
+            void handleBatchDuplicateSelected();
             return;
           }
           if (!inInput && activeNav.kind === 'project') {
@@ -1773,10 +2014,9 @@ export const App: React.FC = () => {
           !projectModalState.open &&
           !moveModalTaskIds
         ) {
-          const allIds = filterByTag(currentViewBaseTasks).map((x) => x.id);
-          if (allIds.length > 0) {
+          if (orderedVisibleTaskIds.length > 0) {
             e.preventDefault();
-            setSelectedTaskIds(allIds);
+            setSelectedTaskIds(orderedVisibleTaskIds);
           }
           return;
         }
@@ -1831,6 +2071,9 @@ export const App: React.FC = () => {
     pendingDeleteProject,
     emptyTrashConfirmOpen,
     appLockSetupOpen,
+    perspectiveModalState.open,
+    dependencyModalTaskId,
+    batchTagPickerOpen,
     whenModalTaskId,
     deadlineModalTarget,
     repeatModalTaskId,
@@ -1847,6 +2090,7 @@ export const App: React.FC = () => {
     magicFabOpen,
     langDropdownOpen,
     projectAreaDropdownOpen,
+    viewSortDropdownOpen,
     quickFindOpen,
     expandedTaskId,
     selectedTaskIds,
@@ -1855,10 +2099,10 @@ export const App: React.FC = () => {
     handleSelectNav,
     createNewTodoInCurrentContext,
     handleDuplicateTask,
+    handleBatchDuplicateSelected,
     handleDuplicateProject,
     defaultAreaIdForNewProject,
-    filterByTag,
-    currentViewBaseTasks,
+    orderedVisibleTaskIds,
     snapshot.tags,
     snapshot.tasks
   ]);
@@ -1963,7 +2207,11 @@ export const App: React.FC = () => {
       isSelected={selectedTaskIds.includes(tk.id)}
       isMultiSelectMode={selectedTaskIds.length > 0}
       showContextSubtitle={showContextSubtitle}
-      showScheduleBadgeInCollapsed={activeNav.kind === 'project' || activeNav.kind === 'area'}
+      showScheduleBadgeInCollapsed={
+        activeNav.kind === 'project' ||
+        activeNav.kind === 'area' ||
+        activeNav.kind === 'perspective'
+      }
       quickFindOpen={quickFindOpen}
       currentDayMarker={endOfToday}
       areasMap={areasMap}
@@ -1971,6 +2219,8 @@ export const App: React.FC = () => {
       tagsMap={tagsMap}
       checklistItems={snapshot.checklistItems}
       attachments={snapshot.attachments}
+      openTaskIdSet={openTaskIdSet}
+      tasksByIdMap={tasksByIdMap}
       lang={lang}
       geminiApiKey={prefs.geminiApiKey}
       t={t}
@@ -1995,6 +2245,7 @@ export const App: React.FC = () => {
       onOpenRepeatModal={(taskId) => setRepeatModalTaskId(taskId)}
       onOpenMoveModal={(taskId) => setMoveModalTaskIds([taskId])}
       onOpenTagsModal={(taskId) => setTagPickerTaskId(taskId)}
+      onOpenDependenciesModal={(taskId) => setDependencyModalTaskId(taskId)}
       onStartFocusTimer={handleStartFocusTimer}
       onDuplicateTask={(taskId) => void handleDuplicateTask(taskId)}
       onDropReorder={(draggedId, targetId) =>
@@ -2002,6 +2253,70 @@ export const App: React.FC = () => {
       }
       onToast={showToast}
     />
+  );
+
+  const viewSortModeLabel = (mode: ViewSortMode): string => {
+    switch (mode) {
+      case 'deadline':
+        return t.viewSortDeadline;
+      case 'duration':
+        return t.viewSortDuration;
+      case 'effort':
+        return t.viewSortEffort;
+      case 'alpha':
+        return t.viewSortAlpha;
+      default:
+        return t.viewSortManual;
+    }
+  };
+
+  const renderViewSortDropdown = () => (
+    <div className="dropdown-anchor" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        className={`view-sort-pill ${viewSortMode !== 'manual' ? 'active' : ''}`}
+        data-testid="view-sort-dropdown-btn"
+        title={`${t.viewSortLabel}: ${viewSortModeLabel(viewSortMode)}`}
+        onClick={() => setViewSortDropdownOpen((v) => !v)}
+      >
+        <ArrowUpDown size={13} />
+        <span>{viewSortModeLabel(viewSortMode)}</span>
+      </button>
+
+      {viewSortDropdownOpen && (
+        <>
+          <div
+            style={{ position: 'fixed', inset: 0, zIndex: 70 }}
+            onClick={() => setViewSortDropdownOpen(false)}
+          />
+          <div className="dropdown-popover" data-testid="view-sort-dropdown-menu">
+            {(
+              [
+                ['manual', t.viewSortManual],
+                ['deadline', t.viewSortDeadline],
+                ['duration', t.viewSortDuration],
+                ['effort', t.viewSortEffort],
+                ['alpha', t.viewSortAlpha]
+              ] as Array<[ViewSortMode, string]>
+            ).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                className="dropdown-item"
+                data-testid={`view-sort-option-${mode}`}
+                onClick={() => {
+                  updatePrefs({ viewSortMode: mode });
+                  setViewSortDropdownOpen(false);
+                }}
+              >
+                <span>{label}</span>
+                {viewSortMode === mode && <Check size={14} />}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   );
 
   // Determine current view title for MagicPlusFab subtitle
@@ -2027,8 +2342,14 @@ export const App: React.FC = () => {
     if (activeNav.kind === 'area') {
       return areasMap.get(activeNav.areaId)?.title || t.entityArea;
     }
+    if (activeNav.kind === 'perspective') {
+      return (
+        savedPerspectives.find((p) => p.id === activeNav.perspectiveId)?.title ||
+        t.perspectivesSectionTitle
+      );
+    }
     return allNonDeletedProjectsMap.get(activeNav.projectId)?.title || t.entityProject;
-  }, [activeNav, areasMap, allNonDeletedProjectsMap, t]);
+  }, [activeNav, areasMap, allNonDeletedProjectsMap, savedPerspectives, t]);
 
   // Format Upcoming Day Group Header ("d. MMM" in de else "MMM d" + "Today • EEEE" / "Tomorrow • EEEE" / "EEEE")
   const formatUpcomingHeader = (dayEpoch: number) => {
@@ -2137,10 +2458,13 @@ export const App: React.FC = () => {
           !deadlineModalTarget &&
           !repeatModalTaskId &&
           !moveModalTaskIds &&
-          !tagPickerTaskId
+          !tagPickerTaskId &&
+          !batchTagPickerOpen &&
+          !dependencyModalTaskId &&
+          !perspectiveModalState.open
         ) {
           setExpandedTaskId(null);
-        } else if (selectedTaskIds.length > 0 && !expandedTaskId) {
+        } else if (selectedTaskIds.length > 0 && !expandedTaskId && !batchTagPickerOpen) {
           setSelectedTaskIds([]);
         }
       }}
@@ -2153,6 +2477,8 @@ export const App: React.FC = () => {
         projects={snapshot.projects}
         tasks={snapshot.tasks}
         counts={sidebarCounts}
+        savedPerspectives={savedPerspectives}
+        perspectiveCounts={perspectiveCounts}
         stalledProjectsCount={stalledProjects.length}
         canInstallPwa={Boolean(deferredInstallPrompt)}
         isStandalonePwa={isStandalonePwa}
@@ -2167,6 +2493,12 @@ export const App: React.FC = () => {
         }
         onOpenWeeklyReview={() => setWeeklyReviewModal({ open: true, step: 1 })}
         onOpenManageAreas={() => setAreaManagerOpen(true)}
+        onCreatePerspective={() =>
+          setPerspectiveModalState({ open: true, perspective: null })
+        }
+        onEditPerspective={(persp) =>
+          setPerspectiveModalState({ open: true, perspective: persp })
+        }
         onDropTaskOnTarget={(taskId, target) => void handleDropTaskOnSidebarTarget(taskId, target)}
         onTriggerInstallPwa={() => void handleTriggerInstallPwa()}
       />
@@ -2566,7 +2898,7 @@ export const App: React.FC = () => {
               <>
                 <div className="view-header" onClick={(e) => e.stopPropagation()}>
                   <div className="view-title-row">
-                    <div className="view-title-left">
+                    <div className="view-title-left" style={{ flexWrap: 'wrap' }}>
                       {activeNav.view === 'INBOX' && (
                         <Inbox size={26} style={{ color: 'var(--things-blue)' }} />
                       )}
@@ -2589,46 +2921,71 @@ export const App: React.FC = () => {
                         <Trash2 size={26} style={{ color: 'var(--things-blue)' }} />
                       )}
                       <h1 className="view-title">{currentViewTitle}</h1>
+
+                      {activeNav.view === 'TODAY' && todayCapacity.plannedMinutes > 0 && (
+                        <span
+                          className="today-capacity-pill"
+                          data-testid="today-capacity-pill"
+                        >
+                          {t.todayCapacitySummary(
+                            formatStandaloneDuration(todayCapacity.plannedMinutes),
+                            formatStandaloneDuration(todayCapacity.freeMinutes)
+                          )}
+                        </span>
+                      )}
                     </div>
 
-                    {activeNav.view === 'TODAY' && (
-                      <div className="v2-segmented-toggle" data-testid="today-mode-toggle">
-                        <button
-                          type="button"
-                          className={`v2-segmented-btn ${todayViewMode === 'list' ? 'active' : ''}`}
-                          data-testid="today-mode-list-btn"
-                          title={t.todayModeList}
-                          onClick={() => setTodayViewMode('list')}
-                        >
-                          <List size={13.5} />
-                          <span>{t.todayModeList}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={`v2-segmented-btn ${todayViewMode === 'timeline' ? 'active' : ''}`}
-                          data-testid="today-mode-timeline-btn"
-                          title={t.todayModeTimeline}
-                          onClick={() => setTodayViewMode('timeline')}
-                        >
-                          <CalendarDays size={13.5} />
-                          <span>{t.todayModeTimeline}</span>
-                        </button>
-                      </div>
-                    )}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        flexWrap: 'wrap'
+                      }}
+                    >
+                      {activeNav.view !== 'LOGBOOK' &&
+                        activeNav.view !== 'TRASH' &&
+                        renderViewSortDropdown()}
 
-                    {activeNav.view === 'TRASH' &&
-                      deletedProjects.length + deletedTasks.length > 0 && (
-                        <button
-                          type="button"
-                          className="chip-btn urgent"
-                          data-testid="empty-trash-btn"
-                          title={t.trashEmptyBtn}
-                          onClick={() => setEmptyTrashConfirmOpen(true)}
-                        >
-                          <Trash2 size={13} />
-                          <span>{t.trashEmptyBtn}</span>
-                        </button>
+                      {activeNav.view === 'TODAY' && (
+                        <div className="v2-segmented-toggle" data-testid="today-mode-toggle">
+                          <button
+                            type="button"
+                            className={`v2-segmented-btn ${todayViewMode === 'list' ? 'active' : ''}`}
+                            data-testid="today-mode-list-btn"
+                            title={t.todayModeList}
+                            onClick={() => setTodayViewMode('list')}
+                          >
+                            <List size={13.5} />
+                            <span>{t.todayModeList}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`v2-segmented-btn ${todayViewMode === 'timeline' ? 'active' : ''}`}
+                            data-testid="today-mode-timeline-btn"
+                            title={t.todayModeTimeline}
+                            onClick={() => setTodayViewMode('timeline')}
+                          >
+                            <CalendarDays size={13.5} />
+                            <span>{t.todayModeTimeline}</span>
+                          </button>
+                        </div>
                       )}
+
+                      {activeNav.view === 'TRASH' &&
+                        deletedProjects.length + deletedTasks.length > 0 && (
+                          <button
+                            type="button"
+                            className="chip-btn urgent"
+                            data-testid="empty-trash-btn"
+                            title={t.trashEmptyBtn}
+                            onClick={() => setEmptyTrashConfirmOpen(true)}
+                          >
+                            <Trash2 size={13} />
+                            <span>{t.trashEmptyBtn}</span>
+                          </button>
+                        )}
+                    </div>
                   </div>
                 </div>
 
@@ -2762,8 +3119,8 @@ export const App: React.FC = () => {
 
                 {/* TODAY View (Daytime + Optional Project/Area Grouping + 🌙 This Evening | 🗓️ Timeline) */}
                 {activeNav.view === 'TODAY' && (() => {
-                  const dayFiltered = filterByTag(todayDaytimeTasks);
-                  const eveFiltered = filterByTag(todayEveningTasks);
+                  const dayFiltered = sortViewList(filterByTag(todayDaytimeTasks));
+                  const eveFiltered = sortViewList(filterByTag(todayEveningTasks));
 
                   if (todayViewMode === 'timeline') {
                     return (
@@ -2917,6 +3274,7 @@ export const App: React.FC = () => {
                       <div className="empty-state">{t.emptyView}</div>
                     ) : (
                       upcomingGroups.map(({ dayEpoch, tasks: groupTasks, phases: groupPhases }) => {
+                        const sortedGroupTasks = sortViewList(groupTasks);
                         const hdr = formatUpcomingHeader(dayEpoch);
                         const targetEpochDay = localEpochDayFromMs(dayEpoch);
                         const todayEpochDay = localEpochDayFromMs(endOfToday);
@@ -2939,7 +3297,7 @@ export const App: React.FC = () => {
                               <span className="upcoming-day-num">{hdr.numPart}</span>
                               <span className="upcoming-day-sub">{hdr.subPart}</span>
                             </div>
-                            {(groupTasks.length > 0 || groupPhases.length > 0) &&
+                            {(sortedGroupTasks.length > 0 || groupPhases.length > 0) &&
                               dayEvents.length > 0 && (
                                 <CalendarEventsBlock events={dayEvents} t={t} compactTop />
                               )}
@@ -2977,9 +3335,11 @@ export const App: React.FC = () => {
                                 />
                               </button>
                             ))}
-                            {groupTasks.length > 0 && (
+                            {sortedGroupTasks.length > 0 && (
                               <div className="task-list">
-                                {groupTasks.map((tk) => renderTaskRow(tk, groupTasks, true))}
+                                {sortedGroupTasks.map((tk) =>
+                                  renderTaskRow(tk, sortedGroupTasks, true)
+                                )}
                               </div>
                             )}
                           </div>
@@ -3006,7 +3366,11 @@ export const App: React.FC = () => {
                 {activeNav.view !== 'TODAY' &&
                   activeNav.view !== 'UPCOMING' &&
                   activeNav.view !== 'TRASH' && (() => {
-                    const list = filterByTag(currentViewBaseTasks);
+                    const rawFiltered = filterByTag(currentViewBaseTasks);
+                    const list =
+                      activeNav.view === 'LOGBOOK'
+                        ? rawFiltered
+                        : sortViewList(rawFiltered);
                     if (list.length === 0) {
                       return (
                         <div className="empty-state">
@@ -3033,7 +3397,7 @@ export const App: React.FC = () => {
               }
               const areaIdx = activeAreas.findIndex((a) => a.id === area.id);
               const areaProjects = activeProjects.filter((p) => p.areaId === area.id);
-              const areaDirectTasks = filterByTag(currentViewBaseTasks);
+              const areaDirectTasks = sortViewList(filterByTag(currentViewBaseTasks));
 
               return (
                 <>
@@ -3077,6 +3441,7 @@ export const App: React.FC = () => {
                       </div>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {renderViewSortDropdown()}
                         <button
                           type="button"
                           className="icon-btn"
@@ -3318,8 +3683,10 @@ export const App: React.FC = () => {
               const validHeadingIdSet = new Set(projHeadings.map((h) => h.id));
 
               const visibleOpenProjTasks = filterByTag(currentViewBaseTasks);
-              const ungroupedTasks = visibleOpenProjTasks.filter(
-                (tk) => !tk.headingId || !validHeadingIdSet.has(tk.headingId)
+              const ungroupedTasks = sortViewList(
+                visibleOpenProjTasks.filter(
+                  (tk) => !tk.headingId || !validHeadingIdSet.has(tk.headingId)
+                )
               );
 
               const dlDiff =
@@ -3331,7 +3698,7 @@ export const App: React.FC = () => {
                 <>
                   {/* Project Header */}
                   <div className="view-header" onClick={(e) => e.stopPropagation()}>
-                    {/* Row 1: ProgressRing(26) + Title + Attention/Review Badge + Up/Down + Edit + Complete + Delete */}
+                    {/* Row 1: ProgressRing(26) + Title + Attention/Review Badge + Sort + Up/Down + Edit + Complete + Delete */}
                     <div className="view-title-row">
                       <div className="view-title-left" style={{ flexWrap: 'wrap' }}>
                         <ProjectProgressRing
@@ -3363,6 +3730,7 @@ export const App: React.FC = () => {
                       </div>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {renderViewSortDropdown()}
                         <button
                           type="button"
                           className="icon-btn"
@@ -3622,8 +3990,8 @@ export const App: React.FC = () => {
 
                   {/* Collapsible Project Phases with Progress, End Date Capsule & Drop Target */}
                   {projHeadings.map((hd) => {
-                    const hdTasks = visibleOpenProjTasks.filter(
-                      (tk) => tk.headingId === hd.id
+                    const hdTasks = sortViewList(
+                      visibleOpenProjTasks.filter((tk) => tk.headingId === hd.id)
                     );
                     const allHdTasks = allProjTasks.filter((tk) => tk.headingId === hd.id);
                     const doneHdTasks = allHdTasks.filter(
@@ -3871,12 +4239,172 @@ export const App: React.FC = () => {
                 </>
               );
             })()}
+
+            {/* ==================== CUSTOM PERSPECTIVE VIEW ==================== */}
+            {activeNav.kind === 'perspective' && (() => {
+              const persp = savedPerspectives.find(
+                (p) => p.id === activeNav.perspectiveId
+              );
+              if (!persp) {
+                return <div className="empty-state">{t.emptyView}</div>;
+              }
+              const perspTasks = sortViewList(filterByTag(currentViewBaseTasks));
+              const perspArea = persp.areaId ? areasMap.get(persp.areaId) : undefined;
+              const perspCategories = persp.categoryIds
+                .map((cid) => tagsMap.get(cid))
+                .filter((tg): tg is TagRecord => tg != null);
+
+              return (
+                <>
+                  <div className="view-header" onClick={(e) => e.stopPropagation()}>
+                    <div className="view-title-row">
+                      <div className="view-title-left" style={{ flexWrap: 'wrap' }}>
+                        <SlidersHorizontal
+                          size={25}
+                          style={{ color: 'var(--things-blue)', flexShrink: 0 }}
+                        />
+                        <h1 className="view-title">{persp.title}</h1>
+                        <span className="today-capacity-pill">
+                          {perspTasks.length} {t.entityTodos}
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {renderViewSortDropdown()}
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          data-testid="perspective-edit-header-btn"
+                          title={t.perspectiveEditTitle}
+                          onClick={() =>
+                            setPerspectiveModalState({ open: true, perspective: persp })
+                          }
+                        >
+                          <Edit3 size={15.5} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          data-testid="perspective-delete-header-btn"
+                          style={{ color: 'var(--deadline-red)' }}
+                          title={t.actionDelete}
+                          onClick={() => {
+                            const nextList = savedPerspectives.filter(
+                              (p) => p.id !== persp.id
+                            );
+                            updatePrefs({ savedPerspectives: nextList });
+                            handleSelectNav({ kind: 'smart', view: 'TODAY' });
+                            showToast(`✓ ${t.actionDelete}`);
+                          }}
+                        >
+                          <Trash2 size={15.5} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Active Perspective Filter Summary Chips */}
+                    <div className="project-action-pills" style={{ marginTop: 8 }}>
+                      {perspArea && (
+                        <span className="meta-badge">
+                          <Folder size={11} />
+                          <span>{perspArea.title}</span>
+                        </span>
+                      )}
+                      {persp.dueWindow !== 'ANY' && (
+                        <span className="meta-badge">
+                          <CalendarDays size={11} />
+                          <span>
+                            {persp.dueWindow === 'TODAY'
+                              ? t.perspectiveDueToday
+                              : persp.dueWindow === 'NEXT_7_DAYS'
+                                ? t.perspectiveDueNext7Days
+                                : t.perspectiveDueOverdue}
+                          </span>
+                        </span>
+                      )}
+                      {persp.effortLevel && (
+                        <span className="meta-badge">
+                          <span>
+                            {persp.effortLevel === 'QUICK_WIN'
+                              ? `⚡ ${t.effortQuickWin}`
+                              : persp.effortLevel === 'MEDIUM'
+                                ? t.effortMedium
+                                : `🧠 ${t.effortDeepFocus}`}
+                          </span>
+                        </span>
+                      )}
+                      {persp.maxDurationMinutes != null && (
+                        <span className="meta-badge">
+                          <span>
+                            ≤ {formatStandaloneDuration(persp.maxDurationMinutes)}
+                          </span>
+                        </span>
+                      )}
+                      {perspCategories.map((tg) => (
+                        <span key={tg.id} className="meta-badge">
+                          <LayoutGrid size={10.5} />
+                          <span>{tg.title}</span>
+                        </span>
+                      ))}
+                      {persp.actionableOnly && (
+                        <span className="meta-badge">
+                          <span>✓ {t.perspectiveActionableOnlyLabel}</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* View Tag Strip */}
+                  {usedTagsInCurrentView.length > 0 && (
+                    <div className="tag-filter-bar" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        className={`tag-pill ${selectedFilterTagId === null ? 'active' : ''}`}
+                        title={t.tagsFilterAll}
+                        onClick={() => setSelectedFilterTagId(null)}
+                      >
+                        {t.tagsFilterAll}
+                      </button>
+                      {usedTagsInCurrentView.map((tg) => (
+                        <button
+                          key={tg.id}
+                          type="button"
+                          className={`tag-pill ${selectedFilterTagId === tg.id ? 'active' : ''}`}
+                          title={`${t.entityTag}: ${tg.title}`}
+                          onClick={() =>
+                            setSelectedFilterTagId((cur) => (cur === tg.id ? null : tg.id))
+                          }
+                        >
+                          <LayoutGrid size={11} />
+                          <span>{tg.title}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="group-section">
+                    {perspTasks.length === 0 ? (
+                      <div className="empty-state" data-testid="perspective-empty-state">
+                        {t.perspectiveEmptyHint}
+                      </div>
+                    ) : (
+                      <div className="task-list">
+                        {perspTasks.map((tk) => renderTaskRow(tk, perspTasks, true))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
 
         {/* Floating Multi-Selection Bar (ThingsMultiSelectionBar) */}
         {selectedTaskIds.length > 0 && !expandedTaskId && (() => {
-          const allVisibleIds = filterByTag(currentViewBaseTasks).map((x) => x.id);
+          const allVisibleIds = orderedVisibleTaskIds;
+          const allSelectedPinned =
+            selectedTaskIds.length > 0 &&
+            selectedTaskIds.every((id) => Boolean(tasksByIdMap.get(id)?.isPinned));
           return (
             <div className="multi-select-bar" onClick={(e) => e.stopPropagation()}>
               <span className="multi-count-pill">
@@ -3924,6 +4452,60 @@ export const App: React.FC = () => {
               >
                 <CalendarDays size={12} />
                 <span>{t.dateTomorrow}</span>
+              </button>
+
+              <button
+                type="button"
+                className="chip-btn"
+                data-testid="multi-select-someday-btn"
+                title={t.batchSomeday}
+                onClick={async () => {
+                  await localDb.batchUpdateTasks(selectedTaskIds, {
+                    scheduleState: 'SOMEDAY',
+                    whenDate: null
+                  });
+                  setSelectedTaskIds([]);
+                }}
+              >
+                <Cloud size={12} />
+                <span>{t.batchSomeday}</span>
+              </button>
+
+              <button
+                type="button"
+                className="chip-btn"
+                data-testid="multi-select-categories-btn"
+                title={t.batchTags}
+                onClick={() => setBatchTagPickerOpen(true)}
+              >
+                <LayoutGrid size={12} />
+                <span>{t.batchTags}</span>
+              </button>
+
+              <button
+                type="button"
+                className={`chip-btn ${allSelectedPinned ? 'active' : ''}`}
+                data-testid="multi-select-pin-btn"
+                title={allSelectedPinned ? t.unpinTask : t.batchPin}
+                onClick={() => {
+                  void localDb.batchUpdateTasks(selectedTaskIds, {
+                    isPinned: !allSelectedPinned
+                  });
+                }}
+              >
+                {allSelectedPinned ? <PinOff size={12} /> : <Pin size={12} />}
+                <span>{allSelectedPinned ? t.unpinTask : t.batchPin}</span>
+              </button>
+
+              <button
+                type="button"
+                className="chip-btn"
+                data-testid="multi-select-duplicate-btn"
+                title={`${t.batchDuplicate} (Ctrl+D)`}
+                onClick={() => void handleBatchDuplicateSelected()}
+              >
+                <Copy size={12} />
+                <span>{t.batchDuplicate}</span>
               </button>
 
               <button
@@ -4115,6 +4697,8 @@ export const App: React.FC = () => {
           <TaskTagPickerModal
             selectedTagIds={liveTask.tagIds}
             tags={snapshot.tags}
+            usageCounts={tagUsageCounts}
+            tagSortMode={tagSortMode}
             t={t}
             onToggleTag={(tagId) => {
               const next = liveTask.tagIds.includes(tagId)
@@ -4130,6 +4714,109 @@ export const App: React.FC = () => {
           />
         );
       })()}
+
+      {batchTagPickerOpen && selectedTaskIds.length > 0 && (() => {
+        const selectedRecords = selectedTaskIds
+          .map((id) => tasksByIdMap.get(id))
+          .filter((tk): tk is TaskRecord => tk != null);
+        if (selectedRecords.length === 0) return null;
+
+        const countsByTag = new Map<string, number>();
+        for (const tk of selectedRecords) {
+          for (const tid of tk.tagIds) {
+            countsByTag.set(tid, (countsByTag.get(tid) ?? 0) + 1);
+          }
+        }
+        const commonTagIds: string[] = [];
+        const indeterminateTagIds: string[] = [];
+        for (const [tid, count] of countsByTag.entries()) {
+          if (count === selectedRecords.length) {
+            commonTagIds.push(tid);
+          } else if (count > 0) {
+            indeterminateTagIds.push(tid);
+          }
+        }
+
+        return (
+          <TaskTagPickerModal
+            selectedTagIds={commonTagIds}
+            indeterminateTagIds={indeterminateTagIds}
+            tags={snapshot.tags}
+            usageCounts={tagUsageCounts}
+            tagSortMode={tagSortMode}
+            t={t}
+            onToggleTag={(tagId) => {
+              if (commonTagIds.includes(tagId)) {
+                void localDb.batchUpdateTasks(selectedTaskIds, {
+                  removeTagIds: [tagId]
+                });
+              } else {
+                void localDb.batchUpdateTasks(selectedTaskIds, {
+                  addTagIds: [tagId]
+                });
+              }
+            }}
+            onOpenManageTags={() => setTagManagerOpen(true)}
+            onClose={() => setBatchTagPickerOpen(false)}
+          />
+        );
+      })()}
+
+      {dependencyModalTaskId && (() => {
+        const liveDepTask = snapshot.tasks.find(
+          (x) => x.id === dependencyModalTaskId && !x.isDeleted
+        );
+        if (!liveDepTask) return null;
+        return (
+          <TaskDependencyModal
+            task={liveDepTask}
+            allTasks={snapshot.tasks}
+            projectsMap={allNonDeletedProjectsMap}
+            t={t}
+            onToast={showToast}
+            onClose={() => setDependencyModalTaskId(null)}
+          />
+        );
+      })()}
+
+      {perspectiveModalState.open && (
+        <PerspectiveModal
+          perspective={perspectiveModalState.perspective}
+          nextSortOrder={
+            savedPerspectives.reduce((m, p) => Math.max(m, p.sortOrder), 0) + 1000
+          }
+          tags={snapshot.tags}
+          areas={snapshot.areas}
+          t={t}
+          onSave={(saved) => {
+            const exists = savedPerspectives.some((p) => p.id === saved.id);
+            const nextList = exists
+              ? savedPerspectives.map((p) => (p.id === saved.id ? saved : p))
+              : [...savedPerspectives, saved];
+            updatePrefs({ savedPerspectives: nextList });
+            setPerspectiveModalState({ open: false, perspective: null });
+            handleSelectNav({ kind: 'perspective', perspectiveId: saved.id });
+            showToast(`✓ ${saved.title}`);
+          }}
+          onDelete={
+            perspectiveModalState.perspective
+              ? (perspId) => {
+                  const nextList = savedPerspectives.filter((p) => p.id !== perspId);
+                  updatePrefs({ savedPerspectives: nextList });
+                  setPerspectiveModalState({ open: false, perspective: null });
+                  if (
+                    activeNav.kind === 'perspective' &&
+                    activeNav.perspectiveId === perspId
+                  ) {
+                    handleSelectNav({ kind: 'smart', view: 'TODAY' });
+                  }
+                  showToast(`✓ ${t.actionDelete}`);
+                }
+              : undefined
+          }
+          onClose={() => setPerspectiveModalState({ open: false, perspective: null })}
+        />
+      )}
 
       {areaManagerOpen && (
         <AreaManagerModal
@@ -4231,7 +4918,11 @@ export const App: React.FC = () => {
       {tagManagerOpen && (
         <TagManagerModal
           tags={snapshot.tags}
+          usageCounts={tagUsageCounts}
+          tagSortMode={tagSortMode}
           t={t}
+          onChangeTagSortMode={(mode) => updatePrefs({ tagSortMode: mode })}
+          onToast={showToast}
           onClose={() => setTagManagerOpen(false)}
         />
       )}

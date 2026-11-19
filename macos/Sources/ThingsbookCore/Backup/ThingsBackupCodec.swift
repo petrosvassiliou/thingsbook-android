@@ -128,6 +128,8 @@ public struct BackupProjectDto: Codable, Equatable, Sendable {
     public var lastReviewedAt: Int64?
     public var sortOrder: Double
     public var tagIdsJson: String
+    public var workspaceId: String?
+    public var viewMode: String?
     public var createdAt: Int64
     public var updatedAt: Int64
 
@@ -144,6 +146,8 @@ public struct BackupProjectDto: Codable, Equatable, Sendable {
         lastReviewedAt: Int64? = nil,
         sortOrder: Double = 0,
         tagIdsJson: String = "[]",
+        workspaceId: String? = nil,
+        viewMode: String? = nil,
         createdAt: Int64 = 0,
         updatedAt: Int64 = 0
     ) {
@@ -159,6 +163,8 @@ public struct BackupProjectDto: Codable, Equatable, Sendable {
         self.lastReviewedAt = lastReviewedAt
         self.sortOrder = sortOrder
         self.tagIdsJson = tagIdsJson
+        self.workspaceId = workspaceId
+        self.viewMode = viewMode
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -177,6 +183,8 @@ public struct BackupProjectDto: Codable, Equatable, Sendable {
         self.lastReviewedAt = try? c.decodeIfPresent(Int64.self, forKey: .lastReviewedAt)
         self.sortOrder = (try? c.decode(Double.self, forKey: .sortOrder)) ?? 0
         self.tagIdsJson = (try? c.decode(String.self, forKey: .tagIdsJson)) ?? "[]"
+        self.workspaceId = try? c.decodeIfPresent(String.self, forKey: .workspaceId)
+        self.viewMode = try? c.decodeIfPresent(String.self, forKey: .viewMode)
         self.createdAt = (try? c.decode(Int64.self, forKey: .createdAt)) ?? 0
         self.updatedAt = (try? c.decode(Int64.self, forKey: .updatedAt)) ?? 0
     }
@@ -188,6 +196,7 @@ public struct BackupHeadingDto: Codable, Equatable, Sendable {
     public var title: String
     public var sortOrder: Double
     public var isArchived: Bool
+    public var startDate: Int64?
     public var endDate: Int64?
     public var createdAt: Int64
     public var updatedAt: Int64
@@ -198,6 +207,7 @@ public struct BackupHeadingDto: Codable, Equatable, Sendable {
         title: String,
         sortOrder: Double = 0,
         isArchived: Bool = false,
+        startDate: Int64? = nil,
         endDate: Int64? = nil,
         createdAt: Int64 = 0,
         updatedAt: Int64 = 0
@@ -207,6 +217,7 @@ public struct BackupHeadingDto: Codable, Equatable, Sendable {
         self.title = title
         self.sortOrder = sortOrder
         self.isArchived = isArchived
+        self.startDate = startDate
         self.endDate = endDate
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -219,6 +230,7 @@ public struct BackupHeadingDto: Codable, Equatable, Sendable {
         self.title = (try? c.decode(String.self, forKey: .title)) ?? ""
         self.sortOrder = (try? c.decode(Double.self, forKey: .sortOrder)) ?? 0
         self.isArchived = (try? c.decode(Bool.self, forKey: .isArchived)) ?? false
+        self.startDate = try? c.decodeIfPresent(Int64.self, forKey: .startDate)
         self.endDate = try? c.decodeIfPresent(Int64.self, forKey: .endDate)
         self.createdAt = (try? c.decode(Int64.self, forKey: .createdAt)) ?? 0
         self.updatedAt = (try? c.decode(Int64.self, forKey: .updatedAt)) ?? 0
@@ -242,6 +254,11 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
     public var areaId: String?
     public var recurrenceRuleJson: String?
     public var sortOrder: Double
+    public var isPinned: Bool
+    public var effortLevel: String?
+    public var blockedByJson: String
+    public var workspaceId: String?
+    public var assigneeId: String?
     public var tagIdsJson: String
     public var createdAt: Int64
     public var updatedAt: Int64
@@ -263,6 +280,11 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
         areaId: String? = nil,
         recurrenceRuleJson: String? = nil,
         sortOrder: Double = 0,
+        isPinned: Bool = false,
+        effortLevel: String? = nil,
+        blockedByJson: String = "[]",
+        workspaceId: String? = nil,
+        assigneeId: String? = nil,
         tagIdsJson: String = "[]",
         createdAt: Int64 = 0,
         updatedAt: Int64 = 0
@@ -283,9 +305,21 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
         self.areaId = areaId
         self.recurrenceRuleJson = recurrenceRuleJson
         self.sortOrder = sortOrder
+        self.isPinned = isPinned
+        self.effortLevel = effortLevel
+        self.blockedByJson = blockedByJson
+        self.workspaceId = workspaceId
+        self.assigneeId = assigneeId
         self.tagIdsJson = tagIdsJson
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, notes, status, scheduleState, whenDate, deadline, reminderTime
+        case scheduledStartMinutes, durationMinutes, completedAt, projectId, headingId, areaId
+        case recurrenceRuleJson, sortOrder, isPinned, effortLevel, blockedByJson, blockedByTaskIds
+        case workspaceId, assigneeId, tagIdsJson, createdAt, updatedAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -306,9 +340,50 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
         self.areaId = try? c.decodeIfPresent(String.self, forKey: .areaId)
         self.recurrenceRuleJson = try? c.decodeIfPresent(String.self, forKey: .recurrenceRuleJson)
         self.sortOrder = (try? c.decode(Double.self, forKey: .sortOrder)) ?? 0
+        self.isPinned = (try? c.decodeIfPresent(Bool.self, forKey: .isPinned)) ?? false
+        self.effortLevel = try? c.decodeIfPresent(String.self, forKey: .effortLevel)
+        if let rawJson = try? c.decodeIfPresent(String.self, forKey: .blockedByJson) {
+            self.blockedByJson = rawJson
+        } else if let arr = try? c.decodeIfPresent([String].self, forKey: .blockedByTaskIds),
+                  let data = try? JSONEncoder().encode(arr),
+                  let s = String(data: data, encoding: .utf8) {
+            self.blockedByJson = s
+        } else {
+            self.blockedByJson = "[]"
+        }
+        self.workspaceId = try? c.decodeIfPresent(String.self, forKey: .workspaceId)
+        self.assigneeId = try? c.decodeIfPresent(String.self, forKey: .assigneeId)
         self.tagIdsJson = (try? c.decode(String.self, forKey: .tagIdsJson)) ?? "[]"
         self.createdAt = (try? c.decode(Int64.self, forKey: .createdAt)) ?? 0
         self.updatedAt = (try? c.decode(Int64.self, forKey: .updatedAt)) ?? 0
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(title, forKey: .title)
+        try c.encode(notes, forKey: .notes)
+        try c.encode(status, forKey: .status)
+        try c.encode(scheduleState, forKey: .scheduleState)
+        try c.encodeIfPresent(whenDate, forKey: .whenDate)
+        try c.encodeIfPresent(deadline, forKey: .deadline)
+        try c.encodeIfPresent(reminderTime, forKey: .reminderTime)
+        try c.encodeIfPresent(scheduledStartMinutes, forKey: .scheduledStartMinutes)
+        try c.encodeIfPresent(durationMinutes, forKey: .durationMinutes)
+        try c.encodeIfPresent(completedAt, forKey: .completedAt)
+        try c.encodeIfPresent(projectId, forKey: .projectId)
+        try c.encodeIfPresent(headingId, forKey: .headingId)
+        try c.encodeIfPresent(areaId, forKey: .areaId)
+        try c.encodeIfPresent(recurrenceRuleJson, forKey: .recurrenceRuleJson)
+        try c.encode(sortOrder, forKey: .sortOrder)
+        try c.encode(isPinned, forKey: .isPinned)
+        try c.encodeIfPresent(effortLevel, forKey: .effortLevel)
+        try c.encode(blockedByJson, forKey: .blockedByJson)
+        try c.encodeIfPresent(workspaceId, forKey: .workspaceId)
+        try c.encodeIfPresent(assigneeId, forKey: .assigneeId)
+        try c.encode(tagIdsJson, forKey: .tagIdsJson)
+        try c.encode(createdAt, forKey: .createdAt)
+        try c.encode(updatedAt, forKey: .updatedAt)
     }
 }
 
@@ -543,6 +618,9 @@ public struct BackupPreferencesDto: Codable, Equatable, Sendable {
     public var selectedCalendarIds: [String]?
     public var groupTodayByProjectOrArea: Bool?
     public var includeBetaUpdates: Bool?
+    public var tagSortMode: String?
+    public var viewSortMode: String?
+    public var savedPerspectivesJson: String?
 
     public init(
         sidebarVisible: Bool? = nil,
@@ -553,7 +631,10 @@ public struct BackupPreferencesDto: Codable, Equatable, Sendable {
         calendarEventsEnabled: Bool? = nil,
         selectedCalendarIds: [String]? = nil,
         groupTodayByProjectOrArea: Bool? = nil,
-        includeBetaUpdates: Bool? = nil
+        includeBetaUpdates: Bool? = nil,
+        tagSortMode: String? = nil,
+        viewSortMode: String? = nil,
+        savedPerspectivesJson: String? = nil
     ) {
         self.sidebarVisible = sidebarVisible
         self.dailyDigestEnabled = dailyDigestEnabled
@@ -564,6 +645,56 @@ public struct BackupPreferencesDto: Codable, Equatable, Sendable {
         self.selectedCalendarIds = selectedCalendarIds
         self.groupTodayByProjectOrArea = groupTodayByProjectOrArea
         self.includeBetaUpdates = includeBetaUpdates
+        self.tagSortMode = tagSortMode
+        self.viewSortMode = viewSortMode
+        self.savedPerspectivesJson = savedPerspectivesJson
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sidebarVisible, dailyDigestEnabled, dailyDigestHour, dailyDigestMinute
+        case languageTag, calendarEventsEnabled, selectedCalendarIds
+        case groupTodayByProjectOrArea, includeBetaUpdates
+        case tagSortMode, viewSortMode, savedPerspectivesJson, savedPerspectives
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.sidebarVisible = try? c.decodeIfPresent(Bool.self, forKey: .sidebarVisible)
+        self.dailyDigestEnabled = try? c.decodeIfPresent(Bool.self, forKey: .dailyDigestEnabled)
+        self.dailyDigestHour = try? c.decodeIfPresent(Int.self, forKey: .dailyDigestHour)
+        self.dailyDigestMinute = try? c.decodeIfPresent(Int.self, forKey: .dailyDigestMinute)
+        self.languageTag = try? c.decodeIfPresent(String.self, forKey: .languageTag)
+        self.calendarEventsEnabled = try? c.decodeIfPresent(Bool.self, forKey: .calendarEventsEnabled)
+        self.selectedCalendarIds = try? c.decodeIfPresent([String].self, forKey: .selectedCalendarIds)
+        self.groupTodayByProjectOrArea = try? c.decodeIfPresent(Bool.self, forKey: .groupTodayByProjectOrArea)
+        self.includeBetaUpdates = try? c.decodeIfPresent(Bool.self, forKey: .includeBetaUpdates)
+        self.tagSortMode = try? c.decodeIfPresent(String.self, forKey: .tagSortMode)
+        self.viewSortMode = try? c.decodeIfPresent(String.self, forKey: .viewSortMode)
+        if let rawJson = try? c.decodeIfPresent(String.self, forKey: .savedPerspectivesJson) {
+            self.savedPerspectivesJson = rawJson
+        } else if let arr = try? c.decodeIfPresent([SavedPerspective].self, forKey: .savedPerspectives),
+                  let data = try? JSONEncoder().encode(arr),
+                  let s = String(data: data, encoding: .utf8) {
+            self.savedPerspectivesJson = s
+        } else {
+            self.savedPerspectivesJson = nil
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(sidebarVisible, forKey: .sidebarVisible)
+        try c.encodeIfPresent(dailyDigestEnabled, forKey: .dailyDigestEnabled)
+        try c.encodeIfPresent(dailyDigestHour, forKey: .dailyDigestHour)
+        try c.encodeIfPresent(dailyDigestMinute, forKey: .dailyDigestMinute)
+        try c.encodeIfPresent(languageTag, forKey: .languageTag)
+        try c.encodeIfPresent(calendarEventsEnabled, forKey: .calendarEventsEnabled)
+        try c.encodeIfPresent(selectedCalendarIds, forKey: .selectedCalendarIds)
+        try c.encodeIfPresent(groupTodayByProjectOrArea, forKey: .groupTodayByProjectOrArea)
+        try c.encodeIfPresent(includeBetaUpdates, forKey: .includeBetaUpdates)
+        try c.encodeIfPresent(tagSortMode, forKey: .tagSortMode)
+        try c.encodeIfPresent(viewSortMode, forKey: .viewSortMode)
+        try c.encodeIfPresent(savedPerspectivesJson, forKey: .savedPerspectivesJson)
     }
 }
 

@@ -16,12 +16,14 @@ import com.pv.thingsbook.data.local.ThingsDatabase
 import com.pv.thingsbook.data.local.entity.ProjectEntity
 import com.pv.thingsbook.data.local.entity.TaskEntity
 import com.pv.thingsbook.data.remote.dto.CloudDeltaBatchPayload
+import com.pv.thingsbook.data.remote.dto.HeadingFirestoreDto
 import com.pv.thingsbook.data.remote.dto.ProjectFirestoreDto
 import com.pv.thingsbook.data.remote.dto.ProjectTemplateFirestoreDto
 import com.pv.thingsbook.data.remote.dto.TaskFirestoreDto
 import com.pv.thingsbook.data.repository.SyncRepository
 import com.pv.thingsbook.domain.model.CalendarEventItem
 import com.pv.thingsbook.domain.model.ChecklistItem
+import com.pv.thingsbook.domain.model.EffortLevel
 import com.pv.thingsbook.domain.model.Project
 import com.pv.thingsbook.domain.model.ProjectOutlineImporter
 import com.pv.thingsbook.domain.model.ProjectStatus
@@ -33,6 +35,7 @@ import com.pv.thingsbook.domain.model.QuickFindFilter
 import com.pv.thingsbook.domain.model.RecurrenceMode
 import com.pv.thingsbook.domain.model.RecurrenceRule
 import com.pv.thingsbook.domain.model.RecurrenceUnit
+import com.pv.thingsbook.domain.model.SavedPerspective
 import com.pv.thingsbook.domain.model.ScheduleState
 import com.pv.thingsbook.domain.model.StalledProjectDetector
 import com.pv.thingsbook.domain.model.StalledProjectReason
@@ -48,6 +51,12 @@ import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import com.pv.thingsbook.domain.model.TimeblockScheduleUtils
 import com.pv.thingsbook.domain.model.TodayTimelineEntry
+import com.pv.thingsbook.domain.model.computeTodayCapacitySummary
+import com.pv.thingsbook.domain.model.filterTasksForPerspective
+import com.pv.thingsbook.domain.model.isTaskActivelyBlocked
+import com.pv.thingsbook.domain.model.sortTagsForMode
+import com.pv.thingsbook.domain.model.sortTasksForView
+import com.pv.thingsbook.domain.model.wouldCreateDependencyCycle
 import com.pv.thingsbook.ui.components.MagicPlusDropMode
 import com.pv.thingsbook.ui.components.ThingsTooltipHostState
 import com.pv.thingsbook.ui.components.TooltipTimingPolicy
@@ -761,9 +770,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(86, BuildConfig.VERSION_CODE)
-        assertEquals("3.0.0-alpha.10", BuildConfig.VERSION_NAME)
-        assertTrue("3.0.0-alpha.10 pre-release contains -alpha", BuildConfig.VERSION_NAME.contains("-alpha"))
+        assertEquals(88, BuildConfig.VERSION_CODE)
+        assertEquals("3.0.0-alpha.11", BuildConfig.VERSION_NAME)
+        assertTrue("3.0.0-alpha.11 pre-release contains -alpha", BuildConfig.VERSION_NAME.contains("-alpha"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -2104,4 +2113,472 @@ class V2UpgradeAndFeaturesTest {
         val settingsKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ThingsSettingsModal.kt").readText()
         assertTrue(settingsKt.contains("LocalLiveAppLocaleOverride.current?.languageTag"))
     }
+
+    private fun makeV3TestTag(id: String, title: String, sortOrder: Double = 1.0): Tag = Tag(
+        id = id,
+        title = title,
+        parentTagId = null,
+        shortcut = null,
+        sortOrder = sortOrder,
+        createdAt = 1_760_000_000_000L,
+        updatedAt = 1_760_000_000_000L
+    )
+
+    private fun makeV3TestTask(
+        id: String,
+        title: String,
+        status: TaskStatus = TaskStatus.OPEN,
+        scheduleState: ScheduleState = ScheduleState.TODAY,
+        whenDate: Long? = null,
+        deadline: Long? = null,
+        durationMinutes: Int? = null,
+        areaId: String? = null,
+        sortOrder: Double = 1.0,
+        isPinned: Boolean = false,
+        effortLevel: String? = null,
+        blockedByTaskIds: List<String> = emptyList(),
+        tags: List<Tag> = emptyList()
+    ): TaskItem = TaskItem(
+        id = id,
+        title = title,
+        notes = "",
+        status = status,
+        scheduleState = scheduleState,
+        whenDate = whenDate,
+        deadline = deadline,
+        reminderTime = null,
+        scheduledStartMinutes = null,
+        durationMinutes = durationMinutes,
+        completedAt = null,
+        projectId = null,
+        headingId = null,
+        areaId = areaId,
+        recurrenceRule = null,
+        sortOrder = sortOrder,
+        isPinned = isPinned,
+        effortLevel = effortLevel,
+        blockedByTaskIds = blockedByTaskIds,
+        tags = tags,
+        createdAt = 1_760_000_000_000L,
+        updatedAt = 1_760_000_000_000L
+    )
+
+    @Test
+    fun `v3_0_0_alpha_11 dependency cycle guard and auto_unlocking blocker evaluation handle self_loops, 2_hop, 3_hop, and valid DAGs`() {
+        // Graph: B is blocked by A, C is blocked by B, D is independent
+        val blockedByMap = mapOf(
+            "task-A" to emptyList(),
+            "task-B" to listOf("task-A"),
+            "task-C" to listOf("task-B"),
+            "task-D" to emptyList()
+        )
+
+        // 1. Direct self-loop: A -> A
+        assertTrue(wouldCreateDependencyCycle("task-A", "task-A", blockedByMap))
+
+        // 2. 2-hop cycle: B is already blocked by A, so making A blocked by B creates A <-> B
+        assertTrue(wouldCreateDependencyCycle("task-A", "task-B", blockedByMap))
+
+        // 3. 3-hop cycle: C -> B -> A, so making A blocked by C creates A -> C -> B -> A
+        assertTrue(wouldCreateDependencyCycle("task-A", "task-C", blockedByMap))
+
+        // 4. Valid DAG edges: C blocked by D, or D blocked by C, or C also blocked by A (diamond DAG)
+        assertFalse(wouldCreateDependencyCycle("task-C", "task-D", blockedByMap))
+        assertFalse(wouldCreateDependencyCycle("task-D", "task-C", blockedByMap))
+        assertFalse(wouldCreateDependencyCycle("task-C", "task-A", blockedByMap))
+
+        // 5. Auto-unlocking when blocker completes (leaves openTaskIds)
+        val waitingTask = makeV3TestTask(
+            id = "task-B",
+            title = "Ship release notes",
+            blockedByTaskIds = listOf("task-A", "task-missing")
+        )
+        assertTrue(isTaskActivelyBlocked(waitingTask, setOf("task-A", "task-B")))
+        // Once task-A completes and is removed from openTaskIds, waitingTask auto-unlocks!
+        assertFalse(isTaskActivelyBlocked(waitingTask, setOf("task-B")))
+    }
+
+    @Test
+    fun `v3_0_0_alpha_11 sortTasksForView enforces pin_first invariant across manual, effort, duration, deadline, and alpha modes`() {
+        val t1 = makeV3TestTask(
+            id = "t1",
+            title = "Charlie Deep",
+            sortOrder = 1.0,
+            isPinned = false,
+            effortLevel = EffortLevel.DEEP_FOCUS,
+            durationMinutes = 120,
+            deadline = 3_000L
+        )
+        val t2 = makeV3TestTask(
+            id = "t2",
+            title = "Alpha Quick",
+            sortOrder = 2.0,
+            isPinned = false,
+            effortLevel = EffortLevel.QUICK_WIN,
+            durationMinutes = 15,
+            deadline = 1_000L
+        )
+        val t3Pinned = makeV3TestTask(
+            id = "t3",
+            title = "Zulu Pinned Unset",
+            sortOrder = 99.0,
+            isPinned = true,
+            effortLevel = null,
+            durationMinutes = null,
+            deadline = null
+        )
+        val t4Medium = makeV3TestTask(
+            id = "t4",
+            title = "Bravo Medium",
+            sortOrder = 3.0,
+            isPinned = false,
+            effortLevel = EffortLevel.MEDIUM,
+            durationMinutes = 45,
+            deadline = 2_000L
+        )
+        val input = listOf(t1, t2, t3Pinned, t4Medium)
+
+        // Manual: pinned first, then sortOrder
+        assertEquals(listOf("t3", "t1", "t2", "t4"), sortTasksForView(input, "manual").map { it.id })
+
+        // Effort: pinned first, then QUICK_WIN < MEDIUM < DEEP_FOCUS < null
+        assertEquals(listOf("t3", "t2", "t4", "t1"), sortTasksForView(input, "effort").map { it.id })
+
+        // Duration: pinned first, then shortest duration first (nulls last)
+        assertEquals(listOf("t3", "t2", "t4", "t1"), sortTasksForView(input, "duration").map { it.id })
+
+        // Deadline: pinned first, then earliest deadline first (nulls last)
+        assertEquals(listOf("t3", "t2", "t4", "t1"), sortTasksForView(input, "deadline").map { it.id })
+
+        // Alphabetical A-Z: pinned first, then case-insensitive title
+        assertEquals(listOf("t3", "t2", "t4", "t1"), sortTasksForView(input, "alpha").map { it.id })
+
+        // Tag sort modes: alpha, usage / most_used, custom
+        val tagZ = makeV3TestTag(id = "tag-z", title = "Zoom", sortOrder = 1.0)
+        val tagA = makeV3TestTag(id = "tag-a", title = "Admin", sortOrder = 2.0)
+        val usage = mapOf("tag-a" to 7, "tag-z" to 2)
+        assertEquals(listOf("tag-a", "tag-z"), sortTagsForMode(listOf(tagZ, tagA), "alpha", usage).map { it.id })
+        assertEquals(listOf("tag-a", "tag-z"), sortTagsForMode(listOf(tagZ, tagA), "most_used", usage).map { it.id })
+        assertEquals(listOf("tag-a", "tag-z"), sortTagsForMode(listOf(tagZ, tagA), "usage", usage).map { it.id })
+        assertEquals(listOf("tag-z", "tag-a"), sortTagsForMode(listOf(tagA, tagZ), "custom", usage).map { it.id })
+    }
+
+    @Test
+    fun `v3_0_0_alpha_11 filterTasksForPerspective and computeTodayCapacitySummary evaluate multi_criteria perspectives and 8h workday window`() {
+        val todayDate = LocalDate.of(2026, 11, 20)
+        val epochDay = todayDate.toEpochDay()
+        val todayStart = todayDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        val dayMs = 86_400_000L
+        val tagFocus = makeV3TestTag(id = "cat-focus", title = "Focus")
+        val tagErrands = makeV3TestTag(id = "cat-errands", title = "Errands")
+
+        val quickActionable = makeV3TestTask(
+            id = "task-quick",
+            title = "Reply to partner email",
+            scheduleState = ScheduleState.TODAY,
+            whenDate = todayStart,
+            durationMinutes = 15,
+            effortLevel = EffortLevel.QUICK_WIN,
+            areaId = "area-work",
+            tags = listOf(tagFocus)
+        )
+        val blockedQuick = quickActionable.copy(
+            id = "task-blocked",
+            title = "Send signed contract",
+            blockedByTaskIds = listOf("task-quick")
+        )
+        val longDeep = makeV3TestTask(
+            id = "task-deep",
+            title = "Write architecture RFC",
+            scheduleState = ScheduleState.UPCOMING,
+            whenDate = todayStart + 3 * dayMs,
+            deadline = todayStart + 5 * dayMs,
+            durationMinutes = 90,
+            effortLevel = EffortLevel.DEEP_FOCUS,
+            areaId = "area-work",
+            tags = listOf(tagFocus)
+        )
+        val homeErrandNoDate = makeV3TestTask(
+            id = "task-home",
+            title = "Buy coffee beans",
+            scheduleState = ScheduleState.ANYTIME,
+            durationMinutes = 20,
+            effortLevel = EffortLevel.QUICK_WIN,
+            areaId = "area-home",
+            tags = listOf(tagErrands)
+        )
+
+        val allTasks = listOf(quickActionable, blockedQuick, longDeep, homeErrandNoDate)
+        val openIds = allTasks.mapTo(HashSet()) { it.id }
+
+        val workQuickWinsPersp = SavedPerspective(
+            id = "persp-1",
+            title = "Work Quick Wins",
+            categoryIds = listOf("cat-focus"),
+            effortLevel = EffortLevel.QUICK_WIN,
+            maxDurationMinutes = 30,
+            dueWindow = "TODAY",
+            areaId = "area-work",
+            actionableOnly = true
+        )
+        val matched = filterTasksForPerspective(allTasks, workQuickWinsPersp, openIds, todayStart)
+        assertEquals(listOf("task-quick"), matched.map { it.id })
+
+        // Once blocker completes, blockedQuick also matches!
+        val matchedAfterUnblock = filterTasksForPerspective(allTasks, workQuickWinsPersp, setOf("task-blocked"), todayStart)
+        assertEquals(listOf("task-quick", "task-blocked"), matchedAfterUnblock.map { it.id })
+
+        // HAS_DEADLINE perspective
+        val deadlinePersp = SavedPerspective(
+            id = "persp-dl",
+            title = "Upcoming Deadlines",
+            dueWindow = "HAS_DEADLINE"
+        )
+        assertEquals(listOf("task-deep"), filterTasksForPerspective(allTasks, deadlinePersp, openIds, todayStart).map { it.id })
+
+        // NO_DATE perspective
+        val noDatePersp = SavedPerspective(id = "persp-nodate", title = "Unscheduled", dueWindow = "NO_DATE")
+        assertEquals(listOf("task-home"), filterTasksForPerspective(allTasks, noDatePersp, openIds, todayStart).map { it.id })
+
+        // Today Capacity Summary:
+        // Workday window = [todayStart + 9h, todayStart + 17h] = 480m
+        // Timed meeting 10:00-11:30 (90m) + 08:30-09:30 (30m overlap with 09:00-17:00) + all-day event (ignored)
+        // Busy workday minutes = 90 + 30 = 120m -> Remaining workday = 360m
+        // Planned tasks = 15m + 45m = 60m -> Free workday = 360 - 60 = 300m (5h)
+        val hourMs = 3_600_000L
+        val todayTasks = listOf(
+            quickActionable, // 15m standalone duration (no clock start required!)
+            makeV3TestTask(id = "t-standup-prep", title = "Prep deck", durationMinutes = 45)
+        )
+        val calEvents = listOf(
+            CalendarEventItem(
+                id = "ev-1",
+                eventId = 1L,
+                calendarId = "cal-work",
+                calendarDisplayName = "Work",
+                title = "Design Review",
+                startMillis = todayStart + 10 * hourMs,
+                endMillis = todayStart + 11 * hourMs + 30 * 60_000L,
+                isAllDay = false,
+                colorArgb = 0xFF1A73E8.toInt(),
+                startDateEpochDay = epochDay,
+                endDateInclusiveEpochDay = epochDay
+            ),
+            CalendarEventItem(
+                id = "ev-2",
+                eventId = 2L,
+                calendarId = "cal-work",
+                calendarDisplayName = "Work",
+                title = "Early Sync",
+                startMillis = todayStart + 8 * hourMs + 30 * 60_000L,
+                endMillis = todayStart + 9 * hourMs + 30 * 60_000L,
+                isAllDay = false,
+                colorArgb = 0xFF1A73E8.toInt(),
+                startDateEpochDay = epochDay,
+                endDateInclusiveEpochDay = epochDay
+            ),
+            CalendarEventItem(
+                id = "ev-3",
+                eventId = 3L,
+                calendarId = "cal-holidays",
+                calendarDisplayName = "Holidays",
+                title = "Company Offsite Banner",
+                startMillis = todayStart,
+                endMillis = todayStart + dayMs,
+                isAllDay = true,
+                colorArgb = 0xFF34A853.toInt(),
+                startDateEpochDay = epochDay,
+                endDateInclusiveEpochDay = epochDay
+            )
+        )
+        val (plannedMins, freeMins) = computeTodayCapacitySummary(
+            tasks = todayTasks,
+            calendarEvents = calEvents,
+            dayStartMillis = todayStart,
+            dayEndMillis = todayStart + dayMs
+        )
+        assertEquals(60, plannedMins)
+        assertEquals(300, freeMins)
+    }
+
+    @Test
+    fun `v3_0_0_alpha_11 Room v6 schema, tbbackup, and Firestore DTOs roundtrip isPinned, effortLevel, blockedByTaskIds, startDate, savedPerspectivesJson, workspaceId, and assigneeId`() {
+        val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
+        val dbKt = File(appSrcMain, "java/com/pv/thingsbook/data/local/ThingsDatabase.kt").readText()
+        val appModuleKt = File(appSrcMain, "java/com/pv/thingsbook/di/AppModule.kt").readText()
+        assertTrue("ThingsDatabase must be at Room version = 6", dbKt.contains("version = 6"))
+        assertTrue("AppModule must register MIGRATION_5_6", appModuleKt.contains("MIGRATION_5_6"))
+
+        val perspectives = listOf(
+            SavedPerspective(
+                id = "persp-exec",
+                title = "Exec Quick Wins",
+                categoryIds = listOf("tag-vip"),
+                effortLevel = EffortLevel.QUICK_WIN,
+                maxDurationMinutes = 15,
+                dueWindow = "NEXT_7_DAYS",
+                areaId = "area-work",
+                actionableOnly = true,
+                sortOrder = 1.0
+            )
+        )
+        val perspectivesJson = lenientJson.encodeToString(perspectives)
+
+        // 1. Full .tbbackup roundtrip of v3.0 entities & preferences
+        val payload = ThingsbookBackupPayload(
+            createdAt = 1_760_000_000_000L,
+            appVersionName = "3.0.0-alpha.11",
+            projects = listOf(
+                BackupProjectDto(
+                    id = "proj-v3",
+                    title = "Platform Launch",
+                    workspaceId = "ws-acme",
+                    viewMode = "roadmap"
+                )
+            ),
+            headings = listOf(
+                BackupHeadingDto(
+                    id = "head-v3",
+                    projectId = "proj-v3",
+                    title = "Milestone Alpha",
+                    startDate = 1_760_100_000_000L,
+                    endDate = 1_760_900_000_000L
+                )
+            ),
+            tasks = listOf(
+                BackupTaskDto(
+                    id = "task-v3",
+                    title = "Cut release candidate",
+                    durationMinutes = 45,
+                    isPinned = true,
+                    effortLevel = EffortLevel.DEEP_FOCUS,
+                    blockedByJson = "[\"task-prereq-1\",\"task-prereq-2\"]",
+                    workspaceId = "ws-acme",
+                    assigneeId = "user-petros"
+                )
+            ),
+            preferences = BackupPreferencesDto(
+                tagSortMode = "usage",
+                viewSortMode = "effort",
+                savedPerspectivesJson = perspectivesJson
+            )
+        )
+
+        val encodedBytes = ThingsBackupCodec.encodeBackup(
+            payload = payload,
+            password = null,
+            appVersionName = "3.0.0-alpha.11",
+            appVersionCode = 88
+        )
+        val decoded = ThingsBackupCodec.decodeBackup(encodedBytes, password = null)
+        val restoredProj = decoded.projects.single()
+        assertEquals("ws-acme", restoredProj.workspaceId)
+        assertEquals("roadmap", restoredProj.viewMode)
+
+        val restoredHeading = decoded.headings.single()
+        assertEquals(1_760_100_000_000L, restoredHeading.startDate)
+        assertEquals(1_760_900_000_000L, restoredHeading.endDate)
+
+        val restoredTask = decoded.tasks.single()
+        assertTrue(restoredTask.isPinned)
+        assertEquals(45, restoredTask.durationMinutes)
+        assertEquals(EffortLevel.DEEP_FOCUS, restoredTask.effortLevel)
+        assertEquals("[\"task-prereq-1\",\"task-prereq-2\"]", restoredTask.blockedByJson)
+        assertEquals("ws-acme", restoredTask.workspaceId)
+        assertEquals("user-petros", restoredTask.assigneeId)
+
+        assertEquals("usage", decoded.preferences.tagSortMode)
+        assertEquals("effort", decoded.preferences.viewSortMode)
+        val restoredPersps = lenientJson.decodeFromString<List<SavedPerspective>>(decoded.preferences.savedPerspectivesJson!!)
+        assertEquals(perspectives, restoredPersps)
+
+        // 2. TaskFirestoreDto / HeadingFirestoreDto / ProjectFirestoreDto roundtrip + legacy peer omission flags
+        val taskEntity = TaskEntity(
+            id = "task-sync-1",
+            title = "Sync v3 fields",
+            notes = "",
+            status = TaskStatus.OPEN,
+            scheduleState = ScheduleState.TODAY,
+            whenDate = 1_760_000_000_000L,
+            deadline = null,
+            reminderTime = null,
+            scheduledStartMinutes = null,
+            durationMinutes = 30,
+            completedAt = null,
+            projectId = "proj-v3",
+            headingId = "head-v3",
+            areaId = null,
+            recurrenceRuleJson = null,
+            sortOrder = 1.0,
+            isPinned = true,
+            effortLevel = EffortLevel.QUICK_WIN,
+            blockedByJson = "[\"blocker-1\"]",
+            workspaceId = "ws-team",
+            assigneeId = "member-7",
+            tagIdsJson = "[\"tag-vip\"]",
+            createdAt = 1_760_000_000_000L,
+            updatedAt = 1_760_000_500_000L,
+            isDeleted = false,
+            isDirty = false
+        )
+        val dto = TaskFirestoreDto.fromEntity(taskEntity)
+        val batchJson = lenientJson.encodeToString(
+            CloudDeltaBatchPayload(
+                userId = "u1",
+                deviceId = "d1",
+                batchTimestamp = 1_760_000_500_000L,
+                projects = listOf(
+                    ProjectFirestoreDto(
+                        id = "proj-v3",
+                        title = "Platform Launch",
+                        workspaceId = "ws-team",
+                        viewMode = "board",
+                        updatedAt = 1_760_000_500_000L
+                    )
+                ),
+                headings = listOf(
+                    HeadingFirestoreDto(
+                        id = "head-v3",
+                        projectId = "proj-v3",
+                        title = "Phase 1",
+                        startDate = 1_760_010_000_000L,
+                        endDate = 1_760_090_000_000L,
+                        updatedAt = 1_760_000_500_000L
+                    )
+                ),
+                tasks = listOf(dto)
+            )
+        )
+        val roundtrippedBatch = CloudDeltaBatchPayload.decodeWithHints(batchJson, lenientJson)
+        val rtTaskDto = roundtrippedBatch.tasks.single()
+        assertFalse(rtTaskDto.omittedPinField)
+        assertFalse(rtTaskDto.omittedV30TaskFields)
+        val rtEntity = rtTaskDto.toEntity()
+        assertTrue(rtEntity.isPinned)
+        assertEquals(30, rtEntity.durationMinutes)
+        assertEquals(EffortLevel.QUICK_WIN, rtEntity.effortLevel)
+        assertEquals("[\"blocker-1\"]", rtEntity.blockedByJson)
+        assertEquals("ws-team", rtEntity.workspaceId)
+        assertEquals("member-7", rtEntity.assigneeId)
+        assertEquals(1_760_010_000_000L, roundtrippedBatch.headings.single().toEntity().startDate)
+        assertEquals("board", roundtrippedBatch.projects.single().toEntity().viewMode)
+
+        // Legacy v2.1 peer payload omitting isPinned, effortLevel, blockedByTaskIds, startDate, viewMode
+        val legacyPeerJson = """
+            {
+              "userId": "u1",
+              "deviceId": "legacy-peer",
+              "batchTimestamp": 1760000900000,
+              "projects": [{"id": "proj-v3", "title": "Platform Launch", "updatedAt": 1760000900000}],
+              "headings": [{"id": "head-v3", "projectId": "proj-v3", "title": "Phase 1", "updatedAt": 1760000900000}],
+              "tasks": [{"id": "task-sync-1", "title": "Edited on v2.1", "updatedAt": 1760000900000}]
+            }
+        """.trimIndent()
+        val legacyDecoded = CloudDeltaBatchPayload.decodeWithHints(legacyPeerJson, lenientJson)
+        assertTrue(legacyDecoded.tasks.single().omittedPinField)
+        assertTrue(legacyDecoded.tasks.single().omittedV30TaskFields)
+        assertTrue(legacyDecoded.headings.single().omittedStartDate)
+        assertTrue(legacyDecoded.projects.single().omittedV30ProjectFields)
+    }
 }
+

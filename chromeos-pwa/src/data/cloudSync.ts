@@ -27,18 +27,9 @@ import type {
   AttachmentRecord,
   ChecklistItemRecord,
   CloudSyncStatus,
-  HeadingRecord,
-  ProjectRecord,
   ProjectTemplate,
-  TagRecord,
-  TaskRecord
+  TagRecord
 } from '../domain/types';
-import {
-  normalizeProjectStatus,
-  normalizeScheduleState,
-  normalizeTaskStatus,
-  safeParseRecurrence
-} from './backupCodec';
 import { hasStoredGoogleCalendarAccountForEmail } from './calendarService';
 import {
   getFirebaseAuthInstance,
@@ -69,9 +60,30 @@ import {
   formatOAuthChannelSeed,
   formatUidWakeChannelFromHex,
   formatUidWakeSeed,
+  headingFromFirestoreMap,
+  headingToFirestoreMap,
   normalizeFirestoreDocWithId,
+  projectFromFirestoreMap,
+  projectToFirestoreMap,
+  taskFromFirestoreMap,
+  taskToFirestoreMap,
+  type RemoteHeadingWithHints,
+  type RemoteProjectWithHints,
+  type RemoteTaskWithHints,
   type SyncCollectionName
 } from './syncUtils';
+
+export {
+  headingFromFirestoreMap,
+  headingToFirestoreMap,
+  projectFromFirestoreMap,
+  projectToFirestoreMap,
+  taskFromFirestoreMap,
+  taskToFirestoreMap,
+  type RemoteHeadingWithHints,
+  type RemoteProjectWithHints,
+  type RemoteTaskWithHints
+};
 
 function extractAuthErrorCode(err: unknown): string {
   const code = (err as { code?: unknown })?.code;
@@ -153,12 +165,6 @@ function finiteNumber(v: unknown, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function nullableNumber(v: unknown): number | null {
-  if (v === null || v === undefined) return null;
-  const n = typeof v === 'number' ? v : Number(v);
-  return Number.isFinite(n) ? Math.trunc(n) : null;
-}
-
 function nullableString(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   const t = v.trim();
@@ -225,163 +231,6 @@ function areaFromFirestoreMap(map: Record<string, unknown>): AreaRecord | null {
     updatedAt: Math.trunc(finiteNumber(map.updatedAt)),
     isDeleted: Boolean(map.isDeleted),
     isDirty: false
-  };
-}
-
-function projectToFirestoreMap(project: ProjectRecord): Record<string, unknown> {
-  return {
-    id: project.id,
-    areaId: project.areaId ?? null,
-    title: project.title,
-    notes: project.notes || '',
-    status: project.status,
-    scheduleState: project.scheduleState,
-    whenDate: project.whenDate != null ? Math.trunc(project.whenDate) : null,
-    deadline: project.deadline != null ? Math.trunc(project.deadline) : null,
-    completedAt: project.completedAt != null ? Math.trunc(project.completedAt) : null,
-    lastReviewedAt: project.lastReviewedAt != null ? Math.trunc(project.lastReviewedAt) : null,
-    sortOrder: finiteNumber(project.sortOrder),
-    tagIds: project.tagIds || [],
-    createdAt: Math.trunc(finiteNumber(project.createdAt)),
-    updatedAt: Math.trunc(finiteNumber(project.updatedAt)),
-    isDeleted: Boolean(project.isDeleted),
-    purgedFromTrash: Boolean(project.purgedFromTrash)
-  };
-}
-
-function projectFromFirestoreMap(map: Record<string, unknown>): ProjectRecord | null {
-  const id = nullableString(map.id);
-  if (!id) return null;
-  const title = typeof map.title === 'string' ? map.title : '';
-  const notes = typeof map.notes === 'string' ? map.notes : '';
-  const isDeleted = Boolean(map.isDeleted);
-  return {
-    id,
-    areaId: nullableString(map.areaId),
-    title,
-    notes,
-    status: normalizeProjectStatus(typeof map.status === 'string' ? map.status : 'ACTIVE'),
-    scheduleState: normalizeScheduleState(
-      typeof map.scheduleState === 'string' ? map.scheduleState : 'ANYTIME',
-      'ANYTIME'
-    ),
-    whenDate: nullableNumber(map.whenDate),
-    deadline: nullableNumber(map.deadline),
-    completedAt: nullableNumber(map.completedAt),
-    lastReviewedAt: nullableNumber(map.lastReviewedAt),
-    sortOrder: finiteNumber(map.sortOrder),
-    tagIds: stringList(map.tagIds),
-    createdAt: Math.trunc(finiteNumber(map.createdAt)),
-    updatedAt: Math.trunc(finiteNumber(map.updatedAt)),
-    isDeleted,
-    isDirty: false,
-    purgedFromTrash: Boolean(map.purgedFromTrash || (isDeleted && !title && !notes))
-  };
-}
-
-type RemoteHeadingWithHints = HeadingRecord & { omittedEndDate?: boolean };
-
-function headingToFirestoreMap(heading: HeadingRecord): Record<string, unknown> {
-  return {
-    id: heading.id,
-    projectId: heading.projectId,
-    title: heading.title,
-    endDate: heading.endDate != null ? Math.trunc(heading.endDate) : null,
-    sortOrder: finiteNumber(heading.sortOrder),
-    isArchived: Boolean(heading.isArchived),
-    createdAt: Math.trunc(finiteNumber(heading.createdAt)),
-    updatedAt: Math.trunc(finiteNumber(heading.updatedAt)),
-    isDeleted: Boolean(heading.isDeleted)
-  };
-}
-
-function headingFromFirestoreMap(map: Record<string, unknown>): RemoteHeadingWithHints | null {
-  const id = nullableString(map.id);
-  const projectId = nullableString(map.projectId);
-  if (!id || !projectId) return null;
-  const omittedEndDate = !Object.prototype.hasOwnProperty.call(map, 'endDate');
-  return {
-    id,
-    projectId,
-    title: typeof map.title === 'string' ? map.title : '',
-    endDate: nullableNumber(map.endDate),
-    sortOrder: finiteNumber(map.sortOrder),
-    isArchived: Boolean(map.isArchived),
-    createdAt: Math.trunc(finiteNumber(map.createdAt)),
-    updatedAt: Math.trunc(finiteNumber(map.updatedAt)),
-    isDeleted: Boolean(map.isDeleted),
-    isDirty: false,
-    ...(omittedEndDate ? { omittedEndDate: true } : {})
-  };
-}
-
-function taskToFirestoreMap(task: TaskRecord): Record<string, unknown> {
-  return {
-    id: task.id,
-    title: task.title,
-    notes: task.notes || '',
-    status: task.status,
-    scheduleState: task.scheduleState,
-    whenDate: task.whenDate != null ? Math.trunc(task.whenDate) : null,
-    deadline: task.deadline != null ? Math.trunc(task.deadline) : null,
-    reminderTime: task.reminderTime != null ? Math.trunc(task.reminderTime) : null,
-    scheduledStartMinutes:
-      task.scheduledStartMinutes != null ? Math.trunc(task.scheduledStartMinutes) : null,
-    durationMinutes:
-      task.durationMinutes != null ? Math.trunc(task.durationMinutes) : null,
-    completedAt: task.completedAt != null ? Math.trunc(task.completedAt) : null,
-    projectId: task.projectId ?? null,
-    headingId: task.headingId ?? null,
-    areaId: task.areaId ?? null,
-    recurrenceRule: task.recurrenceRule ? JSON.stringify(task.recurrenceRule) : null,
-    sortOrder: finiteNumber(task.sortOrder),
-    tagIds: task.tagIds || [],
-    createdAt: Math.trunc(finiteNumber(task.createdAt)),
-    updatedAt: Math.trunc(finiteNumber(task.updatedAt)),
-    isDeleted: Boolean(task.isDeleted),
-    purgedFromTrash: Boolean(task.purgedFromTrash)
-  };
-}
-
-type RemoteTaskWithHints = TaskRecord & { omittedTimeblockFields?: boolean };
-
-function taskFromFirestoreMap(map: Record<string, unknown>): RemoteTaskWithHints | null {
-  const id = nullableString(map.id);
-  if (!id) return null;
-  const title = typeof map.title === 'string' ? map.title : '';
-  const notes = typeof map.notes === 'string' ? map.notes : '';
-  const isDeleted = Boolean(map.isDeleted);
-  const omittedTimeblockFields = !Object.prototype.hasOwnProperty.call(
-    map,
-    'scheduledStartMinutes'
-  );
-  return {
-    id,
-    title,
-    notes,
-    status: normalizeTaskStatus(typeof map.status === 'string' ? map.status : 'OPEN'),
-    scheduleState: normalizeScheduleState(
-      typeof map.scheduleState === 'string' ? map.scheduleState : 'INBOX',
-      'INBOX'
-    ),
-    whenDate: nullableNumber(map.whenDate),
-    deadline: nullableNumber(map.deadline),
-    reminderTime: nullableNumber(map.reminderTime),
-    scheduledStartMinutes: nullableNumber(map.scheduledStartMinutes),
-    durationMinutes: nullableNumber(map.durationMinutes),
-    completedAt: nullableNumber(map.completedAt),
-    projectId: nullableString(map.projectId),
-    headingId: nullableString(map.headingId),
-    areaId: nullableString(map.areaId),
-    recurrenceRule: safeParseRecurrence(nullableString(map.recurrenceRule)),
-    sortOrder: finiteNumber(map.sortOrder),
-    tagIds: stringList(map.tagIds),
-    createdAt: Math.trunc(finiteNumber(map.createdAt)),
-    updatedAt: Math.trunc(finiteNumber(map.updatedAt)),
-    isDeleted,
-    isDirty: false,
-    purgedFromTrash: Boolean(map.purgedFromTrash || (isDeleted && !title && !notes)),
-    ...(omittedTimeblockFields ? { omittedTimeblockFields: true } : {})
   };
 }
 
@@ -1530,13 +1379,13 @@ class ThingsCloudSyncService {
     const tags = rawTags.map(tagFromFirestoreMap).filter((x): x is TagRecord => x !== null);
     const areas = rawAreas.map(areaFromFirestoreMap).filter((x): x is AreaRecord => x !== null);
     const projects = rawProjects
-      .map(projectFromFirestoreMap)
-      .filter((x): x is ProjectRecord => x !== null);
+      .map((m) => projectFromFirestoreMap(m))
+      .filter((x): x is RemoteProjectWithHints => x !== null);
     const headings = rawHeadings
-      .map(headingFromFirestoreMap)
+      .map((m) => headingFromFirestoreMap(m))
       .filter((x): x is RemoteHeadingWithHints => x !== null);
     const tasks = rawTasks
-      .map(taskFromFirestoreMap)
+      .map((m) => taskFromFirestoreMap(m))
       .filter((x): x is RemoteTaskWithHints => x !== null);
     const checklistItems = rawChecklists
       .map(checklistFromFirestoreMap)
@@ -1686,18 +1535,20 @@ class ThingsCloudSyncService {
             });
           } else if (colName === 'projects') {
             await localDb.applyRemoteDeltas({
-              projects: docs.map(projectFromFirestoreMap).filter((x): x is ProjectRecord => x !== null)
+              projects: docs
+                .map((m) => projectFromFirestoreMap(m))
+                .filter((x): x is RemoteProjectWithHints => x !== null)
             });
           } else if (colName === 'headings') {
             await localDb.applyRemoteDeltas({
               headings: docs
-                .map(headingFromFirestoreMap)
+                .map((m) => headingFromFirestoreMap(m))
                 .filter((x): x is RemoteHeadingWithHints => x !== null)
             });
           } else if (colName === 'tasks') {
             await localDb.applyRemoteDeltas({
               tasks: docs
-                .map(taskFromFirestoreMap)
+                .map((m) => taskFromFirestoreMap(m))
                 .filter((x): x is RemoteTaskWithHints => x !== null)
             });
           } else if (colName === 'checklist_items') {
@@ -1874,17 +1725,17 @@ class ThingsCloudSyncService {
         : undefined,
       projects: Array.isArray(batch.projects)
         ? batch.projects
-            .map(projectFromFirestoreMap)
-            .filter((x: ProjectRecord | null): x is ProjectRecord => x !== null)
+            .map((m: Record<string, unknown>) => projectFromFirestoreMap(m))
+            .filter((x: RemoteProjectWithHints | null): x is RemoteProjectWithHints => x !== null)
         : undefined,
       headings: Array.isArray(batch.headings)
         ? batch.headings
-            .map(headingFromFirestoreMap)
+            .map((m: Record<string, unknown>) => headingFromFirestoreMap(m))
             .filter((x: RemoteHeadingWithHints | null): x is RemoteHeadingWithHints => x !== null)
         : undefined,
       tasks: Array.isArray(batch.tasks)
         ? batch.tasks
-            .map(taskFromFirestoreMap)
+            .map((m: Record<string, unknown>) => taskFromFirestoreMap(m))
             .filter((x: RemoteTaskWithHints | null): x is RemoteTaskWithHints => x !== null)
         : undefined,
       checklistItems: Array.isArray(batch.checklistItems)

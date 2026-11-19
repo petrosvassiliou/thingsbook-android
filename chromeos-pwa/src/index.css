@@ -3847,5 +3847,189 @@ button.v2-stalled-pill:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
+/* ==================== v3.0 Milestone 2 Soft Bento Additions ==================== */
 
+.things-checkbox.indeterminate {
+  border-color: var(--things-blue);
+  background: var(--things-blue-soft);
+  color: var(--things-blue);
+}
 
+.category-usage-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-chip);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.task-pin-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--things-blue);
+  margin-right: 5px;
+  flex-shrink: 0;
+  transform: rotate(-18deg);
+}
+
+.task-row.blocked {
+  opacity: 0.68;
+}
+
+.task-row.blocked:hover {
+  opacity: 0.92;
+}
+
+.meta-badge.blocked-badge {
+  background: rgba(234, 88, 12, 0.10);
+  border-color: rgba(234, 88, 12, 0.24);
+  color: #C2410C;
+  font-weight: 600;
+}
+
+[data-theme="dark"] .meta-badge.blocked-badge {
+  background: rgba(251, 146, 60, 0.14);
+  border-color: rgba(251, 146, 60, 0.28);
+  color: #FDBA74;
+}
+
+.meta-badge.duration-badge {
+  background: var(--things-blue-soft);
+  border-color: rgba(36, 139, 253, 0.22);
+  color: var(--things-blue);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.meta-badge.effort-badge {
+  font-weight: 600;
+}
+
+.meta-badge.effort-badge.effort-quick_win {
+  background: rgba(16, 185, 129, 0.11);
+  border-color: rgba(16, 185, 129, 0.25);
+  color: #059669;
+}
+
+[data-theme="dark"] .meta-badge.effort-badge.effort-quick_win {
+  background: rgba(52, 211, 153, 0.14);
+  border-color: rgba(52, 211, 153, 0.28);
+  color: #6EE7B7;
+}
+
+.meta-badge.effort-badge.effort-medium {
+  background: var(--bg-subtle);
+  border-color: var(--border-strong);
+  color: var(--text-secondary);
+}
+
+.meta-badge.effort-badge.effort-deep_focus {
+  background: rgba(124, 58, 237, 0.10);
+  border-color: rgba(124, 58, 237, 0.24);
+  color: #6D28D9;
+}
+
+[data-theme="dark"] .meta-badge.effort-badge.effort-deep_focus {
+  background: rgba(167, 139, 250, 0.15);
+  border-color: rgba(167, 139, 250, 0.28);
+  color: #C4B5FD;
+}
+
+/* Soft Bento Glacier-Blue Today Capacity Pill */
+.today-capacity-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10.5px;
+  border-radius: var(--radius-pill);
+  background: var(--things-blue-soft);
+  border: 1px solid rgba(36, 139, 253, 0.24);
+  color: var(--things-blue);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.005em;
+  font-variant-numeric: tabular-nums;
+}
+
+[data-theme="dark"] .today-capacity-pill {
+  background: rgba(56, 152, 255, 0.15);
+  border-color: rgba(56, 152, 255, 0.30);
+  color: #7CC0FF;
+}
+
+/* View Sort Dropdown Pill */
+.view-sort-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5.5px;
+  height: 29px;
+  padding: 0 10.5px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 12.1px;
+  font-weight: 600;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.view-sort-pill:hover {
+  background: var(--bg-chip);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.view-sort-pill.active {
+  background: var(--things-blue-soft);
+  border-color: rgba(36, 139, 253, 0.28);
+  color: var(--things-blue);
+}
+
+/* Bento Sidebar Perspectives Section */
+.sidebar-perspectives-section {
+  margin: 8px 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 8px 3px 10px;
+}
+
+.sidebar-section-title {
+  font-size: 10.8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.055em;
+  color: var(--text-muted);
+}
+
+.sidebar-section-plus {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.sidebar-section-plus:hover {
+  background: var(--things-blue-soft);
+  color: var(--things-blue);
+}

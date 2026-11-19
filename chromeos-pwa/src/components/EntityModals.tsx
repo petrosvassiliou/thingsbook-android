@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   Bell,
@@ -8,10 +9,14 @@ import {
   Flag,
   Folder,
   FolderInput,
+  GitMerge,
   Inbox,
   LayoutGrid,
+  Link2,
+  Minus,
   Plus,
   Search,
+  SlidersHorizontal,
   Trash2,
   X
 } from 'lucide-react';
@@ -21,10 +26,19 @@ import {
   toIsoDateInputValue,
   type AppPreferences,
   type AreaRecord,
+  type EffortLevel,
   type HeadingRecord,
   type ProjectRecord,
-  type TagRecord
+  type SavedPerspective,
+  type TagRecord,
+  type TagSortMode,
+  type TaskRecord
 } from '../domain/types';
+import {
+  formatStandaloneDuration,
+  sortTagsForMode,
+  wouldCreateDependencyCycle
+} from '../domain/v2Utils';
 import { localDb } from '../data/localDb';
 import {
   ensureNotificationPermission,
@@ -591,27 +605,42 @@ export const MoveTaskModal: React.FC<MoveTaskModalProps> = ({
 
 interface TagManagerModalProps {
   tags: TagRecord[];
+  usageCounts: ReadonlyMap<string, number>;
+  tagSortMode: TagSortMode;
   t: TranslationStrings;
+  onChangeTagSortMode: (mode: TagSortMode) => void;
+  onToast: (msg: string) => void;
   onClose: () => void;
 }
 
-export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClose }) => {
+export const TagManagerModal: React.FC<TagManagerModalProps> = ({
+  tags,
+  usageCounts,
+  tagSortMode,
+  t,
+  onChangeTagSortMode,
+  onToast,
+  onClose
+}) => {
   const [title, setTitle] = useState('');
   const [shortcut, setShortcut] = useState('');
   const [filterQuery, setFilterQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editShortcut, setEditShortcut] = useState('');
+  const [mergingId, setMergingId] = useState<string | null>(null);
+  const [mergeTargetId, setMergeTargetId] = useState<string>('');
 
   const activeTags = tags.filter((tg) => !tg.isDeleted);
+  const sortedTags = sortTagsForMode(activeTags, tagSortMode, usageCounts);
   const normalizedFilter = filterQuery.trim().toLowerCase();
   const filteredTags = normalizedFilter
-    ? activeTags.filter(
+    ? sortedTags.filter(
         (tg) =>
           tg.title.toLowerCase().includes(normalizedFilter) ||
           (tg.shortcut || '').toLowerCase().includes(normalizedFilter)
       )
-    : activeTags;
+    : sortedTags;
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -622,6 +651,33 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
     });
     setTitle('');
     setShortcut('');
+  };
+
+  const commitEdit = async (tg: TagRecord) => {
+    const trimmed = editTitle.trim();
+    if (trimmed) {
+      const updated = await localDb.upsertTag({
+        id: tg.id,
+        title: trimmed,
+        shortcut: editShortcut.trim().toUpperCase().slice(0, 1) || null
+      });
+      if (updated.id !== tg.id) {
+        onToast(t.tagsMergedToast(tg.title, updated.title));
+      }
+    }
+    setEditingId(null);
+  };
+
+  const commitMerge = async (sourceTag: TagRecord) => {
+    if (!mergeTargetId || mergeTargetId === sourceTag.id) return;
+    const targetTag = activeTags.find((tg) => tg.id === mergeTargetId);
+    if (!targetTag) return;
+    const ok = await localDb.mergeTags(sourceTag.id, targetTag.id);
+    if (ok) {
+      onToast(t.tagsMergedToast(sourceTag.title, targetTag.title));
+    }
+    setMergingId(null);
+    setMergeTargetId('');
   };
 
   return (
@@ -663,7 +719,7 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
           <input
             type="text"
             className="text-field"
-            style={{ width: 112 }}
+            style={{ width: 104 }}
             maxLength={1}
             value={shortcut}
             onChange={(e) => setShortcut(e.target.value.toUpperCase().slice(0, 1))}
@@ -676,42 +732,69 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
 
         <div
           style={{
-            position: 'relative',
             display: 'flex',
             alignItems: 'center',
+            gap: 8,
             marginBottom: 12,
+            flexWrap: 'wrap',
             opacity: activeTags.length === 0 ? 0.55 : 1
           }}
         >
-          <Search
-            size={14}
-            style={{
-              position: 'absolute',
-              left: 11,
-              color: 'var(--text-tertiary)',
-              pointerEvents: 'none'
-            }}
-          />
-          <input
-            type="text"
-            className="text-field"
-            style={{ width: '100%', paddingLeft: 32, paddingRight: filterQuery ? 30 : 10 }}
-            value={filterQuery}
-            disabled={activeTags.length === 0}
-            onChange={(e) => setFilterQuery(e.target.value)}
-            placeholder={t.tagsFilterPlaceholder}
-          />
-          {filterQuery && (
-            <button
-              type="button"
-              className="icon-btn"
-              style={{ position: 'absolute', right: 4, width: 24, height: 24 }}
-              onClick={() => setFilterQuery('')}
-              aria-label="Clear"
-            >
-              <X size={13} />
-            </button>
-          )}
+          <div style={{ position: 'relative', flex: '1 1 160px', display: 'flex', alignItems: 'center' }}>
+            <Search
+              size={14}
+              style={{
+                position: 'absolute',
+                left: 11,
+                color: 'var(--text-tertiary)',
+                pointerEvents: 'none'
+              }}
+            />
+            <input
+              type="text"
+              className="text-field"
+              style={{ width: '100%', paddingLeft: 32, paddingRight: filterQuery ? 30 : 10 }}
+              value={filterQuery}
+              disabled={activeTags.length === 0}
+              onChange={(e) => setFilterQuery(e.target.value)}
+              placeholder={t.tagsSearchPlaceholder}
+            />
+            {filterQuery && (
+              <button
+                type="button"
+                className="icon-btn"
+                style={{ position: 'absolute', right: 4, width: 24, height: 24 }}
+                onClick={() => setFilterQuery('')}
+                aria-label="Clear"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+
+          <div
+            className="v2-segmented-toggle"
+            role="group"
+            aria-label={t.viewSortLabel}
+            data-testid="tags-sort-segmented"
+          >
+            {(
+              [
+                ['alpha', t.tagsSortAlpha],
+                ['most_used', t.tagsSortMostUsed],
+                ['manual', t.tagsSortManual]
+              ] as Array<[TagSortMode, string]>
+            ).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                className={`v2-segmented-btn ${tagSortMode === mode ? 'active' : ''}`}
+                onClick={() => onChangeTagSortMode(mode)}
+              >
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
         <div
@@ -746,117 +829,219 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
                 color: 'var(--text-tertiary)'
               }}
             >
-              {t.tagsNoFilterMatches}
+              {t.tagsNoMatches}
             </div>
           )}
-          {filteredTags.map((tg) => {
+          {filteredTags.map((tg, idx) => {
             const isEditing = editingId === tg.id;
+            const isMerging = mergingId === tg.id;
+            const usageCount = usageCounts.get(tg.id) ?? 0;
+            const mergeCandidates = sortedTags.filter((other) => other.id !== tg.id);
+
             return (
               <div
                 key={tg.id}
                 style={{
                   display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
+                  flexDirection: 'column',
+                  gap: 6,
                   padding: '7px 10px',
                   borderRadius: 'var(--radius-sm)',
                   background: 'var(--bg-subtle)',
                   border: '1px solid var(--border-subtle)'
                 }}
               >
-                <LayoutGrid size={14} style={{ color: 'var(--things-blue)' }} />
-                {isEditing ? (
-                  <>
-                    <input
-                      type="text"
-                      className="text-field"
-                      style={{ flex: 1, padding: '4px 8px' }}
-                      autoFocus
-                      value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
-                      onKeyDown={async (e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          if (editTitle.trim()) {
-                            await localDb.upsertTag({
-                              id: tg.id,
-                              title: editTitle.trim(),
-                              shortcut: editShortcut.trim().toUpperCase().slice(0, 1) || null
-                            });
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <LayoutGrid size={14} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
+                  {isEditing ? (
+                    <>
+                      <input
+                        type="text"
+                        className="text-field"
+                        style={{ flex: 1, padding: '4px 8px' }}
+                        autoFocus
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            await commitEdit(tg);
+                          } else if (e.key === 'Escape') {
+                            e.stopPropagation();
+                            setEditingId(null);
                           }
-                          setEditingId(null);
-                        } else if (e.key === 'Escape') {
-                          e.stopPropagation();
-                          setEditingId(null);
-                        }
-                      }}
-                    />
-                    <input
-                      type="text"
-                      className="text-field"
-                      style={{ width: 72, padding: '4px 8px' }}
-                      maxLength={1}
-                      value={editShortcut}
-                      onChange={(e) => setEditShortcut(e.target.value.toUpperCase().slice(0, 1))}
-                      placeholder="Key"
-                      onKeyDown={async (e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          if (editTitle.trim()) {
-                            await localDb.upsertTag({
-                              id: tg.id,
-                              title: editTitle.trim(),
-                              shortcut: editShortcut.trim().toUpperCase().slice(0, 1) || null
-                            });
+                        }}
+                      />
+                      <input
+                        type="text"
+                        className="text-field"
+                        style={{ width: 64, padding: '4px 8px' }}
+                        maxLength={1}
+                        value={editShortcut}
+                        onChange={(e) => setEditShortcut(e.target.value.toUpperCase().slice(0, 1))}
+                        placeholder="Key"
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            await commitEdit(tg);
+                          } else if (e.key === 'Escape') {
+                            e.stopPropagation();
+                            setEditingId(null);
                           }
-                          setEditingId(null);
-                        } else if (e.key === 'Escape') {
-                          e.stopPropagation();
-                          setEditingId(null);
-                        }
-                      }}
-                    />
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="icon-btn active"
+                        title={t.actionSave}
+                        onClick={() => void commitEdit(tg)}
+                      >
+                        <Check size={14} />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span
+                        style={{
+                          flex: 1,
+                          fontWeight: 560,
+                          minWidth: 0,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        {tg.title}
+                      </span>
+
+                      <span
+                        className="category-usage-badge"
+                        data-testid={`tag-usage-badge-${tg.id}`}
+                        title={`${usageCount}`}
+                      >
+                        {usageCount}
+                      </span>
+
+                      {tg.shortcut && <kbd>Ctrl+{tg.shortcut}</kbd>}
+
+                      {tagSortMode === 'manual' && !normalizedFilter && (
+                        <>
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            style={{ width: 24, height: 24 }}
+                            disabled={idx === 0}
+                            title={t.actionMove}
+                            onClick={() => void localDb.moveTagOrder(tg.id, 'up')}
+                          >
+                            <ArrowUp size={13.5} />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            style={{ width: 24, height: 24 }}
+                            disabled={idx >= filteredTags.length - 1}
+                            title={t.actionMove}
+                            onClick={() => void localDb.moveTagOrder(tg.id, 'down')}
+                          >
+                            <ArrowDown size={13.5} />
+                          </button>
+                        </>
+                      )}
+
+                      {mergeCandidates.length > 0 && (
+                        <button
+                          type="button"
+                          className={`icon-btn ${isMerging ? 'active' : ''}`}
+                          title={t.tagsMergeAction}
+                          data-testid={`tag-merge-btn-${tg.id}`}
+                          onClick={() => {
+                            if (isMerging) {
+                              setMergingId(null);
+                              setMergeTargetId('');
+                            } else {
+                              setEditingId(null);
+                              setMergingId(tg.id);
+                              setMergeTargetId(mergeCandidates[0]?.id ?? '');
+                            }
+                          }}
+                        >
+                          <GitMerge size={13.5} />
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        title={t.actionEdit}
+                        onClick={() => {
+                          setMergingId(null);
+                          setEditingId(tg.id);
+                          setEditTitle(tg.title);
+                          setEditShortcut(tg.shortcut || '');
+                        }}
+                      >
+                        <Edit3 size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        style={{ color: 'var(--deadline-red)' }}
+                        title={t.actionDelete}
+                        onClick={() => void localDb.deleteTag(tg.id)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {isMerging && mergeCandidates.length > 0 && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      paddingTop: 6,
+                      borderTop: '1px solid var(--border-subtle)'
+                    }}
+                  >
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 560 }}>
+                      {t.tagsMergeTargetPrompt(tg.title)}
+                    </span>
+                    <select
+                      className="text-field"
+                      style={{ flex: 1, padding: '4px 8px', fontSize: 12.5 }}
+                      value={mergeTargetId}
+                      onChange={(e) => setMergeTargetId(e.target.value)}
+                    >
+                      {mergeCandidates.map((cand) => (
+                        <option key={cand.id} value={cand.id}>
+                          {cand.title}
+                        </option>
+                      ))}
+                    </select>
                     <button
                       type="button"
-                      className="icon-btn active"
-                      onClick={async () => {
-                        if (editTitle.trim()) {
-                          await localDb.upsertTag({
-                            id: tg.id,
-                            title: editTitle.trim(),
-                            shortcut: editShortcut.trim().toUpperCase().slice(0, 1) || null
-                          });
-                        }
-                        setEditingId(null);
-                      }}
+                      className="btn-primary"
+                      style={{ padding: '4px 10px', fontSize: 12 }}
+                      disabled={!mergeTargetId}
+                      onClick={() => void commitMerge(tg)}
                     >
-                      <Check size={14} />
+                      <Check size={13} />
                     </button>
-                  </>
-                ) : (
-                  <>
-                    <span style={{ flex: 1, fontWeight: 560 }}>{tg.title}</span>
-                    {tg.shortcut && <kbd>Ctrl+{tg.shortcut}</kbd>}
                     <button
                       type="button"
                       className="icon-btn"
+                      style={{ width: 24, height: 24 }}
                       onClick={() => {
-                        setEditingId(tg.id);
-                        setEditTitle(tg.title);
-                        setEditShortcut(tg.shortcut || '');
+                        setMergingId(null);
+                        setMergeTargetId('');
                       }}
                     >
-                      <Edit3 size={14} />
+                      <X size={13} />
                     </button>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      style={{ color: 'var(--deadline-red)' }}
-                      onClick={() => localDb.deleteTag(tg.id)}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </>
+                  </div>
                 )}
               </div>
             );
@@ -871,7 +1056,10 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
 
 interface TaskTagPickerModalProps {
   selectedTagIds: string[];
+  indeterminateTagIds?: string[];
   tags: TagRecord[];
+  usageCounts: ReadonlyMap<string, number>;
+  tagSortMode: TagSortMode;
   t: TranslationStrings;
   onToggleTag: (tagId: string) => void;
   onOpenManageTags: () => void;
@@ -880,7 +1068,10 @@ interface TaskTagPickerModalProps {
 
 export const TaskTagPickerModal: React.FC<TaskTagPickerModalProps> = ({
   selectedTagIds,
+  indeterminateTagIds = [],
   tags,
+  usageCounts,
+  tagSortMode,
   t,
   onToggleTag,
   onOpenManageTags,
@@ -888,15 +1079,16 @@ export const TaskTagPickerModal: React.FC<TaskTagPickerModalProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const activeTags = tags.filter((tg) => !tg.isDeleted);
+  const sortedTags = sortTagsForMode(activeTags, tagSortMode, usageCounts);
   const cleanQuery = searchQuery.trim();
   const normalizedQuery = cleanQuery.toLowerCase();
   const filteredTags = normalizedQuery
-    ? activeTags.filter(
+    ? sortedTags.filter(
         (tg) =>
           tg.title.toLowerCase().includes(normalizedQuery) ||
           (tg.shortcut || '').toLowerCase().includes(normalizedQuery)
       )
-    : activeTags;
+    : sortedTags;
   const exactMatch = cleanQuery
     ? activeTags.find((tg) => tg.title.toLowerCase() === normalizedQuery)
     : undefined;
@@ -904,7 +1096,9 @@ export const TaskTagPickerModal: React.FC<TaskTagPickerModalProps> = ({
   const createAndAssignFromQuery = async () => {
     if (!cleanQuery) return;
     if (exactMatch) {
-      onToggleTag(exactMatch.id);
+      if (!selectedTagIds.includes(exactMatch.id)) {
+        onToggleTag(exactMatch.id);
+      }
     } else {
       const created = await localDb.upsertTag({ title: cleanQuery });
       onToggleTag(created.id);
@@ -930,8 +1124,8 @@ export const TaskTagPickerModal: React.FC<TaskTagPickerModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSearchSubmit} style={{ marginBottom: 12 }}>
-          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+        <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center' }}>
             <Search
               size={15}
               style={{
@@ -948,7 +1142,7 @@ export const TaskTagPickerModal: React.FC<TaskTagPickerModalProps> = ({
               autoFocus
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={t.tagsSearchOrCreatePlaceholder}
+              placeholder={t.tagsAssignSearchPlaceholder}
             />
             {searchQuery && (
               <button
@@ -962,6 +1156,9 @@ export const TaskTagPickerModal: React.FC<TaskTagPickerModalProps> = ({
               </button>
             )}
           </div>
+          <button type="submit" className="btn-primary" disabled={!cleanQuery}>
+            <Plus size={15} />
+          </button>
         </form>
 
         <div
@@ -997,7 +1194,7 @@ export const TaskTagPickerModal: React.FC<TaskTagPickerModalProps> = ({
                 background: 'var(--things-blue-soft)',
                 borderRadius: 'var(--radius-sm)'
               }}
-              onClick={createAndAssignFromQuery}
+              onClick={() => void createAndAssignFromQuery()}
             >
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                 <Plus size={14} />
@@ -1014,11 +1211,13 @@ export const TaskTagPickerModal: React.FC<TaskTagPickerModalProps> = ({
                 color: 'var(--text-tertiary)'
               }}
             >
-              {t.tagsNoFilterMatches}
+              {t.tagsNoMatches}
             </div>
           )}
           {filteredTags.map((tg) => {
             const checked = selectedTagIds.includes(tg.id);
+            const indeterminate = !checked && indeterminateTagIds.includes(tg.id);
+            const usageCount = usageCounts.get(tg.id) ?? 0;
             return (
               <button
                 key={tg.id}
@@ -1027,12 +1226,23 @@ export const TaskTagPickerModal: React.FC<TaskTagPickerModalProps> = ({
                 onClick={() => onToggleTag(tg.id)}
               >
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 9 }}>
-                  <span className={`things-checkbox ${checked ? 'completed' : ''}`} style={{ width: 17, height: 17, minWidth: 17 }}>
+                  <span
+                    className={`things-checkbox ${
+                      checked ? 'completed' : indeterminate ? 'indeterminate' : ''
+                    }`}
+                    style={{ width: 17, height: 17, minWidth: 17 }}
+                  >
                     {checked && <Check size={11} strokeWidth={3} />}
+                    {indeterminate && <Minus size={11} strokeWidth={3} />}
                   </span>
                   <span>{tg.title}</span>
                 </span>
-                {tg.shortcut && <kbd>Ctrl+{tg.shortcut}</kbd>}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  {usageCount > 0 && (
+                    <span className="category-usage-badge">{usageCount}</span>
+                  )}
+                  {tg.shortcut && <kbd>Ctrl+{tg.shortcut}</kbd>}
+                </span>
               </button>
             );
           })}
@@ -1189,3 +1399,561 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
     </div>
   );
 };
+
+// ==================== 8. TaskDependencyModal (Waiting On…) ====================
+
+interface TaskDependencyModalProps {
+  task: TaskRecord;
+  allTasks: TaskRecord[];
+  projectsMap: ReadonlyMap<string, ProjectRecord>;
+  t: TranslationStrings;
+  onToast: (msg: string) => void;
+  onClose: () => void;
+}
+
+export const TaskDependencyModal: React.FC<TaskDependencyModalProps> = ({
+  task,
+  allTasks,
+  projectsMap,
+  t,
+  onToast,
+  onClose
+}) => {
+  const [searchQuery, setSearchQuery] = useState('');
+  const currentBlockers = useMemo(
+    () => (task.blockedByTaskIds || []).filter((id) => id && id !== task.id),
+    [task.blockedByTaskIds, task.id]
+  );
+
+  const blockedByMap = useMemo(() => {
+    const map = new Map<string, readonly string[]>();
+    for (const tk of allTasks) {
+      if (tk.isDeleted) continue;
+      if (Array.isArray(tk.blockedByTaskIds) && tk.blockedByTaskIds.length > 0) {
+        map.set(tk.id, tk.blockedByTaskIds);
+      }
+    }
+    return map;
+  }, [allTasks]);
+
+  const candidates = useMemo(() => {
+    const selectedSet = new Set(currentBlockers);
+    const norm = searchQuery.trim().toLowerCase();
+    return allTasks
+      .filter((tk) => {
+        if (tk.isDeleted || tk.id === task.id) return false;
+        if (tk.status !== 'OPEN' && !selectedSet.has(tk.id)) return false;
+        if (!norm) return true;
+        const projTitle = tk.projectId ? (projectsMap.get(tk.projectId)?.title ?? '') : '';
+        return (
+          tk.title.toLowerCase().includes(norm) || projTitle.toLowerCase().includes(norm)
+        );
+      })
+      .sort((a, b) => {
+        const aSel = selectedSet.has(a.id);
+        const bSel = selectedSet.has(b.id);
+        if (aSel !== bSel) return aSel ? -1 : 1;
+        return a.sortOrder - b.sortOrder || a.createdAt - b.createdAt;
+      });
+  }, [allTasks, currentBlockers, projectsMap, searchQuery, task.id]);
+
+  const handleToggleBlocker = async (candidateId: string, wouldCycle: boolean) => {
+    const exists = currentBlockers.includes(candidateId);
+    if (exists) {
+      const next = currentBlockers.filter((id) => id !== candidateId);
+      await localDb.upsertTask({ id: task.id, blockedByTaskIds: next });
+      return;
+    }
+    if (wouldCycle) {
+      onToast(t.dependencyCycleWarning);
+      return;
+    }
+    const next = [...currentBlockers, candidateId];
+    await localDb.upsertTask({ id: task.id, blockedByTaskIds: next });
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-panel" onClick={(e) => e.stopPropagation()} data-testid="task-dependency-modal">
+        <div className="modal-header">
+          <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Link2 size={18} style={{ color: 'var(--things-blue)' }} />
+            <span>{t.dependencyModalTitle}</span>
+            {currentBlockers.length > 0 && (
+              <span className="category-usage-badge">{currentBlockers.length}</span>
+            )}
+          </h3>
+          <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div
+          style={{
+            fontSize: 12.6,
+            color: 'var(--text-secondary)',
+            marginBottom: 10,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          {task.title || t.placeholderTodoTitle}
+        </div>
+
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+          <Search
+            size={15}
+            style={{
+              position: 'absolute',
+              left: 11,
+              color: 'var(--text-tertiary)',
+              pointerEvents: 'none'
+            }}
+          />
+          <input
+            type="text"
+            className="text-field"
+            style={{ width: '100%', paddingLeft: 34, paddingRight: searchQuery ? 30 : 10 }}
+            autoFocus
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={t.dependencySearchPlaceholder}
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              className="icon-btn"
+              style={{ position: 'absolute', right: 4, width: 24, height: 24 }}
+              onClick={() => setSearchQuery('')}
+              aria-label="Clear"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+            height: 'min(260px, 42vh)',
+            minHeight: 'min(260px, 42vh)',
+            maxHeight: 'min(260px, 42vh)',
+            overflowY: 'auto'
+          }}
+        >
+          {candidates.length === 0 ? (
+            <div
+              style={{
+                padding: '18px 10px',
+                textAlign: 'center',
+                fontSize: 13,
+                color: 'var(--text-tertiary)'
+              }}
+            >
+              {t.dependencyEmpty}
+            </div>
+          ) : (
+            candidates.map((cand) => {
+              const checked = currentBlockers.includes(cand.id);
+              const wouldCycle =
+                !checked && wouldCreateDependencyCycle(task.id, cand.id, blockedByMap);
+              const projTitle = cand.projectId
+                ? (projectsMap.get(cand.projectId)?.title ?? '')
+                : '';
+
+              return (
+                <button
+                  key={cand.id}
+                  type="button"
+                  className="dropdown-item"
+                  disabled={wouldCycle}
+                  style={wouldCycle ? { opacity: 0.48, cursor: 'not-allowed' } : undefined}
+                  title={wouldCycle ? t.dependencyCycleWarning : cand.title}
+                  onClick={() => void handleToggleBlocker(cand.id, wouldCycle)}
+                >
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 9,
+                      minWidth: 0,
+                      flex: 1
+                    }}
+                  >
+                    <span
+                      className={`things-checkbox ${checked ? 'completed' : ''}`}
+                      style={{ width: 17, height: 17, minWidth: 17 }}
+                    >
+                      {checked && <Check size={11} strokeWidth={3} />}
+                    </span>
+                    <span
+                      style={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        textDecoration: cand.status !== 'OPEN' ? 'line-through' : undefined
+                      }}
+                    >
+                      {cand.title || t.placeholderTodoTitle}
+                    </span>
+                  </span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                    {wouldCycle && (
+                      <AlertTriangle size={13} style={{ color: 'var(--deadline-red)' }} />
+                    )}
+                    {projTitle && (
+                      <span
+                        style={{
+                          fontSize: 11.5,
+                          color: 'var(--text-muted)',
+                          maxWidth: 120,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        {projTitle}
+                      </span>
+                    )}
+                  </span>
+                </button>
+              );
+            })
+          )}
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginTop: 14,
+            paddingTop: 10,
+            borderTop: '1px solid var(--border-subtle)'
+          }}
+        >
+          {currentBlockers.length > 0 ? (
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => void localDb.upsertTask({ id: task.id, blockedByTaskIds: [] })}
+            >
+              {t.dependencyClearAll}
+            </button>
+          ) : (
+            <span />
+          )}
+          <button type="button" className="btn-primary" onClick={onClose}>
+            {t.actionDone}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ==================== 9. PerspectiveModal ====================
+
+interface PerspectiveModalProps {
+  perspective: SavedPerspective | null;
+  areas: AreaRecord[];
+  tags: TagRecord[];
+  nextSortOrder: number;
+  t: TranslationStrings;
+  onSave: (perspective: SavedPerspective) => void;
+  onDelete?: (perspectiveId: string) => void;
+  onClose: () => void;
+}
+
+const PERSPECTIVE_MAX_DURATION_PRESETS = [5, 15, 30, 60, 120] as const;
+
+export const PerspectiveModal: React.FC<PerspectiveModalProps> = ({
+  perspective,
+  areas,
+  tags,
+  nextSortOrder,
+  t,
+  onSave,
+  onDelete,
+  onClose
+}) => {
+  const [title, setTitle] = useState(perspective?.title ?? '');
+  const [categoryIds, setCategoryIds] = useState<string[]>(perspective?.categoryIds ?? []);
+  const [effortLevel, setEffortLevel] = useState<EffortLevel | null>(
+    perspective?.effortLevel ?? null
+  );
+  const [maxDurationMinutes, setMaxDurationMinutes] = useState<number | null>(
+    perspective?.maxDurationMinutes ?? null
+  );
+  const [dueWindow, setDueWindow] = useState<SavedPerspective['dueWindow']>(
+    perspective?.dueWindow ?? 'ANY'
+  );
+  const [areaId, setAreaId] = useState<string | null>(perspective?.areaId ?? null);
+  const [actionableOnly, setActionableOnly] = useState<boolean>(
+    perspective ? perspective.actionableOnly : true
+  );
+
+  const activeAreas = areas.filter((a) => !a.isDeleted);
+  const activeTags = tags.filter((tg) => !tg.isDeleted);
+
+  const toggleCategory = (id: string) => {
+    setCategoryIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    onSave({
+      id: perspective?.id ?? crypto.randomUUID(),
+      title: trimmed,
+      categoryIds,
+      effortLevel,
+      maxDurationMinutes,
+      dueWindow,
+      areaId,
+      actionableOnly,
+      sortOrder: perspective?.sortOrder ?? nextSortOrder
+    });
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="modal-panel"
+        style={{ maxWidth: 520 }}
+        onClick={(e) => e.stopPropagation()}
+        data-testid="perspective-modal"
+      >
+        <div className="modal-header">
+          <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <SlidersHorizontal size={18} style={{ color: 'var(--things-blue)' }} />
+            <span>{perspective ? t.perspectiveEditTitle : t.perspectiveNewTitle}</span>
+          </h3>
+          <button type="button" className="icon-btn" title={t.actionCancel} onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <input
+            type="text"
+            className="text-field"
+            autoFocus
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder={t.perspectiveNamePlaceholder}
+          />
+
+          {/* Effort Filter */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+              {t.effortLabel}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              <button
+                type="button"
+                className={`chip-btn ${effortLevel === null ? 'active' : ''}`}
+                onClick={() => setEffortLevel(null)}
+              >
+                {t.effortNone}
+              </button>
+              <button
+                type="button"
+                className={`chip-btn ${effortLevel === 'QUICK_WIN' ? 'active' : ''}`}
+                onClick={() => setEffortLevel('QUICK_WIN')}
+              >
+                ⚡ {t.effortQuickWin}
+              </button>
+              <button
+                type="button"
+                className={`chip-btn ${effortLevel === 'MEDIUM' ? 'active' : ''}`}
+                onClick={() => setEffortLevel('MEDIUM')}
+              >
+                {t.effortMedium}
+              </button>
+              <button
+                type="button"
+                className={`chip-btn ${effortLevel === 'DEEP_FOCUS' ? 'active' : ''}`}
+                onClick={() => setEffortLevel('DEEP_FOCUS')}
+              >
+                🧠 {t.effortDeepFocus}
+              </button>
+            </div>
+          </div>
+
+          {/* Max Duration Filter */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+              {t.perspectiveMaxDurationLabel}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              <button
+                type="button"
+                className={`chip-btn ${maxDurationMinutes === null ? 'active' : ''}`}
+                onClick={() => setMaxDurationMinutes(null)}
+              >
+                {t.perspectiveMaxDurationAny}
+              </button>
+              {PERSPECTIVE_MAX_DURATION_PRESETS.map((mins) => (
+                <button
+                  key={mins}
+                  type="button"
+                  className={`chip-btn ${maxDurationMinutes === mins ? 'active' : ''}`}
+                  onClick={() => setMaxDurationMinutes(mins)}
+                >
+                  ≤ {formatStandaloneDuration(mins)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Due Window Filter */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+              {t.perspectiveDueWindowLabel}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {(
+                [
+                  ['ANY', t.perspectiveDueAny],
+                  ['TODAY', t.perspectiveDueToday],
+                  ['NEXT_7_DAYS', t.perspectiveDueNext7Days],
+                  ['OVERDUE', t.perspectiveDueOverdue]
+                ] as Array<[SavedPerspective['dueWindow'], string]>
+              ).map(([win, label]) => (
+                <button
+                  key={win}
+                  type="button"
+                  className={`chip-btn ${dueWindow === win ? 'active' : ''}`}
+                  onClick={() => setDueWindow(win)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Area Filter */}
+          {activeAreas.length > 0 && (
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                {t.entityArea}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                <button
+                  type="button"
+                  className={`chip-btn ${areaId === null ? 'active' : ''}`}
+                  onClick={() => setAreaId(null)}
+                >
+                  {t.perspectiveAreaAll}
+                </button>
+                {activeAreas.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    className={`chip-btn ${areaId === a.id ? 'active' : ''}`}
+                    onClick={() => setAreaId(a.id)}
+                  >
+                    <Folder size={12} />
+                    <span>{a.title}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Categories Multi-Select */}
+          {activeTags.length > 0 && (
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                {t.entityTags}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 92, overflowY: 'auto' }}>
+                {activeTags.map((tg) => {
+                  const selected = categoryIds.includes(tg.id);
+                  return (
+                    <button
+                      key={tg.id}
+                      type="button"
+                      className={`chip-btn ${selected ? 'active' : ''}`}
+                      onClick={() => toggleCategory(tg.id)}
+                    >
+                      <LayoutGrid size={11.5} />
+                      <span>{tg.title}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Actionable Only Toggle */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10,
+              padding: '9px 12px',
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--bg-subtle)',
+              border: '1px solid var(--border-subtle)'
+            }}
+          >
+            <span style={{ fontSize: 13, fontWeight: 560 }}>
+              {t.perspectiveActionableOnlyLabel}
+            </span>
+            <button
+              type="button"
+              className={`toggle-switch ${actionableOnly ? 'on' : ''}`}
+              aria-pressed={actionableOnly}
+              onClick={() => setActionableOnly((v) => !v)}
+            >
+              <span className="toggle-switch-knob" />
+            </button>
+          </div>
+
+          {/* Footer Actions */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 8,
+              paddingTop: 6
+            }}
+          >
+            {perspective && onDelete ? (
+              <button
+                type="button"
+                className="chip-btn urgent"
+                onClick={() => onDelete(perspective.id)}
+              >
+                <Trash2 size={13} />
+                <span>{t.actionDelete}</span>
+              </button>
+            ) : (
+              <span />
+            )}
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" className="btn-secondary" onClick={onClose}>
+                {t.actionCancel}
+              </button>
+              <button type="submit" className="btn-primary" disabled={!title.trim()}>
+                {t.actionSave}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+

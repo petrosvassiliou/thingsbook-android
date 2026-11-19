@@ -117,6 +117,35 @@ object AppModule {
         }
     }
 
+    internal val MIGRATION_5_6 = object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            if (!db.hasColumn("tasks", "isPinned")) {
+                db.execSQL("ALTER TABLE `tasks` ADD COLUMN `isPinned` INTEGER NOT NULL DEFAULT 0")
+            }
+            if (!db.hasColumn("tasks", "effortLevel")) {
+                db.execSQL("ALTER TABLE `tasks` ADD COLUMN `effortLevel` TEXT")
+            }
+            if (!db.hasColumn("tasks", "blockedByJson")) {
+                db.execSQL("ALTER TABLE `tasks` ADD COLUMN `blockedByJson` TEXT NOT NULL DEFAULT '[]'")
+            }
+            if (!db.hasColumn("tasks", "workspaceId")) {
+                db.execSQL("ALTER TABLE `tasks` ADD COLUMN `workspaceId` TEXT")
+            }
+            if (!db.hasColumn("tasks", "assigneeId")) {
+                db.execSQL("ALTER TABLE `tasks` ADD COLUMN `assigneeId` TEXT")
+            }
+            if (!db.hasColumn("headings", "startDate")) {
+                db.execSQL("ALTER TABLE `headings` ADD COLUMN `startDate` INTEGER")
+            }
+            if (!db.hasColumn("projects", "workspaceId")) {
+                db.execSQL("ALTER TABLE `projects` ADD COLUMN `workspaceId` TEXT")
+            }
+            if (!db.hasColumn("projects", "viewMode")) {
+                db.execSQL("ALTER TABLE `projects` ADD COLUMN `viewMode` TEXT")
+            }
+        }
+    }
+
     private fun ensureDefaultFirebaseApp(context: Context): FirebaseApp {
         runCatching {
             if (FirebaseApp.getApps(context).isNotEmpty()) {
@@ -151,7 +180,7 @@ object AppModule {
             ThingsDatabase::class.java,
             ThingsDatabase.DATABASE_NAME
         )
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .addCallback(DatabaseSeeder(databaseProvider))
             .fallbackToDestructiveMigration()
             .fallbackToDestructiveMigrationOnDowngrade()

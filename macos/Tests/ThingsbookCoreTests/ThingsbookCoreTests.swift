@@ -408,15 +408,15 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-alpha.10")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-alpha.10")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 86)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-alpha.11")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-alpha.11")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 88)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.10", current: "2.1.4", includeBeta: false))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.10", current: "2.1.4", includeBeta: true))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.10", current: "3.0.0-alpha.9"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.11", current: "2.5.0", includeBeta: false))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.11", current: "2.5.0", includeBeta: true))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.11", current: "3.0.0-alpha.10"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-alpha.10"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.12", current: "3.0.0-alpha.11"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-alpha.11"))
         let ultraCompact = MacToolbarLayoutMetrics.compute(detailWidth: 506.0, isSidebarCollapsed: false)
         XCTAssertEqual(ultraCompact.usableWidth, 450.0)
         XCTAssertFalse(ultraCompact.showGeminiLabel)
@@ -3200,4 +3200,473 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(rowsDe.count, 1)
         XCTAssertEqual(rowsDe.first?.tagTitles, ["Fokus", "Büro"])
     }
+
+    // MARK: - 28. v3.0.0-alpha.11 TaskDependencyGraph Cycle Detection & Auto-Unlocking
+
+    func testV30TaskDependencyGraphCycleDetectionAndAutoUnlocking() {
+        // A -> blocked by B, B -> blocked by C
+        let blockedByMap: [String: [String]] = [
+            "task-A": ["task-B"],
+            "task-B": ["task-C"],
+            "task-C": []
+        ]
+
+        // Self-cycle rejected
+        XCTAssertTrue(
+            TaskDependencyGraph.wouldCreateCycle(
+                taskId: "task-A",
+                candidateBlockerId: "task-A",
+                blockedByMap: blockedByMap
+            )
+        )
+        // Direct 2-node cycle (B blocked by A when A is already blocked by B) rejected
+        XCTAssertTrue(
+            TaskDependencyGraph.wouldCreateCycle(
+                taskId: "task-B",
+                candidateBlockerId: "task-A",
+                blockedByMap: blockedByMap
+            )
+        )
+        // Transitive 3-node cycle (C blocked by A when A -> B -> C) rejected
+        XCTAssertTrue(
+            TaskDependencyGraph.wouldCreateCycle(
+                taskId: "task-C",
+                candidateBlockerId: "task-A",
+                blockedByMap: blockedByMap
+            )
+        )
+        // Acyclic dependency (A also blocked by D, or D blocked by A) allowed
+        XCTAssertFalse(
+            TaskDependencyGraph.wouldCreateCycle(
+                taskId: "task-A",
+                candidateBlockerId: "task-D",
+                blockedByMap: blockedByMap
+            )
+        )
+        XCTAssertFalse(
+            TaskDependencyGraph.wouldCreateCycle(
+                taskId: "task-D",
+                candidateBlockerId: "task-A",
+                blockedByMap: blockedByMap
+            )
+        )
+
+        // Auto-unlocking when blockers complete or are deleted
+        let dependent = TaskItem(
+            id: "dep-1",
+            title: "Ship Release",
+            blockedByTaskIds: ["blk-1", "blk-2"],
+            createdAt: 100,
+            updatedAt: 100
+        )
+        XCTAssertTrue(TaskDependencyGraph.isActivelyBlocked(dependent, openTaskIds: ["dep-1", "blk-1", "blk-2"]))
+        XCTAssertEqual(TaskDependencyGraph.activeBlockerIds(for: dependent, openTaskIds: ["dep-1", "blk-1", "blk-2"]), ["blk-1", "blk-2"])
+        XCTAssertTrue(TaskDependencyGraph.isActivelyBlocked(dependent, openTaskIds: ["dep-1", "blk-2"]))
+        XCTAssertEqual(TaskDependencyGraph.activeBlockerIds(for: dependent, openTaskIds: ["dep-1", "blk-2"]), ["blk-2"])
+        XCTAssertFalse(TaskDependencyGraph.isActivelyBlocked(dependent, openTaskIds: ["dep-1"]))
+        XCTAssertTrue(TaskDependencyGraph.activeBlockerIds(for: dependent, openTaskIds: ["dep-1"]).isEmpty)
+    }
+
+    // MARK: - 29. v3.0.0-alpha.11 TaskViewSorter, TagListSorter, PerspectiveFilterEngine & TodayCapacityCalculator
+
+    func testV30SortersPerspectiveFilterEngineAndTodayCapacityCalculator() {
+        let dayMs: Int64 = 86_400_000
+        let todayMs: Int64 = 1_795_046_400_000 // Midnight UTC anchor
+        let tagWork = Tag(id: "cat-work", title: "Work", shortcut: "w", sortOrder: 20, createdAt: 1, updatedAt: 1)
+        let tagQuick = Tag(id: "cat-quick", title: "Quick", shortcut: "q", sortOrder: 10, createdAt: 1, updatedAt: 1)
+        let tagHome = Tag(id: "cat-home", title: "Home", shortcut: "h", sortOrder: 30, createdAt: 1, updatedAt: 1)
+
+        // 1. TagListSorter: alpha, most_used, manual
+        let tags = [tagWork, tagQuick, tagHome]
+        XCTAssertEqual(TagListSorter.sort(tags, mode: "alpha").map(\.id), ["cat-home", "cat-quick", "cat-work"])
+        XCTAssertEqual(TagListSorter.sort(tags, mode: "manual").map(\.id), ["cat-quick", "cat-work", "cat-home"])
+        XCTAssertEqual(
+            TagListSorter.sort(tags, mode: "most_used", usageCounts: ["cat-work": 5, "cat-home": 2, "cat-quick": 2]).map(\.id),
+            ["cat-work", "cat-home", "cat-quick"]
+        )
+
+        // 2. TaskViewSorter: Pin-first + manual, deadline, duration, effort, alpha
+        let t1 = TaskItem(
+            id: "t1",
+            title: "Charlie Deep",
+            scheduleState: .today,
+            whenDate: todayMs,
+            deadline: todayMs + 3 * dayMs,
+            durationMinutes: 90,
+            areaId: "area-eng",
+            sortOrder: 10,
+            isPinned: false,
+            effortLevel: TaskEffortLevel.deepFocus.rawValue,
+            tags: [tagWork],
+            createdAt: 1,
+            updatedAt: 1
+        )
+        let t2 = TaskItem(
+            id: "t2",
+            title: "Alpha Quick",
+            scheduleState: .today,
+            whenDate: todayMs,
+            deadline: todayMs + 1 * dayMs,
+            durationMinutes: 15,
+            areaId: "area-eng",
+            sortOrder: 20,
+            isPinned: false,
+            effortLevel: TaskEffortLevel.quickWin.rawValue,
+            tags: [tagWork, tagQuick],
+            createdAt: 2,
+            updatedAt: 2
+        )
+        let t3 = TaskItem(
+            id: "t3",
+            title: "Bravo Pinned Medium",
+            scheduleState: .anytime,
+            durationMinutes: 30,
+            areaId: "area-eng",
+            sortOrder: 30,
+            isPinned: true,
+            effortLevel: TaskEffortLevel.medium.rawValue,
+            blockedByTaskIds: ["t2"],
+            tags: [tagWork],
+            createdAt: 3,
+            updatedAt: 3
+        )
+        let t4 = TaskItem(
+            id: "t4",
+            title: "Delta Unestimated",
+            scheduleState: .someday,
+            sortOrder: 5,
+            isPinned: false,
+            tags: [tagHome],
+            createdAt: 4,
+            updatedAt: 4
+        )
+        let all = [t1, t2, t3, t4]
+
+        XCTAssertEqual(TaskViewSorter.sort(all, mode: "manual").map(\.id), ["t3", "t4", "t1", "t2"])
+        XCTAssertEqual(TaskViewSorter.sort(all, mode: "deadline").map(\.id), ["t3", "t2", "t1", "t4"])
+        XCTAssertEqual(TaskViewSorter.sort(all, mode: "duration").map(\.id), ["t3", "t2", "t1", "t4"])
+        XCTAssertEqual(TaskViewSorter.sort(all, mode: "effort").map(\.id), ["t3", "t2", "t1", "t4"])
+        XCTAssertEqual(TaskViewSorter.sort(all, mode: "alpha").map(\.id), ["t3", "t2", "t1", "t4"])
+
+        // Standalone duration pill vs timeblock pill
+        XCTAssertEqual(t2.formattedStandaloneDurationPill, "15m")
+        XCTAssertEqual(t1.formattedStandaloneDurationPill, "1h 30m")
+
+        // 3. PerspectiveFilterEngine: category, effort, maxDuration, dueWindow, areaId, actionableOnly
+        let quickActionablePerspective = SavedPerspective(
+            id: "p-quick",
+            title: "Quick Wins",
+            categoryIds: ["cat-work"],
+            effortLevel: nil,
+            maxDurationMinutes: 30,
+            dueWindow: "ANY",
+            areaId: "area-eng",
+            actionableOnly: true
+        )
+        // While t2 is open, t3 is actively blocked by t2 -> excluded when actionableOnly == true
+        let filteredWhileBlocked = PerspectiveFilterEngine.filter(
+            tasks: all,
+            perspective: quickActionablePerspective,
+            openTaskIds: ["t1", "t2", "t3", "t4"],
+            todayEpochMillis: todayMs
+        )
+        XCTAssertEqual(filteredWhileBlocked.map(\.id), ["t2"])
+
+        // Once t2 is completed (removed from openTaskIds), t3 auto-unlocks and matches!
+        let filteredOnceUnlocked = PerspectiveFilterEngine.filter(
+            tasks: all,
+            perspective: quickActionablePerspective,
+            openTaskIds: ["t1", "t3", "t4"],
+            todayEpochMillis: todayMs
+        )
+        XCTAssertEqual(Set(filteredOnceUnlocked.map(\.id)), ["t2", "t3"])
+
+        // 4. TodayCapacityCalculator: merges overlapping calendar intervals & subtracts planned task minutes
+        let dayStart = todayMs + 9 * 3_600_000  // 09:00
+        let dayEnd = todayMs + 17 * 3_600_000   // 17:00 (480 mins total window)
+        let ev1 = CalendarEventItem(
+            id: "ev1",
+            eventIdentifier: "ev1",
+            calendarId: "cal1",
+            calendarDisplayName: "Work",
+            title: "Standup",
+            startMillis: todayMs + 10 * 3_600_000,         // 10:00
+            endMillis: todayMs + 11 * 3_600_000,           // 11:00 (60m)
+            isAllDay: false,
+            colorHex: 0x2B79C2,
+            startDateEpochDay: 20776,
+            endDateInclusiveEpochDay: 20776
+        )
+        let evOverlap = CalendarEventItem(
+            id: "ev2",
+            eventIdentifier: "ev2",
+            calendarId: "cal1",
+            calendarDisplayName: "Work",
+            title: "Design Sync",
+            startMillis: todayMs + 10 * 3_600_000 + 1_800_000, // 10:30
+            endMillis: todayMs + 11 * 3_600_000 + 1_800_000,   // 11:30 (merged 10:00-11:30 = 90m busy)
+            isAllDay: false,
+            colorHex: 0x2B79C2,
+            startDateEpochDay: 20776,
+            endDateInclusiveEpochDay: 20776
+        )
+        let allDayEv = CalendarEventItem(
+            id: "ev3",
+            eventIdentifier: "ev3",
+            calendarId: "cal1",
+            calendarDisplayName: "Holidays",
+            title: "Conference",
+            startMillis: todayMs,
+            endMillis: todayMs + dayMs,
+            isAllDay: true,
+            colorHex: 0x2B79C2,
+            startDateEpochDay: 20776,
+            endDateInclusiveEpochDay: 20776
+        )
+        // t1 (90m) + t2 (15m) = 105m planned; 480m window - 90m busy - 105m planned = 285m free
+        let cap = TodayCapacityCalculator.compute(
+            tasks: [t1, t2],
+            calendarEvents: [ev1, evOverlap, allDayEv],
+            dayStartMillis: dayStart,
+            dayEndMillis: dayEnd
+        )
+        XCTAssertEqual(cap.plannedMinutes, 105)
+        XCTAssertEqual(cap.freeMinutes, 285)
+        XCTAssertEqual(TodayCapacityCalculator.formatMinutes(cap.plannedMinutes), "1h 45m")
+        XCTAssertEqual(TodayCapacityCalculator.formatMinutes(cap.freeMinutes), "4h 45m")
+    }
+
+    // MARK: - 30. v3.0.0-alpha.11 SQLite Persistence (isPinned, Effort, Duration, BlockedBy Cycle Guard, Phase startDate, MergeTags & Duplicate)
+
+    func testV30DatabasePinEffortDurationDependenciesPhaseStartDateMergeTagsAndDuplicate() throws {
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let tagSrc = try db.createOrUpdateTag(title: "LegacyWIP", shortcut: "l")
+        let tagDst = try db.createOrUpdateTag(title: "Active", shortcut: "a")
+        let tagExtra = try db.createOrUpdateTag(title: "Urgent", shortcut: "u")
+
+        // Clearing shortcut works via createOrUpdateTag
+        let clearedTag = try db.createOrUpdateTag(existingId: tagDst.id, title: "Active", shortcut: nil)
+        XCTAssertNil(clearedTag.shortcut)
+
+        // Manual tag reorder swaps sort_order
+        try db.moveTagOrder(tagExtra.id, moveUp: true)
+
+        var proj = try db.createProject(title: "3.0 Milestone Project", notes: "")
+        proj.workspaceId = "ws-team-alpha"
+        proj.viewMode = "board"
+        proj.tagIds = [tagSrc.id]
+        try db.updateProject(proj)
+
+        let phase = try db.createHeading(projectId: proj.id, title: "Phase A")
+        let phaseStartMs: Int64 = 1_795_046_400_000
+        let phaseEndMs: Int64 = phaseStartMs + 7 * 86_400_000
+        try db.updateHeadingStartDate(phase.id, startDate: phaseStartMs)
+        try db.updateHeadingEndDate(phase.id, endDate: phaseEndMs)
+
+        let taskA = try db.createTask(
+            title: "Design Schema",
+            scheduleState: .today,
+            projectId: proj.id,
+            headingId: phase.id,
+            tagIds: [tagSrc.id],
+            checklistTitles: ["Add columns", "Write tests"]
+        )
+        let taskB = try db.createTask(
+            title: "Ship macOS Build",
+            scheduleState: .today,
+            projectId: proj.id,
+            headingId: phase.id,
+            recurrenceRule: RecurrenceRule(mode: .fixedSchedule, interval: 1, unit: .days)
+        )
+
+        try db.setTasksPinned([taskA.id, taskB.id], isPinned: true)
+        try db.setTaskEffortAndDuration(taskId: taskA.id, effortLevel: TaskEffortLevel.deepFocus.rawValue, durationMinutes: 60)
+        try db.setTaskEffortAndDuration(taskId: taskB.id, effortLevel: TaskEffortLevel.quickWin.rawValue, durationMinutes: 15)
+
+        // Dependency link: taskB blocked by taskA succeeds; reverse cycle taskA blocked by taskB is rejected!
+        XCTAssertTrue(try db.setTaskBlockedBy(taskId: taskB.id, blockedByTaskIds: [taskA.id]))
+        XCTAssertFalse(try db.setTaskBlockedBy(taskId: taskA.id, blockedByTaskIds: [taskB.id]))
+
+        var snap = try db.loadWorkspaceSnapshot()
+        let loadedPhase = try XCTUnwrap(snap.headingsByProject[proj.id]?.first(where: { $0.id == phase.id }))
+        XCTAssertEqual(loadedPhase.startDate, phaseStartMs)
+        XCTAssertEqual(loadedPhase.endDate, phaseEndMs)
+        let loadedProj = try XCTUnwrap(snap.projects.first(where: { $0.id == proj.id }))
+        XCTAssertEqual(loadedProj.workspaceId, "ws-team-alpha")
+        XCTAssertEqual(loadedProj.viewMode, "board")
+
+        let loadedA = try XCTUnwrap(snap.allOpenTasks.first(where: { $0.id == taskA.id }))
+        let loadedB = try XCTUnwrap(snap.allOpenTasks.first(where: { $0.id == taskB.id }))
+        XCTAssertTrue(loadedA.isPinned)
+        XCTAssertEqual(loadedA.effortLevel, "DEEP_FOCUS")
+        XCTAssertEqual(loadedA.durationMinutes, 60)
+        XCTAssertEqual(loadedB.blockedByTaskIds, [taskA.id])
+
+        // QuickFind search reads v2.5/v3.0 columns accurately
+        let qf = try db.searchQuickFind(rawQuery: "Schema")
+        XCTAssertEqual(qf.tasks.first?.effortLevel, "DEEP_FOCUS")
+        XCTAssertEqual(qf.tasks.first?.isPinned, true)
+
+        // Completing recurring taskB spawns an unpinned, unblocked next occurrence preserving effortLevel & durationMinutes
+        let spawnedId = try XCTUnwrap(try db.setTaskStatus(taskId: taskB.id, status: .completed))
+        snap = try db.loadWorkspaceSnapshot()
+        let spawned = try XCTUnwrap(snap.allOpenTasks.first(where: { $0.id == spawnedId }))
+        XCTAssertFalse(spawned.isPinned)
+        XCTAssertTrue(spawned.blockedByTaskIds.isEmpty)
+        XCTAssertEqual(spawned.effortLevel, "QUICK_WIN")
+        XCTAssertEqual(spawned.durationMinutes, 15)
+
+        // Merge tagSrc -> tagDst deduplicates refs and tombstones tagSrc
+        XCTAssertTrue(try db.mergeTags(sourceTagId: tagSrc.id, into: tagDst.id))
+        snap = try db.loadWorkspaceSnapshot()
+        XCTAssertFalse(snap.tags.contains(where: { $0.id == tagSrc.id }))
+        XCTAssertEqual(snap.allOpenTasks.first(where: { $0.id == taskA.id })?.tagIds, [tagDst.id])
+        XCTAssertEqual(snap.projects.first(where: { $0.id == proj.id })?.tagIds, [tagDst.id])
+
+        // Batch tag update + duplicateTasks preserves effort, duration, pin, checklist, and tags (without copying stale blockedBy edges)
+        try db.batchUpdateTasksTags([taskA.id, spawned.id], addTagIds: [tagExtra.id], removeTagIds: [tagDst.id])
+        let copies = try db.duplicateTasks([taskA.id], copySuffix: "Copy")
+        XCTAssertEqual(copies.count, 1)
+        XCTAssertEqual(copies[0].title, "Design Schema (Copy)")
+        XCTAssertTrue(copies[0].isPinned)
+        XCTAssertEqual(copies[0].effortLevel, "DEEP_FOCUS")
+        XCTAssertEqual(copies[0].durationMinutes, 60)
+        XCTAssertEqual(copies[0].checklistItems.map(\.title), ["Add columns", "Write tests"])
+        XCTAssertEqual(Set(copies[0].tagIds), [tagExtra.id])
+    }
+
+    // MARK: - 31. v3.0.0-alpha.11 .tbbackup Roundtrip, Legacy Sync Omission Preservation & 46 Localization Keys
+
+    func testV30BackupRoundtripSyncOmissionPreservationAndLocalizationParity() throws {
+        let sourceDb = try ThingsSQLiteDatabase(path: ":memory:")
+        var proj = try sourceDb.createProject(title: "Backup 3.0 Project")
+        proj.workspaceId = "ws-backup"
+        proj.viewMode = "gantt"
+        try sourceDb.updateProject(proj)
+
+        let phase = try sourceDb.createHeading(projectId: proj.id, title: "Phase 1")
+        try sourceDb.updateHeadingStartDate(phase.id, startDate: 1_795_000_000_000)
+        try sourceDb.updateHeadingEndDate(phase.id, endDate: 1_795_600_000_000)
+
+        let blocker = try sourceDb.createTask(title: "Upstream Task", scheduleState: .today, projectId: proj.id, headingId: phase.id)
+        var blocked = try sourceDb.createTask(title: "Downstream Task", scheduleState: .today, projectId: proj.id, headingId: phase.id)
+        blocked.isPinned = true
+        blocked.effortLevel = TaskEffortLevel.medium.rawValue
+        blocked.durationMinutes = 45
+        blocked.blockedByTaskIds = [blocker.id]
+        blocked.workspaceId = "ws-backup"
+        blocked.assigneeId = "user-42"
+        try sourceDb.updateTask(blocked)
+
+        let savedPerspective = SavedPerspective(
+            id: "persp-1",
+            title: "Quick Focus",
+            categoryIds: [],
+            effortLevel: TaskEffortLevel.quickWin.rawValue,
+            maxDurationMinutes: 15,
+            dueWindow: "TODAY",
+            areaId: nil,
+            actionableOnly: true,
+            sortOrder: 100.0
+        )
+        var sourcePrefs = AppPreferences()
+        sourcePrefs.tagSortMode = "most_used"
+        sourcePrefs.viewSortMode = "effort"
+        sourcePrefs.savedPerspectives = [savedPerspective]
+
+        let exportedPayload = try sourceDb.buildBackupPayload(preferences: sourcePrefs)
+        let archiveBytes = try ThingsBackupCodec.encodeBackup(payload: exportedPayload, password: nil)
+        let decodedPayload = try ThingsBackupCodec.decodeBackup(rawBytes: archiveBytes, password: nil)
+
+        // BackupPreferencesDto is non-optional on ThingsbookBackupPayload
+        XCTAssertEqual(decodedPayload.preferences.tagSortMode, "most_used")
+        XCTAssertEqual(decodedPayload.preferences.viewSortMode, "effort")
+        let decodedPerspectives = try JSONDecoder().decode(
+            [SavedPerspective].self,
+            from: Data(decodedPayload.preferences.savedPerspectivesJson.utf8)
+        )
+        XCTAssertEqual(decodedPerspectives, [savedPerspective])
+
+        let targetDb = try ThingsSQLiteDatabase(path: ":memory:")
+        try targetDb.restoreBackupPayload(decodedPayload)
+        var restoredSnap = try targetDb.loadWorkspaceSnapshot()
+        let restoredProj = try XCTUnwrap(restoredSnap.projects.first(where: { $0.id == proj.id }))
+        XCTAssertEqual(restoredProj.workspaceId, "ws-backup")
+        XCTAssertEqual(restoredProj.viewMode, "gantt")
+        let restoredPhase = try XCTUnwrap(restoredSnap.headingsByProject[proj.id]?.first(where: { $0.id == phase.id }))
+        XCTAssertEqual(restoredPhase.startDate, 1_795_000_000_000)
+        XCTAssertEqual(restoredPhase.endDate, 1_795_600_000_000)
+        let restoredBlocked = try XCTUnwrap(restoredSnap.allOpenTasks.first(where: { $0.id == blocked.id }))
+        XCTAssertTrue(restoredBlocked.isPinned)
+        XCTAssertEqual(restoredBlocked.effortLevel, "MEDIUM")
+        XCTAssertEqual(restoredBlocked.durationMinutes, 45)
+        XCTAssertEqual(restoredBlocked.blockedByTaskIds, [blocker.id])
+        XCTAssertEqual(restoredBlocked.workspaceId, "ws-backup")
+        XCTAssertEqual(restoredBlocked.assigneeId, "user-42")
+
+        // Older v2.1/v2.5 remote sync payload omitting 3.0 fields must NOT wipe local effort/blockedBy/pin/startDate!
+        let legacyTaskWire: [String: Any] = [
+            "id": blocked.id,
+            "title": "Downstream Task (Renamed on v2.1)",
+            "status": "OPEN",
+            "scheduleState": "TODAY",
+            "projectId": proj.id,
+            "headingId": phase.id,
+            "sortOrder": restoredBlocked.sortOrder,
+            "createdAt": restoredBlocked.createdAt,
+            "updatedAt": restoredBlocked.updatedAt + 10_000,
+            "isDeleted": false
+        ]
+        let taskHints = try XCTUnwrap(FirebaseCloudSyncService.parseTaskWithHints(legacyTaskWire))
+        XCTAssertTrue(taskHints.omittedPin)
+        XCTAssertTrue(taskHints.omittedV30Fields)
+        _ = try targetDb.applyRemoteDeltas(
+            RemoteDeltaBatch(
+                tasks: [taskHints.task],
+                taskOmittedTimeblockTaskIds: taskHints.omittedTimeblock ? [taskHints.task.id] : [],
+                taskOmittedPinTaskIds: taskHints.omittedPin ? [taskHints.task.id] : [],
+                taskOmittedV30TaskIds: taskHints.omittedV30Fields ? [taskHints.task.id] : []
+            )
+        )
+        restoredSnap = try targetDb.loadWorkspaceSnapshot()
+        let preservedAfterLegacySync = try XCTUnwrap(restoredSnap.allOpenTasks.first(where: { $0.id == blocked.id }))
+        XCTAssertEqual(preservedAfterLegacySync.title, "Downstream Task (Renamed on v2.1)")
+        XCTAssertTrue(preservedAfterLegacySync.isPinned)
+        XCTAssertEqual(preservedAfterLegacySync.effortLevel, "MEDIUM")
+        XCTAssertEqual(preservedAfterLegacySync.durationMinutes, 45)
+        XCTAssertEqual(preservedAfterLegacySync.blockedByTaskIds, [blocker.id])
+
+        // Verify all 46 v25_* and v30_* localization keys across all 5 languages
+        let plainKeys = [
+            "v25_pin_task", "v25_unpin_task", "v25_pinned_badge",
+            "v25_tags_search_placeholder", "v25_tags_assign_search_placeholder", "v25_tags_no_matches",
+            "v25_tags_sort_alpha", "v25_tags_sort_most_used", "v25_tags_sort_manual",
+            "v25_tags_merge_action",
+            "v25_view_sort_label", "v25_view_sort_manual", "v25_view_sort_deadline", "v25_view_sort_duration", "v25_view_sort_alpha",
+            "v25_copy_suffix",
+            "v25_batch_pin", "v25_batch_tags", "v25_batch_duplicate", "v25_batch_someday",
+            "v30_duration_label", "v30_duration_clear",
+            "v30_effort_label", "v30_effort_none", "v30_effort_quick_win", "v30_effort_medium", "v30_effort_deep_focus",
+            "v30_view_sort_effort",
+            "v30_blocked_by_label", "v30_blocked_by_action", "v30_blocked_by_dialog_title",
+            "v30_blocked_by_search_placeholder", "v30_blocked_by_cycle_warning", "v30_blocked_by_none_available",
+            "v30_perspectives_section", "v30_perspective_new", "v30_perspective_edit",
+            "v30_perspective_title_placeholder", "v30_perspective_max_duration", "v30_perspective_any_duration",
+            "v30_perspective_actionable_only", "v30_perspective_save", "v30_perspective_delete"
+        ]
+        for lang in [AppLanguage.en, .de, .fr, .it, .es] {
+            let langKeys = ThingsStrings.shared.keys(for: lang.rawValue)
+            for key in plainKeys {
+                XCTAssertTrue(langKeys.contains(key), "Missing \(key) in \(lang.rawValue)")
+                XCTAssertFalse(ThingsStrings.shared.text(key, lang: lang).isEmpty)
+            }
+            XCTAssertTrue(ThingsStrings.shared.format("v25_tags_merge_target_prompt", lang: lang, "WIP").contains("WIP"))
+            XCTAssertTrue(ThingsStrings.shared.format("v25_tags_merged_toast", lang: lang, "WIP", "Active").contains("Active"))
+            XCTAssertTrue(ThingsStrings.shared.format("v30_today_capacity_summary", lang: lang, "2h", "3h").contains("2h"))
+            XCTAssertTrue(ThingsStrings.shared.format("v30_today_planned_only", lang: lang, "2h").contains("2h"))
+            XCTAssertTrue(ThingsStrings.shared.format("v30_blocked_by_badge", lang: lang, "API").contains("API"))
+            XCTAssertTrue(ThingsStrings.shared.format("v30_blocked_by_count_badge", lang: lang, 3).contains("3"))
+        }
+    }
 }
+

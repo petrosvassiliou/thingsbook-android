@@ -556,6 +556,18 @@ interface TaskDao {
     fun observeAllTasksRaw(): Flow<List<TaskEntity>>
 
     @Transaction
+    @Query(
+        """
+        SELECT * FROM tasks
+        WHERE isDeleted = 0
+          AND status = 'OPEN'
+          AND (projectId IS NULL OR NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = tasks.projectId AND (p.isDeleted = 1 OR p.status != 'ACTIVE')))
+        ORDER BY sortOrder ASC
+        """
+    )
+    fun observeAllOpenActiveTasks(): Flow<List<TaskWithDetails>>
+
+    @Transaction
     @Query("SELECT * FROM tasks WHERE isDeleted = 0 ORDER BY sortOrder ASC")
     suspend fun getAllActiveTasksWithDetails(): List<TaskWithDetails>
 

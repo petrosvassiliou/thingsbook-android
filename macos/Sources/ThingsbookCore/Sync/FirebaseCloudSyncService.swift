@@ -724,10 +724,21 @@ public actor FirebaseCloudSyncService {
 
         let tags = (batch["tags"] as? [[String: Any]] ?? []).compactMap(Self.parseTag)
         let areas = (batch["areas"] as? [[String: Any]] ?? []).compactMap(Self.parseArea)
-        let projects = (batch["projects"] as? [[String: Any]] ?? []).compactMap(Self.parseProject)
+        var omittedProjectV30Ids = Set<String>()
+        let projects = (batch["projects"] as? [[String: Any]] ?? []).compactMap { m -> Project? in
+            guard let parsed = Self.parseProjectWithHints(m) else { return nil }
+            if parsed.omittedV30Fields {
+                omittedProjectV30Ids.insert(parsed.project.id)
+            }
+            return parsed.project
+        }
+        var omittedHeadingStartDateIds = Set<String>()
         var omittedHeadingEndDateIds = Set<String>()
         let headings = (batch["headings"] as? [[String: Any]] ?? []).compactMap { m -> Heading? in
             guard let parsed = Self.parseHeadingWithHints(m) else { return nil }
+            if parsed.omittedStartDate {
+                omittedHeadingStartDateIds.insert(parsed.heading.id)
+            }
             if parsed.omittedEndDate {
                 omittedHeadingEndDateIds.insert(parsed.heading.id)
             }
@@ -735,11 +746,19 @@ public actor FirebaseCloudSyncService {
         }
         var taskTags: [String: [String]] = [:]
         var omittedTimeblockTaskIds = Set<String>()
+        var omittedPinTaskIds = Set<String>()
+        var omittedV30TaskIds = Set<String>()
         let tasks = (batch["tasks"] as? [[String: Any]] ?? []).compactMap { m -> TaskItem? in
             guard let parsed = Self.parseTaskWithHints(m) else { return nil }
             taskTags[parsed.task.id] = parsed.tagIds
             if parsed.omittedTimeblock {
                 omittedTimeblockTaskIds.insert(parsed.task.id)
+            }
+            if parsed.omittedPin {
+                omittedPinTaskIds.insert(parsed.task.id)
+            }
+            if parsed.omittedV30Fields {
+                omittedV30TaskIds.insert(parsed.task.id)
             }
             return parsed.task
         }
@@ -753,11 +772,15 @@ public actor FirebaseCloudSyncService {
                 tags: tags,
                 areas: areas,
                 projects: projects,
+                projectOmittedV30Ids: omittedProjectV30Ids,
                 headings: headings,
+                headingOmittedStartDateIds: omittedHeadingStartDateIds,
                 headingOmittedEndDateIds: omittedHeadingEndDateIds,
                 tasks: tasks,
                 taskTagIdsByTaskId: taskTags,
                 taskOmittedTimeblockTaskIds: omittedTimeblockTaskIds,
+                taskOmittedPinTaskIds: omittedPinTaskIds,
+                taskOmittedV30TaskIds: omittedV30TaskIds,
                 checklistItems: checklists,
                 attachments: attachments,
                 projectTemplates: projectTemplates
@@ -1146,6 +1169,8 @@ public actor FirebaseCloudSyncService {
                 "lastReviewedAt": Self.fsNullableInt(proj.lastReviewedAt),
                 "sortOrder": Self.fsDouble(proj.sortOrder),
                 "tagIds": Self.fsStringArray(proj.tagIds),
+                "workspaceId": Self.fsNullableString(isPurged ? nil : proj.workspaceId),
+                "viewMode": Self.fsNullableString(isPurged ? nil : proj.viewMode),
                 "createdAt": Self.fsInt(proj.createdAt),
                 "updatedAt": Self.fsInt(proj.updatedAt),
                 "isDeleted": Self.fsBool(proj.isDeleted),
@@ -1160,6 +1185,7 @@ public actor FirebaseCloudSyncService {
                 "title": Self.fsString(head.title),
                 "sortOrder": Self.fsDouble(head.sortOrder),
                 "isArchived": Self.fsBool(head.isArchived),
+                "startDate": Self.fsNullableInt(head.startDate),
                 "endDate": Self.fsNullableInt(head.endDate),
                 "createdAt": Self.fsInt(head.createdAt),
                 "updatedAt": Self.fsInt(head.updatedAt),
@@ -1191,6 +1217,11 @@ public actor FirebaseCloudSyncService {
                 "areaId": Self.fsNullableString(task.areaId),
                 "recurrenceRule": Self.fsNullableString(recString),
                 "sortOrder": Self.fsDouble(task.sortOrder),
+                "isPinned": Self.fsBool(!task.isDeleted && task.isPinned),
+                "effortLevel": Self.fsNullableString(task.isDeleted ? nil : task.effortLevel),
+                "blockedByTaskIds": Self.fsStringArray(task.isDeleted ? [] : task.blockedByTaskIds),
+                "workspaceId": Self.fsNullableString(task.isDeleted ? nil : task.workspaceId),
+                "assigneeId": Self.fsNullableString(task.isDeleted ? nil : task.assigneeId),
                 "tagIds": Self.fsStringArray(task.tagIds),
                 "createdAt": Self.fsInt(task.createdAt),
                 "updatedAt": Self.fsInt(task.updatedAt),
@@ -1456,6 +1487,8 @@ public actor FirebaseCloudSyncService {
                 "lastReviewedAt": proj.lastReviewedAt as Any,
                 "sortOrder": proj.sortOrder,
                 "tagIds": proj.tagIds,
+                "workspaceId": (isPurged ? nil : proj.workspaceId) as Any,
+                "viewMode": (isPurged ? nil : proj.viewMode) as Any,
                 "createdAt": proj.createdAt,
                 "updatedAt": proj.updatedAt,
                 "isDeleted": proj.isDeleted,
@@ -1469,6 +1502,7 @@ public actor FirebaseCloudSyncService {
                 "title": head.title,
                 "sortOrder": head.sortOrder,
                 "isArchived": head.isArchived,
+                "startDate": head.startDate as Any,
                 "endDate": head.endDate as Any,
                 "createdAt": head.createdAt,
                 "updatedAt": head.updatedAt,
@@ -1498,6 +1532,11 @@ public actor FirebaseCloudSyncService {
                 "areaId": task.areaId as Any,
                 "recurrenceRule": recString as Any,
                 "sortOrder": task.sortOrder,
+                "isPinned": !task.isDeleted && task.isPinned,
+                "effortLevel": (task.isDeleted ? nil : task.effortLevel) as Any,
+                "blockedByTaskIds": task.isDeleted ? [] : task.blockedByTaskIds,
+                "workspaceId": (task.isDeleted ? nil : task.workspaceId) as Any,
+                "assigneeId": (task.isDeleted ? nil : task.assigneeId) as Any,
                 "tagIds": task.tagIds,
                 "createdAt": task.createdAt,
                 "updatedAt": task.updatedAt,
@@ -1670,10 +1709,21 @@ public actor FirebaseCloudSyncService {
 
         let tags: [Tag] = tagMaps.compactMap(Self.parseTag)
         let areas: [Area] = areaMaps.compactMap(Self.parseArea)
-        let projects: [Project] = projMaps.compactMap(Self.parseProject)
+        var omittedProjectV30Ids = Set<String>()
+        let projects: [Project] = projMaps.compactMap { map -> Project? in
+            guard let parsed = Self.parseProjectWithHints(map) else { return nil }
+            if parsed.omittedV30Fields {
+                omittedProjectV30Ids.insert(parsed.project.id)
+            }
+            return parsed.project
+        }
+        var omittedHeadingStartDateIds = Set<String>()
         var omittedHeadingEndDateIds = Set<String>()
         let headings: [Heading] = headMaps.compactMap { map -> Heading? in
             guard let parsed = Self.parseHeadingWithHints(map) else { return nil }
+            if parsed.omittedStartDate {
+                omittedHeadingStartDateIds.insert(parsed.heading.id)
+            }
             if parsed.omittedEndDate {
                 omittedHeadingEndDateIds.insert(parsed.heading.id)
             }
@@ -1681,11 +1731,19 @@ public actor FirebaseCloudSyncService {
         }
         var taskTagIds: [String: [String]] = [:]
         var omittedTimeblockTaskIds = Set<String>()
+        var omittedPinTaskIds = Set<String>()
+        var omittedV30TaskIds = Set<String>()
         let tasks: [TaskItem] = taskMaps.compactMap { map -> TaskItem? in
             guard let parsed = Self.parseTaskWithHints(map) else { return nil }
             taskTagIds[parsed.task.id] = parsed.tagIds
             if parsed.omittedTimeblock {
                 omittedTimeblockTaskIds.insert(parsed.task.id)
+            }
+            if parsed.omittedPin {
+                omittedPinTaskIds.insert(parsed.task.id)
+            }
+            if parsed.omittedV30Fields {
+                omittedV30TaskIds.insert(parsed.task.id)
             }
             return parsed.task
         }
@@ -1716,11 +1774,15 @@ public actor FirebaseCloudSyncService {
                 tags: tags,
                 areas: areas,
                 projects: projects,
+                projectOmittedV30Ids: omittedProjectV30Ids,
                 headings: headings,
+                headingOmittedStartDateIds: omittedHeadingStartDateIds,
                 headingOmittedEndDateIds: omittedHeadingEndDateIds,
                 tasks: tasks,
                 taskTagIdsByTaskId: taskTagIds,
                 taskOmittedTimeblockTaskIds: omittedTimeblockTaskIds,
+                taskOmittedPinTaskIds: omittedPinTaskIds,
+                taskOmittedV30TaskIds: omittedV30TaskIds,
                 checklistItems: checklists,
                 attachments: attachments,
                 projectTemplates: projectTemplates
@@ -1876,10 +1938,21 @@ public actor FirebaseCloudSyncService {
 
             let tags = (batch["tags"] as? [[String: Any]] ?? []).compactMap(Self.parseTag)
             let areas = (batch["areas"] as? [[String: Any]] ?? []).compactMap(Self.parseArea)
-            let projects = (batch["projects"] as? [[String: Any]] ?? []).compactMap(Self.parseProject)
+            var omittedProjectV30Ids = Set<String>()
+            let projects = (batch["projects"] as? [[String: Any]] ?? []).compactMap { m -> Project? in
+                guard let parsed = Self.parseProjectWithHints(m) else { return nil }
+                if parsed.omittedV30Fields {
+                    omittedProjectV30Ids.insert(parsed.project.id)
+                }
+                return parsed.project
+            }
+            var omittedHeadingStartDateIds = Set<String>()
             var omittedHeadingEndDateIds = Set<String>()
             let headings = (batch["headings"] as? [[String: Any]] ?? []).compactMap { m -> Heading? in
                 guard let parsed = Self.parseHeadingWithHints(m) else { return nil }
+                if parsed.omittedStartDate {
+                    omittedHeadingStartDateIds.insert(parsed.heading.id)
+                }
                 if parsed.omittedEndDate {
                     omittedHeadingEndDateIds.insert(parsed.heading.id)
                 }
@@ -1887,11 +1960,19 @@ public actor FirebaseCloudSyncService {
             }
             var taskTags: [String: [String]] = [:]
             var omittedTimeblockTaskIds = Set<String>()
+            var omittedPinTaskIds = Set<String>()
+            var omittedV30TaskIds = Set<String>()
             let tasks = (batch["tasks"] as? [[String: Any]] ?? []).compactMap { m -> TaskItem? in
                 guard let parsed = Self.parseTaskWithHints(m) else { return nil }
                 taskTags[parsed.task.id] = parsed.tagIds
                 if parsed.omittedTimeblock {
                     omittedTimeblockTaskIds.insert(parsed.task.id)
+                }
+                if parsed.omittedPin {
+                    omittedPinTaskIds.insert(parsed.task.id)
+                }
+                if parsed.omittedV30Fields {
+                    omittedV30TaskIds.insert(parsed.task.id)
                 }
                 return parsed.task
             }
@@ -1904,11 +1985,15 @@ public actor FirebaseCloudSyncService {
                     tags: tags,
                     areas: areas,
                     projects: projects,
+                    projectOmittedV30Ids: omittedProjectV30Ids,
                     headings: headings,
+                    headingOmittedStartDateIds: omittedHeadingStartDateIds,
                     headingOmittedEndDateIds: omittedHeadingEndDateIds,
                     tasks: tasks,
                     taskTagIdsByTaskId: taskTags,
                     taskOmittedTimeblockTaskIds: omittedTimeblockTaskIds,
+                    taskOmittedPinTaskIds: omittedPinTaskIds,
+                    taskOmittedV30TaskIds: omittedV30TaskIds,
                     checklistItems: checklists,
                     attachments: attachments,
                     projectTemplates: projectTemplates
@@ -2373,10 +2458,15 @@ public actor FirebaseCloudSyncService {
     }
 
     public static func parseProject(_ map: [String: Any]) -> Project? {
+        parseProjectWithHints(map)?.project
+    }
+
+    public static func parseProjectWithHints(_ map: [String: Any]) -> (project: Project, omittedV30Fields: Bool)? {
         guard let id = asString(map["id"]) else { return nil }
         let isDeleted = asBool(map["isDeleted"])
         let purged = isDeleted && asBool(map["purgedFromTrash"])
-        return Project(
+        let omittedV30Fields = !map.keys.contains("workspaceId") && !map.keys.contains("viewMode")
+        let project = Project(
             id: id,
             areaId: asString(map["areaId"]),
             title: purged ? "" : ((map["title"] as? String) ?? ""),
@@ -2389,18 +2479,22 @@ public actor FirebaseCloudSyncService {
             lastReviewedAt: asInt64(map["lastReviewedAt"]),
             sortOrder: asDouble(map["sortOrder"]),
             tagIds: asStringList(map["tagIds"]),
+            workspaceId: purged ? nil : asString(map["workspaceId"]),
+            viewMode: purged ? nil : asString(map["viewMode"]),
             createdAt: asInt64(map["createdAt"]) ?? 0,
             updatedAt: asInt64(map["updatedAt"]) ?? 0,
             isDeleted: isDeleted
         )
+        return (project, omittedV30Fields)
     }
 
     public static func parseHeading(_ map: [String: Any]) -> Heading? {
         parseHeadingWithHints(map)?.heading
     }
 
-    public static func parseHeadingWithHints(_ map: [String: Any]) -> (heading: Heading, omittedEndDate: Bool)? {
+    public static func parseHeadingWithHints(_ map: [String: Any]) -> (heading: Heading, omittedStartDate: Bool, omittedEndDate: Bool)? {
         guard let id = asString(map["id"]), let projectId = asString(map["projectId"]) else { return nil }
+        let omittedStartDate = !map.keys.contains("startDate")
         let omittedEndDate = !map.keys.contains("endDate")
         let heading = Heading(
             id: id,
@@ -2408,17 +2502,18 @@ public actor FirebaseCloudSyncService {
             title: (map["title"] as? String) ?? "",
             sortOrder: asDouble(map["sortOrder"]),
             isArchived: asBool(map["isArchived"]),
+            startDate: asInt64(map["startDate"]),
             endDate: asInt64(map["endDate"]),
             createdAt: asInt64(map["createdAt"]) ?? 0,
             updatedAt: asInt64(map["updatedAt"]) ?? 0,
             isDeleted: asBool(map["isDeleted"])
         )
-        return (heading, omittedEndDate)
+        return (heading, omittedStartDate, omittedEndDate)
     }
 
     public static func parseTaskWithHints(
         _ map: [String: Any]
-    ) -> (task: TaskItem, tagIds: [String], omittedTimeblock: Bool)? {
+    ) -> (task: TaskItem, tagIds: [String], omittedTimeblock: Bool, omittedPin: Bool, omittedV30Fields: Bool)? {
         guard let id = asString(map["id"]) else { return nil }
         var rule: RecurrenceRule? = nil
         if let recStr = asString(map["recurrenceRule"]), let data = recStr.data(using: .utf8) {
@@ -2428,6 +2523,21 @@ public actor FirebaseCloudSyncService {
         let isDeleted = asBool(map["isDeleted"])
         let purged = isDeleted && asBool(map["purgedFromTrash"])
         let omittedTimeblock = !map.keys.contains("scheduledStartMinutes") && !map.keys.contains("durationMinutes")
+        let omittedPin = !map.keys.contains("isPinned")
+        let omittedV30Fields = !map.keys.contains("effortLevel")
+            && !map.keys.contains("blockedByTaskIds")
+            && !map.keys.contains("blockedByJson")
+            && !map.keys.contains("workspaceId")
+            && !map.keys.contains("assigneeId")
+
+        var blockedIds = asStringList(map["blockedByTaskIds"])
+        if blockedIds.isEmpty,
+           let rawBlockedJson = asString(map["blockedByJson"]),
+           let bData = rawBlockedJson.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode([String].self, from: bData) {
+            blockedIds = decoded
+        }
+
         let task = TaskItem(
             id: id,
             title: purged ? "" : ((map["title"] as? String) ?? ""),
@@ -2445,11 +2555,16 @@ public actor FirebaseCloudSyncService {
             areaId: asString(map["areaId"]),
             recurrenceRule: rule,
             sortOrder: asDouble(map["sortOrder"]),
+            isPinned: !isDeleted && asBool(map["isPinned"]),
+            effortLevel: isDeleted ? nil : TaskEffortLevel.normalized(asString(map["effortLevel"]))?.rawValue,
+            blockedByTaskIds: isDeleted ? [] : blockedIds.filter { $0 != id && !$0.isEmpty },
+            workspaceId: isDeleted ? nil : asString(map["workspaceId"]),
+            assigneeId: isDeleted ? nil : asString(map["assigneeId"]),
             createdAt: asInt64(map["createdAt"]) ?? 0,
             updatedAt: asInt64(map["updatedAt"]) ?? 0,
             isDeleted: isDeleted
         )
-        return (task, tids, omittedTimeblock)
+        return (task, tids, omittedTimeblock, omittedPin, omittedV30Fields)
     }
 
     public static func parseTask(_ map: [String: Any]) -> (TaskItem, [String])? {

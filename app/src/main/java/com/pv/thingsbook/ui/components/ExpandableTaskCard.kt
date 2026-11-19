@@ -61,8 +61,10 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.GridView
+import androidx.compose.material.icons.outlined.HourglassTop
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.CircularProgressIndicator
@@ -89,6 +91,7 @@ import androidx.compose.runtime.setValue
 import android.view.MotionEvent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
@@ -133,6 +136,7 @@ import androidx.compose.ui.unit.sp
 import com.pv.thingsbook.R
 import com.pv.thingsbook.domain.model.Area
 import com.pv.thingsbook.domain.model.ChecklistItem
+import com.pv.thingsbook.domain.model.EffortLevel
 import com.pv.thingsbook.domain.model.Heading
 import com.pv.thingsbook.domain.model.Project
 import com.pv.thingsbook.domain.model.RecurrenceRule
@@ -142,6 +146,8 @@ import com.pv.thingsbook.domain.model.TaskCardInteractionRules
 import com.pv.thingsbook.domain.model.TaskItem
 import com.pv.thingsbook.domain.model.TaskStatus
 import com.pv.thingsbook.domain.model.TimeblockScheduleUtils
+import com.pv.thingsbook.domain.model.formatDurationCompact
+import com.pv.thingsbook.domain.model.isTaskActivelyBlocked
 import com.pv.thingsbook.ui.theme.ThingsTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -181,9 +187,13 @@ private fun PointerEvent.isRightClickTrigger(previousButtonsSecondary: Boolean):
 fun ExpandableTaskCard(
     task: TaskItem,
     allTags: List<Tag> = emptyList(),
+    tagSortMode: String = "alpha",
+    tagUsageCounts: Map<String, Int> = emptyMap(),
     allAreas: List<Area> = emptyList(),
     allProjects: List<Project> = emptyList(),
     allHeadings: List<Heading> = emptyList(),
+    allOpenTasks: List<TaskItem> = emptyList(),
+    openTaskIds: Set<String> = emptySet(),
     isExpanded: Boolean,
     isTodayView: Boolean = false,
     isSelected: Boolean = false,
@@ -201,6 +211,10 @@ fun ExpandableTaskCard(
     onDeadlineChange: (Long?) -> Unit,
     onRecurrenceChange: ((RecurrenceRule?) -> Unit)? = null,
     onUpdateTimeblock: ((startMinutes: Int?, durationMinutes: Int?) -> Unit)? = null,
+    onUpdateEffortLevel: ((effortLevel: String?) -> Unit)? = null,
+    onUpdateStandaloneDuration: ((durationMinutes: Int?) -> Unit)? = null,
+    onUpdateBlockedBy: ((blockerIds: List<String>) -> Unit)? = null,
+    onTogglePin: (() -> Unit)? = null,
     onMoveTaskToContainer: ((projectId: String?, headingId: String?, areaId: String?) -> Unit)? = null,
     onUpdateTaskTags: ((List<String>) -> Unit)? = null,
     onCreateAndAssignTag: ((String) -> Unit)? = null,
@@ -282,6 +296,7 @@ fun ExpandableTaskCard(
     var showDeadlineDialog by remember(task.id) { mutableStateOf(false) }
     var showRepeatDialog by remember(task.id) { mutableStateOf(false) }
     var showTimeblockDialog by remember(task.id) { mutableStateOf(false) }
+    var showDependenciesDialog by remember(task.id) { mutableStateOf(false) }
     var showMoveDialog by remember(task.id) { mutableStateOf(false) }
     var showTagPickerDialog by remember(task.id) { mutableStateOf(false) }
     var showContextMenu by remember(task.id) { mutableStateOf(false) }
@@ -460,8 +475,12 @@ fun ExpandableTaskCard(
         completionExitProgress.value.coerceIn(0f, 1f)
     }
 
+    val isActivelyBlocked = remember(task.id, task.blockedByTaskIds, openTaskIds) {
+        isTaskActivelyBlocked(task, openTaskIds)
+    }
+
     val isContextMenuTargeted = (!isExpanded && showContextMenu && !suppressCustomContextMenu) ||
-        (!isExpanded && (showWhenDialog || showDeadlineDialog || showRepeatDialog || showMoveDialog || showTagPickerDialog))
+        (!isExpanded && (showWhenDialog || showDeadlineDialog || showRepeatDialog || showDependenciesDialog || showMoveDialog || showTagPickerDialog))
 
     val surfaceColor by animateColorAsState(
         targetValue = when {
@@ -614,7 +633,14 @@ fun ExpandableTaskCard(
                             onExpandToggle()
                         }
                     },
-                    onLongClick = if (suppressCustomContextMenu) {
+                    onLongClick = if (isExpanded) {
+                        null
+                    } else if (task.status == TaskStatus.OPEN && onToggleSelection != null) {
+                        {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onToggleSelection.invoke()
+                        }
+                    } else if (suppressCustomContextMenu) {
                         null
                     } else {
                         {
@@ -630,6 +656,7 @@ fun ExpandableTaskCard(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .alpha(if (!isExpanded && isActivelyBlocked) 0.62f else 1f)
                     .padding(
                         horizontal = if (isExpanded) 16.dp else 8.dp,
                         vertical = if (isExpanded) 14.dp else 10.dp
@@ -705,6 +732,40 @@ fun ExpandableTaskCard(
                         )
                     }
 
+                    if (!isExpanded && task.isPinned && !isCompletingAnim) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        val pinnedTooltip = if (onTogglePin != null) {
+                            stringResource(R.string.v25_unpin_task)
+                        } else {
+                            stringResource(R.string.v25_pinned_badge)
+                        }
+                        ThingsHoverTooltip(
+                            text = pinnedTooltip,
+                            enableTouchLongPress = false
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.PushPin,
+                                contentDescription = stringResource(R.string.v25_pinned_badge),
+                                tint = colors.thingsBlue.copy(alpha = 0.88f),
+                                modifier = Modifier
+                                    .padding(top = 4.dp)
+                                    .size(14.dp)
+                                    .let { base ->
+                                        if (onTogglePin != null) {
+                                            base
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .clickable {
+                                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    onTogglePin()
+                                                }
+                                        } else {
+                                            base
+                                        }
+                                    }
+                            )
+                        }
+                    }
+
                     if (!isExpanded && collapsedTrailingContent != null && !isCompletingAnim) {
                         Spacer(modifier = Modifier.width(4.dp))
                         collapsedTrailingContent()
@@ -722,11 +783,14 @@ fun ExpandableTaskCard(
                     )
                 }
 
-                if (!isExpanded && hasCollapsedTaskBadges(task)) {
+                if (!isExpanded && hasCollapsedTaskBadges(task, isActivelyBlocked)) {
                     CollapsedTaskInlineBadges(
                         task = task,
+                        allOpenTasks = allOpenTasks,
+                        openTaskIds = openTaskIds,
                         locale = locale,
                         onOpenTimeblockDialog = if (onUpdateTimeblock != null) ({ showTimeblockDialog = true }) else null,
+                        onOpenDependenciesDialog = if (onUpdateBlockedBy != null) ({ showDependenciesDialog = true }) else null,
                         modifier = Modifier.padding(start = 40.dp, top = 6.dp)
                     )
                 }
@@ -742,6 +806,7 @@ fun ExpandableTaskCard(
                 ) {
                     ExpandedTaskCardBody(
                         task = task,
+                        openTaskIds = openTaskIds,
                         assignedProject = assignedProject,
                         assignedArea = assignedArea,
                         showQuickThisEveningPill = TaskCardInteractionRules.shouldShowQuickThisEveningPill(
@@ -803,8 +868,12 @@ fun ExpandableTaskCard(
                         onOpenDeadlineDialog = { showDeadlineDialog = true },
                         onOpenRepeatDialog = { showRepeatDialog = true },
                         onOpenTimeblockDialog = if (onUpdateTimeblock != null) ({ showTimeblockDialog = true }) else null,
+                        onUpdateEffortLevel = onUpdateEffortLevel,
+                        onUpdateStandaloneDuration = onUpdateStandaloneDuration,
+                        onOpenDependenciesDialog = if (onUpdateBlockedBy != null) ({ showDependenciesDialog = true }) else null,
                         onOpenMoveDialog = { showMoveDialog = true },
                         onOpenTagPickerDialog = { showTagPickerDialog = true },
+                        onTogglePin = onTogglePin,
                         onDuplicateTask = onDuplicateTask,
                         onStartFocusTimer = onStartFocusTimer,
                         onDeleteTask = onDeleteTask,
@@ -825,10 +894,14 @@ fun ExpandableTaskCard(
                 onOpenDeadlineDialog = { showDeadlineDialog = true },
                 onOpenRepeatDialog = { showRepeatDialog = true },
                 onOpenTimeblockDialog = if (onUpdateTimeblock != null) ({ showTimeblockDialog = true }) else null,
+                onUpdateEffortLevel = onUpdateEffortLevel,
+                onUpdateStandaloneDuration = onUpdateStandaloneDuration,
+                onOpenDependenciesDialog = if (onUpdateBlockedBy != null) ({ showDependenciesDialog = true }) else null,
                 onOpenMoveDialog = { showMoveDialog = true },
                 onOpenTagPickerDialog = { showTagPickerDialog = true },
                 onTriggerGeminiMagicBreakdown = onTriggerGeminiMagicBreakdown,
                 onStartFocusTimer = onStartFocusTimer,
+                onTogglePin = onTogglePin,
                 onDuplicateTask = onDuplicateTask,
                 onDeleteTask = onDeleteTask,
                 onDismiss = { showContextMenu = false }
@@ -847,9 +920,20 @@ fun ExpandableTaskCard(
         )
     }
 
+    if (showDependenciesDialog && onUpdateBlockedBy != null) {
+        TaskDependenciesPickerDialog(
+            task = task,
+            allOpenTasks = allOpenTasks,
+            onUpdateBlockedBy = onUpdateBlockedBy,
+            onDismiss = { showDependenciesDialog = false }
+        )
+    }
+
     TaskCardDialogsHost(
         task = task,
         allTags = allTags,
+        tagSortMode = tagSortMode,
+        tagUsageCounts = tagUsageCounts,
         allAreas = allAreas,
         allProjects = allProjects,
         allHeadings = allHeadings,
@@ -984,10 +1068,12 @@ private fun CollapsedTaskTitleWithStrike(
     }
 }
 
-private fun hasCollapsedTaskBadges(task: TaskItem): Boolean {
+private fun hasCollapsedTaskBadges(task: TaskItem, isActivelyBlocked: Boolean = false): Boolean {
     return task.scheduleState == ScheduleState.THIS_EVENING ||
         task.scheduledStartMinutes != null ||
         task.durationMinutes != null ||
+        EffortLevel.normalize(task.effortLevel) != null ||
+        isActivelyBlocked ||
         task.recurrenceRule != null ||
         task.reminderTime != null ||
         task.checklistItems.isNotEmpty() ||
@@ -1000,15 +1086,62 @@ private fun hasCollapsedTaskBadges(task: TaskItem): Boolean {
 @Composable
 private fun CollapsedTaskInlineBadges(
     task: TaskItem,
+    allOpenTasks: List<TaskItem> = emptyList(),
+    openTaskIds: Set<String> = emptySet(),
     locale: Locale,
     onOpenTimeblockDialog: (() -> Unit)? = null,
+    onOpenDependenciesDialog: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val activeOpenBlockerIds = remember(task.blockedByTaskIds, openTaskIds) {
+        task.blockedByTaskIds.filter { it in openTaskIds }.distinct()
+    }
     FlowRow(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(5.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        if (activeOpenBlockerIds.isNotEmpty()) {
+            val firstBlockerTitle = remember(activeOpenBlockerIds, allOpenTasks) {
+                if (activeOpenBlockerIds.size == 1) {
+                    allOpenTasks.firstOrNull { it.id == activeOpenBlockerIds.first() }?.title?.trim()?.takeIf { it.isNotEmpty() }
+                } else null
+            }
+            val blockedLabel = if (firstBlockerTitle != null) {
+                stringResource(R.string.v30_blocked_by_badge, firstBlockerTitle)
+            } else {
+                stringResource(R.string.v30_blocked_by_count_badge, activeOpenBlockerIds.size)
+            }
+            ThingsHoverTooltip(
+                text = blockedLabel,
+                enableTouchLongPress = false
+            ) {
+                ThingsTagPill(
+                    title = "⏳ $blockedLabel",
+                    onClick = onOpenDependenciesDialog
+                )
+            }
+        }
+        when (EffortLevel.normalize(task.effortLevel)) {
+            EffortLevel.QUICK_WIN -> {
+                val label = stringResource(R.string.v30_effort_quick_win)
+                ThingsHoverTooltip(text = label, enableTouchLongPress = false) {
+                    ThingsTagPill(title = "⚡ $label")
+                }
+            }
+            EffortLevel.MEDIUM -> {
+                val label = stringResource(R.string.v30_effort_medium)
+                ThingsHoverTooltip(text = label, enableTouchLongPress = false) {
+                    ThingsTagPill(title = "◐ $label")
+                }
+            }
+            EffortLevel.DEEP_FOCUS -> {
+                val label = stringResource(R.string.v30_effort_deep_focus)
+                ThingsHoverTooltip(text = label, enableTouchLongPress = false) {
+                    ThingsTagPill(title = "🧠 $label")
+                }
+            }
+        }
         if (task.scheduleState == ScheduleState.THIS_EVENING) {
             ThingsHoverTooltip(
                 text = stringResource(R.string.view_this_evening),
@@ -1036,12 +1169,13 @@ private fun CollapsedTaskInlineBadges(
                 )
             }
         } else if (task.durationMinutes != null) {
+            val durFormatted = formatDurationCompact(task.durationMinutes) ?: "${task.durationMinutes}m"
             ThingsHoverTooltip(
-                text = "${stringResource(R.string.v2_timeblock_title)}: ${task.durationMinutes}m",
+                text = "${stringResource(R.string.v30_duration_label)}: $durFormatted",
                 enableTouchLongPress = false
             ) {
                 ThingsTagPill(
-                    title = "⏱ ${task.durationMinutes}m",
+                    title = "⏱ $durFormatted",
                     onClick = onOpenTimeblockDialog
                 )
             }
@@ -1175,6 +1309,7 @@ private fun SwipeActionBackgroundLayer(
 @Composable
 private fun ExpandedTaskCardBody(
     task: TaskItem,
+    openTaskIds: Set<String> = emptySet(),
     assignedProject: Project?,
     assignedArea: Area?,
     showQuickThisEveningPill: Boolean = false,
@@ -1203,8 +1338,12 @@ private fun ExpandedTaskCardBody(
     onOpenDeadlineDialog: () -> Unit,
     onOpenRepeatDialog: () -> Unit,
     onOpenTimeblockDialog: (() -> Unit)? = null,
+    onUpdateEffortLevel: ((effortLevel: String?) -> Unit)? = null,
+    onUpdateStandaloneDuration: ((durationMinutes: Int?) -> Unit)? = null,
+    onOpenDependenciesDialog: (() -> Unit)? = null,
     onOpenMoveDialog: () -> Unit,
     onOpenTagPickerDialog: () -> Unit,
+    onTogglePin: (() -> Unit)? = null,
     onDuplicateTask: (() -> Unit)? = null,
     onStartFocusTimer: (() -> Unit)? = null,
     onDeleteTask: () -> Unit,
@@ -1646,12 +1785,146 @@ private fun ExpandedTaskCardBody(
                     )
                 } else if (onOpenTimeblockDialog != null) {
                     ThingsTagPill(
-                        title = if (task.durationMinutes != null) {
-                            "⏱️ ${stringResource(R.string.v2_timeblock_title)} (${task.durationMinutes}m)"
-                        } else {
-                            "⏱️ ${stringResource(R.string.v2_timeblock_title)}"
-                        },
+                        title = "⏱️ ${stringResource(R.string.v2_timeblock_title)}",
                         onClick = onOpenTimeblockDialog
+                    )
+                }
+
+                // v3.0 Standalone Duration Picker Pill (no clock time required)
+                if (onUpdateStandaloneDuration != null) {
+                    var showDurationPickerMenu by remember(task.id) { mutableStateOf(false) }
+                    val durText = formatDurationCompact(task.durationMinutes)
+                    Box {
+                        ThingsTagPill(
+                            title = if (durText != null) {
+                                "⏱ $durText"
+                            } else {
+                                "⏱ ${stringResource(R.string.v30_duration_label)}"
+                            },
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                showDurationPickerMenu = true
+                            }
+                        )
+                        DropdownMenu(
+                            expanded = showDurationPickerMenu,
+                            onDismissRequest = { showDurationPickerMenu = false },
+                            modifier = Modifier.background(colors.cardElevatedSurface)
+                        ) {
+                            listOf(
+                                5 to "5m",
+                                15 to "15m",
+                                30 to "30m",
+                                60 to "1h",
+                                120 to "2h",
+                                240 to "4h"
+                            ).forEach { (mins, label) ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = label,
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                fontWeight = if (task.durationMinutes == mins) FontWeight.Bold else FontWeight.Normal
+                                            ),
+                                            color = if (task.durationMinutes == mins) colors.thingsBlue else colors.primaryText
+                                        )
+                                    },
+                                    onClick = {
+                                        showDurationPickerMenu = false
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onUpdateStandaloneDuration(mins)
+                                    }
+                                )
+                            }
+                            if (task.durationMinutes != null) {
+                                HorizontalDivider(color = colors.hairlineDivider)
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = stringResource(R.string.v30_duration_clear),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = colors.secondaryText
+                                        )
+                                    },
+                                    onClick = {
+                                        showDurationPickerMenu = false
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onUpdateStandaloneDuration(null)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // v3.0 Effort Level Picker Pill
+                if (onUpdateEffortLevel != null) {
+                    var showEffortPickerMenu by remember(task.id) { mutableStateOf(false) }
+                    val normalizedEffort = EffortLevel.normalize(task.effortLevel)
+                    val effortPillTitle = when (normalizedEffort) {
+                        EffortLevel.QUICK_WIN -> "⚡ ${stringResource(R.string.v30_effort_quick_win)}"
+                        EffortLevel.MEDIUM -> "◐ ${stringResource(R.string.v30_effort_medium)}"
+                        EffortLevel.DEEP_FOCUS -> "🧠 ${stringResource(R.string.v30_effort_deep_focus)}"
+                        else -> "⚡ ${stringResource(R.string.v30_effort_label)}"
+                    }
+                    Box {
+                        ThingsTagPill(
+                            title = effortPillTitle,
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                showEffortPickerMenu = true
+                            }
+                        )
+                        DropdownMenu(
+                            expanded = showEffortPickerMenu,
+                            onDismissRequest = { showEffortPickerMenu = false },
+                            modifier = Modifier.background(colors.cardElevatedSurface)
+                        ) {
+                            val effortOptions: List<Pair<String?, String>> = listOf(
+                                null to stringResource(R.string.v30_effort_none),
+                                EffortLevel.QUICK_WIN to "⚡ ${stringResource(R.string.v30_effort_quick_win)}",
+                                EffortLevel.MEDIUM to "◐ ${stringResource(R.string.v30_effort_medium)}",
+                                EffortLevel.DEEP_FOCUS to "🧠 ${stringResource(R.string.v30_effort_deep_focus)}"
+                            )
+                            effortOptions.forEach { (key, label) ->
+                                val selected = normalizedEffort == key
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = label,
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                            ),
+                                            color = if (selected) colors.thingsBlue else colors.primaryText
+                                        )
+                                    },
+                                    onClick = {
+                                        showEffortPickerMenu = false
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onUpdateEffortLevel(key)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // v3.0 Waiting On (Dependencies) Pill
+                if (onOpenDependenciesDialog != null) {
+                    val activeBlockerCount = remember(task.blockedByTaskIds, openTaskIds) {
+                        task.blockedByTaskIds.count { it in openTaskIds }
+                    }
+                    val depLabel = if (activeBlockerCount > 0) {
+                        "⏳ " + stringResource(R.string.v30_blocked_by_count_badge, activeBlockerCount)
+                    } else {
+                        "⏳ " + stringResource(R.string.v30_blocked_by_action)
+                    }
+                    ThingsTagPill(
+                        title = depLabel,
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onOpenDependenciesDialog()
+                        }
                     )
                 }
 
@@ -1761,6 +2034,58 @@ private fun ExpandedTaskCardBody(
                         onDismissRequest = { showInlineMoreMenu = false },
                         modifier = Modifier.background(colors.cardElevatedSurface)
                     ) {
+                        if (onTogglePin != null) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = stringResource(
+                                            if (task.isPinned) R.string.v25_unpin_task else R.string.v25_pin_task
+                                        ),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colors.primaryText
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.PushPin,
+                                        contentDescription = null,
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showInlineMoreMenu = false
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onTogglePin()
+                                }
+                            )
+                        }
+
+                        if (onOpenDependenciesDialog != null) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = stringResource(R.string.v30_blocked_by_action),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colors.primaryText
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.HourglassTop,
+                                        contentDescription = null,
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showInlineMoreMenu = false
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onOpenDependenciesDialog()
+                                }
+                            )
+                        }
+
                         if (onAddTaskAttachment != null) {
                             DropdownMenuItem(
                                 text = {
@@ -1932,10 +2257,14 @@ private fun TaskContextDropdownMenu(
     onOpenDeadlineDialog: () -> Unit,
     onOpenRepeatDialog: () -> Unit,
     onOpenTimeblockDialog: (() -> Unit)? = null,
+    onUpdateEffortLevel: ((effortLevel: String?) -> Unit)? = null,
+    onUpdateStandaloneDuration: ((durationMinutes: Int?) -> Unit)? = null,
+    onOpenDependenciesDialog: (() -> Unit)? = null,
     onOpenMoveDialog: () -> Unit,
     onOpenTagPickerDialog: () -> Unit,
     onTriggerGeminiMagicBreakdown: () -> Unit,
     onStartFocusTimer: (() -> Unit)? = null,
+    onTogglePin: (() -> Unit)? = null,
     onDuplicateTask: (() -> Unit)? = null,
     onDeleteTask: () -> Unit,
     onDismiss: () -> Unit
@@ -1959,7 +2288,7 @@ private fun TaskContextDropdownMenu(
             Box(
                 modifier = Modifier
                     .size(7.dp)
-                    .clip( RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(50))
                     .background(colors.thingsBlue)
             )
             Text(
@@ -1994,6 +2323,31 @@ private fun TaskContextDropdownMenu(
                 onClick = {
                     onDismiss()
                     onToggleSelection()
+                }
+            )
+        }
+        if (onTogglePin != null) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = stringResource(
+                            if (task.isPinned) R.string.v25_unpin_task else R.string.v25_pin_task
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.primaryText
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.PushPin,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    onDismiss()
+                    onTogglePin()
                 }
             )
         }
@@ -2060,6 +2414,82 @@ private fun TaskContextDropdownMenu(
                 onClick = {
                     onDismiss()
                     onOpenTimeblockDialog()
+                }
+            )
+        }
+        if (onUpdateStandaloneDuration != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.v30_duration_label) + ":",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.secondaryText
+                )
+                listOf(15 to "15m", 30 to "30m", 60 to "1h").forEach { (mins, lbl) ->
+                    ThingsTagPill(
+                        title = lbl,
+                        onClick = {
+                            onDismiss()
+                            onUpdateStandaloneDuration(if (task.durationMinutes == mins) null else mins)
+                        }
+                    )
+                }
+            }
+        }
+        if (onUpdateEffortLevel != null) {
+            val currentEff = EffortLevel.normalize(task.effortLevel)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.v30_effort_label) + ":",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.secondaryText
+                )
+                listOf(
+                    EffortLevel.QUICK_WIN to "⚡",
+                    EffortLevel.MEDIUM to "◐",
+                    EffortLevel.DEEP_FOCUS to "🧠"
+                ).forEach { (effKey, icon) ->
+                    ThingsTagPill(
+                        title = icon,
+                        onClick = {
+                            onDismiss()
+                            onUpdateEffortLevel(if (currentEff == effKey) null else effKey)
+                        }
+                    )
+                }
+            }
+        }
+        if (onOpenDependenciesDialog != null) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = stringResource(R.string.v30_blocked_by_action),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.primaryText
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.HourglassTop,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    onDismiss()
+                    onOpenDependenciesDialog()
                 }
             )
         }
@@ -2264,6 +2694,8 @@ private fun TaskContextDropdownMenu(
 private fun TaskCardDialogsHost(
     task: TaskItem,
     allTags: List<Tag>,
+    tagSortMode: String = "alpha",
+    tagUsageCounts: Map<String, Int> = emptyMap(),
     allAreas: List<Area>,
     allProjects: List<Project>,
     allHeadings: List<Heading>,
@@ -2346,6 +2778,8 @@ private fun TaskCardDialogsHost(
         TaskTagPickerDialog(
             allTags = allTags,
             selectedTagIds = task.tags.map { it.id },
+            tagSortMode = tagSortMode,
+            tagUsageCounts = tagUsageCounts,
             onUpdateSelectedTags = { updatedIds ->
                 onUpdateTaskTags?.invoke(updatedIds)
             },

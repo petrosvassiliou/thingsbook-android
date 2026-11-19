@@ -36,18 +36,21 @@ import com.pv.thingsbook.data.update.AppUpdateUiState
 import com.pv.thingsbook.domain.model.Area
 import com.pv.thingsbook.domain.model.CalendarEventItem
 import com.pv.thingsbook.domain.model.DeviceCalendarInfo
+import com.pv.thingsbook.domain.model.EffortLevel
 import com.pv.thingsbook.domain.model.Heading
 import com.pv.thingsbook.domain.model.Project
 import com.pv.thingsbook.domain.model.ProjectStatus
 import com.pv.thingsbook.domain.model.ProjectTemplate
 import com.pv.thingsbook.domain.model.QuickFindFilter
 import com.pv.thingsbook.domain.model.RecurrenceRule
+import com.pv.thingsbook.domain.model.SavedPerspective
 import com.pv.thingsbook.domain.model.ScheduleState
 import com.pv.thingsbook.domain.model.Tag
 import com.pv.thingsbook.domain.model.TaskAttachment
 import com.pv.thingsbook.domain.model.TaskItem
 import com.pv.thingsbook.domain.model.TaskStatus
 import com.pv.thingsbook.domain.model.TimeblockScheduleUtils
+import com.pv.thingsbook.domain.model.sortTagsForMode
 import com.pv.thingsbook.domain.util.runCatchingCancellable
 import com.pv.thingsbook.ui.components.FocusTimerUiState
 import com.pv.thingsbook.ui.components.QuickShareDraft
@@ -74,6 +77,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.io.BufferedReader
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -82,17 +87,20 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Locale
+import java.util.UUID
 import javax.inject.Inject
 
 sealed interface ActiveNavigationTarget {
     data class SmartView(val type: SmartViewType) : ActiveNavigationTarget
     data class ProjectDetail(val projectId: String) : ActiveNavigationTarget
     data class AreaDetail(val areaId: String) : ActiveNavigationTarget
+    data class PerspectiveDetail(val perspectiveId: String) : ActiveNavigationTarget
 
     fun scrollScopeKey(): String = when (this) {
         is SmartView -> "smart_${type.name}"
         is ProjectDetail -> "project_$projectId"
         is AreaDetail -> "area_$areaId"
+        is PerspectiveDetail -> "perspective_$perspectiveId"
     }
 
     fun topScrollAnchorKey(): String =
@@ -246,6 +254,92 @@ class ThingsbookViewModel @Inject constructor(
     private val _collapsedHeadingIds = MutableStateFlow<Set<String>>(emptySet())
     val collapsedHeadingIds: StateFlow<Set<String>> = _collapsedHeadingIds.asStateFlow()
 
+    private val settingsPrefs = appContext.getSharedPreferences("thingsbook_ui_prefs", Context.MODE_PRIVATE)
+    private val coreSettingsPrefs = appContext.getSharedPreferences("thingsbook_settings_prefs", Context.MODE_PRIVATE)
+    private val vmJson = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
+
+    private fun normalizeTagSortMode(raw: String?): String = when (raw?.trim()?.lowercase(Locale.ROOT)) {
+        "most_used" -> "most_used"
+        "manual" -> "manual"
+        else -> "alpha"
+    }
+
+    private fun normalizeViewSortMode(raw: String?): String = when (raw?.trim()?.lowercase(Locale.ROOT)) {
+        "deadline" -> "deadline"
+        "duration" -> "duration"
+        "effort" -> "effort"
+        "alpha" -> "alpha"
+        else -> "manual"
+    }
+
+    private val _tagSortMode = MutableStateFlow(
+        normalizeTagSortMode(coreSettingsPrefs.getString(PREF_TAG_SORT_MODE, "alpha"))
+    )
+    val tagSortMode: StateFlow<String> = _tagSortMode.asStateFlow()
+
+    fun setTagSortMode(mode: String) {
+        val normalized = normalizeTagSortMode(mode)
+        _tagSortMode.value = normalized
+        runCatching {
+            coreSettingsPrefs.edit().putString(PREF_TAG_SORT_MODE, normalized).apply()
+        }
+    }
+
+    private val _viewSortMode = MutableStateFlow(
+        normalizeViewSortMode(coreSettingsPrefs.getString(PREF_VIEW_SORT_MODE, "manual"))
+    )
+    val viewSortMode: StateFlow<String> = _viewSortMode.asStateFlow()
+
+    fun setViewSortMode(mode: String) {
+        val normalized = normalizeViewSortMode(mode)
+        _viewSortMode.value = normalized
+        runCatching {
+            coreSettingsPrefs.edit().putString(PREF_VIEW_SORT_MODE, normalized).apply()
+        }
+    }
+
+    private fun decodeSavedPerspectives(raw: String?): List<SavedPerspective> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            vmJson.decodeFromString<List<SavedPerspective>>(raw)
+                .filter { it.id.isNotBlank() && it.title.isNotBlank() }
+                .distinctBy { it.id }
+                .sortedWith(
+                    compareBy<SavedPerspective> { if (it.sortOrder.isFinite()) it.sortOrder else 0.0 }
+                        .thenBy { it.title.lowercase(Locale.ROOT) }
+                        .thenBy { it.id }
+                )
+        }.getOrDefault(emptyList())
+    }
+
+    private val _savedPerspectives = MutableStateFlow(
+        decodeSavedPerspectives(coreSettingsPrefs.getString(PREF_SAVED_PERSPECTIVES_JSON, null))
+    )
+    val savedPerspectives: StateFlow<List<SavedPerspective>> = _savedPerspectives.asStateFlow()
+
+    private fun persistSavedPerspectives(list: List<SavedPerspective>) {
+        val sorted = list
+            .filter { it.id.isNotBlank() && it.title.isNotBlank() }
+            .distinctBy { it.id }
+            .sortedWith(
+                compareBy<SavedPerspective> { if (it.sortOrder.isFinite()) it.sortOrder else 0.0 }
+                    .thenBy { it.title.lowercase(Locale.ROOT) }
+                    .thenBy { it.id }
+            )
+        _savedPerspectives.value = sorted
+        runCatching {
+            coreSettingsPrefs.edit().putString(PREF_SAVED_PERSPECTIVES_JSON, vmJson.encodeToString(sorted)).apply()
+        }
+    }
+
+    private fun restoreSavedPerspectivesFromJson(raw: String) {
+        val parsed = decodeSavedPerspectives(raw)
+        persistSavedPerspectives(parsed)
+    }
+
     // Tag Filter & Tag Management Modal States
     private val _selectedFilterTagId = MutableStateFlow<String?>(null)
     val selectedFilterTagId: StateFlow<String?> = _selectedFilterTagId.asStateFlow()
@@ -346,6 +440,15 @@ class ThingsbookViewModel @Inject constructor(
         .catch { emit(emptyList()) }
         .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val allOpenTasks: StateFlow<List<TaskItem>> = repository.observeAllOpenTasks()
+        .catch { emit(emptyList()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val openTaskIds: StateFlow<Set<String>> = allOpenTasks
+        .map { list -> list.mapTo(HashSet()) { it.id } as Set<String> }
+        .catch { emit(emptySet()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
     val deletedProjects: StateFlow<List<Project>> = repository.observeDeletedProjects()
         .catch { emit(emptyList()) }
         .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -370,7 +473,51 @@ class ThingsbookViewModel @Inject constructor(
         .catch { emit(emptyMap()) }
         .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
-    val allTags: StateFlow<List<Tag>> = repository.observeAllTags()
+    private fun decodeRawTagIds(tagIdsJson: String): List<String> {
+        if (tagIdsJson.isBlank() || tagIdsJson == "[]") return emptyList()
+        return runCatching { vmJson.decodeFromString<List<String>>(tagIdsJson) }
+            .getOrDefault(emptyList())
+            .mapNotNull { it.trim().takeIf(String::isNotEmpty) }
+            .distinct()
+    }
+
+    val tagUsageCounts: StateFlow<Map<String, Int>> = combine(
+        repository.observeAllTasksRaw(),
+        repository.observeAllProjectsRaw()
+    ) { allRawTasks, allRawProjects ->
+        runCatching {
+            val inactiveOrDeletedProjectIds = allRawProjects
+                .asSequence()
+                .filter { it.isDeleted || it.status != ProjectStatus.ACTIVE }
+                .map { it.id }
+                .toSet()
+            val counts = HashMap<String, Int>()
+            for (task in allRawTasks) {
+                if (task.isDeleted || task.status != TaskStatus.OPEN) continue
+                if (task.projectId != null && task.projectId in inactiveOrDeletedProjectIds) continue
+                for (tagId in decodeRawTagIds(task.tagIdsJson)) {
+                    counts[tagId] = (counts[tagId] ?: 0) + 1
+                }
+            }
+            for (proj in allRawProjects) {
+                if (proj.isDeleted || proj.status != ProjectStatus.ACTIVE) continue
+                for (tagId in decodeRawTagIds(proj.tagIdsJson)) {
+                    counts[tagId] = (counts[tagId] ?: 0) + 1
+                }
+            }
+            counts.toMap()
+        }.getOrDefault(emptyMap())
+    }
+        .catch { emit(emptyMap()) }
+        .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    val allTags: StateFlow<List<Tag>> = combine(
+        repository.observeAllTags(),
+        _tagSortMode,
+        tagUsageCounts
+    ) { tags, mode, counts ->
+        sortTagsForMode(tags, mode, counts)
+    }
         .catch { emit(emptyList()) }
         .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -392,6 +539,7 @@ class ThingsbookViewModel @Inject constructor(
                                     id = it.id,
                                     projectId = it.projectId,
                                     title = it.title,
+                                    startDate = it.startDate,
                                     endDate = it.endDate,
                                     sortOrder = it.sortOrder,
                                     isArchived = it.isArchived,
@@ -528,6 +676,87 @@ class ThingsbookViewModel @Inject constructor(
         _expandedTaskId.value = null
         clearTaskSelection()
         _navigationTarget.value = ActiveNavigationTarget.AreaDetail(areaId)
+    }
+
+    fun selectPerspective(perspectiveId: String) {
+        if (perspectiveId.isBlank()) return
+        _expandedTaskId.value = null
+        clearTaskSelection()
+        _navigationTarget.value = ActiveNavigationTarget.PerspectiveDetail(perspectiveId)
+    }
+
+    fun savePerspective(perspective: SavedPerspective) {
+        val cleanTitle = perspective.title.trim()
+        if (cleanTitle.isEmpty()) return
+        val existingList = _savedPerspectives.value
+        val resolvedId = perspective.id.trim().ifEmpty { UUID.randomUUID().toString() }
+        val existing = existingList.firstOrNull { it.id == resolvedId }
+        val nextSortOrder = existing?.sortOrder?.takeIf { it.isFinite() }
+            ?: perspective.sortOrder.takeIf { it.isFinite() && it > 0.0 }
+            ?: ((existingList.maxOfOrNull { if (it.sortOrder.isFinite()) it.sortOrder else 0.0 } ?: 0.0) + 1000.0)
+
+        val cleanPerspective = perspective.copy(
+            id = resolvedId,
+            title = cleanTitle,
+            categoryIds = perspective.categoryIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
+            effortLevel = EffortLevel.normalize(perspective.effortLevel),
+            maxDurationMinutes = perspective.maxDurationMinutes?.coerceIn(5, 1440),
+            dueWindow = perspective.dueWindow.trim().uppercase(Locale.ROOT).ifEmpty { "ANY" },
+            areaId = perspective.areaId?.trim()?.takeIf { it.isNotEmpty() },
+            sortOrder = nextSortOrder
+        )
+        val updated = existingList.filterNot { it.id == resolvedId } + cleanPerspective
+        persistSavedPerspectives(updated)
+        _expandedTaskId.value = null
+        clearTaskSelection()
+        _navigationTarget.value = ActiveNavigationTarget.PerspectiveDetail(resolvedId)
+    }
+
+    fun deletePerspective(id: String) {
+        val cleanId = id.trim()
+        if (cleanId.isEmpty()) return
+        val updated = _savedPerspectives.value.filterNot { it.id == cleanId }
+        persistSavedPerspectives(updated)
+        val currentTarget = _navigationTarget.value
+        if (currentTarget is ActiveNavigationTarget.PerspectiveDetail && currentTarget.perspectiveId == cleanId) {
+            _expandedTaskId.value = null
+            clearTaskSelection()
+            _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
+        }
+    }
+
+    fun setTaskEffortLevel(taskId: String, effortLevel: String?) {
+        if (taskId.isBlank()) return
+        safeVmScope.launch {
+            repository.updateTaskEffortAndDuration(
+                taskId = taskId,
+                effortLevel = EffortLevel.normalize(effortLevel),
+                updateEffort = true,
+                updateDuration = false
+            )
+        }
+    }
+
+    fun setStandaloneTaskDuration(taskId: String, durationMinutes: Int?) {
+        if (taskId.isBlank()) return
+        safeVmScope.launch {
+            repository.updateTaskEffortAndDuration(
+                taskId = taskId,
+                durationMinutes = durationMinutes,
+                updateEffort = false,
+                updateDuration = true
+            )
+        }
+    }
+
+    fun setTaskBlockedBy(taskId: String, blockerIds: List<String>) {
+        if (taskId.isBlank()) return
+        safeVmScope.launch {
+            val ok = repository.updateTaskBlockedBy(taskId = taskId, blockerIds = blockerIds)
+            if (!ok) {
+                _uiErrorMessage.value = getLocalizedString(R.string.v30_blocked_by_cycle_warning)
+            }
+        }
     }
 
     fun toggleTaskExpansion(taskId: String?) {
@@ -839,6 +1068,9 @@ class ThingsbookViewModel @Inject constructor(
             val tomorrowEpoch = LocalDate.now(zone).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
 
             val target = _navigationTarget.value
+            val activePerspective = (target as? ActiveNavigationTarget.PerspectiveDetail)?.let { pd ->
+                _savedPerspectives.value.firstOrNull { it.id == pd.perspectiveId }
+            }
             val (scheduleState, whenDate, projectId) = when (target) {
                 is ActiveNavigationTarget.SmartView -> when (target.type) {
                     SmartViewType.INBOX -> Triple(ScheduleState.INBOX, null, null)
@@ -856,11 +1088,19 @@ class ThingsbookViewModel @Inject constructor(
                 }
                 is ActiveNavigationTarget.ProjectDetail -> Triple(ScheduleState.ANYTIME, null, target.projectId)
                 is ActiveNavigationTarget.AreaDetail -> Triple(ScheduleState.ANYTIME, null, null)
+                is ActiveNavigationTarget.PerspectiveDetail -> {
+                    when (activePerspective?.dueWindow?.uppercase(Locale.ROOT)) {
+                        "TODAY" -> Triple(ScheduleState.TODAY, todayEpoch, null)
+                        "NEXT_7_DAYS" -> Triple(ScheduleState.UPCOMING, tomorrowEpoch, null)
+                        else -> Triple(ScheduleState.ANYTIME, null, null)
+                    }
+                }
             }
 
             val areaId = when (target) {
                 is ActiveNavigationTarget.AreaDetail -> target.areaId
                 is ActiveNavigationTarget.ProjectDetail -> activeProjects.value.find { it.id == target.projectId }?.areaId
+                is ActiveNavigationTarget.PerspectiveDetail -> activePerspective?.areaId
                 else -> null
             }
 
@@ -883,7 +1123,10 @@ class ThingsbookViewModel @Inject constructor(
                 projectId = projectId,
                 headingId = neighboringHeadingId,
                 areaId = areaId,
-                sortOrder = midpointOrder
+                sortOrder = midpointOrder,
+                tagIds = activePerspective?.categoryIds.orEmpty(),
+                durationMinutes = activePerspective?.maxDurationMinutes,
+                effortLevel = activePerspective?.effortLevel
             )
 
             if (
@@ -984,6 +1227,12 @@ class ThingsbookViewModel @Inject constructor(
     fun renameHeading(headingId: String, newTitle: String) {
         safeVmScope.launch {
             repository.renameHeading(headingId, newTitle)
+        }
+    }
+
+    fun updateHeadingStartDate(headingId: String, startDate: Long?) {
+        safeVmScope.launch {
+            repository.updateHeadingStartDate(headingId, startDate)
         }
     }
 
@@ -1606,7 +1855,50 @@ class ThingsbookViewModel @Inject constructor(
 
     fun renameTag(tagId: String, newTitle: String, shortcut: String?) {
         safeVmScope.launch {
-            repository.createOrUpdateTag(id = tagId, title = newTitle, shortcut = shortcut)
+            val resolvedId = repository.createOrUpdateTag(
+                id = tagId,
+                title = newTitle,
+                shortcut = shortcut,
+                allowClearShortcut = true
+            )
+            if (resolvedId != tagId && _selectedFilterTagId.value == tagId) {
+                _selectedFilterTagId.value = resolvedId
+            }
+        }
+    }
+
+    fun mergeTags(sourceTagId: String, targetTagId: String) {
+        if (sourceTagId.isBlank() || targetTagId.isBlank() || sourceTagId == targetTagId) return
+        safeVmScope.launch {
+            val sourceTitle = allTags.value.firstOrNull { it.id == sourceTagId }?.title ?: sourceTagId
+            val targetTitle = allTags.value.firstOrNull { it.id == targetTagId }?.title ?: targetTagId
+            if (_selectedFilterTagId.value == sourceTagId) {
+                _selectedFilterTagId.value = targetTagId
+            }
+            // Also remap categoryIds in saved perspectives if sourceTagId was referenced
+            val updatedPerspectives = _savedPerspectives.value.map { p ->
+                if (sourceTagId in p.categoryIds) {
+                    p.copy(
+                        categoryIds = p.categoryIds.map { if (it == sourceTagId) targetTagId else it }.distinct()
+                    )
+                } else p
+            }
+            if (updatedPerspectives != _savedPerspectives.value) {
+                persistSavedPerspectives(updatedPerspectives)
+            }
+            val merged = repository.mergeTags(sourceTagId = sourceTagId, targetTagId = targetTagId)
+            if (merged) {
+                showCelebrationToast(
+                    getLocalizedString(R.string.v25_tags_merged_toast, sourceTitle, targetTitle)
+                )
+            }
+        }
+    }
+
+    fun moveTag(tagId: String, moveUp: Boolean) {
+        if (tagId.isBlank()) return
+        safeVmScope.launch {
+            repository.moveTag(tagId = tagId, moveUp = moveUp)
         }
     }
 
@@ -1614,6 +1906,12 @@ class ThingsbookViewModel @Inject constructor(
         safeVmScope.launch {
             if (_selectedFilterTagId.value == tagId) {
                 _selectedFilterTagId.value = null
+            }
+            val updatedPerspectives = _savedPerspectives.value.map { p ->
+                if (tagId in p.categoryIds) p.copy(categoryIds = p.categoryIds - tagId) else p
+            }
+            if (updatedPerspectives != _savedPerspectives.value) {
+                persistSavedPerspectives(updatedPerspectives)
             }
             repository.softDeleteTag(tagId)
         }
@@ -1689,9 +1987,6 @@ class ThingsbookViewModel @Inject constructor(
     // v1.3.0 / v1.4.0: Settings Modal, Collapsible Sidebar, Local/Cloud DB Mode,
     // Live Task Statistics, and Off-Main-Thread CSV Import/Export/Share
     // =========================================================================
-
-    private val settingsPrefs = appContext.getSharedPreferences("thingsbook_ui_prefs", Context.MODE_PRIVATE)
-    private val coreSettingsPrefs = appContext.getSharedPreferences("thingsbook_settings_prefs", Context.MODE_PRIVATE)
 
     private val _isSettingsModalOpen = MutableStateFlow(false)
     val isSettingsModalOpen: StateFlow<Boolean> = _isSettingsModalOpen.asStateFlow()
@@ -2113,7 +2408,10 @@ class ThingsbookViewModel @Inject constructor(
             selectedCalendarIds = _selectedCalendarIds.value.sorted(),
             groupTodayByProjectOrArea = _groupTodayByProjectOrArea.value,
             lastWeeklyReviewAt = _lastWeeklyReviewAt.value,
-            includeBetaUpdates = _includeBetaUpdates.value
+            includeBetaUpdates = _includeBetaUpdates.value,
+            tagSortMode = _tagSortMode.value,
+            viewSortMode = _viewSortMode.value,
+            savedPerspectivesJson = vmJson.encodeToString(_savedPerspectives.value)
         )
     }
 
@@ -2332,6 +2630,9 @@ class ThingsbookViewModel @Inject constructor(
                     restoredPrefs.includeBetaUpdates?.let { betaEnabled ->
                         setIncludeBetaUpdates(betaEnabled, triggerCheck = false)
                     }
+                    restoredPrefs.tagSortMode?.let { setTagSortMode(it) }
+                    restoredPrefs.viewSortMode?.let { setViewSortMode(it) }
+                    restoredPrefs.savedPerspectivesJson?.let { restoreSavedPerspectivesFromJson(it) }
                     if (
                         restoredPrefs.dailyDigestEnabled != null &&
                         restoredPrefs.dailyDigestHour != null &&
@@ -2388,6 +2689,7 @@ class ThingsbookViewModel @Inject constructor(
         if (taskId in current) {
             _selectedTaskIds.value = current - taskId
         } else {
+            _expandedTaskId.value = null
             _selectedTaskIds.value = current + taskId
             lastSelectedAnchorTaskId = taskId
         }
@@ -2482,6 +2784,51 @@ class ThingsbookViewModel @Inject constructor(
                 repository.moveTaskToContainer(task.id, projectId, headingId, areaId)
             }
             _selectedTaskIds.value = emptySet()
+        }
+    }
+
+    fun batchTogglePinSelectedTasks() {
+        val ids = _selectedTaskIds.value.toList()
+        if (ids.isEmpty()) return
+        safeVmScope.launch {
+            val entities = ids.mapNotNull { repository.getTaskEntityById(it) }.filter { !it.isDeleted }
+            if (entities.isEmpty()) {
+                _selectedTaskIds.value = emptySet()
+                return@launch
+            }
+            val targetPinned = entities.any { !it.isPinned }
+            repository.setTasksPinned(ids, targetPinned)
+            _selectedTaskIds.value = emptySet()
+        }
+    }
+
+    fun batchDuplicateSelectedTasks() {
+        val ids = _selectedTaskIds.value.toList()
+        if (ids.isEmpty()) return
+        safeVmScope.launch {
+            val copySuffix = getLocalizedString(R.string.v25_copy_suffix)
+            ids.forEach { id ->
+                repository.duplicateTask(id, copySuffix = copySuffix)
+            }
+            _selectedTaskIds.value = emptySet()
+        }
+    }
+
+    fun batchUpdateSelectedTasksTags(tagIdsToAdd: Set<String>, tagIdsToRemove: Set<String>) {
+        val ids = _selectedTaskIds.value.toList()
+        if (ids.isEmpty() || (tagIdsToAdd.isEmpty() && tagIdsToRemove.isEmpty())) return
+        safeVmScope.launch {
+            repository.batchUpdateTasksTags(ids, tagIdsToAdd, tagIdsToRemove)
+        }
+    }
+
+    fun batchCreateAndAssignTagToSelectedTasks(newTagTitle: String) {
+        val ids = _selectedTaskIds.value.toList()
+        val cleanTitle = newTagTitle.trim()
+        if (ids.isEmpty() || cleanTitle.isEmpty()) return
+        safeVmScope.launch {
+            val newId = repository.createOrUpdateTag(title = cleanTitle)
+            repository.batchUpdateTasksTags(ids, setOf(newId), emptySet())
         }
     }
 
@@ -3006,9 +3353,19 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
+    fun toggleTaskPinned(taskId: String) {
+        if (taskId.isBlank()) return
+        safeVmScope.launch {
+            val entity = repository.getTaskEntityById(taskId) ?: return@launch
+            if (entity.isDeleted) return@launch
+            repository.setTasksPinned(listOf(taskId), !entity.isPinned)
+        }
+    }
+
     fun duplicateTask(taskId: String) {
         safeVmScope.launch {
-            val clonedId = repository.duplicateTask(taskId)
+            val copySuffix = getLocalizedString(R.string.v25_copy_suffix)
+            val clonedId = repository.duplicateTask(taskId, copySuffix = copySuffix)
             if (clonedId != null) {
                 _expandedTaskId.value = clonedId
             }
@@ -3017,7 +3374,8 @@ class ThingsbookViewModel @Inject constructor(
 
     fun duplicateProject(projectId: String) {
         safeVmScope.launch {
-            val clonedId = repository.duplicateProject(projectId)
+            val copySuffix = getLocalizedString(R.string.v25_copy_suffix)
+            val clonedId = repository.duplicateProject(projectId, copySuffix = copySuffix)
             if (clonedId != null) {
                 _expandedTaskId.value = null
                 _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(clonedId)
@@ -3031,7 +3389,8 @@ class ThingsbookViewModel @Inject constructor(
     private var focusTimerJob: Job? = null
 
     private fun findLoadedTaskDurationMinutes(taskId: String): Int? {
-        return (todayDaytimeTasks.value.firstOrNull { it.id == taskId }
+        return (allOpenTasks.value.firstOrNull { it.id == taskId }
+            ?: todayDaytimeTasks.value.firstOrNull { it.id == taskId }
             ?: thisEveningTasks.value.firstOrNull { it.id == taskId }
             ?: activeProjectTasks.value.firstOrNull { it.id == taskId }
             ?: activeAreaTasks.value.firstOrNull { it.id == taskId }
@@ -3795,6 +4154,9 @@ class ThingsbookViewModel @Inject constructor(
         private const val PREF_INCLUDE_BETA_UPDATES = "include_beta_updates"
         private const val PREF_LAST_WEEKLY_REVIEW_AT = "last_weekly_review_at"
         private const val PREF_TODAY_TIMELINE_MODE = "today_timeline_mode"
+        private const val PREF_TAG_SORT_MODE = "tag_sort_mode"
+        private const val PREF_VIEW_SORT_MODE = "view_sort_mode"
+        private const val PREF_SAVED_PERSPECTIVES_JSON = "saved_perspectives_json"
         private const val UPCOMING_CALENDAR_HORIZON_DAYS = 30L
     }
 }

@@ -22,6 +22,25 @@ public struct ThingsCommandMenus: Commands {
         store.isLocked || store.activeSheet != nil || Self.isTextInputActive()
     }
 
+    @MainActor
+    private var pinTargetIds: [String] {
+        if !store.selectedTaskIds.isEmpty {
+            return Array(store.selectedTaskIds)
+        }
+        if let exp = store.expandedTaskId {
+            return [exp]
+        }
+        return []
+    }
+
+    @MainActor
+    private var allPinTargetsPinned: Bool {
+        let ids = pinTargetIds
+        guard !ids.isEmpty else { return false }
+        let matches = (store.allOpenTasks + store.logbookTasks).filter { ids.contains($0.id) }
+        return !matches.isEmpty && matches.allSatisfy(\.isPinned)
+    }
+
     public var body: some Commands {
         CommandGroup(after: .appInfo) {
             Button(store.tr("settings_updates_search_btn") + "…") {
@@ -103,6 +122,13 @@ public struct ThingsCommandMenus: Commands {
             .keyboardShortcut("n", modifiers: [.command, .control])
             .disabled(store.isLocked)
 
+            Button(store.tr("v30_perspective_new")) {
+                guard !store.isLocked else { return }
+                store.editingPerspective = nil
+                store.isPerspectiveEditorPresented = true
+            }
+            .disabled(store.isLocked)
+
             Divider()
 
             Button(store.tr("backup_create_button")) {
@@ -138,13 +164,22 @@ public struct ThingsCommandMenus: Commands {
         CommandMenu(store.tr("macos_todo_menu")) {
             Button(store.tr("action_complete")) {
                 guard !store.isLocked, store.activeSheet == nil else { return }
-                if let id = store.expandedTaskId ?? store.selectedTaskIds.first,
-                   let task = (store.allOpenTasks + store.logbookTasks).first(where: { $0.id == id }) {
+                if store.selectedTaskIds.count > 1 {
+                    store.completeSelectedTasks()
+                } else if let id = store.expandedTaskId ?? store.selectedTaskIds.first,
+                          let task = (store.allOpenTasks + store.logbookTasks).first(where: { $0.id == id }) {
                     store.toggleTaskCompletion(task)
                 }
             }
             .keyboardShortcut("k", modifiers: [.command])
             .disabled(store.isLocked || store.activeSheet != nil)
+
+            Button(store.tr(allPinTargetsPinned ? "v25_unpin_task" : "v25_pin_task")) {
+                guard !isShortcutBlocked() else { return }
+                store.togglePinForSelectedOrExpandedTasks()
+            }
+            .keyboardShortcut("p", modifiers: [.command, .shift])
+            .disabled(store.isLocked || store.activeSheet != nil || pinTargetIds.isEmpty)
 
             Button(store.tr("action_duplicate_todo")) {
                 guard !isShortcutBlocked() else { return }

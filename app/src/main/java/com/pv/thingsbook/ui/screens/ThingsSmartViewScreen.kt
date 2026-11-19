@@ -67,10 +67,13 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.shadow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.MenuOpen
+import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.AutoAwesomeMosaic
+import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircleOutline
@@ -91,6 +94,7 @@ import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.NotificationsActive
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SelectAll
@@ -167,6 +171,7 @@ import com.pv.thingsbook.data.repository.CloudSyncStatus
 import com.pv.thingsbook.data.repository.ThingsRepository
 import com.pv.thingsbook.domain.model.Area
 import com.pv.thingsbook.domain.model.CalendarEventItem
+import com.pv.thingsbook.domain.model.EffortLevel
 import com.pv.thingsbook.domain.model.Heading
 import com.pv.thingsbook.domain.model.Project
 import com.pv.thingsbook.domain.model.QuickFindDateFilter
@@ -174,12 +179,17 @@ import com.pv.thingsbook.domain.model.QuickFindEntityScope
 import com.pv.thingsbook.domain.model.QuickFindFilter
 import com.pv.thingsbook.domain.model.RecurrenceMode
 import com.pv.thingsbook.domain.model.RecurrenceUnit
+import com.pv.thingsbook.domain.model.SavedPerspective
 import com.pv.thingsbook.domain.model.ScheduleState
 import com.pv.thingsbook.domain.model.StalledProjectDetector
 import com.pv.thingsbook.domain.model.Tag
 import com.pv.thingsbook.domain.model.TaskItem
 import com.pv.thingsbook.domain.model.TaskStatus
 import com.pv.thingsbook.domain.model.TimeblockScheduleUtils
+import com.pv.thingsbook.domain.model.computeTodayCapacitySummary
+import com.pv.thingsbook.domain.model.filterTasksForPerspective
+import com.pv.thingsbook.domain.model.formatDurationCompact
+import com.pv.thingsbook.domain.model.sortTasksForView
 import com.pv.thingsbook.ui.components.AttachmentImportOutcome
 import com.pv.thingsbook.ui.components.CreateOrEditProjectDialog
 import com.pv.thingsbook.ui.components.DeadlineDatePickerDialog
@@ -193,11 +203,13 @@ import com.pv.thingsbook.ui.components.MagicPlusDragState
 import com.pv.thingsbook.ui.components.MagicPlusFab
 import com.pv.thingsbook.ui.components.MagicPlusInsertionGap
 import com.pv.thingsbook.ui.components.MoveTaskToProjectOrAreaDialog
+import com.pv.thingsbook.ui.components.PerspectiveEditorDialog
 import com.pv.thingsbook.ui.components.ProjectProgressRing
 import com.pv.thingsbook.ui.components.QuickCreateAreaDialog
 import com.pv.thingsbook.ui.components.SampleTasksAccountMergeDialog
 import com.pv.thingsbook.ui.components.SmartViewIcon
 import com.pv.thingsbook.ui.components.SmartViewType
+import com.pv.thingsbook.ui.components.TaskTagPickerDialog
 import com.pv.thingsbook.ui.components.ThingsAreaManagerModal
 import com.pv.thingsbook.ui.components.ThingsAuthAndSyncModal
 import com.pv.thingsbook.ui.components.ThingsBackupCreateDialog
@@ -332,6 +344,14 @@ fun ThingsSmartViewScreen(
     val projectAttachments by viewModel.activeProjectAttachments.collectAsState()
     val areaTasks by viewModel.activeAreaTasks.collectAsState()
     val allTags by viewModel.allTags.collectAsState()
+    val viewSortMode by viewModel.viewSortMode.collectAsState()
+    val savedPerspectives by viewModel.savedPerspectives.collectAsState()
+    val allOpenTasks by viewModel.allOpenTasks.collectAsState()
+    val openTaskIds by viewModel.openTaskIds.collectAsState()
+    val calendarEventsEnabledTop by viewModel.calendarEventsEnabled.collectAsState()
+    val rawTodayCalendarEventsTop by viewModel.todayCalendarEvents.collectAsState()
+    val allHeadingsTop by viewModel.allHeadings.collectAsState()
+    val currentEpochDayTop by viewModel.currentEpochDay.collectAsState()
 
     var magicDragState by remember { mutableStateOf(MagicPlusDragState()) }
     val projectDragController = remember { ProjectDragDropController() }
@@ -339,9 +359,33 @@ fun ThingsSmartViewScreen(
     var projectDialogPreselectedAreaId by remember { mutableStateOf<String?>(null) }
     var editingProject by remember { mutableStateOf<Project?>(null) }
     var showBatchMoveDialog by remember { mutableStateOf(false) }
+    var showBatchTagPickerDialog by remember { mutableStateOf(false) }
+    var showPerspectiveEditorDialog by remember { mutableStateOf(false) }
+    var editingPerspective by remember { mutableStateOf<SavedPerspective?>(null) }
     var showEmptyTrashConfirmDialog by remember { mutableStateOf(false) }
     var externalDialogTriggerToken by remember { mutableIntStateOf(0) }
     var externalDialogTriggerType by remember { mutableStateOf<String?>(null) }
+
+    val zoneTop = ZoneId.systemDefault()
+    val todayDateTop = remember(currentEpochDayTop) { LocalDate.ofEpochDay(currentEpochDayTop) }
+    val todayDayStartMillis = remember(todayDateTop, zoneTop) {
+        todayDateTop.atStartOfDay(zoneTop).toInstant().toEpochMilli()
+    }
+    val todayDayEndMillis = remember(todayDateTop, zoneTop) {
+        todayDateTop.plusDays(1).atStartOfDay(zoneTop).toInstant().toEpochMilli()
+    }
+
+    val isProjectView = navTarget is ActiveNavigationTarget.ProjectDetail
+    val isAreaView = navTarget is ActiveNavigationTarget.AreaDetail
+    val currentProject: Project? = (navTarget as? ActiveNavigationTarget.ProjectDetail)?.let { detail ->
+        activeProjects.find { it.id == detail.projectId }
+    }
+    val currentArea: Area? = (navTarget as? ActiveNavigationTarget.AreaDetail)?.let { detail ->
+        areas.find { it.id == detail.areaId }
+    }
+    val currentPerspective: SavedPerspective? = (navTarget as? ActiveNavigationTarget.PerspectiveDetail)?.let { detail ->
+        savedPerspectives.find { it.id == detail.perspectiveId }
+    }
 
     // Determine primary task list for current view, filtered by selected tag if active
     val rawPrimaryTasks: List<TaskItem> = when (val target = navTarget) {
@@ -356,18 +400,65 @@ fun ThingsSmartViewScreen(
         }
         is ActiveNavigationTarget.ProjectDetail -> projectTasks
         is ActiveNavigationTarget.AreaDetail -> areaTasks
+        is ActiveNavigationTarget.PerspectiveDetail -> remember(
+            target.perspectiveId,
+            savedPerspectives,
+            allOpenTasks,
+            openTaskIds,
+            todayDayStartMillis
+        ) {
+            val persp = savedPerspectives.firstOrNull { it.id == target.perspectiveId }
+            if (persp != null) {
+                filterTasksForPerspective(allOpenTasks, persp, openTaskIds, todayDayStartMillis)
+            } else {
+                emptyList()
+            }
+        }
     }
 
-    val primaryTasks: List<TaskItem> = remember(rawPrimaryTasks, selectedFilterTagId) {
+    val shouldDirectSortPrimary = !isProjectView &&
+        navTarget != ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK) &&
+        navTarget != ActiveNavigationTarget.SmartView(SmartViewType.TRASH) &&
+        navTarget != ActiveNavigationTarget.SmartView(SmartViewType.UPCOMING)
+
+    val primaryTasks: List<TaskItem> = remember(
+        rawPrimaryTasks,
+        selectedFilterTagId,
+        viewSortMode,
+        openTaskIds,
+        shouldDirectSortPrimary
+    ) {
         val tagId = selectedFilterTagId
-        if (tagId == null) rawPrimaryTasks
-        else rawPrimaryTasks.filter { task -> task.tags.any { it.id == tagId } }
+        val tagFiltered = if (tagId == null) rawPrimaryTasks else rawPrimaryTasks.filter { task -> task.tags.any { it.id == tagId } }
+        if (shouldDirectSortPrimary) {
+            sortTasksForView(tagFiltered, viewSortMode, openTaskIds)
+        } else {
+            tagFiltered
+        }
     }
 
-    val filteredEveningTasks: List<TaskItem> = remember(eveningTasks, selectedFilterTagId) {
+    val filteredEveningTasks: List<TaskItem> = remember(eveningTasks, selectedFilterTagId, viewSortMode, openTaskIds) {
         val tagId = selectedFilterTagId
-        if (tagId == null) eveningTasks
-        else eveningTasks.filter { task -> task.tags.any { it.id == tagId } }
+        val tagFiltered = if (tagId == null) eveningTasks else eveningTasks.filter { task -> task.tags.any { it.id == tagId } }
+        sortTasksForView(tagFiltered, viewSortMode, openTaskIds)
+    }
+
+    val todayCapacitySummary: Pair<Int, Int> = remember(
+        todayTasks,
+        eveningTasks,
+        rawTodayCalendarEventsTop,
+        calendarEventsEnabledTop,
+        todayDayStartMillis,
+        todayDayEndMillis
+    ) {
+        val combinedToday = (todayTasks + eveningTasks).distinctBy { it.id }
+        val activeCalEvents = if (calendarEventsEnabledTop) rawTodayCalendarEventsTop else emptyList()
+        computeTodayCapacitySummary(
+            tasks = combinedToday,
+            calendarEvents = activeCalEvents,
+            dayStartMillis = todayDayStartMillis,
+            dayEndMillis = todayDayEndMillis
+        )
     }
 
     val allVisibleViewTasks: List<TaskItem> = remember(primaryTasks, filteredEveningTasks, navTarget) {
@@ -379,15 +470,6 @@ fun ThingsSmartViewScreen(
     }
     val allVisibleTaskIds: List<String> = remember(allVisibleViewTasks) {
         allVisibleViewTasks.map { it.id }
-    }
-
-    val isProjectView = navTarget is ActiveNavigationTarget.ProjectDetail
-    val isAreaView = navTarget is ActiveNavigationTarget.AreaDetail
-    val currentProject: Project? = (navTarget as? ActiveNavigationTarget.ProjectDetail)?.let { detail ->
-        activeProjects.find { it.id == detail.projectId }
-    }
-    val currentArea: Area? = (navTarget as? ActiveNavigationTarget.AreaDetail)?.let { detail ->
-        areas.find { it.id == detail.areaId }
     }
 
     // Adaptive Layout Detection: Tablets & Foldables (>= 700dp) vs. Android Phones (< 700dp)
@@ -405,8 +487,6 @@ fun ThingsSmartViewScreen(
         isMobileDrawerOpen = false
     }
 
-    val allHeadingsTop by viewModel.allHeadings.collectAsState()
-    val currentEpochDayTop by viewModel.currentEpochDay.collectAsState()
     val upcomingPhaseMilestoneCount = remember(allHeadingsTop, activeProjects, currentEpochDayTop) {
         val zone = ZoneId.systemDefault()
         val todayDate = LocalDate.ofEpochDay(currentEpochDayTop)
@@ -433,6 +513,8 @@ fun ThingsSmartViewScreen(
         showCreateProjectDialog = false
         editingProject = null
         showBatchMoveDialog = false
+        showBatchTagPickerDialog = false
+        showPerspectiveEditorDialog = false
         isMobileDrawerOpen = false
         viewModel.setMagicPlusMenuOpen(false)
         viewModel.createTaskAtPosition(primaryTasks, 0, "", forceTopUngroupedInProject = true)
@@ -440,6 +522,8 @@ fun ThingsSmartViewScreen(
 
     val triggerCreateProjectShortcut by rememberUpdatedState {
         showBatchMoveDialog = false
+        showBatchTagPickerDialog = false
+        showPerspectiveEditorDialog = false
         isMobileDrawerOpen = false
         viewModel.setMagicPlusMenuOpen(false)
         projectDialogPreselectedAreaId = currentArea?.id ?: currentProject?.areaId
@@ -474,6 +558,10 @@ fun ThingsSmartViewScreen(
             }
             ctrlOrMeta && !nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_D -> {
                 when {
+                    selectedTaskIds.isNotEmpty() -> {
+                        viewModel.batchDuplicateSelectedTasks()
+                        true
+                    }
                     expandedTaskId != null -> {
                         viewModel.duplicateTask(expandedTaskId!!)
                         true
@@ -522,11 +610,20 @@ fun ThingsSmartViewScreen(
                 }
             }
             ctrlOrMeta && !nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_A &&
-                expandedTaskId == null && !showCreateProjectDialog && !showBatchMoveDialog -> {
+                expandedTaskId == null && !showCreateProjectDialog && !showBatchMoveDialog && !showBatchTagPickerDialog && !showPerspectiveEditorDialog -> {
                 viewModel.selectAllTasks(allVisibleTaskIds)
                 true
             }
             nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_ESCAPE -> when {
+                showPerspectiveEditorDialog -> {
+                    showPerspectiveEditorDialog = false
+                    editingPerspective = null
+                    true
+                }
+                showBatchTagPickerDialog -> {
+                    showBatchTagPickerDialog = false
+                    true
+                }
                 showCreateProjectDialog -> {
                     showCreateProjectDialog = false
                     editingProject = null
@@ -584,6 +681,10 @@ fun ThingsSmartViewScreen(
                         }
                         ctrlOrMeta && !event.isShiftPressed && event.key == Key.D -> {
                             when {
+                                selectedTaskIds.isNotEmpty() -> {
+                                    viewModel.batchDuplicateSelectedTasks()
+                                    true
+                                }
                                 expandedTaskId != null -> {
                                     viewModel.duplicateTask(expandedTaskId!!)
                                     true
@@ -639,6 +740,15 @@ fun ThingsSmartViewScreen(
                             true
                         }
                         event.key == Key.Escape -> when {
+                            showPerspectiveEditorDialog -> {
+                                showPerspectiveEditorDialog = false
+                                editingPerspective = null
+                                true
+                            }
+                            showBatchTagPickerDialog -> {
+                                showBatchTagPickerDialog = false
+                                true
+                            }
                             showCreateProjectDialog -> {
                                 showCreateProjectDialog = false
                                 editingProject = null
@@ -701,9 +811,22 @@ fun ThingsSmartViewScreen(
                     smartViewCounts = smartViewCounts,
                     areas = areas,
                     projects = activeProjects,
+                    savedPerspectives = savedPerspectives,
+                    allOpenTasks = allOpenTasks,
+                    openTaskIds = openTaskIds,
+                    todayDayStartMillis = todayDayStartMillis,
                     onSelectSmartView = { viewModel.selectSmartView(it) },
                     onSelectArea = { viewModel.selectArea(it) },
                     onSelectProject = { viewModel.selectProject(it) },
+                    onSelectPerspective = { viewModel.selectPerspective(it) },
+                    onCreateNewPerspective = {
+                        editingPerspective = null
+                        showPerspectiveEditorDialog = true
+                    },
+                    onEditPerspective = { persp ->
+                        editingPerspective = persp
+                        showPerspectiveEditorDialog = true
+                    },
                     onOpenAreaManager = { viewModel.setAreaManagerOpen(true) },
                     onCreateNewProject = { areaId ->
                         projectDialogPreselectedAreaId = areaId
@@ -769,9 +892,15 @@ fun ThingsSmartViewScreen(
                             navTarget = navTarget,
                             areas = areas,
                             projects = activeProjects,
+                            savedPerspectives = savedPerspectives,
                             onSelectSmartView = { viewModel.selectSmartView(it) },
                             onSelectArea = { viewModel.selectArea(it) },
                             onSelectProject = { viewModel.selectProject(it) },
+                            onSelectPerspective = { viewModel.selectPerspective(it) },
+                            onCreateNewPerspective = {
+                                editingPerspective = null
+                                showPerspectiveEditorDialog = true
+                            },
                             onOpenAreaManager = { viewModel.setAreaManagerOpen(true) },
                             onCreateNewProject = {
                                 projectDialogPreselectedAreaId = currentArea?.id
@@ -788,11 +917,12 @@ fun ThingsSmartViewScreen(
                         )
                     }
 
-                    // View Title Header (Smart View, Project with Target Date / Deadline, or Area like Work / Home)
+                    // View Title Header (Smart View, Project with Target Date / Deadline, Area, or Custom Perspective)
                     ViewTitleHeader(
                         navTarget = navTarget,
                         currentProject = currentProject,
                         currentArea = currentArea,
+                        currentPerspective = currentPerspective,
                         areas = areas,
                         projects = activeProjects,
                         projectAttachments = projectAttachments,
@@ -800,6 +930,18 @@ fun ThingsSmartViewScreen(
                         trashItemCount = deletedTasks.size + deletedProjects.size,
                         isTodayTimelineMode = isTodayTimelineMode,
                         onToggleTodayTimelineMode = { viewModel.setTodayTimelineMode(it) },
+                        todayPlannedMinutes = todayCapacitySummary.first,
+                        todayFreeMinutes = todayCapacitySummary.second,
+                        calendarEventsEnabled = calendarEventsEnabledTop,
+                        viewSortMode = viewSortMode,
+                        onSelectViewSortMode = { viewModel.setViewSortMode(it) },
+                        onEditPerspective = { persp ->
+                            editingPerspective = persp
+                            showPerspectiveEditorDialog = true
+                        },
+                        onDeletePerspective = { pId ->
+                            viewModel.deletePerspective(pId)
+                        },
                         onSaveProjectAsTemplate = { pId, toastMsg ->
                             viewModel.saveProjectAsTemplate(pId, toastMsg)
                         },
@@ -906,7 +1048,7 @@ fun ThingsSmartViewScreen(
             }
         }
 
-        // Floating Multi-Task Selection Action Bar (Mouse Ctrl/Shift-Click & Things-for-iPhone Swipe)
+        // Floating Multi-Task Selection Action Bar (Mouse Ctrl/Shift-Click, Touch Long-Press & Things-for-iPhone Swipe)
         if (selectedTaskIds.isNotEmpty()) {
             ThingsMultiSelectionBar(
                 selectedCount = selectedTaskIds.size,
@@ -927,6 +1069,12 @@ fun ThingsSmartViewScreen(
                         .toEpochMilli()
                     viewModel.batchScheduleSelectedTasks(allVisibleViewTasks, ScheduleState.UPCOMING, tomorrowStartMillis)
                 },
+                onScheduleSomeday = {
+                    viewModel.batchScheduleSelectedTasks(allVisibleViewTasks, ScheduleState.SOMEDAY, null)
+                },
+                onOpenBatchTags = { showBatchTagPickerDialog = true },
+                onBatchPin = { viewModel.batchTogglePinSelectedTasks() },
+                onBatchDuplicate = { viewModel.batchDuplicateSelectedTasks() },
                 onOpenBatchMove = { showBatchMoveDialog = true },
                 onBatchComplete = { viewModel.batchCompleteSelectedTasks() },
                 onBatchDelete = { viewModel.batchDeleteSelectedTasks() },
@@ -1017,6 +1165,10 @@ fun ThingsSmartViewScreen(
                         smartViewCounts = smartViewCounts,
                         areas = areas,
                         projects = activeProjects,
+                        savedPerspectives = savedPerspectives,
+                        allOpenTasks = allOpenTasks,
+                        openTaskIds = openTaskIds,
+                        todayDayStartMillis = todayDayStartMillis,
                         onSelectSmartView = {
                             isMobileDrawerOpen = false
                             viewModel.selectSmartView(it)
@@ -1028,6 +1180,20 @@ fun ThingsSmartViewScreen(
                         onSelectProject = {
                             isMobileDrawerOpen = false
                             viewModel.selectProject(it)
+                        },
+                        onSelectPerspective = {
+                            isMobileDrawerOpen = false
+                            viewModel.selectPerspective(it)
+                        },
+                        onCreateNewPerspective = {
+                            isMobileDrawerOpen = false
+                            editingPerspective = null
+                            showPerspectiveEditorDialog = true
+                        },
+                        onEditPerspective = { persp ->
+                            isMobileDrawerOpen = false
+                            editingPerspective = persp
+                            showPerspectiveEditorDialog = true
                         },
                         onOpenAreaManager = {
                             isMobileDrawerOpen = false
@@ -1078,6 +1244,15 @@ fun ThingsSmartViewScreen(
                 activeLocale = activeLocale,
                 showBatchMoveDialog = showBatchMoveDialog,
                 onDismissBatchMoveDialog = { showBatchMoveDialog = false },
+                showBatchTagPickerDialog = showBatchTagPickerDialog,
+                onDismissBatchTagPickerDialog = { showBatchTagPickerDialog = false },
+                showPerspectiveEditorDialog = showPerspectiveEditorDialog,
+                editingPerspective = editingPerspective,
+                savedPerspectivesCount = savedPerspectives.size,
+                onDismissPerspectiveEditorDialog = {
+                    showPerspectiveEditorDialog = false
+                    editingPerspective = null
+                },
                 showCreateProjectDialog = showCreateProjectDialog,
                 editingProject = editingProject,
                 projectDialogPreselectedAreaId = projectDialogPreselectedAreaId,
@@ -1152,6 +1327,7 @@ private fun MagicPlusOverlaySection(
     val contextMode = when (navTarget) {
         is ActiveNavigationTarget.ProjectDetail -> MagicPlusContextMode.PROJECT_DETAIL
         is ActiveNavigationTarget.AreaDetail -> MagicPlusContextMode.AREA_DETAIL
+        is ActiveNavigationTarget.PerspectiveDetail -> MagicPlusContextMode.SMART_VIEW
         is ActiveNavigationTarget.SmartView -> {
             if (navTarget.type == SmartViewType.LOGBOOK || navTarget.type == SmartViewType.TRASH) {
                 MagicPlusContextMode.LOGBOOK
@@ -1630,6 +1806,10 @@ private fun ThingsTaskRowItem(
 ) {
     val currentEpochDay by viewModel.currentEpochDay.collectAsState()
     val navTarget by viewModel.navigationTarget.collectAsState()
+    val tagSortMode by viewModel.tagSortMode.collectAsState()
+    val tagUsageCounts by viewModel.tagUsageCounts.collectAsState()
+    val allOpenTasks by viewModel.allOpenTasks.collectAsState()
+    val openTaskIds by viewModel.openTaskIds.collectAsState()
     val isTodayView = navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
     androidx.compose.runtime.key(currentEpochDay) {
         ExpandableTaskCard(
@@ -1638,9 +1818,13 @@ private fun ThingsTaskRowItem(
             onRequestEnsureVisible = onRequestEnsureVisible,
             task = task,
             allTags = allTags,
+            tagSortMode = tagSortMode,
+            tagUsageCounts = tagUsageCounts,
             allAreas = areas,
             allProjects = activeProjects,
             allHeadings = allHeadings,
+            allOpenTasks = allOpenTasks,
+            openTaskIds = openTaskIds,
             isExpanded = expandedTaskId == task.id,
             isTodayView = isTodayView,
             isSelected = task.id in selectedTaskIds,
@@ -1662,6 +1846,10 @@ private fun ThingsTaskRowItem(
             onDeadlineChange = { dl -> viewModel.updateTaskDeadline(task, dl) },
             onRecurrenceChange = { rule -> viewModel.updateTaskRecurrence(task.id, rule) },
             onUpdateTimeblock = { s, d -> viewModel.updateTaskTimeblock(task.id, s, d) },
+            onTogglePin = { viewModel.toggleTaskPinned(task.id) },
+            onUpdateEffortLevel = { eff -> viewModel.setTaskEffortLevel(task.id, eff) },
+            onUpdateStandaloneDuration = { mins -> viewModel.setStandaloneTaskDuration(task.id, mins) },
+            onUpdateBlockedBy = { blockers -> viewModel.setTaskBlockedBy(task.id, blockers) },
             onMoveTaskToContainer = { pId, hId, aId ->
                 viewModel.moveTaskToContainer(task.id, pId, hId, aId)
             },
@@ -1739,6 +1927,8 @@ private fun ThingsMainTaskLazyList(
     val allHeadings by viewModel.allHeadings.collectAsState()
     val headingTaskCounts by viewModel.headingTaskCounts.collectAsState()
     val selectedFilterTagId by viewModel.selectedFilterTagId.collectAsState()
+    val viewSortMode by viewModel.viewSortMode.collectAsState()
+    val openTaskIds by viewModel.openTaskIds.collectAsState()
     val magicBreakdownTaskId by viewModel.magicBreakdownTaskId.collectAsState()
     val logbookAiReview by viewModel.logbookAiReview.collectAsState()
     val isGeminiBusy by viewModel.isGeminiBusy.collectAsState()
@@ -1817,14 +2007,30 @@ private fun ThingsMainTaskLazyList(
     }
 
     // Project sections as displayed: tasks without (valid) heading first, then one section per heading
-    val projectSections: Map<String?, List<TaskItem>> = remember(isProjectView, primaryTasks, projectHeadings) {
+    val projectSections: Map<String?, List<TaskItem>> = remember(
+        isProjectView,
+        primaryTasks,
+        projectHeadings,
+        viewSortMode,
+        openTaskIds
+    ) {
         if (!isProjectView) {
             emptyMap()
         } else {
             val headingIdSet = projectHeadings.mapTo(HashSet()) { it.id }
             val result = LinkedHashMap<String?, List<TaskItem>>()
-            result[null] = primaryTasks.filter { it.headingId == null || it.headingId !in headingIdSet }
-            projectHeadings.forEach { h -> result[h.id] = primaryTasks.filter { it.headingId == h.id } }
+            result[null] = sortTasksForView(
+                primaryTasks.filter { it.headingId == null || it.headingId !in headingIdSet },
+                viewSortMode,
+                openTaskIds
+            )
+            projectHeadings.forEach { h ->
+                result[h.id] = sortTasksForView(
+                    primaryTasks.filter { it.headingId == h.id },
+                    viewSortMode,
+                    openTaskIds
+                )
+            }
             result
         }
     }
@@ -2008,7 +2214,7 @@ private fun ThingsMainTaskLazyList(
 
     val draggedTaskId = projectDragController.session?.draggedTaskId
     val taskDragHandleFor: (TaskItem) -> (@Composable () -> Unit)? = { task ->
-        if (isProjectView && task.status == TaskStatus.OPEN && selectedTaskIds.isEmpty()) {
+        if (isProjectView && viewSortMode == "manual" && task.status == TaskStatus.OPEN && selectedTaskIds.isEmpty()) {
             { ProjectTaskDragHandle(task = task, controller = projectDragController) }
         } else {
             null
@@ -2304,7 +2510,7 @@ private fun ThingsMainTaskLazyList(
 
             var cumulativeTaskOffset = 0
             allUpcomingDates.forEachIndexed { groupIdx, targetDate ->
-                val dayTasks = groupedUpcoming[targetDate].orEmpty()
+                val dayTasks = sortTasksForView(groupedUpcoming[targetDate].orEmpty(), viewSortMode, openTaskIds)
                 val dayMilestones = upcomingMilestonesByDate[targetDate].orEmpty()
                 val dayEvents = if (calendarEventsEnabled && (dayTasks.isNotEmpty() || dayMilestones.isNotEmpty())) {
                     DeviceCalendarRepository.filterActiveOrUpcomingEvents(
@@ -2638,6 +2844,12 @@ private fun ThingsModalsOverlay(
     activeLocale: Locale,
     showBatchMoveDialog: Boolean,
     onDismissBatchMoveDialog: () -> Unit,
+    showBatchTagPickerDialog: Boolean = false,
+    onDismissBatchTagPickerDialog: () -> Unit = {},
+    showPerspectiveEditorDialog: Boolean = false,
+    editingPerspective: SavedPerspective? = null,
+    savedPerspectivesCount: Int = 0,
+    onDismissPerspectiveEditorDialog: () -> Unit = {},
     showCreateProjectDialog: Boolean,
     editingProject: Project?,
     projectDialogPreselectedAreaId: String?,
@@ -2646,6 +2858,9 @@ private fun ThingsModalsOverlay(
     onDismissEmptyTrashConfirmDialog: () -> Unit = {}
 ) {
     val allHeadings by viewModel.allHeadings.collectAsState()
+    val selectedTaskIds by viewModel.selectedTaskIds.collectAsState()
+    val tagSortMode by viewModel.tagSortMode.collectAsState()
+    val tagUsageCounts by viewModel.tagUsageCounts.collectAsState()
     val isSettingsModalOpen by viewModel.isSettingsModalOpen.collectAsState()
     val isLocalOnlyDbMode by viewModel.isLocalOnlyDbMode.collectAsState()
     val syncStatus by viewModel.syncStatus.collectAsState()
@@ -2695,6 +2910,71 @@ private fun ThingsModalsOverlay(
                 viewModel.batchMoveSelectedTasks(allVisibleViewTasks, pId, hId, aId)
             },
             onDismiss = onDismissBatchMoveDialog
+        )
+    }
+
+    // Batch Categories Picker Dialog for Multi-Selection (v2.5 / v3.0)
+    if (showBatchTagPickerDialog) {
+        val selectedTasksList = remember(allVisibleViewTasks, selectedTaskIds) {
+            allVisibleViewTasks.filter { it.id in selectedTaskIds }
+        }
+        val commonTagIds = remember(selectedTasksList) {
+            if (selectedTasksList.isEmpty()) {
+                emptySet()
+            } else {
+                selectedTasksList
+                    .map { t -> t.tags.mapTo(HashSet()) { it.id } as Set<String> }
+                    .reduce { acc, next -> acc.intersect(next) }
+            }
+        }
+        TaskTagPickerDialog(
+            allTags = allTags,
+            selectedTagIds = commonTagIds.toList(),
+            tagSortMode = tagSortMode,
+            tagUsageCounts = tagUsageCounts,
+            onUpdateSelectedTags = { updatedList ->
+                val nextSet = updatedList.toSet()
+                viewModel.batchUpdateSelectedTasksTags(
+                    tagIdsToAdd = nextSet - commonTagIds,
+                    tagIdsToRemove = commonTagIds - nextSet
+                )
+            },
+            onCreateAndAssignTag = { newTagTitle ->
+                viewModel.batchCreateAndAssignTagToSelectedTasks(newTagTitle)
+            },
+            onOpenFullTagManager = {
+                onDismissBatchTagPickerDialog()
+                viewModel.setTagManagerOpen(true)
+            },
+            onDismiss = onDismissBatchTagPickerDialog
+        )
+    }
+
+    // v3.0 Custom Saved Perspective Editor Dialog
+    if (showPerspectiveEditorDialog) {
+        PerspectiveEditorDialog(
+            initialPerspective = editingPerspective,
+            areas = areas,
+            allTags = allTags,
+            onSave = { saved ->
+                viewModel.savePerspective(
+                    if (editingPerspective == null && saved.sortOrder <= 0.0) {
+                        saved.copy(sortOrder = (savedPerspectivesCount + 1).toDouble())
+                    } else {
+                        saved
+                    }
+                )
+                onDismissPerspectiveEditorDialog()
+            },
+            onDelete = if (editingPerspective != null) {
+                { pId ->
+                    viewModel.deletePerspective(pId)
+                    onDismissPerspectiveEditorDialog()
+                }
+            } else {
+                null
+            },
+            onDismiss = onDismissPerspectiveEditorDialog
         )
     }
 
@@ -2835,10 +3115,15 @@ private fun ThingsModalsOverlay(
         )
     }
 
-    // Full Tag Management Modal
+    // Full Tag Management Modal (Categories Power Suite)
     if (isTagManagerOpen) {
         ThingsTagManagerModal(
             allTags = allTags,
+            tagSortMode = tagSortMode,
+            tagUsageCounts = tagUsageCounts,
+            onSetTagSortMode = { mode -> viewModel.setTagSortMode(mode) },
+            onMoveTag = { tagId, moveUp -> viewModel.moveTag(tagId, moveUp) },
+            onMergeTags = { sourceId, targetId -> viewModel.mergeTags(sourceId, targetId) },
             onCreateTag = { title, shortcut -> viewModel.createTag(title, shortcut) },
             onRenameTag = { id, title, shortcut -> viewModel.renameTag(id, title, shortcut) },
             onDeleteTag = { id -> viewModel.deleteTag(id) },
@@ -3187,6 +3472,10 @@ private fun ThingsMultiSelectionBar(
     onSelectAll: () -> Unit,
     onScheduleToday: () -> Unit,
     onScheduleTomorrow: () -> Unit,
+    onScheduleSomeday: () -> Unit = {},
+    onOpenBatchTags: () -> Unit = {},
+    onBatchPin: () -> Unit = {},
+    onBatchDuplicate: () -> Unit = {},
     onOpenBatchMove: () -> Unit,
     onBatchComplete: () -> Unit,
     onBatchDelete: () -> Unit,
@@ -3258,6 +3547,46 @@ private fun ThingsMultiSelectionBar(
                     onClick = {
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onScheduleTomorrow()
+                    }
+                )
+            }
+
+            ThingsHoverTooltip(text = stringResource(R.string.v25_batch_someday)) {
+                ThingsTagPill(
+                    title = "📦 ${stringResource(R.string.v25_batch_someday)}",
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onScheduleSomeday()
+                    }
+                )
+            }
+
+            ThingsHoverTooltip(text = stringResource(R.string.v25_batch_tags)) {
+                ThingsTagPill(
+                    title = "🏷️ ${stringResource(R.string.v25_batch_tags)}",
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onOpenBatchTags()
+                    }
+                )
+            }
+
+            ThingsHoverTooltip(text = stringResource(R.string.v25_batch_pin)) {
+                ThingsTagPill(
+                    title = "📌 ${stringResource(R.string.v25_batch_pin)}",
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onBatchPin()
+                    }
+                )
+            }
+
+            ThingsHoverTooltip(text = "${stringResource(R.string.v25_batch_duplicate)} (Ctrl+D)") {
+                ThingsTagPill(
+                    title = "⧉ ${stringResource(R.string.v25_batch_duplicate)}",
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onBatchDuplicate()
                     }
                 )
             }
@@ -3961,9 +4290,12 @@ private fun SmartViewNavigationStrip(
     navTarget: ActiveNavigationTarget,
     areas: List<Area>,
     projects: List<Project>,
+    savedPerspectives: List<SavedPerspective> = emptyList(),
     onSelectSmartView: (SmartViewType) -> Unit,
     onSelectArea: (String) -> Unit,
     onSelectProject: (String) -> Unit,
+    onSelectPerspective: (String) -> Unit = {},
+    onCreateNewPerspective: () -> Unit = {},
     onOpenAreaManager: () -> Unit,
     onCreateNewProject: () -> Unit,
     onOpenWeeklyReview: () -> Unit = {},
@@ -4066,6 +4398,69 @@ private fun SmartViewNavigationStrip(
                         text = templatesTitle,
                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
                         color = colors.secondaryText
+                    )
+                }
+            }
+        }
+
+        // 1c. Custom Saved Perspectives (v3.0)
+        items(savedPerspectives, key = { "nav_persp_${it.id}" }) { persp ->
+            val selected = navTarget == ActiveNavigationTarget.PerspectiveDetail(persp.id)
+            ThingsHoverTooltip(text = "${stringResource(R.string.v30_perspectives_section)}: ${persp.title}") {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(if (selected) colors.thingsBlueSoft else colors.tagPillBg.copy(alpha = 0.72f))
+                        .clickable {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onSelectPerspective(persp.id)
+                        }
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.AutoAwesomeMosaic,
+                        contentDescription = persp.title,
+                        tint = if (selected) colors.thingsBlue else colors.secondaryText,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = persp.title,
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold
+                        ),
+                        color = if (selected) colors.thingsBlue else colors.primaryText
+                    )
+                }
+            }
+        }
+
+        item(key = "nav_add_perspective") {
+            val newPerspLabel = stringResource(R.string.v30_perspective_new)
+            ThingsHoverTooltip(text = newPerspLabel) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(colors.thingsBlueSoft.copy(alpha = 0.75f))
+                        .clickable {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onCreateNewPerspective()
+                        }
+                        .padding(horizontal = 11.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.AutoAwesomeMosaic,
+                        contentDescription = newPerspLabel,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = "+ ${stringResource(R.string.v30_perspectives_section)}",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.thingsBlue
                     )
                 }
             }
@@ -4249,12 +4644,111 @@ private fun SmartViewNavigationStrip(
     }
 }
 
+@Composable
+private fun ViewSortMenuPill(
+    viewSortMode: String,
+    onSelectViewSortMode: (String) -> Unit
+) {
+    val colors = ThingsTheme.colors
+    var expanded by remember { mutableStateOf(false) }
+    val activeSortLabel = when (viewSortMode) {
+        "deadline" -> stringResource(R.string.v25_view_sort_deadline)
+        "duration" -> stringResource(R.string.v25_view_sort_duration)
+        "effort" -> stringResource(R.string.v30_view_sort_effort)
+        "alpha" -> stringResource(R.string.v25_view_sort_alpha)
+        else -> stringResource(R.string.v25_view_sort_manual)
+    }
+    val isNonDefaultSort = viewSortMode != "manual"
+
+    Box {
+        ThingsHoverTooltip(text = "${stringResource(R.string.v25_view_sort_label)}: $activeSortLabel") {
+            Surface(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { expanded = true },
+                shape = RoundedCornerShape(10.dp),
+                color = if (isNonDefaultSort) colors.thingsBlueSoft else colors.tagPillBg,
+                border = BorderStroke(
+                    width = 0.75.dp,
+                    color = if (isNonDefaultSort) colors.thingsBlue.copy(alpha = 0.42f) else colors.hairlineDivider
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Outlined.Sort,
+                        contentDescription = stringResource(R.string.v25_view_sort_label),
+                        tint = if (isNonDefaultSort) colors.thingsBlue else colors.secondaryText,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Text(
+                        text = if (isNonDefaultSort) activeSortLabel else stringResource(R.string.v25_view_sort_label),
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = if (isNonDefaultSort) FontWeight.Bold else FontWeight.Medium
+                        ),
+                        color = if (isNonDefaultSort) colors.thingsBlue else colors.secondaryText,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            val options = listOf(
+                "manual" to stringResource(R.string.v25_view_sort_manual),
+                "deadline" to stringResource(R.string.v25_view_sort_deadline),
+                "duration" to stringResource(R.string.v25_view_sort_duration),
+                "effort" to stringResource(R.string.v30_view_sort_effort),
+                "alpha" to stringResource(R.string.v25_view_sort_alpha)
+            )
+            options.forEach { (modeKey, modeLabel) ->
+                val selected = viewSortMode == modeKey
+                DropdownMenuItem(
+                    leadingIcon = {
+                        if (selected) {
+                            Icon(
+                                imageVector = Icons.Outlined.Check,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        } else {
+                            Spacer(modifier = Modifier.size(16.dp))
+                        }
+                    },
+                    text = {
+                        Text(
+                            text = modeLabel,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                            ),
+                            color = if (selected) colors.thingsBlue else colors.primaryText
+                        )
+                    },
+                    onClick = {
+                        expanded = false
+                        onSelectViewSortMode(modeKey)
+                    }
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ViewTitleHeader(
     navTarget: ActiveNavigationTarget,
     currentProject: Project?,
     currentArea: Area?,
+    currentPerspective: SavedPerspective? = null,
     areas: List<Area>,
     projects: List<Project>,
     projectAttachments: List<TaskAttachment> = emptyList(),
@@ -4262,6 +4756,13 @@ private fun ViewTitleHeader(
     trashItemCount: Int = 0,
     isTodayTimelineMode: Boolean = false,
     onToggleTodayTimelineMode: (Boolean) -> Unit = {},
+    todayPlannedMinutes: Int = 0,
+    todayFreeMinutes: Int = 480,
+    calendarEventsEnabled: Boolean = false,
+    viewSortMode: String = "manual",
+    onSelectViewSortMode: (String) -> Unit = {},
+    onEditPerspective: (SavedPerspective) -> Unit = {},
+    onDeletePerspective: (String) -> Unit = {},
     onSaveProjectAsTemplate: (String, String) -> Unit = { _, _ -> },
     onOpenStalledProjectReview: () -> Unit = {},
     onMarkProjectReviewed: (String) -> Unit = {},
@@ -4295,6 +4796,8 @@ private fun ViewTitleHeader(
     val stalledStatus = remember(currentProject) {
         currentProject?.let { StalledProjectDetector.evaluateProject(it) }
     }
+    val supportsViewSorting = navTarget != ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK) &&
+        navTarget != ActiveNavigationTarget.SmartView(SmartViewType.TRASH)
 
     val projectFilePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -4407,6 +4910,21 @@ private fun ViewTitleHeader(
                             text = stringResource(navTarget.type.titleRes),
                             style = MaterialTheme.typography.headlineLarge,
                             color = colors.primaryText
+                        )
+                    }
+                    is ActiveNavigationTarget.PerspectiveDetail -> {
+                        Icon(
+                            imageVector = Icons.Outlined.AutoAwesomeMosaic,
+                            contentDescription = null,
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(26.dp)
+                        )
+                        Text(
+                            text = currentPerspective?.title ?: stringResource(R.string.v30_perspectives_section),
+                            style = MaterialTheme.typography.headlineLarge,
+                            color = colors.primaryText,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                     is ActiveNavigationTarget.ProjectDetail -> {
@@ -4546,12 +5064,21 @@ private fun ViewTitleHeader(
                 }
             }
 
-            // Quick Actions for Today (List | Timeline toggle), Project, Area, or Trash in Header
+            // Quick Actions for Today (Sort + List | Timeline toggle), Perspective, Project, Area, Smart Views, or Trash in Header
             if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY)) {
-                ThingsTodayModeSegmentedToggle(
-                    isTimelineMode = isTodayTimelineMode,
-                    onModeChange = onToggleTodayTimelineMode
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    ViewSortMenuPill(
+                        viewSortMode = viewSortMode,
+                        onSelectViewSortMode = onSelectViewSortMode
+                    )
+                    ThingsTodayModeSegmentedToggle(
+                        isTimelineMode = isTodayTimelineMode,
+                        onModeChange = onToggleTodayTimelineMode
+                    )
+                }
             } else if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TRASH) && trashItemCount > 0) {
                 ThingsHoverTooltip(text = stringResource(R.string.trash_empty_btn)) {
                     Row(
@@ -4576,12 +5103,52 @@ private fun ViewTitleHeader(
                         )
                     }
                 }
+            } else if (currentPerspective != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    ViewSortMenuPill(
+                        viewSortMode = viewSortMode,
+                        onSelectViewSortMode = onSelectViewSortMode
+                    )
+                    ThingsHoverTooltip(text = stringResource(R.string.v30_perspective_edit)) {
+                        IconButton(
+                            onClick = { onEditPerspective(currentPerspective) },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Edit,
+                                contentDescription = stringResource(R.string.v30_perspective_edit),
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                    }
+                    ThingsHoverTooltip(text = stringResource(R.string.v30_perspective_delete)) {
+                        IconButton(
+                            onClick = { onDeletePerspective(currentPerspective.id) },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.DeleteOutline,
+                                contentDescription = stringResource(R.string.v30_perspective_delete),
+                                tint = colors.deadlineUrgentRed,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
             } else if (currentProject != null) {
                 val projIdx = projects.indexOfFirst { it.id == currentProject.id }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
+                    ViewSortMenuPill(
+                        viewSortMode = viewSortMode,
+                        onSelectViewSortMode = onSelectViewSortMode
+                    )
                     if (projIdx > 0) {
                         ThingsHoverTooltip(text = stringResource(R.string.project_move_up)) {
                             IconButton(
@@ -4671,6 +5238,10 @@ private fun ViewTitleHeader(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
+                    ViewSortMenuPill(
+                        viewSortMode = viewSortMode,
+                        onSelectViewSortMode = onSelectViewSortMode
+                    )
                     if (areaIdx > 0) {
                         ThingsHoverTooltip(text = stringResource(R.string.area_move_up)) {
                             IconButton(
@@ -4733,6 +5304,46 @@ private fun ViewTitleHeader(
                             )
                         }
                     }
+                }
+            } else if (supportsViewSorting) {
+                ViewSortMenuPill(
+                    viewSortMode = viewSortMode,
+                    onSelectViewSortMode = onSelectViewSortMode
+                )
+            }
+        }
+
+        // v3.0 Today Capacity Summary Pill (Glacier-Blue Soft Bento pill shown whenever plannedMinutes > 0)
+        if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) && todayPlannedMinutes > 0) {
+            val plannedFmt = formatDurationCompact(todayPlannedMinutes) ?: "${todayPlannedMinutes}m"
+            val freeFmt = formatDurationCompact(todayFreeMinutes) ?: "0m"
+            val capacityText = if (calendarEventsEnabled) {
+                stringResource(R.string.v30_today_capacity_summary, plannedFmt, freeFmt)
+            } else {
+                stringResource(R.string.v30_today_planned_only, plannedFmt)
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = colors.thingsBlueSoft,
+                border = BorderStroke(0.75.dp, colors.thingsBlue.copy(alpha = 0.35f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Schedule,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = capacityText,
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.thingsBlue
+                    )
                 }
             }
         }
@@ -5969,9 +6580,16 @@ private fun ThingsChromebookSidebar(
     smartViewCounts: Map<SmartViewType, Int>,
     areas: List<Area>,
     projects: List<Project>,
+    savedPerspectives: List<SavedPerspective> = emptyList(),
+    allOpenTasks: List<TaskItem> = emptyList(),
+    openTaskIds: Set<String> = emptySet(),
+    todayDayStartMillis: Long = 0L,
     onSelectSmartView: (SmartViewType) -> Unit,
     onSelectArea: (String) -> Unit,
     onSelectProject: (String) -> Unit,
+    onSelectPerspective: (String) -> Unit = {},
+    onCreateNewPerspective: () -> Unit = {},
+    onEditPerspective: (SavedPerspective) -> Unit = {},
     onOpenAreaManager: () -> Unit,
     onCreateNewProject: (String?) -> Unit,
     onOpenWeeklyReview: () -> Unit = {},
@@ -5985,6 +6603,11 @@ private fun ThingsChromebookSidebar(
         StalledProjectDetector.detectStalledProjects(projects)
     }
     val stalledCount = stalledStatuses.size
+    val perspectiveCounts = remember(savedPerspectives, allOpenTasks, openTaskIds, todayDayStartMillis) {
+        savedPerspectives.associate { p ->
+            p.id to filterTasksForPerspective(allOpenTasks, p, openTaskIds, todayDayStartMillis).size
+        }
+    }
     val collapsedAreaIds = remember { androidx.compose.runtime.mutableStateMapOf<String, Boolean>() }
     val defaultNewProjectAreaId = when (navTarget) {
         is ActiveNavigationTarget.AreaDetail -> navTarget.areaId
@@ -6249,11 +6872,132 @@ private fun ThingsChromebookSidebar(
         HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
         Spacer(modifier = Modifier.height(2.dp))
 
-        // Areas -> Projects Hierarchy (Collapsible Workspace Folders + Linear Project Progress Bars)
+        // Perspectives + Areas -> Projects Hierarchy
         LazyColumn(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+            // v3.0 Custom Saved Perspectives Section
+            item(key = "sidebar_perspectives_header") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 8.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.AutoAwesomeMosaic,
+                            contentDescription = null,
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.v30_perspectives_section),
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = colors.secondaryText
+                            )
+                        )
+                    }
+                    ThingsHoverTooltip(text = stringResource(R.string.v30_perspective_new)) {
+                        IconButton(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onCreateNewPerspective()
+                            },
+                            modifier = Modifier.size(22.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Add,
+                                contentDescription = stringResource(R.string.v30_perspective_new),
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            items(savedPerspectives, key = { "sidebar_persp_${it.id}" }) { persp ->
+                val isPerspSelected = navTarget == ActiveNavigationTarget.PerspectiveDetail(persp.id)
+                val pCount = perspectiveCounts[persp.id] ?: 0
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(50))
+                        .background(if (isPerspSelected) colors.thingsBlueSoft else Color.Transparent)
+                        .clickable {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onSelectPerspective(persp.id)
+                        }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.AutoAwesomeMosaic,
+                            contentDescription = persp.title,
+                            tint = if (isPerspSelected) colors.thingsBlue else colors.secondaryText,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Text(
+                            text = persp.title,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontWeight = if (isPerspSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                color = if (isPerspSelected) colors.thingsBlue else colors.primaryText
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (pCount > 0) {
+                            Text(
+                                text = pCount.toString(),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = if (isPerspSelected) colors.thingsBlue else colors.secondaryText
+                            )
+                        }
+                        if (isPerspSelected) {
+                            IconButton(
+                                onClick = { onEditPerspective(persp) },
+                                modifier = Modifier.size(20.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Edit,
+                                    contentDescription = stringResource(R.string.v30_perspective_edit),
+                                    tint = colors.thingsBlue,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (savedPerspectives.isNotEmpty()) {
+                item(key = "sidebar_perspectives_divider") {
+                    HorizontalDivider(
+                        color = colors.hairlineDivider,
+                        thickness = 0.75.dp,
+                        modifier = Modifier.padding(vertical = 3.dp)
+                    )
+                }
+            }
+
             items(areas, key = { "sidebar_area_${it.id}" }) { area ->
                 val isAreaSelected = navTarget == ActiveNavigationTarget.AreaDetail(area.id)
                 val areaProjects = projects.filter { it.areaId == area.id }

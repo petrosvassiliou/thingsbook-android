@@ -8,6 +8,7 @@ import {
   Cloud,
   Compass,
   Download,
+  Edit3,
   Flag,
   Folder,
   FolderKanban,
@@ -15,6 +16,7 @@ import {
   Inbox,
   ListChecks,
   Plus,
+  SlidersHorizontal,
   Sun,
   Trash2,
   X
@@ -25,6 +27,7 @@ import {
   type ActiveNavigation,
   type AreaRecord,
   type ProjectRecord,
+  type SavedPerspective,
   type SmartViewType,
   type TaskRecord
 } from '../domain/types';
@@ -38,6 +41,8 @@ interface SidebarProps {
   areas: AreaRecord[];
   projects: ProjectRecord[];
   tasks: TaskRecord[];
+  savedPerspectives?: SavedPerspective[];
+  perspectiveCounts?: ReadonlyMap<string, number>;
   counts: {
     inbox: number;
     today: number;
@@ -56,6 +61,8 @@ interface SidebarProps {
   onOpenTemplates: (areaId: string | null) => void;
   onOpenWeeklyReview: () => void;
   onOpenManageAreas: () => void;
+  onCreatePerspective?: () => void;
+  onEditPerspective?: (perspective: SavedPerspective) => void;
   onDropTaskOnTarget: (
     taskId: string,
     target:
@@ -92,6 +99,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   areas,
   projects,
   tasks,
+  savedPerspectives = [],
+  perspectiveCounts,
   counts,
   stalledProjectsCount = 0,
   canInstallPwa,
@@ -103,6 +112,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenTemplates,
   onOpenWeeklyReview,
   onOpenManageAreas,
+  onCreatePerspective,
+  onEditPerspective,
   onDropTaskOnTarget,
   onTriggerInstallPwa
 }) => {
@@ -115,6 +126,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const unassignedProjects = activeProjects.filter(
     (p) => !p.areaId || !activeAreas.some((a) => a.id === p.areaId)
   );
+  const sortedPerspectives = [...savedPerspectives].sort((a, b) => a.sortOrder - b.sortOrder);
   const isBetaBuild = isPrereleaseVersion(APP_VERSION);
 
   const projectProgress = (projectId: string) => {
@@ -301,6 +313,82 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </span>
             </button>
           </div>
+
+          {/* 3. Custom Perspectives Section */}
+          {onCreatePerspective && (
+            <div className="sidebar-perspectives-section" data-testid="sidebar-perspectives-section">
+              <div className="sidebar-section-header">
+                <span className="sidebar-section-title">{t.perspectivesSectionTitle}</span>
+                <button
+                  type="button"
+                  className="sidebar-section-plus"
+                  data-testid="sidebar-add-perspective-btn"
+                  title={t.perspectiveNewTitle}
+                  aria-label={t.perspectiveNewTitle}
+                  onClick={() => {
+                    onCloseMobile();
+                    onCreatePerspective();
+                  }}
+                >
+                  <Plus size={13.5} />
+                </button>
+              </div>
+
+              {sortedPerspectives.map((persp) => {
+                const isPerspActive =
+                  activeNav.kind === 'perspective' && activeNav.perspectiveId === persp.id;
+                const matchCount = perspectiveCounts?.get(persp.id) ?? 0;
+                return (
+                  <div key={persp.id} className="nav-row-wrap">
+                    <button
+                      type="button"
+                      className={`nav-item ${isPerspActive ? 'active' : ''}`}
+                      data-testid={`sidebar-perspective-${persp.id}`}
+                      title={persp.title}
+                      onClick={() =>
+                        onSelectNav({ kind: 'perspective', perspectiveId: persp.id })
+                      }
+                    >
+                      <SlidersHorizontal
+                        size={14}
+                        style={{
+                          color: isPerspActive ? 'var(--things-blue)' : 'var(--text-secondary)',
+                          flexShrink: 0
+                        }}
+                      />
+                      <span className="nav-item-label">{persp.title}</span>
+                      {matchCount > 0 && (
+                        <span
+                          style={{
+                            fontSize: 11.5,
+                            fontWeight: 600,
+                            color: isPerspActive ? 'var(--things-blue)' : 'var(--text-tertiary)',
+                            fontVariantNumeric: 'tabular-nums'
+                          }}
+                        >
+                          {matchCount}
+                        </span>
+                      )}
+                    </button>
+                    {onEditPerspective && (
+                      <button
+                        type="button"
+                        className="nav-inline-plus"
+                        title={t.perspectiveEditTitle}
+                        aria-label={t.perspectiveEditTitle}
+                        onClick={() => {
+                          onCloseMobile();
+                          onEditPerspective(persp);
+                        }}
+                      >
+                        <Edit3 size={12.5} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {(activeAreas.length > 0 || unassignedProjects.length > 0) && (
             <div className="sidebar-divider" />

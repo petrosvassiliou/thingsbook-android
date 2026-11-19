@@ -5,16 +5,22 @@ import {
   type AreaRecord,
   type AttachmentRecord,
   type ChecklistItemRecord,
+  type EffortLevel,
   type HeadingRecord,
   type ProjectRecord,
   type ProjectStatus,
   type ProjectTemplate,
+  type ProjectViewMode,
   type RecurrenceRule,
+  type SavedPerspective,
   type ScheduleState,
   type TagRecord,
+  type TagSortMode,
   type TaskRecord,
-  type TaskStatus
+  type TaskStatus,
+  type ViewSortMode
 } from '../domain/types.ts';
+import { wouldCreateDependencyCycle } from '../domain/v2Utils.ts';
 
 export const BACKUP_MAGIC = 'THINGSBOOK_BACKUP_V1';
 export const FORMAT_VERSION = 1;
@@ -55,6 +61,69 @@ export interface BackupPreferencesDto {
   groupTodayByProjectOrArea?: boolean | null;
   includeBetaUpdates?: boolean | null;
   lastWeeklyReviewAt?: number | null;
+  tagSortMode?: string | null;
+  viewSortMode?: string | null;
+  savedPerspectivesJson?: string | null;
+  savedPerspectives?: SavedPerspective[] | null;
+}
+
+export interface BackupProjectDto {
+  id: string;
+  areaId: string | null;
+  title: string;
+  notes: string;
+  status: string;
+  scheduleState: string;
+  whenDate: number | null;
+  deadline: number | null;
+  completedAt: number | null;
+  lastReviewedAt?: number | null;
+  sortOrder: number;
+  tagIdsJson: string;
+  workspaceId?: string | null;
+  viewMode?: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface BackupHeadingDto {
+  id: string;
+  projectId: string;
+  title: string;
+  startDate?: number | null;
+  endDate?: number | null;
+  sortOrder: number;
+  isArchived: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface BackupTaskDto {
+  id: string;
+  title: string;
+  notes: string;
+  status: string;
+  scheduleState: string;
+  whenDate: number | null;
+  deadline: number | null;
+  reminderTime: number | null;
+  scheduledStartMinutes?: number | null;
+  durationMinutes?: number | null;
+  isPinned?: boolean | null;
+  effortLevel?: string | null;
+  blockedByTaskIdsJson?: string | null;
+  blockedByTaskIds?: string[] | null;
+  workspaceId?: string | null;
+  assigneeId?: string | null;
+  completedAt: number | null;
+  projectId: string | null;
+  headingId: string | null;
+  areaId: string | null;
+  recurrenceRuleJson: string | null;
+  sortOrder: number;
+  tagIdsJson: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface ThingsbookBackupPayload {
@@ -69,53 +138,9 @@ export interface ThingsbookBackupPayload {
     createdAt: number;
     updatedAt: number;
   }>;
-  projects: Array<{
-    id: string;
-    areaId: string | null;
-    title: string;
-    notes: string;
-    status: string;
-    scheduleState: string;
-    whenDate: number | null;
-    deadline: number | null;
-    completedAt: number | null;
-    lastReviewedAt?: number | null;
-    sortOrder: number;
-    tagIdsJson: string;
-    createdAt: number;
-    updatedAt: number;
-  }>;
-  headings: Array<{
-    id: string;
-    projectId: string;
-    title: string;
-    endDate?: number | null;
-    sortOrder: number;
-    isArchived: boolean;
-    createdAt: number;
-    updatedAt: number;
-  }>;
-  tasks: Array<{
-    id: string;
-    title: string;
-    notes: string;
-    status: string;
-    scheduleState: string;
-    whenDate: number | null;
-    deadline: number | null;
-    reminderTime: number | null;
-    scheduledStartMinutes?: number | null;
-    durationMinutes?: number | null;
-    completedAt: number | null;
-    projectId: string | null;
-    headingId: string | null;
-    areaId: string | null;
-    recurrenceRuleJson: string | null;
-    sortOrder: number;
-    tagIdsJson: string;
-    createdAt: number;
-    updatedAt: number;
-  }>;
+  projects: BackupProjectDto[];
+  headings: BackupHeadingDto[];
+  tasks: BackupTaskDto[];
   checklistItems: Array<{
     id: string;
     taskId: string;
@@ -305,7 +330,7 @@ export function buildBackupPayloadFromEntities(params: {
   tags: TagRecord[];
   attachments?: AttachmentRecord[];
   projectTemplates?: ProjectTemplate[];
-  preferences: BackupPreferencesDto;
+  preferences?: BackupPreferencesDto;
   appVersionName: string;
 }): ThingsbookBackupPayload {
   const now = Date.now();
@@ -367,6 +392,8 @@ export function buildBackupPayloadFromEntities(params: {
       lastReviewedAt: p.lastReviewedAt ?? null,
       sortOrder: Number.isFinite(p.sortOrder) ? p.sortOrder : 0,
       tagIdsJson: JSON.stringify(p.tagIds || []),
+      workspaceId: p.workspaceId ?? null,
+      viewMode: p.viewMode ?? null,
       createdAt: p.createdAt,
       updatedAt: p.updatedAt
     })),
@@ -374,33 +401,50 @@ export function buildBackupPayloadFromEntities(params: {
       id: h.id,
       projectId: h.projectId,
       title: h.title,
+      startDate: h.startDate ?? null,
       endDate: h.endDate ?? null,
       sortOrder: Number.isFinite(h.sortOrder) ? h.sortOrder : 0,
       isArchived: Boolean(h.isArchived),
       createdAt: h.createdAt,
       updatedAt: h.updatedAt
     })),
-    tasks: tasks.map((t) => ({
-      id: t.id,
-      title: t.title,
-      notes: t.notes || '',
-      status: t.status,
-      scheduleState: t.scheduleState,
-      whenDate: t.whenDate,
-      deadline: t.deadline,
-      reminderTime: t.reminderTime,
-      scheduledStartMinutes: t.scheduledStartMinutes ?? null,
-      durationMinutes: t.durationMinutes ?? null,
-      completedAt: t.completedAt,
-      projectId: t.projectId,
-      headingId: t.headingId,
-      areaId: t.areaId,
-      recurrenceRuleJson: t.recurrenceRule ? JSON.stringify(t.recurrenceRule) : null,
-      sortOrder: Number.isFinite(t.sortOrder) ? t.sortOrder : 0,
-      tagIdsJson: JSON.stringify(t.tagIds || []),
-      createdAt: t.createdAt,
-      updatedAt: t.updatedAt
-    })),
+    tasks: tasks.map((t) => {
+      const cleanBlocked = Array.from(
+        new Set(
+          (t.blockedByTaskIds || []).filter(
+            (bid): bid is string =>
+              typeof bid === 'string' && bid.trim().length > 0 && bid !== t.id && validTaskIds.has(bid)
+          )
+        )
+      );
+      return {
+        id: t.id,
+        title: t.title,
+        notes: t.notes || '',
+        status: t.status,
+        scheduleState: t.scheduleState,
+        whenDate: t.whenDate,
+        deadline: t.deadline,
+        reminderTime: t.reminderTime,
+        scheduledStartMinutes: t.scheduledStartMinutes ?? null,
+        durationMinutes: t.durationMinutes ?? null,
+        isPinned: Boolean(t.isPinned),
+        effortLevel: t.effortLevel ?? null,
+        blockedByTaskIdsJson: JSON.stringify(cleanBlocked),
+        blockedByTaskIds: cleanBlocked,
+        workspaceId: t.workspaceId ?? null,
+        assigneeId: t.assigneeId ?? null,
+        completedAt: t.completedAt,
+        projectId: t.projectId,
+        headingId: t.headingId,
+        areaId: t.areaId,
+        recurrenceRuleJson: t.recurrenceRule ? JSON.stringify(t.recurrenceRule) : null,
+        sortOrder: Number.isFinite(t.sortOrder) ? t.sortOrder : 0,
+        tagIdsJson: JSON.stringify(t.tagIds || []),
+        createdAt: t.createdAt,
+        updatedAt: t.updatedAt
+      };
+    }),
     checklistItems: checklistItems.map((c) => ({
       id: c.id,
       taskId: c.taskId,
@@ -449,7 +493,7 @@ export function buildBackupPayloadFromEntities(params: {
         updatedAt: tpl.updatedAt
       };
     }),
-    preferences: params.preferences
+    preferences: params.preferences ?? {}
   };
 }
 
@@ -667,6 +711,134 @@ export function normalizeScheduleState(val: string | undefined, fallback: Schedu
   return fallback;
 }
 
+export function normalizeEffortLevel(val: unknown): EffortLevel | null {
+  if (typeof val !== 'string') return null;
+  const up = val.trim().toUpperCase();
+  if (up === 'QUICK_WIN' || up === 'MEDIUM' || up === 'DEEP_FOCUS') {
+    return up;
+  }
+  return null;
+}
+
+export function normalizeProjectViewMode(val: unknown): ProjectViewMode | null {
+  if (typeof val !== 'string') return null;
+  const low = val.trim().toLowerCase();
+  if (low === 'list' || low === 'board' || low === 'roadmap') {
+    return low;
+  }
+  return null;
+}
+
+export function normalizeTagSortMode(val: unknown): TagSortMode {
+  if (val === 'most_used' || val === 'manual' || val === 'alpha') {
+    return val;
+  }
+  return 'alpha';
+}
+
+export function normalizeViewSortMode(val: unknown): ViewSortMode {
+  if (
+    val === 'deadline' ||
+    val === 'duration' ||
+    val === 'effort' ||
+    val === 'alpha' ||
+    val === 'manual'
+  ) {
+    return val;
+  }
+  return 'manual';
+}
+
+export function safeParseBlockedByTaskIds(raw: unknown, selfTaskId?: string): string[] {
+  let list: unknown[] = [];
+  if (Array.isArray(raw)) {
+    list = raw;
+  } else if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) list = parsed;
+    } catch {
+      list = [];
+    }
+  }
+  const out: string[] = [];
+  for (const item of list) {
+    if (typeof item !== 'string') continue;
+    const trimmed = item.trim();
+    if (!trimmed || trimmed === selfTaskId) continue;
+    if (!out.includes(trimmed)) {
+      out.push(trimmed);
+    }
+  }
+  return out;
+}
+
+export function safeParseSavedPerspectives(raw: unknown): SavedPerspective[] {
+  let list: unknown[] = [];
+  if (Array.isArray(raw)) {
+    list = raw;
+  } else if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) list = parsed;
+    } catch {
+      list = [];
+    }
+  }
+  const seenIds = new Set<string>();
+  const out: SavedPerspective[] = [];
+  for (let idx = 0; idx < list.length; idx++) {
+    const item = list[idx];
+    if (!item || typeof item !== 'object') continue;
+    const rec = item as Record<string, unknown>;
+    const id = typeof rec.id === 'string' ? rec.id.trim() : '';
+    const title = typeof rec.title === 'string' ? rec.title.trim() : '';
+    if (!id || !title || seenIds.has(id)) continue;
+    seenIds.add(id);
+
+    const categoryIds = Array.isArray(rec.categoryIds)
+      ? Array.from(
+          new Set(
+            rec.categoryIds
+              .filter((c): c is string => typeof c === 'string')
+              .map((c) => c.trim())
+              .filter(Boolean)
+          )
+        )
+      : [];
+    const effortLevel = normalizeEffortLevel(rec.effortLevel);
+    const maxDurationMinutes =
+      typeof rec.maxDurationMinutes === 'number' &&
+      Number.isFinite(rec.maxDurationMinutes) &&
+      rec.maxDurationMinutes > 0
+        ? Math.max(5, Math.min(720, Math.trunc(rec.maxDurationMinutes)))
+        : null;
+    const rawDue = typeof rec.dueWindow === 'string' ? rec.dueWindow.trim().toUpperCase() : 'ANY';
+    const dueWindow: SavedPerspective['dueWindow'] =
+      rawDue === 'TODAY' || rawDue === 'NEXT_7_DAYS' || rawDue === 'OVERDUE' ? rawDue : 'ANY';
+    const areaId =
+      typeof rec.areaId === 'string' && rec.areaId.trim().length > 0 ? rec.areaId.trim() : null;
+    const actionableOnly = rec.actionableOnly === undefined ? true : Boolean(rec.actionableOnly);
+    const sortOrder =
+      typeof rec.sortOrder === 'number' && Number.isFinite(rec.sortOrder)
+        ? rec.sortOrder
+        : (idx + 1) * 1000;
+
+    out.push({
+      id,
+      title,
+      categoryIds,
+      effortLevel,
+      maxDurationMinutes,
+      dueWindow,
+      areaId,
+      actionableOnly,
+      sortOrder
+    });
+  }
+  return out.sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
 export interface NormalizedBackupEntities {
   tags: TagRecord[];
   areas: AreaRecord[];
@@ -679,12 +851,15 @@ export interface NormalizedBackupEntities {
   preferences: {
     includeBetaUpdates: boolean;
     lastWeeklyReviewAt: number;
+    tagSortMode: TagSortMode;
+    viewSortMode: ViewSortMode;
+    savedPerspectives: SavedPerspective[];
   };
 }
 
 /**
- * Normalizes any v1.7, v1.8, or v2.0 `.tbbackup` payload into clean local entities,
- * safely applying `null` / `[]` / `0` defaults for missing v2.0 fields.
+ * Normalizes any v1.7, v1.8, v2.x, or v3.0 `.tbbackup` payload into clean local entities,
+ * safely applying `null` / `[]` / `0` defaults for missing fields and preventing dependency cycles.
  */
 export function normalizeBackupPayloadToEntities(
   payload: ThingsbookBackupPayload,
@@ -742,6 +917,11 @@ export function normalizeBackupPayloadToEntities(
         p.lastReviewedAt != null && Number.isFinite(p.lastReviewedAt)
           ? Math.trunc(p.lastReviewedAt)
           : null;
+      const workspaceId =
+        typeof p.workspaceId === 'string' && p.workspaceId.trim().length > 0
+          ? p.workspaceId.trim()
+          : null;
+      const viewMode = normalizeProjectViewMode(p.viewMode);
       return {
         id: p.id,
         areaId: p.areaId && validAreaIds.has(p.areaId) ? p.areaId : null,
@@ -755,6 +935,8 @@ export function normalizeBackupPayloadToEntities(
         lastReviewedAt,
         sortOrder: Number.isFinite(p.sortOrder) ? p.sortOrder : 0,
         tagIds: mergedTags,
+        workspaceId,
+        viewMode,
         createdAt: p.createdAt || now,
         updatedAt: p.updatedAt || now,
         isDeleted: false,
@@ -769,7 +951,14 @@ export function normalizeBackupPayloadToEntities(
       id: h.id,
       projectId: h.projectId,
       title: h.title || '',
-      endDate: typeof h.endDate === 'number' && Number.isFinite(h.endDate) ? Math.trunc(h.endDate) : null,
+      startDate:
+        typeof h.startDate === 'number' && Number.isFinite(h.startDate)
+          ? Math.trunc(h.startDate)
+          : null,
+      endDate:
+        typeof h.endDate === 'number' && Number.isFinite(h.endDate)
+          ? Math.trunc(h.endDate)
+          : null,
       sortOrder: Number.isFinite(h.sortOrder) ? h.sortOrder : 0,
       isArchived: Boolean(h.isArchived),
       createdAt: h.createdAt || now,
@@ -787,6 +976,11 @@ export function normalizeBackupPayloadToEntities(
       taskRefMap.set(ref.taskId, list);
     }
   }
+
+  const rawValidTaskIdSet = new Set(
+    (payload.tasks || []).filter((t) => t && t.id).map((t) => t.id)
+  );
+  const sanitizedBlockedByMap = new Map<string, string[]>();
 
   const tasks: TaskRecord[] = (payload.tasks || [])
     .filter((t) => t && t.id)
@@ -819,6 +1013,28 @@ export function normalizeBackupPayloadToEntities(
           ? Math.max(5, Math.min(720, Math.trunc(t.durationMinutes)))
           : null;
 
+      const rawCandidates = safeParseBlockedByTaskIds(
+        t.blockedByTaskIds ?? t.blockedByTaskIdsJson,
+        t.id
+      ).filter((bid) => rawValidTaskIdSet.has(bid));
+      const cleanBlocked: string[] = [];
+      for (const candidateId of rawCandidates) {
+        if (!wouldCreateDependencyCycle(t.id, candidateId, sanitizedBlockedByMap)) {
+          cleanBlocked.push(candidateId);
+          sanitizedBlockedByMap.set(t.id, cleanBlocked);
+        }
+      }
+      sanitizedBlockedByMap.set(t.id, cleanBlocked);
+
+      const workspaceId =
+        typeof t.workspaceId === 'string' && t.workspaceId.trim().length > 0
+          ? t.workspaceId.trim()
+          : null;
+      const assigneeId =
+        typeof t.assigneeId === 'string' && t.assigneeId.trim().length > 0
+          ? t.assigneeId.trim()
+          : null;
+
       return {
         id: t.id,
         title: t.title || '',
@@ -830,6 +1046,11 @@ export function normalizeBackupPayloadToEntities(
         reminderTime: t.reminderTime ?? null,
         scheduledStartMinutes,
         durationMinutes,
+        isPinned: Boolean(t.isPinned),
+        effortLevel: normalizeEffortLevel(t.effortLevel),
+        blockedByTaskIds: cleanBlocked,
+        workspaceId,
+        assigneeId,
         completedAt: t.completedAt ?? null,
         projectId: cleanProjId,
         headingId: cleanHeadId,
@@ -910,6 +1131,14 @@ export function normalizeBackupPayloadToEntities(
       };
     });
 
+  const restoredPerspectives = safeParseSavedPerspectives(
+    payload.preferences?.savedPerspectivesJson ?? payload.preferences?.savedPerspectives
+  ).map((p) => ({
+    ...p,
+    categoryIds: p.categoryIds.filter((cid) => validTagIds.has(cid)),
+    areaId: p.areaId && validAreaIds.has(p.areaId) ? p.areaId : null
+  }));
+
   return {
     tags,
     areas,
@@ -925,7 +1154,10 @@ export function normalizeBackupPayloadToEntities(
         payload.preferences?.lastWeeklyReviewAt != null &&
         Number.isFinite(payload.preferences.lastWeeklyReviewAt)
           ? Math.max(0, Math.trunc(payload.preferences.lastWeeklyReviewAt))
-          : 0
+          : 0,
+      tagSortMode: normalizeTagSortMode(payload.preferences?.tagSortMode),
+      viewSortMode: normalizeViewSortMode(payload.preferences?.viewSortMode),
+      savedPerspectives: restoredPerspectives
     }
   };
 }

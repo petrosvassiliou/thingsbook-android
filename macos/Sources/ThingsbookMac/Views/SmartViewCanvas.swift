@@ -43,6 +43,12 @@ public struct SmartViewCanvas: View {
                     } else {
                         emptyPlaceholder(icon: "folder", text: store.tr("empty_view"))
                     }
+                case .perspective(let perspectiveId):
+                    if let perspective = store.perspective(byId: perspectiveId) {
+                        perspectiveCanvas(perspective)
+                    } else {
+                        emptyPlaceholder(icon: "line.3.horizontal.decrease.circle", text: store.tr("empty_view"))
+                    }
                 }
             }
             .padding(.horizontal, 40)
@@ -82,7 +88,34 @@ public struct SmartViewCanvas: View {
             Text(store.tr(view.titleKey))
                 .font(.system(size: 28, weight: .bold))
 
+            if view == .today, let cap = store.todayCapacitySummary() {
+                HStack(spacing: 5) {
+                    Image(systemName: "gauge.with.dots.needle.33percent")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(cap.pillText)
+                        .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                        .lineLimit(1)
+                }
+                .fixedSize(horizontal: true, vertical: false)
+                .foregroundStyle(ThingsMacPalette.accentBlue)
+                .padding(.horizontal, 10.5)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(ThingsMacPalette.accentBlue.opacity(0.12))
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.24), lineWidth: 0.8)
+                        )
+                )
+                .thingsTooltip(cap.pillText)
+            }
+
             Spacer()
+
+            if view != .logbook && view != .trash {
+                viewSortMenu
+            }
 
             if view == .today {
                 Picker("", selection: $store.todayViewMode) {
@@ -340,7 +373,7 @@ public struct SmartViewCanvas: View {
 
             VStack(alignment: .leading, spacing: 22) {
                 ForEach(sortedDays, id: \.self) { epochDay in
-                    let dayTasks = groupedTasks[epochDay] ?? []
+                    let dayTasks = TaskViewSorter.sort(groupedTasks[epochDay] ?? [], mode: store.preferences.viewSortMode)
                     let dayMilestones = groupedMilestones[epochDay] ?? []
                     let sampleMillis = dayTasks.first?.whenDate ?? dayMilestones.first?.heading.endDate
                     VStack(alignment: .leading, spacing: 8) {
@@ -526,6 +559,8 @@ public struct SmartViewCanvas: View {
                 Spacer()
 
                 HStack(spacing: 6) {
+                    viewSortMenu
+
                     Button {
                         store.moveProjectOrder(project, direction: -1)
                     } label: {
@@ -585,7 +620,7 @@ public struct SmartViewCanvas: View {
                             store.markProjectReviewed(project.id)
                         }
                         Button(store.tr("action_duplicate_project")) {
-                            if let copy = try? store.database.duplicateProject(project.id, copySuffix: store.tr("macos_copy_suffix")) {
+                            if let copy = try? store.database.duplicateProject(project.id, copySuffix: store.tr("v25_copy_suffix")) {
                                 store.selectedDestination = .project(copy.id)
                             }
                         }
@@ -990,6 +1025,9 @@ public struct SmartViewCanvas: View {
                 Text(area.title)
                     .font(.system(size: 28, weight: .bold))
                 Spacer()
+
+                viewSortMenu
+
                 Button {
                     store.editingArea = area
                 } label: {
@@ -1061,7 +1099,7 @@ public struct SmartViewCanvas: View {
                                 store.markProjectReviewed(proj.id)
                             }
                             Button(store.tr("action_duplicate_project")) {
-                                if let copy = try? store.database.duplicateProject(proj.id, copySuffix: store.tr("macos_copy_suffix")) {
+                                if let copy = try? store.database.duplicateProject(proj.id, copySuffix: store.tr("v25_copy_suffix")) {
                                     store.selectedDestination = .project(copy.id)
                                 }
                             }
@@ -1086,6 +1124,173 @@ public struct SmartViewCanvas: View {
                 emptyPlaceholder(icon: "folder", text: store.tr("empty_view"))
             }
         }
+    }
+
+    // MARK: - Custom Saved Perspective View (v3.0)
+
+    @ViewBuilder
+    private func perspectiveCanvas(_ perspective: SavedPerspective) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                    .font(.system(size: 25, weight: .bold))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+
+                Text(perspective.title)
+                    .font(.system(size: 28, weight: .bold))
+
+                Spacer()
+
+                viewSortMenu
+
+                Button {
+                    store.editingPerspective = perspective
+                    store.isPerspectiveEditorPresented = true
+                } label: {
+                    Label(store.tr("v30_perspective_edit"), systemImage: "slider.horizontal.3")
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .fixedSize(horizontal: true, vertical: false)
+                .thingsTooltip(store.tr("v30_perspective_edit"))
+
+                Menu {
+                    Button(store.tr("v30_perspective_edit")) {
+                        store.editingPerspective = perspective
+                        store.isPerspectiveEditorPresented = true
+                    }
+                    Divider()
+                    Button(role: .destructive) {
+                        store.deletePerspective(perspective.id)
+                    } label: {
+                        Text(store.tr("v30_perspective_delete"))
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 15))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
+
+            let summaryBadges = perspectiveFilterSummaryBadges(perspective)
+            if !summaryBadges.isEmpty {
+                ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
+                    ForEach(summaryBadges, id: \.self) { badge in
+                        Text(badge)
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(ThingsMacPalette.accentBlue)
+                            .padding(.horizontal, 9.5)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(ThingsMacPalette.accentBlue.opacity(0.11))
+                            )
+                    }
+                }
+            }
+
+            let tasks = store.tasksForPerspective(perspective)
+            tagFilterBar(for: tasks)
+
+            if tasks.isEmpty {
+                emptyPlaceholder(icon: "line.3.horizontal.decrease.circle", text: store.tr("empty_view"))
+            } else {
+                reorderableTaskStack(tasks)
+            }
+        }
+    }
+
+    private func perspectiveFilterSummaryBadges(_ perspective: SavedPerspective) -> [String] {
+        var badges: [String] = []
+        let dw = perspective.dueWindow.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        switch dw {
+        case "TODAY": badges.append(store.tr("view_today"))
+        case "UPCOMING": badges.append(store.tr("view_upcoming"))
+        case "ANYTIME": badges.append(store.tr("view_anytime"))
+        case "SOMEDAY": badges.append(store.tr("view_someday"))
+        default: break
+        }
+        if let effort = TaskEffortLevel.normalized(perspective.effortLevel) {
+            switch effort {
+            case .quickWin: badges.append(store.tr("v30_effort_quick_win"))
+            case .medium: badges.append(store.tr("v30_effort_medium"))
+            case .deepFocus: badges.append(store.tr("v30_effort_deep_focus"))
+            }
+        }
+        if let maxDur = perspective.maxDurationMinutes, maxDur > 0 {
+            badges.append("≤ \(TaskItem.formatCompactDuration(maxDur))")
+        }
+        if let aid = perspective.areaId, let area = store.area(byId: aid) {
+            badges.append("\(store.tr("entity_area")): \(area.title)")
+        }
+        for cid in perspective.categoryIds {
+            if let tag = store.tags.first(where: { $0.id == cid }) {
+                badges.append("#\(tag.title)")
+            }
+        }
+        if perspective.actionableOnly {
+            badges.append(store.tr("v30_perspective_actionable_only"))
+        }
+        return badges
+    }
+
+    private var viewSortMenu: some View {
+        let currentMode = store.preferences.viewSortMode.lowercased()
+        let activeLabel: String = {
+            switch currentMode {
+            case "deadline": return store.tr("v25_view_sort_deadline")
+            case "duration": return store.tr("v25_view_sort_duration")
+            case "effort": return store.tr("v30_view_sort_effort")
+            case "alpha": return store.tr("v25_view_sort_alpha")
+            default: return store.tr("v25_view_sort_manual")
+            }
+        }()
+        let isCustomSort = currentMode != "manual" && !currentMode.isEmpty
+
+        return Menu {
+            let options: [(id: String, label: String)] = [
+                ("manual", store.tr("v25_view_sort_manual")),
+                ("deadline", store.tr("v25_view_sort_deadline")),
+                ("duration", store.tr("v25_view_sort_duration")),
+                ("effort", store.tr("v30_view_sort_effort")),
+                ("alpha", store.tr("v25_view_sort_alpha")),
+            ]
+            ForEach(options, id: \.id) { opt in
+                let selected = (currentMode == opt.id) || (opt.id == "manual" && !isCustomSort)
+                Button {
+                    store.preferences.viewSortMode = opt.id
+                } label: {
+                    if selected {
+                        Label(opt.label, systemImage: "checkmark")
+                    } else {
+                        Text(opt.label)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(isCustomSort ? activeLabel : store.tr("v25_view_sort_label"))
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .foregroundStyle(isCustomSort ? ThingsMacPalette.accentBlue : .secondary)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5.5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(isCustomSort ? ThingsMacPalette.accentBlue.opacity(0.13) : Color.primary.opacity(0.055))
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .thingsTooltip("\(store.tr("v25_view_sort_label")): \(activeLabel)")
     }
 
     // MARK: - Logbook & Trash Views
@@ -1301,7 +1506,7 @@ public struct SmartViewCanvas: View {
 
         return VStack(alignment: .leading, spacing: 14) {
             ForEach(sortedKeys, id: \.self) { groupName in
-                let groupTasks = grouped[groupName] ?? []
+                let groupTasks = TaskViewSorter.sort(grouped[groupName] ?? [], mode: store.preferences.viewSortMode)
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 7) {
                         Capsule(style: .continuous)

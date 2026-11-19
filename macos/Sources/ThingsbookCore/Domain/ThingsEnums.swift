@@ -220,10 +220,41 @@ public enum SmartView: String, CaseIterable, Hashable, Codable, Sendable, Identi
     }
 }
 
+public enum TaskEffortLevel: String, Codable, CaseIterable, Sendable {
+    case quickWin = "QUICK_WIN"
+    case medium = "MEDIUM"
+    case deepFocus = "DEEP_FOCUS"
+
+    public static func normalized(_ raw: String?) -> TaskEffortLevel? {
+        guard let up = raw?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+              !up.isEmpty else {
+            return nil
+        }
+        return TaskEffortLevel(rawValue: up)
+    }
+
+    public var sortRank: Int {
+        switch self {
+        case .quickWin: return 0
+        case .medium: return 1
+        case .deepFocus: return 2
+        }
+    }
+
+    public var sfSymbol: String {
+        switch self {
+        case .quickWin: return "bolt.fill"
+        case .medium: return "circle.lefthalf.filled"
+        case .deepFocus: return "brain.head.profile"
+        }
+    }
+}
+
 public enum NavigationDestination: Hashable, Codable, Sendable {
     case smartView(SmartView)
     case area(String)
     case project(String)
+    case perspective(String)
 }
 
 public enum QuickShareDestination: Hashable, Sendable {

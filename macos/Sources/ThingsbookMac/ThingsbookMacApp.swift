@@ -133,7 +133,7 @@ public struct ThingsbookMacApp: App {
     public var body: some Scene {
         WindowGroup("Thingsbook", id: "main") {
             MainWorkspaceView(store: store)
-                .frame(minWidth: 880, minHeight: 580)
+                .frame(minWidth: 846, minHeight: 560)
                 .onAppear {
                     appDelegate.store = store
                 }

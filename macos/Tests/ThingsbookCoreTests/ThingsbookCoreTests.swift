@@ -408,14 +408,19 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-alpha.8")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-alpha.8")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 82)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-alpha.9")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-alpha.9")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 84)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.8", current: "2.1.2", includeBeta: false))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.8", current: "2.1.2", includeBeta: true))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.9", current: "2.1.3", includeBeta: false))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.9", current: "2.1.3", includeBeta: true))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.9", current: "3.0.0-alpha.8"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-alpha.8"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.10", current: "3.0.0-alpha.9"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-alpha.9"))
+        let ultraCompact = MacToolbarLayoutMetrics.compute(detailWidth: 506.0, isSidebarCollapsed: false)
+        XCTAssertEqual(ultraCompact.usableWidth, 450.0)
+        XCTAssertFalse(ultraCompact.showGeminiLabel)
+        XCTAssertLessThanOrEqual(ultraCompact.totalBarWidth, ultraCompact.usableWidth)
         XCTAssertNotNil(ThingsResourceLoader.appIconImage(), "3.0 Glacier Liquid Glass Book AppIcon must be loadable at runtime")
         for lang in [AppLanguage.en, .de, .fr, .it, .es] {
             XCTAssertFalse(ThingsStrings.shared.text("v2_beta_channel_desc", lang: lang).contains("2.0"))

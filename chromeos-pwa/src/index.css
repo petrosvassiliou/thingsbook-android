@@ -708,6 +708,7 @@ button {
   justify-content: space-between;
   padding: 10px 20px 8px;
   gap: 10px;
+  min-width: 0;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-canvas);
   flex-shrink: 0;
@@ -719,6 +720,69 @@ button {
   display: flex;
   align-items: center;
   gap: 5px;
+  min-width: 0;
+}
+
+/* Workspace-width responsive tiers so 100% of top-bar controls stay visible when resizing */
+.workspace-topbar[data-topbar-tier='medium'] {
+  padding: 9px 14px 8px;
+  gap: 8px;
+}
+
+.workspace-topbar[data-topbar-tier='medium'] .topbar-label-hide-sm {
+  display: none;
+}
+
+.workspace-topbar[data-topbar-tier='compact'] {
+  padding: 8px 10px;
+  gap: 4px;
+}
+
+.workspace-topbar[data-topbar-tier='compact'] .topbar-label-hide-sm,
+.workspace-topbar[data-topbar-tier='compact'] .topbar-label-hide-md,
+.workspace-topbar[data-topbar-tier='compact'] .topbar-label-hide-xs {
+  display: none;
+}
+
+.workspace-topbar[data-topbar-tier='compact'] .topbar-left,
+.workspace-topbar[data-topbar-tier='compact'] .topbar-right {
+  gap: 3px;
+}
+
+.workspace-topbar[data-topbar-tier='compact'] .icon-btn,
+.workspace-topbar[data-topbar-tier='compact'] .topbar-pill {
+  height: 30px;
+  min-width: 30px;
+  padding: 0 6px;
+}
+
+.workspace-topbar[data-topbar-tier='wrap'] {
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  gap: 6px 6px;
+}
+
+.workspace-topbar[data-topbar-tier='wrap'] .topbar-label-hide-sm,
+.workspace-topbar[data-topbar-tier='wrap'] .topbar-label-hide-md {
+  display: none;
+}
+
+.workspace-topbar[data-topbar-tier='wrap'] .topbar-left {
+  gap: 4px;
+  flex: 1 1 auto;
+}
+
+.workspace-topbar[data-topbar-tier='wrap'] .topbar-right {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 3px;
+  flex: 1 1 100%;
+}
+
+.workspace-topbar[data-topbar-tier='wrap'] .icon-btn {
+  height: 32px;
+  min-width: 32px;
+  padding: 0 6px;
 }
 
 .topbar-pill {

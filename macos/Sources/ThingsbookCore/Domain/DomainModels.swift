@@ -1771,6 +1771,7 @@ public struct MacToolbarLayoutMetrics: Equatable, Sendable {
     public let trailingActionsPadding: Double
     public let centerGap: Double
     public let showSearchShortcutBadge: Bool
+    public let showGeminiLabel: Bool
 
     public var estimatedActionsBarWidth: Double {
         let group1 = geminiPillMinWidth + (2.0 * buttonWidth) + (2.0 * itemSpacing)
@@ -1794,7 +1795,8 @@ public struct MacToolbarLayoutMetrics: Equatable, Sendable {
     ) -> MacToolbarLayoutMetrics {
         let leadingReserved = isSidebarCollapsed ? 136.0 : 0.0
         let toolbarMargins = 56.0
-        let usable = max(494.0, detailWidth - leadingReserved - toolbarMargins)
+        let rawUsable = detailWidth - leadingReserved - toolbarMargins
+        let usable = max(446.0, rawUsable)
 
         let lerp: (Double, Double, Double) -> Double = { a, b, frac in
             a + (b - a) * frac
@@ -1805,8 +1807,17 @@ public struct MacToolbarLayoutMetrics: Equatable, Sendable {
         let rawGeminiMinW: Double
         let rawSpacing: Double
         let rawDivPad: Double
+        let showGeminiText: Bool
 
-        if usable < 562.0 {
+        if usable < 494.0 {
+            // Ultra-compact tier (446pt..<494pt usable): collapses Gemini text to icon capsule so all 12 controls stay visible
+            rawSearchW = 126.0
+            rawBtnW = 24.0
+            rawGeminiMinW = 32.0
+            rawSpacing = 2.0
+            rawDivPad = 3.0
+            showGeminiText = false
+        } else if usable < 562.0 {
             // Compact sidebar-expanded minimum window tier (494pt..562pt usable)
             let s = max(0.0, (usable - 494.0) / 68.0)
             rawSearchW = lerp(126.0, 144.0, s)
@@ -1814,6 +1825,7 @@ public struct MacToolbarLayoutMetrics: Equatable, Sendable {
             rawGeminiMinW = lerp(72.0, 78.0, s)
             rawSpacing = lerp(2.0, 3.0, s)
             rawDivPad = lerp(3.0, 5.0, s)
+            showGeminiText = true
         } else if usable <= 822.0 {
             // Standard tier up to default 1140pt window / 878pt detail pane (562pt..822pt usable)
             let t = (usable - 562.0) / 260.0
@@ -1822,6 +1834,7 @@ public struct MacToolbarLayoutMetrics: Equatable, Sendable {
             rawGeminiMinW = lerp(78.0, 86.0, t)
             rawSpacing = lerp(3.0, 6.0, t)
             rawDivPad = lerp(5.0, 9.0, t)
+            showGeminiText = true
         } else {
             // Wide & fullscreen tier (822pt..1050pt+ usable)
             let u = min(1.0, (usable - 822.0) / 228.0)
@@ -1830,12 +1843,13 @@ public struct MacToolbarLayoutMetrics: Equatable, Sendable {
             rawGeminiMinW = lerp(86.0, 90.0, u)
             rawSpacing = lerp(6.0, 8.0, u)
             rawDivPad = lerp(9.0, 11.0, u)
+            showGeminiText = true
         }
 
         let roundRule: FloatingPointRoundingRule = usable < 590.0 ? .down : .toNearestOrAwayFromZero
         let searchW = rawSearchW.rounded(roundRule)
         let btnW = rawBtnW.rounded(roundRule)
-        let syncW = btnW + 8.0
+        let syncW = usable < 494.0 ? (btnW + 6.0) : (btnW + 8.0)
         let geminiMinW = rawGeminiMinW.rounded(roundRule)
         let spacing = rawSpacing.rounded(roundRule)
         let divPad = rawDivPad.rounded(roundRule)
@@ -1859,7 +1873,8 @@ public struct MacToolbarLayoutMetrics: Equatable, Sendable {
             groupDividerPadding: divPad,
             trailingActionsPadding: trailingPad,
             centerGap: computedGap,
-            showSearchShortcutBadge: searchW >= 165.0
+            showSearchShortcutBadge: searchW >= 165.0,
+            showGeminiLabel: showGeminiText
         )
     }
 }

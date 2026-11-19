@@ -42,7 +42,7 @@ function isDisabledControl(el: HTMLElement): boolean {
 
 function hasVisibleResponsiveTextLabel(el: HTMLElement): boolean {
   const labelNodes = el.querySelectorAll<HTMLElement>(
-    '.brand-name, .topbar-label-hide-sm, .topbar-label-hide-xs'
+    '.brand-name, .topbar-label-hide-md, .topbar-label-hide-sm, .topbar-label-hide-xs'
   );
   if (labelNodes.length === 0) {
     return (el.textContent ?? '').trim().length > 0;

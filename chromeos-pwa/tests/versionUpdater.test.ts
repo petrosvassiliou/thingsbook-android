@@ -27,25 +27,37 @@ import {
   isPurgeableSampleTask
 } from '../src/data/seedData.ts';
 import {
+  resolveTopBarLayoutTier,
   shouldAutoFocusTitleOnExpand,
   shouldShowQuickThisEveningPill
 } from '../src/domain/v2Utils.ts';
 
-test('v3.0.0-alpha.8 build metadata constants are set to 3.0.0-alpha.8 (Build 82, pre-release isolated from stable)', () => {
-  assert.equal(APP_VERSION, '3.0.0-alpha.8');
-  assert.equal(APP_BUILD_CODE, 82);
-  assert.equal(versionFromUtils, '3.0.0-alpha.8');
-  assert.equal(buildFromUtils, 82);
+test('v3.0.0-alpha.9 build metadata constants are set to 3.0.0-alpha.9 (Build 84, pre-release isolated from stable)', () => {
+  assert.equal(APP_VERSION, '3.0.0-alpha.9');
+  assert.equal(APP_BUILD_CODE, 84);
+  assert.equal(versionFromUtils, '3.0.0-alpha.9');
+  assert.equal(buildFromUtils, 84);
   assert.equal(isPrereleaseVersion(APP_VERSION), true);
-  assert.equal(isPrereleaseVersion('2.1.2'), false);
+  assert.equal(isPrereleaseVersion('2.1.3'), false);
   assert.equal(isPrereleaseVersion('2.0.0'), false);
-  assert.equal(isPrereleaseVersion('3.0.0-alpha.8'), true);
-  assert.equal(compareSemver('3.0.0-alpha.8', '2.1.2'), 1);
-  assert.equal(compareSemver('3.0.0-alpha.8', '3.0.0-alpha.7'), 1);
-  assert.equal(compareSemver('3.0.0', '3.0.0-alpha.8'), 1);
+  assert.equal(isPrereleaseVersion('3.0.0-alpha.9'), true);
+  assert.equal(compareSemver('3.0.0-alpha.9', '2.1.3'), 1);
+  assert.equal(compareSemver('3.0.0-alpha.9', '3.0.0-alpha.8'), 1);
+  assert.equal(compareSemver('3.0.0', '3.0.0-alpha.9'), 1);
   assert.equal(compareSemver, compareFromUtils);
   assert.equal(isEligibleReleasePayload, isEligibleFromUtils);
   assert.equal(selectLatestEligibleRelease, selectFromUtils);
+});
+
+test('resolveTopBarLayoutTier keeps 100% of top-bar controls visible across wide, medium, compact, and ultra-narrow wrap workspace widths', () => {
+  assert.equal(resolveTopBarLayoutTier(1280), 'wide');
+  assert.equal(resolveTopBarLayoutTier(940), 'wide');
+  assert.equal(resolveTopBarLayoutTier(939), 'medium');
+  assert.equal(resolveTopBarLayoutTier(640), 'medium');
+  assert.equal(resolveTopBarLayoutTier(639), 'compact');
+  assert.equal(resolveTopBarLayoutTier(460), 'compact');
+  assert.equal(resolveTopBarLayoutTier(459), 'wrap');
+  assert.equal(resolveTopBarLayoutTier(360), 'wrap');
 });
 
 test('compareSemver orders numeric pre-release identifiers (beta.1 < beta.2 < beta.3 < beta.10 < beta.11 < 2.0.0) and +build metadata accurately', () => {

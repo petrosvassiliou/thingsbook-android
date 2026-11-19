@@ -62,7 +62,8 @@ import {
 } from './domain/types';
 import {
   detectStalledProjects,
-  evaluateProjectStalledStatus
+  evaluateProjectStalledStatus,
+  resolveTopBarLayoutTier
 } from './domain/v2Utils';
 import {
   clearLastCalendarError,
@@ -279,6 +280,12 @@ export const App: React.FC = () => {
   const [loadingReflection, setLoadingReflection] = useState(false);
   const [reflectionError, setReflectionError] = useState<string | null>(null);
   const workspaceScrollRef = useRef<HTMLDivElement | null>(null);
+  const workspaceContainerRef = useRef<HTMLElement | null>(null);
+  const [workspaceWidthPx, setWorkspaceWidthPx] = useState<number>(() => {
+    if (typeof window === 'undefined') return 1024;
+    const sidebarReserve = window.innerWidth >= 700 && prefs.sidebarVisible ? 278 : 0;
+    return Math.max(280, window.innerWidth - sidebarReserve);
+  });
 
   // ChromeOS Install Prompt, Auto-Update State & Toast
   const [deferredInstallPrompt, setDeferredInstallPrompt] =
@@ -359,12 +366,32 @@ export const App: React.FC = () => {
     return () => mq.removeEventListener('change', applyTheme);
   }, [prefs.themeMode]);
 
-  // 700px Responsive Breakpoint Listener
+  // 700px Responsive Breakpoint & Live Workspace Width Listener
   useEffect(() => {
-    const onResize = () => setIsWideScreen(window.innerWidth >= 700);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
+    const syncWidths = () => {
+      setIsWideScreen(window.innerWidth >= 700);
+      const el = workspaceContainerRef.current;
+      if (el && el.clientWidth > 0) {
+        setWorkspaceWidthPx(el.clientWidth);
+      }
+    };
+    syncWidths();
+    window.addEventListener('resize', syncWidths);
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && workspaceContainerRef.current) {
+      observer = new ResizeObserver((entries) => {
+        const w = entries[0]?.contentRect.width;
+        if (typeof w === 'number' && w > 0) {
+          setWorkspaceWidthPx(Math.round(w));
+        }
+      });
+      observer.observe(workspaceContainerRef.current);
+    }
+    return () => {
+      window.removeEventListener('resize', syncWidths);
+      observer?.disconnect();
+    };
+  }, [prefs.sidebarVisible]);
 
   // Re-lock app after 60s in background when Biometric / PIN App Lock is enabled
   useEffect(() => {
@@ -2145,9 +2172,13 @@ export const App: React.FC = () => {
       />
 
       {/* Right Workspace */}
-      <main className="workspace">
+      <main ref={workspaceContainerRef} className="workspace">
         {/* TopThingsbookBar */}
-        <header className="workspace-topbar" onClick={(e) => e.stopPropagation()}>
+        <header
+          className="workspace-topbar"
+          data-topbar-tier={resolveTopBarLayoutTier(workspaceWidthPx)}
+          onClick={(e) => e.stopPropagation()}
+        >
           <div className="topbar-left">
             <button
               type="button"
@@ -2237,7 +2268,7 @@ export const App: React.FC = () => {
               title="Gemini"
             >
               <Sparkles size={14} />
-              <span className="topbar-label-hide-sm">Gemini</span>
+              <span className="topbar-label-hide-md">Gemini</span>
             </button>
 
             {/* Voice Capture Icon (v1.8.0) */}

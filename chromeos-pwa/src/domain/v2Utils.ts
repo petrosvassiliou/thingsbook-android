@@ -2305,4 +2305,25 @@ export function shouldShowQuickThisEveningPill(params: {
   );
 }
 
+export type TopBarLayoutTier = 'wide' | 'medium' | 'compact' | 'wrap';
+
+/**
+ * Resolves the responsive layout tier for `.workspace-topbar` from the actual rendered `.workspace`
+ * container width (accounting for whether the sidebar is open or collapsed) so 100% of top-bar
+ * controls remain completely visible across all window sizes without clipping.
+ */
+export function resolveTopBarLayoutTier(workspaceWidthPx: number): TopBarLayoutTier {
+  if (!Number.isFinite(workspaceWidthPx) || workspaceWidthPx >= 940) {
+    return 'wide';
+  }
+  if (workspaceWidthPx >= 640) {
+    return 'medium';
+  }
+  if (workspaceWidthPx >= 460) {
+    return 'compact';
+  }
+  return 'wrap';
+}
+
+
 

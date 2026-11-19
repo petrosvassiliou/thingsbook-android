@@ -761,9 +761,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(82, BuildConfig.VERSION_CODE)
-        assertEquals("3.0.0-alpha.8", BuildConfig.VERSION_NAME)
-        assertTrue("3.0.0-alpha.8 pre-release contains -alpha", BuildConfig.VERSION_NAME.contains("-alpha"))
+        assertEquals(84, BuildConfig.VERSION_CODE)
+        assertEquals("3.0.0-alpha.9", BuildConfig.VERSION_NAME)
+        assertTrue("3.0.0-alpha.9 pre-release contains -alpha", BuildConfig.VERSION_NAME.contains("-alpha"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -2063,5 +2063,25 @@ class V2UpgradeAndFeaturesTest {
         val macosPopoversSwift = File(repoRoot, "macos/Sources/ThingsbookMac/Views/SchedulingPopovers.swift").readText()
         assertTrue(macosPopoversSwift.contains(".frame(height: 220)"))
         assertTrue(macosPopoversSwift.contains(".frame(height: 260)"))
+    }
+
+    @Test
+    fun `v3_0_0_alpha_9 TopThingsbookBar keeps 100 percent of controls visible without horizontalScroll or NSToolbar overflow across all platforms`() {
+        val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
+        val repoRoot = if (appSrcMain.path.startsWith("app/")) File(".") else File("..")
+
+        val smartViewKt = File(appSrcMain, "java/com/pv/thingsbook/ui/screens/ThingsSmartViewScreen.kt").readText()
+        val topBarChunk = smartViewKt.substringAfter("private fun TopThingsbookBar(").substringBefore("private fun ")
+        assertTrue("TopThingsbookBar must measure live container width via BoxWithConstraints", topBarChunk.contains("BoxWithConstraints("))
+        assertFalse("TopThingsbookBar must not hide controls in an invisible horizontalScroll strip", topBarChunk.contains("horizontalScroll("))
+
+        val chromeosAppTsx = File(repoRoot, "chromeos-pwa/src/App.tsx").readText()
+        val chromeosCss = File(repoRoot, "chromeos-pwa/src/index.css").readText()
+        assertTrue(chromeosAppTsx.contains("data-topbar-tier={resolveTopBarLayoutTier(workspaceWidthPx)}"))
+        assertFalse("Must not use CSS layout containment that traps position:fixed modal backdrops", chromeosCss.contains("container-type:"))
+
+        val macDomainSwift = File(repoRoot, "macos/Sources/ThingsbookCore/Domain/DomainModels.swift").readText()
+        assertTrue(macDomainSwift.contains("public let showGeminiLabel: Bool"))
+        assertTrue(macDomainSwift.contains("max(446.0, rawUsable)"))
     }
 }

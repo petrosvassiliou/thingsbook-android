@@ -899,6 +899,7 @@ public struct MainWorkspaceView: View {
                 MacToolbarGeminiButton(
                     minWidth: CGFloat(metrics.geminiPillMinWidth),
                     height: btnH,
+                    showLabel: metrics.showGeminiLabel,
                     isDisabled: store.isLocked,
                     helpText: store.tr("gemini_hub_title")
                 ) {
@@ -1099,6 +1100,7 @@ private struct DetailPaneWidthPreferenceKey: PreferenceKey {
 private struct MacToolbarGeminiButton: View {
     let minWidth: CGFloat
     let height: CGFloat
+    let showLabel: Bool
     let isDisabled: Bool
     let helpText: String
     let action: () -> Void
@@ -1110,12 +1112,14 @@ private struct MacToolbarGeminiButton: View {
             HStack(spacing: 5.5) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 12, weight: .semibold))
-                Text("Gemini")
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .lineLimit(1)
+                if showLabel {
+                    Text("Gemini")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .lineLimit(1)
+                }
             }
             .foregroundStyle(ThingsMacPalette.geminiPurple)
-            .padding(.horizontal, 11)
+            .padding(.horizontal, showLabel ? 11 : 0)
             .frame(minWidth: minWidth, minHeight: height, maxHeight: height)
             .background(
                 Capsule(style: .continuous)

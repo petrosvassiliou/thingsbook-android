@@ -408,10 +408,14 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "2.1.2")
-        XCTAssertEqual(AppUpdateService.displayVersion, "2.1.2")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 79)
+        XCTAssertEqual(AppUpdateService.currentVersion, "2.1.3")
+        XCTAssertEqual(AppUpdateService.displayVersion, "2.1.3")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 83)
         XCTAssertFalse(AppUpdateService.currentVersionIsPrerelease)
+        let ultraCompact = MacToolbarLayoutMetrics.compute(detailWidth: 506.0, isSidebarCollapsed: false)
+        XCTAssertEqual(ultraCompact.usableWidth, 450.0)
+        XCTAssertFalse(ultraCompact.showGeminiLabel)
+        XCTAssertLessThanOrEqual(ultraCompact.totalBarWidth, ultraCompact.usableWidth)
         for lang in [AppLanguage.en, .de, .fr, .it, .es] {
             XCTAssertFalse(ThingsStrings.shared.text("v2_beta_channel_desc", lang: lang).contains("2.0"))
         }

@@ -27,26 +27,38 @@ import {
   isPurgeableSampleTask
 } from '../src/data/seedData.ts';
 import {
+  resolveTopBarLayoutTier,
   shouldAutoFocusTitleOnExpand,
   shouldShowQuickThisEveningPill
 } from '../src/domain/v2Utils.ts';
 
-test('v2.1.2 release build metadata constants are promoted to 2.1.2 (Build 79, non-prerelease)', () => {
-  assert.equal(APP_VERSION, '2.1.2');
-  assert.equal(APP_BUILD_CODE, 79);
-  assert.equal(versionFromUtils, '2.1.2');
-  assert.equal(buildFromUtils, 79);
+test('v2.1.3 release build metadata constants are promoted to 2.1.3 (Build 83, non-prerelease)', () => {
+  assert.equal(APP_VERSION, '2.1.3');
+  assert.equal(APP_BUILD_CODE, 83);
+  assert.equal(versionFromUtils, '2.1.3');
+  assert.equal(buildFromUtils, 83);
   assert.equal(isPrereleaseVersion(APP_VERSION), false);
   assert.equal(isPrereleaseVersion('1.8.1'), false);
   assert.equal(isPrereleaseVersion('2.0.0'), false);
   assert.equal(isPrereleaseVersion('2.0.0-beta.26'), true);
+  assert.equal(compareSemver('2.1.3', '2.1.2'), 1);
   assert.equal(compareSemver('2.1.2', '2.1.1'), 1);
-  assert.equal(compareSemver('2.1.1', '2.1.0'), 1);
   assert.equal(compareSemver('2.1.0', '2.0.1'), 1);
   assert.equal(compareSemver('2.0.0', '2.0.0-beta.26'), 1);
   assert.equal(compareSemver, compareFromUtils);
   assert.equal(isEligibleReleasePayload, isEligibleFromUtils);
   assert.equal(selectLatestEligibleRelease, selectFromUtils);
+});
+
+test('resolveTopBarLayoutTier keeps 100% of top-bar controls visible across wide, medium, compact, and ultra-narrow wrap workspace widths', () => {
+  assert.equal(resolveTopBarLayoutTier(1280), 'wide');
+  assert.equal(resolveTopBarLayoutTier(940), 'wide');
+  assert.equal(resolveTopBarLayoutTier(939), 'medium');
+  assert.equal(resolveTopBarLayoutTier(640), 'medium');
+  assert.equal(resolveTopBarLayoutTier(639), 'compact');
+  assert.equal(resolveTopBarLayoutTier(460), 'compact');
+  assert.equal(resolveTopBarLayoutTier(459), 'wrap');
+  assert.equal(resolveTopBarLayoutTier(360), 'wrap');
 });
 
 test('compareSemver orders numeric pre-release identifiers (beta.1 < beta.2 < beta.3 < beta.10 < beta.11 < 2.0.0) and +build metadata accurately', () => {

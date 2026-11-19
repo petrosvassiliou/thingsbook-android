@@ -297,7 +297,7 @@ fun sortTagsForMode(
                         .compareTo(b.title.lowercase(Locale.ROOT))
                 }
             }
-            "manual" -> {
+            "manual", "custom" -> {
                 val orderCmp = a.sortOrder.compareTo(b.sortOrder)
                 if (orderCmp != 0) {
                     orderCmp

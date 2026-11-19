@@ -3445,7 +3445,7 @@ final class ThingsbookCoreTests: XCTestCase {
         let tagExtra = try db.createOrUpdateTag(title: "Urgent", shortcut: "u")
 
         // Clearing shortcut works via createOrUpdateTag
-        let clearedTag = try db.createOrUpdateTag(existingId: tagDst.id, title: "Active", shortcut: nil)
+        let clearedTag = try db.createOrUpdateTag(id: tagDst.id, title: "Active", shortcut: nil)
         XCTAssertNil(clearedTag.shortcut)
 
         // Manual tag reorder swaps sort_order
@@ -3583,7 +3583,7 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(decodedPayload.preferences.viewSortMode, "effort")
         let decodedPerspectives = try JSONDecoder().decode(
             [SavedPerspective].self,
-            from: Data(decodedPayload.preferences.savedPerspectivesJson.utf8)
+            from: Data((decodedPayload.preferences.savedPerspectivesJson ?? "[]").utf8)
         )
         XCTAssertEqual(decodedPerspectives, [savedPerspective])
 

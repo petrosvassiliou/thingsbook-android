@@ -674,47 +674,69 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
           </button>
         </form>
 
-        {activeTags.length > 0 && (
-          <div
+        <div
+          style={{
+            position: 'relative',
+            display: 'flex',
+            alignItems: 'center',
+            marginBottom: 12,
+            opacity: activeTags.length === 0 ? 0.55 : 1
+          }}
+        >
+          <Search
+            size={14}
             style={{
-              position: 'relative',
-              display: 'flex',
-              alignItems: 'center',
-              marginBottom: 12
+              position: 'absolute',
+              left: 11,
+              color: 'var(--text-tertiary)',
+              pointerEvents: 'none'
             }}
-          >
-            <Search
-              size={14}
-              style={{
-                position: 'absolute',
-                left: 11,
-                color: 'var(--text-tertiary)',
-                pointerEvents: 'none'
-              }}
-            />
-            <input
-              type="text"
-              className="text-field"
-              style={{ width: '100%', paddingLeft: 32, paddingRight: filterQuery ? 30 : 10 }}
-              value={filterQuery}
-              onChange={(e) => setFilterQuery(e.target.value)}
-              placeholder={t.tagsFilterPlaceholder}
-            />
-            {filterQuery && (
-              <button
-                type="button"
-                className="icon-btn"
-                style={{ position: 'absolute', right: 4, width: 24, height: 24 }}
-                onClick={() => setFilterQuery('')}
-                aria-label="Clear"
-              >
-                <X size={13} />
-              </button>
-            )}
-          </div>
-        )}
+          />
+          <input
+            type="text"
+            className="text-field"
+            style={{ width: '100%', paddingLeft: 32, paddingRight: filterQuery ? 30 : 10 }}
+            value={filterQuery}
+            disabled={activeTags.length === 0}
+            onChange={(e) => setFilterQuery(e.target.value)}
+            placeholder={t.tagsFilterPlaceholder}
+          />
+          {filterQuery && (
+            <button
+              type="button"
+              className="icon-btn"
+              style={{ position: 'absolute', right: 4, width: 24, height: 24 }}
+              onClick={() => setFilterQuery('')}
+              aria-label="Clear"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '50vh', overflowY: 'auto' }}>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+            height: 'min(250px, 38vh)',
+            minHeight: 'min(250px, 38vh)',
+            maxHeight: 'min(250px, 38vh)',
+            overflowY: 'auto'
+          }}
+        >
+          {activeTags.length === 0 && (
+            <div
+              style={{
+                padding: '18px 10px',
+                textAlign: 'center',
+                fontSize: 13,
+                color: 'var(--text-tertiary)'
+              }}
+            >
+              {t.emptyView}
+            </div>
+          )}
           {activeTags.length > 0 && filteredTags.length === 0 && (
             <div
               style={{
@@ -942,7 +964,29 @@ export const TaskTagPickerModal: React.FC<TaskTagPickerModalProps> = ({
           </div>
         </form>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: '48vh', overflowY: 'auto' }}>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+            height: 'min(240px, 40vh)',
+            minHeight: 'min(240px, 40vh)',
+            maxHeight: 'min(240px, 40vh)',
+            overflowY: 'auto'
+          }}
+        >
+          {activeTags.length === 0 && !cleanQuery && (
+            <div
+              style={{
+                padding: '16px 10px',
+                textAlign: 'center',
+                fontSize: 13,
+                color: 'var(--text-tertiary)'
+              }}
+            >
+              {t.emptyView}
+            </div>
+          )}
           {cleanQuery && !exactMatch && (
             <button
               type="button"
@@ -961,7 +1005,7 @@ export const TaskTagPickerModal: React.FC<TaskTagPickerModalProps> = ({
               </span>
             </button>
           )}
-          {filteredTags.length === 0 && (!cleanQuery || Boolean(exactMatch)) && activeTags.length > 0 && (
+          {filteredTags.length === 0 && activeTags.length > 0 && (
             <div
               style={{
                 padding: '12px 10px',

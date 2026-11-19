@@ -7,9 +7,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -54,6 +54,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
@@ -289,245 +290,258 @@ fun ThingsTagManagerModal(
                 HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
                 Spacer(modifier = Modifier.height(10.dp))
 
-                if (allTags.isNotEmpty()) {
-                    OutlinedTextField(
-                        value = filterQueryField,
-                        onValueChange = { filterQueryField = it },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Outlined.Search,
-                                contentDescription = null,
-                                tint = colors.secondaryText,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        },
-                        trailingIcon = {
-                            if (filterQueryField.text.isNotEmpty()) {
-                                IconButton(
-                                    onClick = {
-                                        filterQueryField = TextFieldValue(text = "", selection = TextRange(0))
-                                    },
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.Close,
-                                        contentDescription = stringResource(R.string.action_cancel),
-                                        tint = colors.secondaryText,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-                        },
-                        placeholder = {
-                            Text(
-                                text = stringResource(R.string.tags_filter_placeholder),
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
+                val screenHeightDp = LocalConfiguration.current.screenHeightDp
+                val manageListHeight = remember(screenHeightDp) {
+                    (screenHeightDp.dp * 0.30f).coerceIn(156.dp, 240.dp)
                 }
 
-                if (allTags.isEmpty()) {
-                    Text(
-                        text = stringResource(R.string.tags_empty_hint),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.secondaryText,
-                        modifier = Modifier.padding(vertical = 16.dp)
-                    )
-                } else if (filteredTags.isEmpty()) {
-                    Text(
-                        text = stringResource(R.string.tags_no_filter_matches),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.secondaryText,
-                        modifier = Modifier.padding(vertical = 12.dp)
-                    )
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 250.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        items(filteredTags, key = { it.id }) { tag ->
-                            val isEditingThis = editingTagId == tag.id
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = colors.tagPillBg.copy(alpha = 0.65f),
-                                modifier = Modifier.fillMaxWidth()
+                OutlinedTextField(
+                    value = filterQueryField,
+                    onValueChange = { filterQueryField = it },
+                    enabled = allTags.isNotEmpty(),
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.Search,
+                            contentDescription = null,
+                            tint = colors.secondaryText,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    trailingIcon = {
+                        if (filterQueryField.text.isNotEmpty()) {
+                            IconButton(
+                                onClick = {
+                                    filterQueryField = TextFieldValue(text = "", selection = TextRange(0))
+                                },
+                                modifier = Modifier.size(28.dp)
                             ) {
-                                if (isEditingThis) {
-                                    val commitRenameTag = {
-                                        if (editingTagTitleField.text.isNotBlank()) {
-                                            onRenameTag(
-                                                tag.id,
-                                                editingTagTitleField.text.trim(),
-                                                editingTagShortcutField.text.trim().ifEmpty { null }
-                                            )
-                                        }
-                                        editingTagId = null
-                                    }
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        OutlinedTextField(
-                                            value = editingTagTitleField,
-                                            onValueChange = { editingTagTitleField = it },
-                                            singleLine = true,
-                                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                                            keyboardActions = KeyboardActions(onDone = { commitRenameTag() }),
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .onPreviewKeyEvent { keyEvent ->
-                                                    if (keyEvent.type == KeyEventType.KeyDown &&
-                                                        (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
-                                                    ) {
-                                                        commitRenameTag()
-                                                        true
-                                                    } else {
-                                                        false
-                                                    }
-                                                }
-                                                .onFocusChanged { focusState ->
-                                                    if (focusState.isFocused) {
-                                                        val txt = editingTagTitleField.text
-                                                        editingTagTitleField = editingTagTitleField.copy(
-                                                            selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
-                                                        )
-                                                    }
-                                                }
-                                        )
-                                        OutlinedTextField(
-                                            value = editingTagShortcutField,
-                                            onValueChange = { if (it.text.length <= 2) editingTagShortcutField = it },
-                                            placeholder = {
-                                                Text(
-                                                    text = stringResource(R.string.tags_shortcut_placeholder),
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            },
-                                            singleLine = true,
-                                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                                            keyboardActions = KeyboardActions(onDone = { commitRenameTag() }),
-                                            modifier = Modifier
-                                                .width(68.dp)
-                                                .onPreviewKeyEvent { keyEvent ->
-                                                    if (keyEvent.type == KeyEventType.KeyDown &&
-                                                        (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
-                                                    ) {
-                                                        commitRenameTag()
-                                                        true
-                                                    } else {
-                                                        false
-                                                    }
-                                                }
-                                                .onFocusChanged { focusState ->
-                                                    if (focusState.isFocused) {
-                                                        val txt = editingTagShortcutField.text
-                                                        editingTagShortcutField = editingTagShortcutField.copy(
-                                                            selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
-                                                        )
-                                                    }
-                                                }
-                                        )
-                                        IconButton(onClick = commitRenameTag) {
-                                            Icon(
-                                                imageVector = Icons.Outlined.Check,
-                                                contentDescription = stringResource(R.string.action_save),
-                                                tint = colors.thingsBlue
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Outlined.GridView,
-                                                contentDescription = null,
-                                                tint = colors.thingsBlue,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                            Text(
-                                                text = tag.title,
-                                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                                                color = colors.primaryText
-                                            )
-                                            if (!tag.shortcut.isNullOrBlank()) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .clip(RoundedCornerShape(5.dp))
-                                                        .background(colors.thingsBlueSoft)
-                                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                                ) {
-                                                    Text(
-                                                        text = "Ctrl+${tag.shortcut.uppercase(java.util.Locale.ROOT)}",
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = colors.thingsBlue
-                                                    )
-                                                }
-                                            }
-                                        }
+                                Icon(
+                                    imageVector = Icons.Outlined.Close,
+                                    contentDescription = stringResource(R.string.action_cancel),
+                                    tint = colors.secondaryText,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    },
+                    placeholder = {
+                        Text(
+                            text = stringResource(R.string.tags_filter_placeholder),
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(manageListHeight)
+                ) {
+                    if (allTags.isEmpty()) {
+                        Text(
+                            text = stringResource(R.string.tags_empty_hint),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.secondaryText,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(vertical = 18.dp, horizontal = 8.dp)
+                        )
+                    } else if (filteredTags.isEmpty()) {
+                        Text(
+                            text = stringResource(R.string.tags_no_filter_matches),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.secondaryText,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(vertical = 18.dp, horizontal = 8.dp)
+                        )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(filteredTags, key = { it.id }) { tag ->
+                                val isEditingThis = editingTagId == tag.id
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = colors.tagPillBg.copy(alpha = 0.65f),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    if (isEditingThis) {
+                                        val commitRenameTag = {
+                                            if (editingTagTitleField.text.isNotBlank()) {
+                                                onRenameTag(
+                                                    tag.id,
+                                                    editingTagTitleField.text.trim(),
+                                                    editingTagShortcutField.text.trim().ifEmpty { null }
+                                                )
+                                            }
+                                            editingTagId = null
+                                        }
                                         Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 10.dp, vertical = 6.dp),
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
-                                            IconButton(
-                                                onClick = {
-                                                    editingTagId = tag.id
-                                                    editingTagTitleField = TextFieldValue(
-                                                        text = tag.title,
-                                                        selection = TextRange(0, tag.title.length)
-                                                    )
-                                                    val sc = tag.shortcut ?: ""
-                                                    editingTagShortcutField = TextFieldValue(
-                                                        text = sc,
-                                                        selection = if (sc.isEmpty()) TextRange(0) else TextRange(0, sc.length)
+                                            OutlinedTextField(
+                                                value = editingTagTitleField,
+                                                onValueChange = { editingTagTitleField = it },
+                                                singleLine = true,
+                                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                                keyboardActions = KeyboardActions(onDone = { commitRenameTag() }),
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .onPreviewKeyEvent { keyEvent ->
+                                                        if (keyEvent.type == KeyEventType.KeyDown &&
+                                                            (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
+                                                        ) {
+                                                            commitRenameTag()
+                                                            true
+                                                        } else {
+                                                            false
+                                                        }
+                                                    }
+                                                    .onFocusChanged { focusState ->
+                                                        if (focusState.isFocused) {
+                                                            val txt = editingTagTitleField.text
+                                                            editingTagTitleField = editingTagTitleField.copy(
+                                                                selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                                            )
+                                                        }
+                                                    }
+                                            )
+                                            OutlinedTextField(
+                                                value = editingTagShortcutField,
+                                                onValueChange = { if (it.text.length <= 2) editingTagShortcutField = it },
+                                                placeholder = {
+                                                    Text(
+                                                        text = stringResource(R.string.tags_shortcut_placeholder),
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
                                                     )
                                                 },
-                                                modifier = Modifier.size(30.dp)
-                                            ) {
+                                                singleLine = true,
+                                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                                keyboardActions = KeyboardActions(onDone = { commitRenameTag() }),
+                                                modifier = Modifier
+                                                    .width(68.dp)
+                                                    .onPreviewKeyEvent { keyEvent ->
+                                                        if (keyEvent.type == KeyEventType.KeyDown &&
+                                                            (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
+                                                        ) {
+                                                            commitRenameTag()
+                                                            true
+                                                        } else {
+                                                            false
+                                                        }
+                                                    }
+                                                    .onFocusChanged { focusState ->
+                                                        if (focusState.isFocused) {
+                                                            val txt = editingTagShortcutField.text
+                                                            editingTagShortcutField = editingTagShortcutField.copy(
+                                                                selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                                            )
+                                                        }
+                                                    }
+                                            )
+                                            IconButton(onClick = commitRenameTag) {
                                                 Icon(
-                                                    imageVector = Icons.Outlined.Edit,
-                                                    contentDescription = stringResource(R.string.tags_edit_title),
-                                                    tint = colors.secondaryText,
-                                                    modifier = Modifier.size(17.dp)
+                                                    imageVector = Icons.Outlined.Check,
+                                                    contentDescription = stringResource(R.string.action_save),
+                                                    tint = colors.thingsBlue
                                                 )
                                             }
+                                        }
+                                    } else {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.GridView,
+                                                    contentDescription = null,
+                                                    tint = colors.thingsBlue,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Text(
+                                                    text = tag.title,
+                                                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                                                    color = colors.primaryText
+                                                )
+                                                if (!tag.shortcut.isNullOrBlank()) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(5.dp))
+                                                            .background(colors.thingsBlueSoft)
+                                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "Ctrl+${tag.shortcut.uppercase(java.util.Locale.ROOT)}",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = colors.thingsBlue
+                                                        )
+                                                    }
+                                                }
+                                            }
 
-                                            ThingsHoverTooltip(text = stringResource(R.string.action_delete)) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                            ) {
                                                 IconButton(
                                                     onClick = {
-                                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                        onDeleteTag(tag.id)
+                                                        editingTagId = tag.id
+                                                        editingTagTitleField = TextFieldValue(
+                                                            text = tag.title,
+                                                            selection = TextRange(0, tag.title.length)
+                                                        )
+                                                        val sc = tag.shortcut ?: ""
+                                                        editingTagShortcutField = TextFieldValue(
+                                                            text = sc,
+                                                            selection = if (sc.isEmpty()) TextRange(0) else TextRange(0, sc.length)
+                                                        )
                                                     },
                                                     modifier = Modifier.size(30.dp)
                                                 ) {
                                                     Icon(
-                                                        imageVector = Icons.Outlined.DeleteOutline,
-                                                        contentDescription = stringResource(R.string.action_delete),
-                                                        tint = colors.deadlineUrgentRed,
+                                                        imageVector = Icons.Outlined.Edit,
+                                                        contentDescription = stringResource(R.string.tags_edit_title),
+                                                        tint = colors.secondaryText,
                                                         modifier = Modifier.size(17.dp)
                                                     )
+                                                }
+
+                                                ThingsHoverTooltip(text = stringResource(R.string.action_delete)) {
+                                                    IconButton(
+                                                        onClick = {
+                                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                            onDeleteTag(tag.id)
+                                                        },
+                                                        modifier = Modifier.size(30.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Outlined.DeleteOutline,
+                                                            contentDescription = stringResource(R.string.action_delete),
+                                                            tint = colors.deadlineUrgentRed,
+                                                            modifier = Modifier.size(17.dp)
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -701,91 +715,111 @@ fun TaskTagPickerDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                LazyColumn(
+                val screenHeightDp = LocalConfiguration.current.screenHeightDp
+                val pickerListHeight = remember(screenHeightDp) {
+                    (screenHeightDp.dp * 0.34f).coerceIn(176.dp, 240.dp)
+                }
+
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 240.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                        .height(pickerListHeight)
                 ) {
-                    if (cleanQuery.isNotEmpty() && exactMatch == null) {
-                        item(key = "__create_from_search__") {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (allTags.isEmpty() && cleanQuery.isEmpty()) {
+                            item(key = "__empty_categories__") {
+                                Text(
+                                    text = stringResource(R.string.tags_empty_hint),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = colors.secondaryText,
+                                    modifier = Modifier.padding(vertical = 14.dp, horizontal = 8.dp)
+                                )
+                            }
+                        }
+
+                        if (cleanQuery.isNotEmpty() && exactMatch == null) {
+                            item(key = "__create_from_search__") {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(colors.thingsBlueSoft)
+                                        .clickable { submitSearchOrCreate() }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Add,
+                                        contentDescription = null,
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.tags_create_from_search, cleanQuery),
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        color = colors.thingsBlue,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+
+                        if (filteredTags.isEmpty() && allTags.isNotEmpty()) {
+                            item(key = "__no_matches__") {
+                                Text(
+                                    text = stringResource(R.string.tags_no_filter_matches),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = colors.secondaryText,
+                                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp)
+                                )
+                            }
+                        }
+
+                        items(filteredTags, key = { it.id }) { tag ->
+                            val isChecked = tag.id in currentSelection
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(colors.thingsBlueSoft)
-                                    .clickable { submitSearchOrCreate() }
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Add,
-                                    contentDescription = null,
-                                    tint = colors.thingsBlue,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = stringResource(R.string.tags_create_from_search, cleanQuery),
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                    color = colors.thingsBlue,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-
-                    if (filteredTags.isEmpty() && (cleanQuery.isEmpty() || exactMatch != null) && allTags.isNotEmpty()) {
-                        item(key = "__no_matches__") {
-                            Text(
-                                text = stringResource(R.string.tags_no_filter_matches),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = colors.secondaryText,
-                                modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp)
-                            )
-                        }
-                    }
-
-                    items(filteredTags, key = { it.id }) { tag ->
-                        val isChecked = tag.id in currentSelection
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable {
-                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    val updated = if (isChecked) currentSelection - tag.id else currentSelection + tag.id
-                                    currentSelection = updated
-                                    onUpdateSelectedTags(updated.toList())
-                                }
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Checkbox(
-                                    checked = isChecked,
-                                    onCheckedChange = { checked ->
+                                    .clickable {
                                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        val updated = if (checked) currentSelection + tag.id else currentSelection - tag.id
+                                        val updated = if (isChecked) currentSelection - tag.id else currentSelection + tag.id
                                         currentSelection = updated
                                         onUpdateSelectedTags(updated.toList())
-                                    },
-                                    colors = CheckboxDefaults.colors(checkedColor = colors.thingsBlue)
-                                )
-                                Text(
-                                    text = tag.title,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = colors.primaryText
-                                )
-                            }
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Checkbox(
+                                        checked = isChecked,
+                                        onCheckedChange = { checked ->
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            val updated = if (checked) currentSelection + tag.id else currentSelection - tag.id
+                                            currentSelection = updated
+                                            onUpdateSelectedTags(updated.toList())
+                                        },
+                                        colors = CheckboxDefaults.colors(checkedColor = colors.thingsBlue)
+                                    )
+                                    Text(
+                                        text = tag.title,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = colors.primaryText
+                                    )
+                                }
 
-                            if (!tag.shortcut.isNullOrBlank()) {
-                                ThingsTagPill(title = "Ctrl+${tag.shortcut.uppercase(java.util.Locale.ROOT)}")
+                                if (!tag.shortcut.isNullOrBlank()) {
+                                    ThingsTagPill(title = "Ctrl+${tag.shortcut.uppercase(java.util.Locale.ROOT)}")
+                                }
                             }
                         }
                     }

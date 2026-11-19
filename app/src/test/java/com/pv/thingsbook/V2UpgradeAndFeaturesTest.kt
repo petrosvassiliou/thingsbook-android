@@ -761,9 +761,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(81, BuildConfig.VERSION_CODE)
-        assertEquals("3.0.0-alpha.7", BuildConfig.VERSION_NAME)
-        assertTrue("3.0.0-alpha.7 pre-release contains -alpha", BuildConfig.VERSION_NAME.contains("-alpha"))
+        assertEquals(82, BuildConfig.VERSION_CODE)
+        assertEquals("3.0.0-alpha.8", BuildConfig.VERSION_NAME)
+        assertTrue("3.0.0-alpha.8 pre-release contains -alpha", BuildConfig.VERSION_NAME.contains("-alpha"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -2041,5 +2041,27 @@ class V2UpgradeAndFeaturesTest {
         val infoPlist = File(repoRoot, "macos/Resources/Info.plist").readText()
         assertTrue(infoPlist.contains("<string>AppIconGlacierV3</string>"))
         assertTrue(infoPlist.contains("<string>com.thingsbook.macos</string>"))
+    }
+
+    @Test
+    fun `v3_0_0_alpha_8 Category Assign and Manage dialogs keep constant viewport height across Android, ChromeOS PWA, and macOS`() {
+        val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
+        val repoRoot = if (appSrcMain.path.startsWith("app/")) File(".") else File("..")
+
+        val androidModalKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ThingsTagManagerModal.kt").readText()
+        assertFalse(
+            "ThingsTagManagerModal.kt must not use dynamic heightIn() that resizes dialog on search",
+            androidModalKt.contains("heightIn(")
+        )
+        assertTrue(androidModalKt.contains(".height(manageListHeight)"))
+        assertTrue(androidModalKt.contains(".height(pickerListHeight)"))
+
+        val chromeosModalsTsx = File(repoRoot, "chromeos-pwa/src/components/EntityModals.tsx").readText()
+        assertTrue(chromeosModalsTsx.contains("height: 'min(250px, 38vh)'"))
+        assertTrue(chromeosModalsTsx.contains("height: 'min(240px, 40vh)'"))
+
+        val macosPopoversSwift = File(repoRoot, "macos/Sources/ThingsbookMac/Views/SchedulingPopovers.swift").readText()
+        assertTrue(macosPopoversSwift.contains(".frame(height: 220)"))
+        assertTrue(macosPopoversSwift.contains(".frame(height: 260)"))
     }
 }

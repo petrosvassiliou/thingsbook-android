@@ -24,8 +24,8 @@
     <string name="entity_todos">Aufgaben</string>
     <string name="entity_new_todo">Neue Aufgabe</string>
     <string name="entity_checklist_item">Checklistenpunkt</string>
-    <string name="entity_tag">Tag</string>
-    <string name="entity_tags">Tags</string>
+    <string name="entity_tag">Kategorie</string>
+    <string name="entity_tags">Kategorien</string>
 
     <!-- Task Actions & Card Fields -->
     <string name="placeholder_todo_title">Neue Aufgabe</string>
@@ -34,7 +34,7 @@
     <string name="placeholder_add_checklist_item">Checklistenpunkt hinzufügen…</string>
     <string name="action_when">Wann</string>
     <string name="action_deadline">Frist</string>
-    <string name="action_tags">Tags</string>
+    <string name="action_tags">Kategorien</string>
     <string name="action_checklist">Checkliste</string>
     <string name="action_reminder">Erinnerung</string>
     <string name="action_move">Bewegen</string>
@@ -52,7 +52,7 @@
     <!-- Quick Find & Search -->
     <string name="quick_find_title">Schnellsuche</string>
     <string name="quick_find_placeholder">Schnellsuche – Tippen zum Suchen…</string>
-    <string name="quick_find_no_results">Keine passenden Aufgaben, Projekte oder Tags</string>
+    <string name="quick_find_no_results">Keine passenden Aufgaben, Projekte oder Kategorien</string>
     <string name="quick_find_hint_swipe">Nach unten wischen oder Suche antippen</string>
 
     <!-- Deadlines & Dates -->
@@ -138,13 +138,13 @@
     <string name="notifications_daily_digest_empty">Alles erledigt – heute stehen keine offenen Aufgaben an!</string>
 
     <!-- Full Tag Management -->
-    <string name="tags_manage_title">Tags verwalten</string>
-    <string name="tags_assign_title">Tags für diese Aufgabe</string>
-    <string name="tags_new_placeholder">Neuer Tag-Name (z. B. Wichtig, Zuhause, Büro)…</string>
+    <string name="tags_manage_title">Kategorien verwalten</string>
+    <string name="tags_assign_title">Kategorien zuweisen</string>
+    <string name="tags_new_placeholder">Neuer Kategoriename (z. B. Fokus, Zuhause, Büro)…</string>
     <string name="tags_shortcut_placeholder">Kürzel</string>
-    <string name="tags_add_button">Tag anlegen</string>
-    <string name="tags_edit_title">Tag umbenennen</string>
-    <string name="tags_empty_hint">Noch keine Tags vorhanden. Lege oben deinen ersten Tag an.</string>
+    <string name="tags_add_button">Kategorie anlegen</string>
+    <string name="tags_edit_title">Kategorie umbenennen</string>
+    <string name="tags_empty_hint">Noch keine Kategorien vorhanden. Lege oben deine erste Kategorie an.</string>
     <string name="tags_filter_all">Alle</string>
 
     <!-- Areas, Projects & Password Reset -->
@@ -202,15 +202,15 @@
     <string name="settings_stat_today_active">★ Heute aktiv</string>
     <string name="settings_stat_recurring">🔁 Wiederkehrende Aufgaben</string>
     <string name="settings_stat_active_projects">📁 Aktive Projekte</string>
-    <string name="settings_stat_saved_tags">🏷️ Gespeicherte Tags</string>
+    <string name="settings_stat_saved_tags">⊞ Gespeicherte Kategorien</string>
     <string name="settings_stat_total_records">🗄️ Datenbank-Einträge gesamt</string>
     <string name="settings_stat_tasks_count">%1$d Aufgaben</string>
     <string name="settings_stat_active_count">%1$d aktiv</string>
     <string name="settings_stat_projects_count">%1$d Projekte</string>
-    <string name="settings_stat_tags_count">%1$d Tags</string>
+    <string name="settings_stat_tags_count">%1$d Kategorien</string>
     <string name="settings_stat_records_count">%1$d Datensätze</string>
     <string name="settings_csv_section">Import &amp; Export (CSV-Datei)</string>
-    <string name="settings_csv_desc">Exportiere alle Aufgaben (inkl. Status, Bereich, Projekt, Datum, Fälligkeit, Tags &amp; Unteraufgaben) als CSV-Datei oder importiere bestehende CSV-Dateien.</string>
+    <string name="settings_csv_desc">Exportiere alle Aufgaben (inkl. Status, Bereich, Projekt, Datum, Fälligkeit, Kategorien &amp; Unteraufgaben) als CSV-Datei oder importiere bestehende CSV-Dateien.</string>
     <string name="settings_csv_export">CSV exportieren</string>
     <string name="settings_csv_share">CSV teilen</string>
     <string name="settings_csv_import">CSV importieren</string>
@@ -218,11 +218,11 @@
 
     <!-- Backup & Restore -->
     <string name="backup_section_title">Backup &amp; Restore (Komplettsicherung)</string>
-    <string name="backup_section_desc">Sichert sämtliche Aufgaben, Bereiche, Projekte, Phasen, Tags, Unteraufgaben und Einstellungen in einer Datei (.tbbackup) — optional mit AES-256-Passwortschutz — und stellt den kompletten Stand wieder her.</string>
+    <string name="backup_section_desc">Sichert sämtliche Aufgaben, Bereiche, Projekte, Phasen, Kategorien, Unteraufgaben und Einstellungen in einer Datei (.tbbackup) — optional mit AES-256-Passwortschutz — und stellt den kompletten Stand wieder her.</string>
     <string name="backup_create_button">Backup erstellen</string>
     <string name="backup_restore_button">Restore aus Datei</string>
     <string name="backup_create_dialog_title">Vollständiges Backup erstellen</string>
-    <string name="backup_create_dialog_summary">%1$d Aufgaben • %2$d Projekte • %3$d Bereiche • %4$d Tags</string>
+    <string name="backup_create_dialog_summary">%1$d Aufgaben • %2$d Projekte • %3$d Bereiche • %4$d Kategorien</string>
     <string name="backup_close_dialog_tooltip">Dialog schließen</string>
     <string name="backup_password_protect_title">Mit Passwort schützen (optional)</string>
     <string name="backup_password_protect_on">Aktiv: AES-256-GCM &amp; PBKDF2-Verschlüsselung</string>
@@ -239,10 +239,10 @@
     <string name="backup_unknown_date">Unbekanntes Datum</string>
     <string name="backup_restore_encrypted_title">Passwortgeschütztes Backup</string>
     <string name="backup_restore_plain_title">Backup wiederherstellen</string>
-    <string name="backup_restore_encrypted_desc">Diese Backup-Datei ist verschlüsselt. Bitte gib das Passwort ein, um sämtliche Aufgaben, Bereiche, Projekte und Tags wiederherzustellen.</string>
+    <string name="backup_restore_encrypted_desc">Diese Backup-Datei ist verschlüsselt. Bitte gib das Passwort ein, um sämtliche Aufgaben, Bereiche, Projekte und Kategorien wiederherzustellen.</string>
     <string name="backup_restore_enter_password">Backup-Passwort eingeben</string>
     <string name="backup_preview_header">Inhalt der Sicherungsdatei:</string>
-    <string name="backup_preview_details">• %1$d Aufgaben &amp; %2$d Unteraufgaben\n• %3$d Projekte &amp; %4$d Phasen\n• %5$d Bereiche &amp; %6$d Tags</string>
+    <string name="backup_preview_details">• %1$d Aufgaben &amp; %2$d Unteraufgaben\n• %3$d Projekte &amp; %4$d Phasen\n• %5$d Bereiche &amp; %6$d Kategorien</string>
     <string name="backup_restore_replace_notice">Hinweis: Beim kompletten Restore werden die aktuell lokal vorhandenen Einträge vollständig durch den Stand dieser Backup-Datei ersetzt.</string>
     <string name="backup_restore_confirm_decrypt">Entschlüsseln &amp; komplett wiederherstellen</string>
     <string name="backup_restore_confirm_plain">Jetzt komplett wiederherstellen</string>
@@ -253,11 +253,11 @@
     <string name="csv_status_imported">✅ %1$d Aufgaben erfolgreich aus der CSV-Datei importiert!</string>
     <string name="csv_status_export_failed">❌ CSV-Export fehlgeschlagen: %1$s</string>
     <string name="csv_status_import_failed">❌ CSV-Import fehlgeschlagen: %1$s</string>
-    <string name="backup_status_saved">✅ Backup gespeichert (%1$s): %2$d Aufgaben, %3$d Projekte, %4$d Bereiche &amp; %5$d Tags.</string>
+    <string name="backup_status_saved">✅ Backup gespeichert (%1$s): %2$d Aufgaben, %3$d Projekte, %4$d Bereiche &amp; %5$d Kategorien.</string>
     <string name="backup_badge_encrypted">🔒 Passwortgeschützt</string>
     <string name="backup_badge_unencrypted">Unverschlüsselt</string>
     <string name="backup_status_shared">✅ Backup (%1$s) zum Teilen geöffnet.</string>
-    <string name="backup_status_restored">✅ Komplettes Restore erfolgreich: %1$d Aufgaben, %2$d Projekte, %3$d Bereiche &amp; %4$d Tags wiederhergestellt!</string>
+    <string name="backup_status_restored">✅ Komplettes Restore erfolgreich: %1$d Aufgaben, %2$d Projekte, %3$d Bereiche &amp; %4$d Kategorien wiederhergestellt!</string>
     <string name="backup_status_failed">❌ Backup fehlgeschlagen: %1$s</string>
     <string name="backup_status_restore_failed">❌ Restore fehlgeschlagen: %1$s</string>
     <string name="backup_err_wrong_password">Falsches Passwort. Bitte überprüfe das eingegebene Passwort.</string>
@@ -314,7 +314,7 @@
     <string name="context_when_date_reminder">Wann? (Datum &amp; Erinnerung)</string>
     <string name="context_adjust_deadline">Fälligkeit / Deadline anpassen</string>
     <string name="context_configure_repeat">Wiederholung konfigurieren</string>
-    <string name="context_assign_tags">Tags zuweisen</string>
+    <string name="context_assign_tags">Kategorien zuweisen</string>
     <string name="repeat_dialog_title">Wiederholung planen</string>
     <string name="repeat_mode_fixed">Nach Zeitplan</string>
     <string name="repeat_mode_after">Nach Erledigung</string>
@@ -403,7 +403,7 @@
     <string name="areas_manage_count_tooltip">Bereiche verwalten (%1$d/%2$d)</string>
     <string name="sidebar_new_project_in_area">Neues Projekt in %1$s</string>
     <string name="quick_find_clear">Suche leeren</string>
-    <string name="quick_find_empty_hint">Tippe einen Suchbegriff ein, um Aufgaben (inkl. Notizen, Datum, Bereich, Projekt, Unteraufgaben &amp; Tags), Projekte, Bereiche oder Ansichten sofort inline zu durchsuchen.</string>
+    <string name="quick_find_empty_hint">Tippe einen Suchbegriff ein, um Aufgaben (inkl. Notizen, Datum, Bereich, Projekt, Unteraufgaben &amp; Kategorien), Projekte, Bereiche oder Ansichten sofort inline zu durchsuchen.</string>
     <string name="quick_find_results_for">%1$d Ergebnisse für „%2$s“</string>
     <string name="quick_find_badge_view">Ansicht</string>
     <string name="quick_find_subtasks_count">☑ %1$d/%2$d Unteraufgaben</string>
@@ -454,7 +454,7 @@
     <string name="search_filter_date_none">Ohne Datum</string>
     <string name="search_filter_has_deadline">Mit Frist</string>
     <string name="search_filter_has_checklist">Mit Checkliste</string>
-    <string name="search_filter_all_tags">Alle Tags</string>
+    <string name="search_filter_all_tags">Alle Kategorien</string>
     <string name="search_filter_scope_all">Alle Typen</string>
     <string name="search_filter_scope_tasks">Nur Aufgaben</string>
     <string name="search_filter_scope_projects">Nur Projekte</string>
@@ -467,7 +467,7 @@
     <string name="topbar_tooltip_quick_entry">Schnelleingabe</string>
     <string name="topbar_tooltip_voice_input">Spracheingabe</string>
     <string name="topbar_tooltip_areas">Bereiche</string>
-    <string name="topbar_tooltip_tags">Tags</string>
+    <string name="topbar_tooltip_tags">Kategorien</string>
     <string name="topbar_tooltip_notifications">Benachrichtigungen</string>
     <string name="topbar_tooltip_language">Sprache</string>
     <string name="topbar_tooltip_cloud_sync">Cloud-Sync</string>
@@ -477,4 +477,9 @@
     <string name="phase_clear_end_date">Enddatum löschen</string>
     <string name="phase_ends_on">Endet %1$s</string>
     <string name="phase_milestone_badge">Phasen-Meilenstein</string>
+    <string name="sidebar_review_short">Rückblick</string>
+    <string name="tags_search_or_create_placeholder">Kategorie suchen oder neu erstellen…</string>
+    <string name="tags_filter_placeholder">Kategorien filtern…</string>
+    <string name="tags_create_from_search">Als neue Kategorie erstellen: „%1$s“</string>
+    <string name="tags_no_filter_matches">Keine passenden Kategorien</string>
 </resources>

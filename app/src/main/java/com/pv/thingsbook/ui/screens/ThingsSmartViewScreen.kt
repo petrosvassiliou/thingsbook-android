@@ -86,8 +86,8 @@ import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Language
-import androidx.compose.material.icons.outlined.LocalOffer
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Schedule
@@ -3686,7 +3686,7 @@ private fun TopThingsbookBar(
                             modifier = Modifier.size(iconButtonSize)
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.LocalOffer,
+                                imageVector = Icons.Outlined.GridView,
                                 contentDescription = stringResource(R.string.topbar_tooltip_tags),
                                 tint = colors.secondaryText,
                                 modifier = Modifier.size(iconGlyphSize)
@@ -5475,7 +5475,7 @@ private fun InlineQuickFindSection(
                     Box {
                         QuickFindFilterChip(
                             label = selectedTagTitle?.let { "#$it" } ?: stringResource(R.string.search_filter_all_tags),
-                            icon = Icons.Outlined.LocalOffer,
+                            icon = Icons.Outlined.GridView,
                             active = filter.tagId != null,
                             hasDropdown = true,
                             onClick = { showTagMenu = true }
@@ -6052,112 +6052,130 @@ private fun ThingsChromebookSidebar(
             }
         }
 
-        // 2. Compact Secondary Utility Pills (Someday, Weekly Review, Logbook, Trash, Templates)
-        FlowRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp)
+        // 2. 1x2 Slim Secondary Mini-Cards (Someday, Weekly Review)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
         ) {
-            val utilitySmartViews = listOf(
-                SmartViewType.SOMEDAY to 5,
-                SmartViewType.LOGBOOK to 6,
-                SmartViewType.TRASH to 7
-            )
-            utilitySmartViews.forEach { (viewType, shortcutNum) ->
-                val selected = navTarget == ActiveNavigationTarget.SmartView(viewType)
-                val count = smartViewCounts[viewType] ?: 0
-                val label = stringResource(viewType.titleRes)
-                val badgeText = if (count > 0 && viewType != SmartViewType.LOGBOOK) " · $count" else ""
-                ThingsHoverTooltip(text = "$label (Ctrl+$shortcutNum)") {
+            val somedaySelected = navTarget == ActiveNavigationTarget.SmartView(SmartViewType.SOMEDAY)
+            val somedayCount = smartViewCounts[SmartViewType.SOMEDAY] ?: 0
+            val somedayLabel = stringResource(SmartViewType.SOMEDAY.titleRes)
+            ThingsHoverTooltip(
+                text = "$somedayLabel (Ctrl+5)",
+                modifier = Modifier.weight(1f)
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(11.dp))
+                        .clickable {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onSelectSmartView(SmartViewType.SOMEDAY)
+                        },
+                    shape = RoundedCornerShape(11.dp),
+                    color = if (somedaySelected) colors.thingsBlueSoft else colors.cardSurface.copy(alpha = 0.74f),
+                    border = BorderStroke(
+                        width = if (somedaySelected) 1.1.dp else 0.75.dp,
+                        color = if (somedaySelected) colors.thingsBlue.copy(alpha = 0.45f) else colors.hairlineDivider
+                    )
+                ) {
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(if (selected) colors.thingsBlueSoft else colors.tagPillBg.copy(alpha = 0.72f))
-                            .clickable {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onSelectSmartView(viewType)
-                            }
-                            .padding(horizontal = 9.dp, vertical = 5.dp),
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        SmartViewIcon(
-                            viewType = viewType,
-                            modifier = Modifier.size(14.dp),
-                            isSelected = selected
-                        )
-                        Text(
-                            text = "$label$badgeText",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-                            ),
-                            color = if (selected) colors.thingsBlue else colors.secondaryText,
-                            maxLines = 1
-                        )
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            SmartViewIcon(
+                                viewType = SmartViewType.SOMEDAY,
+                                modifier = Modifier.size(16.dp),
+                                isSelected = somedaySelected
+                            )
+                            Text(
+                                text = somedayLabel,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = if (somedaySelected) FontWeight.Bold else FontWeight.SemiBold,
+                                    color = if (somedaySelected) colors.thingsBlue else colors.primaryText
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        if (somedayCount > 0) {
+                            Text(
+                                text = somedayCount.toString(),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = if (somedaySelected) colors.thingsBlue else colors.secondaryText,
+                                modifier = Modifier.padding(start = 4.dp)
+                            )
+                        }
                     }
                 }
             }
 
-            // Weekly Review utility pill
-            val reviewTitle = stringResource(R.string.v2_weekly_review_title)
-            val reviewBadge = if (stalledCount > 0) " · $stalledCount" else ""
-            ThingsHoverTooltip(text = reviewTitle) {
-                Row(
+            val reviewFullTitle = stringResource(R.string.v2_weekly_review_title)
+            val reviewShortLabel = stringResource(R.string.sidebar_review_short)
+            ThingsHoverTooltip(
+                text = "$reviewFullTitle (Ctrl+Shift+R)",
+                modifier = Modifier.weight(1f)
+            ) {
+                Surface(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(colors.tagPillBg.copy(alpha = 0.72f))
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(11.dp))
                         .clickable {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onOpenWeeklyReview()
-                        }
-                        .padding(horizontal = 9.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        },
+                    shape = RoundedCornerShape(11.dp),
+                    color = colors.cardSurface.copy(alpha = 0.74f),
+                    border = BorderStroke(
+                        width = 0.75.dp,
+                        color = colors.hairlineDivider
+                    )
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Checklist,
-                        contentDescription = reviewTitle,
-                        tint = colors.secondaryText,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Text(
-                        text = "$reviewTitle$reviewBadge",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                        color = colors.secondaryText,
-                        maxLines = 1
-                    )
-                }
-            }
-
-            // Templates utility pill
-            val templatesTitle = stringResource(R.string.v2_templates_title)
-            ThingsHoverTooltip(text = templatesTitle) {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(colors.tagPillBg.copy(alpha = 0.72f))
-                        .clickable {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onOpenTemplatesAndImport()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Checklist,
+                                contentDescription = reviewFullTitle,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = reviewShortLabel,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colors.primaryText
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
-                        .padding(horizontal = 9.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.ContentCopy,
-                        contentDescription = templatesTitle,
-                        tint = colors.secondaryText,
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Text(
-                        text = templatesTitle,
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                        color = colors.secondaryText,
-                        maxLines = 1
-                    )
+                        if (stalledCount > 0) {
+                            Text(
+                                text = stalledCount.toString(),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = colors.secondaryText,
+                                modifier = Modifier.padding(start = 4.dp)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -6368,63 +6386,158 @@ private fun ThingsChromebookSidebar(
             }
         }
 
-        // Bottom Sidebar Actions: "+ New Project" (defaults into active/first Area) & "Areas (X/8)"
+        // Bottom Sidebar Actions: "+ New Project ▾" (with Templates & Import) + quiet Logbook / Trash / Areas X/8 dock
         HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
+        var showNewProjectFooterMenu by remember { mutableStateOf(false) }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            ThingsHoverTooltip(text = "${stringResource(R.string.entity_new_project)} (Ctrl+Shift+N)") {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .clickable { onCreateNewProject(defaultNewProjectAreaId) }
-                        .padding(horizontal = 8.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+            Box {
+                ThingsHoverTooltip(text = "${stringResource(R.string.entity_new_project)} (Ctrl+Shift+N)") {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .clickable { showNewProjectFooterMenu = true }
+                            .padding(horizontal = 7.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Add,
+                            contentDescription = null,
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.entity_new_project),
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.thingsBlue,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Icon(
+                            imageVector = Icons.Outlined.ExpandMore,
+                            contentDescription = null,
+                            tint = colors.thingsBlue.copy(alpha = 0.8f),
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+
+                DropdownMenu(
+                    expanded = showNewProjectFooterMenu,
+                    onDismissRequest = { showNewProjectFooterMenu = false }
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Add,
-                        contentDescription = null,
-                        tint = colors.thingsBlue,
-                        modifier = Modifier.size(15.dp)
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.entity_new_project)) },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Outlined.Add,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        onClick = {
+                            showNewProjectFooterMenu = false
+                            onCreateNewProject(defaultNewProjectAreaId)
+                        }
                     )
-                    Text(
-                        text = stringResource(R.string.entity_new_project),
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                        color = colors.thingsBlue
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.v2_templates_title)) },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Outlined.ContentCopy,
+                                contentDescription = null,
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        },
+                        onClick = {
+                            showNewProjectFooterMenu = false
+                            onOpenTemplatesAndImport()
+                        }
                     )
                 }
             }
 
-            ThingsHoverTooltip(
-                text = stringResource(
-                    R.string.areas_manage_count_tooltip,
-                    areas.size,
-                    ThingsRepository.MAX_AREAS
-                )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .clickable(onClick = onOpenAreaManager)
-                        .padding(horizontal = 8.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                val logbookSelected = navTarget == ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK)
+                val logbookLabel = stringResource(SmartViewType.LOGBOOK.titleRes)
+                ThingsHoverTooltip(text = "$logbookLabel (Ctrl+6)") {
+                    IconButton(
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onSelectSmartView(SmartViewType.LOGBOOK)
+                        },
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (logbookSelected) colors.thingsBlueSoft else Color.Transparent)
+                    ) {
+                        SmartViewIcon(
+                            viewType = SmartViewType.LOGBOOK,
+                            modifier = Modifier.size(15.dp),
+                            isSelected = logbookSelected
+                        )
+                    }
+                }
+
+                val trashSelected = navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TRASH)
+                val trashLabel = stringResource(SmartViewType.TRASH.titleRes)
+                ThingsHoverTooltip(text = "$trashLabel (Ctrl+7)") {
+                    IconButton(
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onSelectSmartView(SmartViewType.TRASH)
+                        },
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (trashSelected) colors.thingsBlueSoft else Color.Transparent)
+                    ) {
+                        SmartViewIcon(
+                            viewType = SmartViewType.TRASH,
+                            modifier = Modifier.size(15.dp),
+                            isSelected = trashSelected
+                        )
+                    }
+                }
+
+                ThingsHoverTooltip(
+                    text = stringResource(
+                        R.string.areas_manage_count_tooltip,
+                        areas.size,
+                        ThingsRepository.MAX_AREAS
+                    )
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Folder,
-                        contentDescription = null,
-                        tint = colors.secondaryText,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Text(
-                        text = "$areasLabel (${areas.size}/${ThingsRepository.MAX_AREAS})",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.secondaryText
-                    )
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .clickable(onClick = onOpenAreaManager)
+                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Folder,
+                            contentDescription = areasLabel,
+                            tint = colors.secondaryText,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = "${areas.size}/${ThingsRepository.MAX_AREAS}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.secondaryText
+                        )
+                    }
                 }
             }
         }

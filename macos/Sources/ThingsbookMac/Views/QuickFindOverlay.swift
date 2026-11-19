@@ -160,7 +160,7 @@ public struct QuickFindOverlay: View {
                             }
                         } label: {
                             filterMenuLabel(
-                                icon: "tag",
+                                icon: "square.grid.2x2",
                                 title: selectedTagTitle,
                                 isActive: filter.tagId != nil
                             )

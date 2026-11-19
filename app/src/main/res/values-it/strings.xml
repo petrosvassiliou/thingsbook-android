@@ -24,8 +24,8 @@
     <string name="entity_todos">Attività</string>
     <string name="entity_new_todo">Nuova attività</string>
     <string name="entity_checklist_item">Voce di controllo</string>
-    <string name="entity_tag">Tag</string>
-    <string name="entity_tags">Tag</string>
+    <string name="entity_tag">Categoria</string>
+    <string name="entity_tags">Categorie</string>
 
     <!-- Task Actions & Card Fields -->
     <string name="placeholder_todo_title">Nuova attività</string>
@@ -34,7 +34,7 @@
     <string name="placeholder_add_checklist_item">Aggiungi voce di controllo…</string>
     <string name="action_when">Quando</string>
     <string name="action_deadline">Scadenza</string>
-    <string name="action_tags">Tag</string>
+    <string name="action_tags">Categorie</string>
     <string name="action_checklist">Elenco</string>
     <string name="action_reminder">Promemoria</string>
     <string name="action_move">Sposta</string>
@@ -52,7 +52,7 @@
     <!-- Quick Find & Search -->
     <string name="quick_find_title">Ricerca rapida</string>
     <string name="quick_find_placeholder">Ricerca rapida – Digita per cercare…</string>
-    <string name="quick_find_no_results">Nessuna attività, progetto o tag corrispondente</string>
+    <string name="quick_find_no_results">Nessuna attività, progetto o categoria corrispondente</string>
     <string name="quick_find_hint_swipe">Scorri verso il basso o tocca cerca</string>
 
     <!-- Deadlines & Dates -->
@@ -138,14 +138,14 @@
     <string name="notifications_daily_digest_empty">Tutto completato per Oggi!</string>
 
     <!-- Full Tag Management -->
-    <string name="tags_manage_title">Gestione Tag</string>
-    <string name="tags_assign_title">Assegna Tag all\'attività</string>
-    <string name="tags_new_placeholder">Nome nuovo tag (es. Urgente, Casa, Ufficio)…</string>
+    <string name="tags_manage_title">Gestione Categorie</string>
+    <string name="tags_assign_title">Assegna Categorie</string>
+    <string name="tags_new_placeholder">Nome nuova categoria (es. Focus, Casa, Ufficio)…</string>
     <string name="tags_shortcut_placeholder">Scorciatoia</string>
-    <string name="tags_add_button">Crea Tag</string>
-    <string name="tags_edit_title">Rinomina Tag</string>
-    <string name="tags_empty_hint">Nessun tag presente. Crea il tuo primo tag qui sopra.</string>
-    <string name="tags_filter_all">Tutti</string>
+    <string name="tags_add_button">Crea Categoria</string>
+    <string name="tags_edit_title">Rinomina Categoria</string>
+    <string name="tags_empty_hint">Nessuna categoria presente. Crea la tua prima categoria qui sopra.</string>
+    <string name="tags_filter_all">Tutte</string>
 
     <!-- Areas, Projects & Password Reset -->
     <string name="areas_manage_title">Gestione Aree</string>
@@ -202,15 +202,15 @@
     <string name="settings_stat_today_active">★ Attive oggi</string>
     <string name="settings_stat_recurring">🔁 Attività ricorrenti</string>
     <string name="settings_stat_active_projects">📁 Progetti attivi</string>
-    <string name="settings_stat_saved_tags">🏷️ Tag salvati</string>
+    <string name="settings_stat_saved_tags">⊞ Categorie salvate</string>
     <string name="settings_stat_total_records">🗄️ Record totali nel database</string>
     <string name="settings_stat_tasks_count">%1$d attività</string>
     <string name="settings_stat_active_count">%1$d attive</string>
     <string name="settings_stat_projects_count">%1$d progetti</string>
-    <string name="settings_stat_tags_count">%1$d tag</string>
+    <string name="settings_stat_tags_count">%1$d categorie</string>
     <string name="settings_stat_records_count">%1$d record</string>
     <string name="settings_csv_section">Importa ed esporta (File CSV)</string>
-    <string name="settings_csv_desc">Esporta tutte le attività (inclusi stato, area, progetto, data, scadenza, tag e sotto-attività) come file CSV o importa file CSV esistenti.</string>
+    <string name="settings_csv_desc">Esporta tutte le attività (inclusi stato, area, progetto, data, scadenza, categorie e sotto-attività) come file CSV o importa file CSV esistenti.</string>
     <string name="settings_csv_export">Esporta CSV</string>
     <string name="settings_csv_share">Condividi CSV</string>
     <string name="settings_csv_import">Importa CSV</string>
@@ -218,11 +218,11 @@
 
     <!-- Backup & Restore -->
     <string name="backup_section_title">Backup e ripristino (Backup completo)</string>
-    <string name="backup_section_desc">Salva tutte le attività, aree, progetti, fasi, tag, sotto-attività e impostazioni in un unico file (.tbbackup) — opzionalmente protetto da password AES-256 — e ripristina lo stato completo.</string>
+    <string name="backup_section_desc">Salva tutte le attività, aree, progetti, fasi, categorie, sotto-attività e impostazioni in un unico file (.tbbackup) — opzionalmente protetto da password AES-256 — e ripristina lo stato completo.</string>
     <string name="backup_create_button">Crea backup</string>
     <string name="backup_restore_button">Ripristina da file</string>
     <string name="backup_create_dialog_title">Crea backup completo</string>
-    <string name="backup_create_dialog_summary">%1$d attività • %2$d progetti • %3$d aree • %4$d tag</string>
+    <string name="backup_create_dialog_summary">%1$d attività • %2$d progetti • %3$d aree • %4$d categorie</string>
     <string name="backup_close_dialog_tooltip">Chiudi finestra</string>
     <string name="backup_password_protect_title">Proteggi con password (opzionale)</string>
     <string name="backup_password_protect_on">Attivo: crittografia AES-256-GCM e PBKDF2</string>
@@ -239,10 +239,10 @@
     <string name="backup_unknown_date">Data sconosciuta</string>
     <string name="backup_restore_encrypted_title">Backup protetto da password</string>
     <string name="backup_restore_plain_title">Ripristina backup</string>
-    <string name="backup_restore_encrypted_desc">Questo file di backup è crittografato. Inserisci la password per ripristinare tutte le attività, aree, progetti e tag.</string>
+    <string name="backup_restore_encrypted_desc">Questo file di backup è crittografato. Inserisci la password per ripristinare tutte le attività, aree, progetti e categorie.</string>
     <string name="backup_restore_enter_password">Inserisci password di backup</string>
     <string name="backup_preview_header">Contenuto del file di backup:</string>
-    <string name="backup_preview_details">• %1$d attività e %2$d sotto-attività\n• %3$d progetti e %4$d fasi\n• %5$d aree e %6$d tag</string>
+    <string name="backup_preview_details">• %1$d attività e %2$d sotto-attività\n• %3$d progetti e %4$d fasi\n• %5$d aree e %6$d categorie</string>
     <string name="backup_restore_replace_notice">Nota: il ripristino completo sostituisce tutte le voci locali attuali con il contenuto di questo file di backup.</string>
     <string name="backup_restore_confirm_decrypt">Decrittografa e ripristina tutto</string>
     <string name="backup_restore_confirm_plain">Ripristina tutto ora</string>
@@ -253,11 +253,11 @@
     <string name="csv_status_imported">✅ %1$d attività importate dal file CSV!</string>
     <string name="csv_status_export_failed">❌ Esportazione CSV non riuscita: %1$s</string>
     <string name="csv_status_import_failed">❌ Importazione CSV non riuscita: %1$s</string>
-    <string name="backup_status_saved">✅ Backup salvato (%1$s): %2$d attività, %3$d progetti, %4$d aree e %5$d tag.</string>
+    <string name="backup_status_saved">✅ Backup salvato (%1$s): %2$d attività, %3$d progetti, %4$d aree e %5$d categorie.</string>
     <string name="backup_badge_encrypted">🔒 Protetto da password</string>
     <string name="backup_badge_unencrypted">Non crittografato</string>
     <string name="backup_status_shared">✅ Backup (%1$s) aperto per la condivisione.</string>
-    <string name="backup_status_restored">✅ Ripristino completo riuscito: %1$d attività, %2$d progetti, %3$d aree e %4$d tag ripristinati!</string>
+    <string name="backup_status_restored">✅ Ripristino completo riuscito: %1$d attività, %2$d progetti, %3$d aree e %4$d categorie ripristinati!</string>
     <string name="backup_status_failed">❌ Backup non riuscito: %1$s</string>
     <string name="backup_status_restore_failed">❌ Ripristino non riuscito: %1$s</string>
     <string name="backup_err_wrong_password">Password errata. Verifica la password inserita.</string>
@@ -314,7 +314,7 @@
     <string name="context_when_date_reminder">Quando? (Data e promemoria)</string>
     <string name="context_adjust_deadline">Modifica scadenza</string>
     <string name="context_configure_repeat">Configura ripetizione</string>
-    <string name="context_assign_tags">Assegna tag</string>
+    <string name="context_assign_tags">Assegna categorie</string>
     <string name="repeat_dialog_title">Pianifica ripetizione</string>
     <string name="repeat_mode_fixed">Regolarmente</string>
     <string name="repeat_mode_after">Dopo il completamento</string>
@@ -403,7 +403,7 @@
     <string name="areas_manage_count_tooltip">Gestisci aree (%1$d/%2$d)</string>
     <string name="sidebar_new_project_in_area">Nuovo progetto in %1$s</string>
     <string name="quick_find_clear">Cancella ricerca</string>
-    <string name="quick_find_empty_hint">Digita un termine per cercare istantaneamente attività (note, date, aree, progetti, sotto-attività &amp; tag), progetti, aree o viste.</string>
+    <string name="quick_find_empty_hint">Digita un termine per cercare istantaneamente attività (note, date, aree, progetti, sotto-attività &amp; categorie), progetti, aree o viste.</string>
     <string name="quick_find_results_for">%1$d risultati per «%2$s»</string>
     <string name="quick_find_badge_view">Vista</string>
     <string name="quick_find_subtasks_count">☑ %1$d/%2$d sotto-attività</string>
@@ -454,7 +454,7 @@
     <string name="search_filter_date_none">Senza data</string>
     <string name="search_filter_has_deadline">Con scadenza</string>
     <string name="search_filter_has_checklist">Con checklist</string>
-    <string name="search_filter_all_tags">Tutti i tag</string>
+    <string name="search_filter_all_tags">Tutte le categorie</string>
     <string name="search_filter_scope_all">Tutti i tipi</string>
     <string name="search_filter_scope_tasks">Solo attività</string>
     <string name="search_filter_scope_projects">Solo progetti</string>
@@ -467,7 +467,7 @@
     <string name="topbar_tooltip_quick_entry">Inserimento rapido</string>
     <string name="topbar_tooltip_voice_input">Dettatura vocale</string>
     <string name="topbar_tooltip_areas">Aree</string>
-    <string name="topbar_tooltip_tags">Tag</string>
+    <string name="topbar_tooltip_tags">Categorie</string>
     <string name="topbar_tooltip_notifications">Notifiche</string>
     <string name="topbar_tooltip_language">Lingua</string>
     <string name="topbar_tooltip_cloud_sync">Sincronizzazione Cloud</string>
@@ -477,4 +477,9 @@
     <string name="phase_clear_end_date">Rimuovi data di fine</string>
     <string name="phase_ends_on">Fine %1$s</string>
     <string name="phase_milestone_badge">Traguardo di fase</string>
+    <string name="sidebar_review_short">Revisione</string>
+    <string name="tags_search_or_create_placeholder">Cerca o crea categoria…</string>
+    <string name="tags_filter_placeholder">Filtra categorie…</string>
+    <string name="tags_create_from_search">Crea nuova categoria “%1$s”</string>
+    <string name="tags_no_filter_matches">Nessuna categoria corrispondente</string>
 </resources>

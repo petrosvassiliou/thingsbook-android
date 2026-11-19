@@ -108,6 +108,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [dragTargetKey, setDragTargetKey] = useState<string | null>(null);
   const [collapsedAreas, setCollapsedAreas] = useState<Record<string, boolean>>({});
+  const [newProjectMenuOpen, setNewProjectMenuOpen] = useState(false);
 
   const activeAreas = areas.filter((a) => !a.isDeleted);
   const activeProjects = projects.filter((p) => !p.isDeleted && p.status === 'ACTIVE');
@@ -170,17 +171,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { view: 'ANYTIME', label: t.viewAnytime, count: counts.anytime, shortcutIdx: 4 }
   ];
 
-  const utilityViews: Array<{
-    view: SmartViewType;
-    label: string;
-    count?: number;
-    shortcutIdx: number;
-    droppable: boolean;
-  }> = [
-    { view: 'SOMEDAY', label: t.viewSomeday, count: counts.someday, shortcutIdx: 5, droppable: true },
-    { view: 'LOGBOOK', label: t.viewLogbook, shortcutIdx: 6, droppable: false },
-    { view: 'TRASH', label: t.viewTrash, count: counts.trash, shortcutIdx: 7, droppable: true }
-  ];
+  const isSomedayActive = activeNav.kind === 'smart' && activeNav.view === 'SOMEDAY';
+  const isLogbookActive = activeNav.kind === 'smart' && activeNav.view === 'LOGBOOK';
+  const isTrashActive = activeNav.kind === 'smart' && activeNav.view === 'TRASH';
 
   return (
     <>
@@ -214,7 +207,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         <div className="sidebar-scroll">
-          {/* 2x2 Bento Focus Grid (Inbox, Today, Upcoming, Anytime) */}
+          {/* 1. 2x2 Bento Focus Grid (Inbox, Today, Upcoming, Anytime) */}
           <div className="bento-focus-grid">
             {bentoPrimaryItems.map((item) => {
               const isActive = activeNav.kind === 'smart' && activeNav.view === item.view;
@@ -244,36 +237,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
             })}
           </div>
 
-          {/* Compact Secondary Utility Pills (Someday, Weekly Review, Logbook, Trash, Templates) */}
-          <div className="sidebar-utility-pills">
-            {utilityViews.map((item) => {
-              const isActive = activeNav.kind === 'smart' && activeNav.view === item.view;
-              const dKey = `smart-${item.view}`;
-              return (
-                <button
-                  key={item.view}
-                  type="button"
-                  className={`utility-pill ${isActive ? 'active' : ''} ${
-                    dragTargetKey === dKey ? 'drag-over' : ''
-                  }`}
-                  title={`${item.label} (Ctrl+${item.shortcutIdx})`}
-                  onClick={() => onSelectNav({ kind: 'smart', view: item.view })}
-                  {...(item.droppable
-                    ? makeDropHandlers(dKey, { kind: 'smart', view: item.view })
-                    : {})}
-                >
-                  {renderMonochromeSmartIcon(item.view, 13.5, isActive)}
-                  <span className="utility-pill-label">{item.label}</span>
-                  {item.count != null && item.count > 0 && (
-                    <span className="utility-pill-count">{item.count}</span>
-                  )}
-                </button>
-              );
-            })}
+          {/* 2. Slim 1x2 Mini-Cards (Someday & Weekly Review — aligned to grid, zero wrapping) */}
+          <div className="bento-mini-grid">
+            <button
+              type="button"
+              className={`bento-mini-card ${isSomedayActive ? 'active' : ''} ${
+                dragTargetKey === 'smart-SOMEDAY' ? 'drag-over' : ''
+              }`}
+              title={`${t.viewSomeday} (Ctrl+5)`}
+              onClick={() => onSelectNav({ kind: 'smart', view: 'SOMEDAY' })}
+              {...makeDropHandlers('smart-SOMEDAY', { kind: 'smart', view: 'SOMEDAY' })}
+            >
+              <span className="bento-mini-left">
+                {renderMonochromeSmartIcon('SOMEDAY', 14.5, isSomedayActive)}
+                <span className="bento-mini-label">{t.viewSomeday}</span>
+              </span>
+              {counts.someday > 0 && (
+                <span className="bento-mini-count">{counts.someday}</span>
+              )}
+            </button>
 
             <button
               type="button"
-              className="utility-pill"
+              className="bento-mini-card"
               data-testid="sidebar-weekly-review-btn"
               title={`${t.weeklyReviewTitle} (Ctrl+Shift+R)`}
               onClick={() => {
@@ -281,25 +267,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onOpenWeeklyReview();
               }}
             >
-              <ListChecks size={13.5} style={{ color: 'var(--text-secondary)' }} />
-              <span className="utility-pill-label">{t.weeklyReviewBtn}</span>
+              <span className="bento-mini-left">
+                <ListChecks
+                  size={14.5}
+                  style={{
+                    color: stalledProjectsCount > 0 ? 'var(--things-blue)' : 'var(--text-secondary)',
+                    flexShrink: 0
+                  }}
+                />
+                <span className="bento-mini-label">{t.sidebarReviewShort}</span>
+              </span>
               {stalledProjectsCount > 0 && (
-                <span className="utility-pill-count">{stalledProjectsCount}</span>
+                <span
+                  className="bento-mini-count"
+                  style={{ color: 'var(--things-blue)' }}
+                >
+                  {stalledProjectsCount}
+                </span>
               )}
-            </button>
-
-            <button
-              type="button"
-              className="utility-pill"
-              data-testid="sidebar-templates-btn"
-              title={t.templatesModalTitle}
-              onClick={() => {
-                onCloseMobile();
-                onOpenTemplates(resolveCurrentAreaId());
-              }}
-            >
-              <ClipboardList size={13.5} style={{ color: 'var(--text-secondary)' }} />
-              <span className="utility-pill-label">{t.templatesBtn}</span>
             </button>
           </div>
 
@@ -462,30 +447,110 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         )}
 
-        {/* Sidebar Footer: + New Project & Areas (X/8) */}
+        {/* Option A Quiet Bottom Footer Dock: "+ New Project ▾" (with Templates) + Logbook / Trash / Areas */}
         <div className="sidebar-footer">
-          <button
-            type="button"
-            className="sidebar-footer-btn"
-            title={`${t.entityNewProject} (Ctrl+Shift+N)`}
-            onClick={() => onCreateProjectInArea(resolveCurrentAreaId())}
-          >
-            <Plus size={14} style={{ color: 'var(--things-blue)' }} />
-            <span style={{ color: 'var(--things-blue)', fontWeight: 600 }}>
-              {t.entityNewProject}
-            </span>
-          </button>
-          <button
-            type="button"
-            className="sidebar-footer-btn"
-            title={t.areasManageTitle}
-            onClick={onOpenManageAreas}
-          >
-            <Folder size={13.5} />
-            <span>
-              {t.entityAreas} ({activeAreas.length}/{MAX_AREAS})
-            </span>
-          </button>
+          <div className="sidebar-new-project-anchor">
+            <button
+              type="button"
+              className="sidebar-footer-btn"
+              title={`${t.entityNewProject} (Ctrl+Shift+N)`}
+              onClick={() => setNewProjectMenuOpen((v) => !v)}
+            >
+              <Plus size={14} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
+              <span
+                style={{
+                  color: 'var(--things-blue)',
+                  fontWeight: 600,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {t.entityNewProject}
+              </span>
+              <ChevronDown
+                size={12}
+                style={{ color: 'var(--things-blue)', opacity: 0.78, flexShrink: 0 }}
+              />
+            </button>
+
+            {newProjectMenuOpen && (
+              <>
+                <div
+                  style={{ position: 'fixed', inset: 0, zIndex: 80 }}
+                  onClick={() => setNewProjectMenuOpen(false)}
+                />
+                <div className="sidebar-new-project-menu">
+                  <button
+                    type="button"
+                    className="dropdown-item"
+                    onClick={() => {
+                      setNewProjectMenuOpen(false);
+                      onCloseMobile();
+                      onCreateProjectInArea(resolveCurrentAreaId());
+                    }}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <Plus size={14} style={{ color: 'var(--things-blue)' }} />
+                      <span>{t.entityNewProject}</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="dropdown-item"
+                    data-testid="sidebar-templates-btn"
+                    onClick={() => {
+                      setNewProjectMenuOpen(false);
+                      onCloseMobile();
+                      onOpenTemplates(resolveCurrentAreaId());
+                    }}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <ClipboardList size={14} style={{ color: 'var(--things-blue)' }} />
+                      <span>{t.templatesBtn}</span>
+                    </span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="sidebar-footer-utilities">
+            <button
+              type="button"
+              className={`sidebar-footer-icon-btn ${isLogbookActive ? 'active' : ''}`}
+              title={`${t.viewLogbook} (Ctrl+6)`}
+              aria-label={t.viewLogbook}
+              onClick={() => onSelectNav({ kind: 'smart', view: 'LOGBOOK' })}
+            >
+              <History size={14.5} />
+            </button>
+
+            <button
+              type="button"
+              className={`sidebar-footer-icon-btn ${isTrashActive ? 'active' : ''} ${
+                dragTargetKey === 'smart-TRASH' ? 'drag-over' : ''
+              }`}
+              title={`${t.viewTrash}${counts.trash ? ` (${counts.trash})` : ''} (Ctrl+7)`}
+              aria-label={t.viewTrash}
+              onClick={() => onSelectNav({ kind: 'smart', view: 'TRASH' })}
+              {...makeDropHandlers('smart-TRASH', { kind: 'smart', view: 'TRASH' })}
+            >
+              <Trash2 size={14.5} />
+            </button>
+
+            <button
+              type="button"
+              className="sidebar-footer-icon-btn"
+              title={`${t.areasManageTitle} (${activeAreas.length}/${MAX_AREAS})`}
+              onClick={onOpenManageAreas}
+            >
+              <Folder size={13.5} />
+              <span>
+                {activeAreas.length}/{MAX_AREAS}
+              </span>
+            </button>
+          </div>
         </div>
 
         <div className="sidebar-version-row">

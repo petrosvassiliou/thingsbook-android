@@ -689,7 +689,7 @@ public struct TaskRowCardView: View {
                     ForEach(latestTask.tags) { tag in
                         ThingsActionChipButton(
                             title: tag.title,
-                            systemImage: "tag",
+                            systemImage: "square.grid.2x2",
                             isActive: true,
                             helpText: "#\(tag.title)"
                         ) {
@@ -700,7 +700,7 @@ public struct TaskRowCardView: View {
 
                     ThingsActionChipButton(
                         title: "+ \(store.tr("action_tags"))",
-                        systemImage: "tag",
+                        systemImage: "square.grid.2x2",
                         isActive: false,
                         helpText: tagsButtonTooltip
                     ) {

@@ -24,8 +24,8 @@
     <string name="entity_todos">Tareas</string>
     <string name="entity_new_todo">Nueva tarea</string>
     <string name="entity_checklist_item">Elemento de lista</string>
-    <string name="entity_tag">Etiqueta</string>
-    <string name="entity_tags">Etiquetas</string>
+    <string name="entity_tag">Categoría</string>
+    <string name="entity_tags">Categorías</string>
 
     <!-- Task Actions & Card Fields -->
     <string name="placeholder_todo_title">Nueva tarea</string>
@@ -34,7 +34,7 @@
     <string name="placeholder_add_checklist_item">Añadir elemento a la lista…</string>
     <string name="action_when">Cuándo</string>
     <string name="action_deadline">Fecha límite</string>
-    <string name="action_tags">Etiquetas</string>
+    <string name="action_tags">Categorías</string>
     <string name="action_checklist">Lista</string>
     <string name="action_reminder">Recordatorio</string>
     <string name="action_move">Mover</string>
@@ -52,7 +52,7 @@
     <!-- Quick Find & Search -->
     <string name="quick_find_title">Búsqueda rápida</string>
     <string name="quick_find_placeholder">Búsqueda rápida – Escribe para buscar…</string>
-    <string name="quick_find_no_results">No hay tareas, proyectos ni etiquetas coincidentes</string>
+    <string name="quick_find_no_results">No hay tareas, proyectos ni categorías coincidentes</string>
     <string name="quick_find_hint_swipe">Desliza hacia abajo o toca buscar</string>
 
     <!-- Deadlines & Dates -->
@@ -138,13 +138,13 @@
     <string name="notifications_daily_digest_empty">¡Todo al día para Hoy!</string>
 
     <!-- Full Tag Management -->
-    <string name="tags_manage_title">Gestionar etiquetas</string>
-    <string name="tags_assign_title">Asignar etiquetas a la tarea</string>
-    <string name="tags_new_placeholder">Nombre de nueva etiqueta (ej. Urgente, Casa, Oficina)…</string>
+    <string name="tags_manage_title">Gestionar categorías</string>
+    <string name="tags_assign_title">Asignar categorías</string>
+    <string name="tags_new_placeholder">Nombre de nueva categoría (ej. Enfoque, Casa, Oficina)…</string>
     <string name="tags_shortcut_placeholder">Atajo</string>
-    <string name="tags_add_button">Crear etiqueta</string>
-    <string name="tags_edit_title">Renombrar etiqueta</string>
-    <string name="tags_empty_hint">Aún no hay etiquetas. Crea la primera arriba.</string>
+    <string name="tags_add_button">Crear categoría</string>
+    <string name="tags_edit_title">Renombrar categoría</string>
+    <string name="tags_empty_hint">Aún no hay categorías. Crea la primera arriba.</string>
     <string name="tags_filter_all">Todas</string>
 
     <!-- Areas, Projects & Password Reset -->
@@ -202,15 +202,15 @@
     <string name="settings_stat_today_active">★ Activas hoy</string>
     <string name="settings_stat_recurring">🔁 Tareas recurrentes</string>
     <string name="settings_stat_active_projects">📁 Proyectos activos</string>
-    <string name="settings_stat_saved_tags">🏷️ Etiquetas guardadas</string>
+    <string name="settings_stat_saved_tags">⊞ Categorías guardadas</string>
     <string name="settings_stat_total_records">🗄️ Registros totales en BD</string>
     <string name="settings_stat_tasks_count">%1$d tareas</string>
     <string name="settings_stat_active_count">%1$d activas</string>
     <string name="settings_stat_projects_count">%1$d proyectos</string>
-    <string name="settings_stat_tags_count">%1$d etiquetas</string>
+    <string name="settings_stat_tags_count">%1$d categorías</string>
     <string name="settings_stat_records_count">%1$d registros</string>
     <string name="settings_csv_section">Importar y exportar (Archivo CSV)</string>
-    <string name="settings_csv_desc">Exporta todas las tareas (incluidos estado, área, proyecto, fecha, fecha límite, etiquetas y subtareas) como archivo CSV o importa archivos CSV existentes.</string>
+    <string name="settings_csv_desc">Exporta todas las tareas (incluidos estado, área, proyecto, fecha, fecha límite, categorías y subtareas) como archivo CSV o importa archivos CSV existentes.</string>
     <string name="settings_csv_export">Exportar CSV</string>
     <string name="settings_csv_share">Compartir CSV</string>
     <string name="settings_csv_import">Importar CSV</string>
@@ -218,11 +218,11 @@
 
     <!-- Backup & Restore -->
     <string name="backup_section_title">Copia de seguridad y restauración</string>
-    <string name="backup_section_desc">Guarda todas las tareas, áreas, proyectos, fases, etiquetas, subtareas y ajustes en un archivo (.tbbackup) — opcionalmente con contraseña AES-256 — y restaura el estado completo.</string>
+    <string name="backup_section_desc">Guarda todas las tareas, áreas, proyectos, fases, categorías, subtareas y ajustes en un archivo (.tbbackup) — opcionalmente con contraseña AES-256 — y restaura el estado completo.</string>
     <string name="backup_create_button">Crear copia</string>
     <string name="backup_restore_button">Restaurar archivo</string>
     <string name="backup_create_dialog_title">Crear copia de seguridad completa</string>
-    <string name="backup_create_dialog_summary">%1$d tareas • %2$d proyectos • %3$d áreas • %4$d etiquetas</string>
+    <string name="backup_create_dialog_summary">%1$d tareas • %2$d proyectos • %3$d áreas • %4$d categorías</string>
     <string name="backup_close_dialog_tooltip">Cerrar diálogo</string>
     <string name="backup_password_protect_title">Proteger con contraseña (opcional)</string>
     <string name="backup_password_protect_on">Activo: cifrado AES-256-GCM y PBKDF2</string>
@@ -239,10 +239,10 @@
     <string name="backup_unknown_date">Fecha desconocida</string>
     <string name="backup_restore_encrypted_title">Copia protegida con contraseña</string>
     <string name="backup_restore_plain_title">Restaurar copia de seguridad</string>
-    <string name="backup_restore_encrypted_desc">Este archivo de copia está cifrado. Introduce la contraseña para restaurar todas las tareas, áreas, proyectos y etiquetas.</string>
+    <string name="backup_restore_encrypted_desc">Este archivo de copia está cifrado. Introduce la contraseña para restaurar todas las tareas, áreas, proyectos y categorías.</string>
     <string name="backup_restore_enter_password">Introducir contraseña</string>
     <string name="backup_preview_header">Contenido del archivo de copia:</string>
-    <string name="backup_preview_details">• %1$d tareas y %2$d subtareas\n• %3$d proyectos y %4$d fases\n• %5$d áreas y %6$d etiquetas</string>
+    <string name="backup_preview_details">• %1$d tareas y %2$d subtareas\n• %3$d proyectos y %4$d fases\n• %5$d áreas y %6$d categorías</string>
     <string name="backup_restore_replace_notice">Nota: la restauración completa reemplaza todas las entradas locales actuales por el contenido de esta copia.</string>
     <string name="backup_restore_confirm_decrypt">Descifrar y restaurar todo</string>
     <string name="backup_restore_confirm_plain">Restaurar todo ahora</string>
@@ -253,11 +253,11 @@
     <string name="csv_status_imported">✅ ¡%1$d tareas importadas desde el archivo CSV!</string>
     <string name="csv_status_export_failed">❌ Error al exportar CSV: %1$s</string>
     <string name="csv_status_import_failed">❌ Error al importar CSV: %1$s</string>
-    <string name="backup_status_saved">✅ Copia guardada (%1$s): %2$d tareas, %3$d proyectos, %4$d áreas y %5$d etiquetas.</string>
+    <string name="backup_status_saved">✅ Copia guardada (%1$s): %2$d tareas, %3$d proyectos, %4$d áreas y %5$d categorías.</string>
     <string name="backup_badge_encrypted">🔒 Protegida con contraseña</string>
     <string name="backup_badge_unencrypted">Sin cifrar</string>
     <string name="backup_status_shared">✅ Copia (%1$s) abierta para compartir.</string>
-    <string name="backup_status_restored">✅ Restauración completa: ¡%1$d tareas, %2$d proyectos, %3$d áreas y %4$d etiquetas restauradas!</string>
+    <string name="backup_status_restored">✅ Restauración completa: ¡%1$d tareas, %2$d proyectos, %3$d áreas y %4$d categorías restauradas!</string>
     <string name="backup_status_failed">❌ Error en la copia: %1$s</string>
     <string name="backup_status_restore_failed">❌ Error al restaurar: %1$s</string>
     <string name="backup_err_wrong_password">Contraseña incorrecta. Comprueba la contraseña introducida.</string>
@@ -314,7 +314,7 @@
     <string name="context_when_date_reminder">¿Cuándo? (Fecha y recordatorio)</string>
     <string name="context_adjust_deadline">Ajustar fecha límite</string>
     <string name="context_configure_repeat">Configurar repetición</string>
-    <string name="context_assign_tags">Asignar etiquetas</string>
+    <string name="context_assign_tags">Asignar categorías</string>
     <string name="repeat_dialog_title">Programar repetición</string>
     <string name="repeat_mode_fixed">Regularmente</string>
     <string name="repeat_mode_after">Al completar</string>
@@ -403,7 +403,7 @@
     <string name="areas_manage_count_tooltip">Gestionar áreas (%1$d/%2$d)</string>
     <string name="sidebar_new_project_in_area">Nuevo proyecto en %1$s</string>
     <string name="quick_find_clear">Borrar búsqueda</string>
-    <string name="quick_find_empty_hint">Escribe un término para buscar al instante tareas (notas, fechas, áreas, proyectos, subtareas &amp; etiquetas), proyectos, áreas o vistas.</string>
+    <string name="quick_find_empty_hint">Escribe un término para buscar al instante tareas (notas, fechas, áreas, proyectos, subtareas &amp; categorías), proyectos, áreas o vistas.</string>
     <string name="quick_find_results_for">%1$d resultados para «%2$s»</string>
     <string name="quick_find_badge_view">Vista</string>
     <string name="quick_find_subtasks_count">☑ %1$d/%2$d subtareas</string>
@@ -454,7 +454,7 @@
     <string name="search_filter_date_none">Sin fecha</string>
     <string name="search_filter_has_deadline">Con fecha límite</string>
     <string name="search_filter_has_checklist">Con sub-tareas</string>
-    <string name="search_filter_all_tags">Todas las etiquetas</string>
+    <string name="search_filter_all_tags">Todas las categorías</string>
     <string name="search_filter_scope_all">Todos los tipos</string>
     <string name="search_filter_scope_tasks">Solo tareas</string>
     <string name="search_filter_scope_projects">Solo proyectos</string>
@@ -467,7 +467,7 @@
     <string name="topbar_tooltip_quick_entry">Entrada rápida</string>
     <string name="topbar_tooltip_voice_input">Entrada por voz</string>
     <string name="topbar_tooltip_areas">Áreas</string>
-    <string name="topbar_tooltip_tags">Etiquetas</string>
+    <string name="topbar_tooltip_tags">Categorías</string>
     <string name="topbar_tooltip_notifications">Notificaciones</string>
     <string name="topbar_tooltip_language">Idioma</string>
     <string name="topbar_tooltip_cloud_sync">Sincronización Cloud</string>
@@ -477,4 +477,9 @@
     <string name="phase_clear_end_date">Borrar fecha de fin</string>
     <string name="phase_ends_on">Fin el %1$s</string>
     <string name="phase_milestone_badge">Hito de fase</string>
+    <string name="sidebar_review_short">Revisión</string>
+    <string name="tags_search_or_create_placeholder">Buscar o crear categoría…</string>
+    <string name="tags_filter_placeholder">Filtrar categorías…</string>
+    <string name="tags_create_from_search">Crear nueva categoría «%1$s»</string>
+    <string name="tags_no_filter_matches">Ninguna categoría coincidente</string>
 </resources>

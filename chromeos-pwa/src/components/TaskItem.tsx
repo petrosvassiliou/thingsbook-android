@@ -17,6 +17,7 @@ import {
   Flag,
   FolderInput,
   GripVertical,
+  LayoutGrid,
   Mic,
   Moon,
   MoreHorizontal,
@@ -26,7 +27,6 @@ import {
   RotateCcw,
   Sparkles,
   Sun,
-  Tag,
   Timer,
   Trash2,
   X,
@@ -1191,7 +1191,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                   onOpenTagsModal(task.id);
                 }}
               >
-                <Tag size={11.5} />
+                <LayoutGrid size={11.5} />
                 <span>{tg.title}</span>
               </button>
             ))}
@@ -1546,7 +1546,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               {/* 5. Tag Pills */}
               {taskTags.map((tg) => (
                 <span key={tg.id} className="meta-badge" title={`${t.entityTag}: ${tg.title}`}>
-                  <Tag size={9.5} />
+                  <LayoutGrid size={9.5} />
                   <span>{tg.title}</span>
                 </span>
               ))}
@@ -1689,7 +1689,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                   onOpenTagsModal(task.id);
                 }}
               >
-                <Tag size={14} />
+                <LayoutGrid size={14} />
                 <span>{t.ctxAssignTags}</span>
               </button>
 

@@ -21,6 +21,7 @@ import {
   Heading as HeadingIcon,
   History,
   Inbox,
+  LayoutGrid,
   List,
   ListChecks,
   Menu,
@@ -34,7 +35,6 @@ import {
   Share2,
   Sparkles,
   Sun,
-  Tag,
   Trash2,
   X
 } from 'lucide-react';
@@ -2285,7 +2285,7 @@ export const App: React.FC = () => {
               title={t.topbarTooltipTags}
               onClick={() => setTagManagerOpen(true)}
             >
-              <Tag size={17} />
+              <LayoutGrid size={17} />
             </button>
 
             {/* Notifications Icon (blue when dailyDigestEnabled) */}
@@ -2622,7 +2622,7 @@ export const App: React.FC = () => {
                           setSelectedFilterTagId((cur) => (cur === tg.id ? null : tg.id))
                         }
                       >
-                        <Tag size={11} />
+                        <LayoutGrid size={11} />
                         <span>{tg.title}</span>
                       </button>
                     ))}
@@ -3106,7 +3106,7 @@ export const App: React.FC = () => {
                             setSelectedFilterTagId((cur) => (cur === tg.id ? null : tg.id))
                           }
                         >
-                          <Tag size={11} />
+                          <LayoutGrid size={11} />
                           <span>{tg.title}</span>
                         </button>
                       ))}
@@ -3571,7 +3571,7 @@ export const App: React.FC = () => {
                             setSelectedFilterTagId((cur) => (cur === tg.id ? null : tg.id))
                           }
                         >
-                          <Tag size={11} />
+                          <LayoutGrid size={11} />
                           <span>{tg.title}</span>
                         </button>
                       ))}

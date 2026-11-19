@@ -408,14 +408,14 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-alpha.2")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-alpha.2")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 75)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-alpha.3")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-alpha.3")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 76)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.2", current: "2.1.0", includeBeta: false))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.2", current: "2.1.0", includeBeta: true))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.3", current: "3.0.0-alpha.2"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-alpha.2"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.3", current: "2.1.1", includeBeta: false))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.3", current: "2.1.1", includeBeta: true))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.4", current: "3.0.0-alpha.3"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-alpha.3"))
         XCTAssertEqual(
             FirebaseCloudSyncService.deriveUidWakeTopic(uid: " user-abc-123 "),
             "tb_uid_9d8ecb07e35952112a013d4819b4"
@@ -2056,7 +2056,7 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(ThingsStrings.shared.text("action_when", lang: .de), "Wann")
         XCTAssertEqual(ThingsStrings.shared.text("action_repeat", lang: .de), "Wiederholen")
         XCTAssertEqual(ThingsStrings.shared.text("action_move", lang: .de), "Bewegen")
-        XCTAssertEqual(ThingsStrings.shared.text("action_tags", lang: .de), "Tags")
+        XCTAssertEqual(ThingsStrings.shared.text("action_tags", lang: .de), "Kategorien")
         XCTAssertEqual(ThingsStrings.shared.text("action_deadline", lang: .de), "Frist")
         XCTAssertEqual(ThingsStrings.shared.text("v2_timeblock_title", lang: .de), "Zeitblock")
     }
@@ -2669,7 +2669,8 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(ThingsStrings.shared.text("topbar_tooltip_cloud_sync", lang: .de), "Cloud-Sync")
         XCTAssertEqual(ThingsStrings.shared.text("topbar_tooltip_templates", lang: .en), "Templates & Import")
         XCTAssertEqual(ThingsStrings.shared.text("topbar_tooltip_areas", lang: .en), "Areas")
-        XCTAssertEqual(ThingsStrings.shared.text("topbar_tooltip_tags", lang: .en), "Tags")
+        XCTAssertEqual(ThingsStrings.shared.text("topbar_tooltip_tags", lang: .en), "Categories")
+        XCTAssertEqual(ThingsStrings.shared.text("topbar_tooltip_tags", lang: .de), "Kategorien")
     }
 
     // MARK: - 21. v2.0.0-beta.22 Cross-Platform Sync Overhaul (Cialis Area-Split Dedup, v1.8 Guards, Tag Remap & Ntfy Chunks)
@@ -3154,5 +3155,40 @@ final class ThingsbookCoreTests: XCTestCase {
         let clearedPhase = try XCTUnwrap(snap.headingsByProject[proj.id]?.first(where: { $0.id == phase.id }))
         XCTAssertEqual(clearedPhase.title, "Phase 1: Discovery (Cleared on v3.0)")
         XCTAssertNil(clearedPhase.endDate)
+    }
+
+    // MARK: - 27. v3.0.0-alpha.3 Option A Sidebar, Categories Terminology, Search Strings & CSV Header Compatibility
+
+    func testCategoriesRenameSearchStringsAndCsvAliasesV300Alpha3() {
+        for lang in [AppLanguage.en, .de, .fr, .it, .es] {
+            for key in [
+                "sidebar_review_short",
+                "tags_search_or_create_placeholder",
+                "tags_filter_placeholder",
+                "tags_create_from_search",
+                "tags_no_filter_matches"
+            ] {
+                let val = ThingsStrings.shared.text(key, lang: lang)
+                XCTAssertFalse(val.isEmpty, "Missing \(key) in \(lang.rawValue)")
+                XCTAssertNotEqual(val, key, "Unresolved \(key) in \(lang.rawValue)")
+            }
+            let formatted = ThingsStrings.shared.format("tags_create_from_search", lang: lang, "Focus")
+            XCTAssertTrue(formatted.contains("Focus"), "Formatted tags_create_from_search in \(lang.rawValue) must embed query")
+        }
+
+        XCTAssertEqual(ThingsStrings.shared.text("sidebar_review_short", lang: .en), "Review")
+        XCTAssertEqual(ThingsStrings.shared.text("sidebar_review_short", lang: .de), "Rückblick")
+        XCTAssertEqual(ThingsStrings.shared.text("tags_manage_title", lang: .en), "Manage Categories")
+        XCTAssertEqual(ThingsStrings.shared.text("tags_manage_title", lang: .de), "Kategorien verwalten")
+
+        let csvEn = "Title,Categories\nPrepare Q4 Deck,Focus;Office\n"
+        let rowsEn = CsvCodec.parseCsvTasks(csvContent: csvEn)
+        XCTAssertEqual(rowsEn.count, 1)
+        XCTAssertEqual(rowsEn.first?.tagTitles, ["Focus", "Office"])
+
+        let csvDe = "Titel,Kategorien\nQuartalsbericht,Fokus;Büro\n"
+        let rowsDe = CsvCodec.parseCsvTasks(csvContent: csvDe)
+        XCTAssertEqual(rowsDe.count, 1)
+        XCTAssertEqual(rowsDe.first?.tagTitles, ["Fokus", "Büro"])
     }
 }

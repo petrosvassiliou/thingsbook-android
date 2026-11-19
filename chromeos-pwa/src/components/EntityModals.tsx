@@ -9,8 +9,9 @@ import {
   Folder,
   FolderInput,
   Inbox,
+  LayoutGrid,
   Plus,
-  Tag,
+  Search,
   Trash2,
   X
 } from 'lucide-react';
@@ -597,11 +598,20 @@ interface TagManagerModalProps {
 export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClose }) => {
   const [title, setTitle] = useState('');
   const [shortcut, setShortcut] = useState('');
+  const [filterQuery, setFilterQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editShortcut, setEditShortcut] = useState('');
 
   const activeTags = tags.filter((tg) => !tg.isDeleted);
+  const normalizedFilter = filterQuery.trim().toLowerCase();
+  const filteredTags = normalizedFilter
+    ? activeTags.filter(
+        (tg) =>
+          tg.title.toLowerCase().includes(normalizedFilter) ||
+          (tg.shortcut || '').toLowerCase().includes(normalizedFilter)
+      )
+    : activeTags;
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -619,15 +629,29 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
       <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Tag size={18} style={{ color: 'var(--things-blue)' }} />
+            <LayoutGrid size={18} style={{ color: 'var(--things-blue)' }} />
             <span>{t.tagsManageTitle}</span>
+            {activeTags.length > 0 && (
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: 'var(--text-tertiary)',
+                  padding: '2px 7px',
+                  borderRadius: 999,
+                  background: 'var(--bg-subtle)'
+                }}
+              >
+                {normalizedFilter ? `${filteredTags.length}/${activeTags.length}` : activeTags.length}
+              </span>
+            )}
           </h3>
           <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
             <X size={18} />
           </button>
         </div>
 
-        <form onSubmit={handleCreate} style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        <form onSubmit={handleCreate} style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
           <input
             type="text"
             className="text-field"
@@ -650,8 +674,60 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
           </button>
         </form>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '54vh', overflowY: 'auto' }}>
-          {activeTags.map((tg) => {
+        {activeTags.length > 0 && (
+          <div
+            style={{
+              position: 'relative',
+              display: 'flex',
+              alignItems: 'center',
+              marginBottom: 12
+            }}
+          >
+            <Search
+              size={14}
+              style={{
+                position: 'absolute',
+                left: 11,
+                color: 'var(--text-tertiary)',
+                pointerEvents: 'none'
+              }}
+            />
+            <input
+              type="text"
+              className="text-field"
+              style={{ width: '100%', paddingLeft: 32, paddingRight: filterQuery ? 30 : 10 }}
+              value={filterQuery}
+              onChange={(e) => setFilterQuery(e.target.value)}
+              placeholder={t.tagsFilterPlaceholder}
+            />
+            {filterQuery && (
+              <button
+                type="button"
+                className="icon-btn"
+                style={{ position: 'absolute', right: 4, width: 24, height: 24 }}
+                onClick={() => setFilterQuery('')}
+                aria-label="Clear"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '50vh', overflowY: 'auto' }}>
+          {activeTags.length > 0 && filteredTags.length === 0 && (
+            <div
+              style={{
+                padding: '14px 10px',
+                textAlign: 'center',
+                fontSize: 13,
+                color: 'var(--text-tertiary)'
+              }}
+            >
+              {t.tagsNoFilterMatches}
+            </div>
+          )}
+          {filteredTags.map((tg) => {
             const isEditing = editingId === tg.id;
             return (
               <div
@@ -666,7 +742,7 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({ tags, t, onClo
                   border: '1px solid var(--border-subtle)'
                 }}
               >
-                <Tag size={14} style={{ color: 'var(--things-blue)' }} />
+                <LayoutGrid size={14} style={{ color: 'var(--things-blue)' }} />
                 {isEditing ? (
                   <>
                     <input
@@ -788,21 +864,35 @@ export const TaskTagPickerModal: React.FC<TaskTagPickerModalProps> = ({
   onOpenManageTags,
   onClose
 }) => {
-  const [quickTag, setQuickTag] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const activeTags = tags.filter((tg) => !tg.isDeleted);
+  const cleanQuery = searchQuery.trim();
+  const normalizedQuery = cleanQuery.toLowerCase();
+  const filteredTags = normalizedQuery
+    ? activeTags.filter(
+        (tg) =>
+          tg.title.toLowerCase().includes(normalizedQuery) ||
+          (tg.shortcut || '').toLowerCase().includes(normalizedQuery)
+      )
+    : activeTags;
+  const exactMatch = cleanQuery
+    ? activeTags.find((tg) => tg.title.toLowerCase() === normalizedQuery)
+    : undefined;
 
-  const handleQuickCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const clean = quickTag.trim();
-    if (!clean) return;
-    const existing = activeTags.find((tg) => tg.title.toLowerCase() === clean.toLowerCase());
-    if (existing) {
-      if (!selectedTagIds.includes(existing.id)) onToggleTag(existing.id);
+  const createAndAssignFromQuery = async () => {
+    if (!cleanQuery) return;
+    if (exactMatch) {
+      onToggleTag(exactMatch.id);
     } else {
-      const created = await localDb.upsertTag({ title: clean });
+      const created = await localDb.upsertTag({ title: cleanQuery });
       onToggleTag(created.id);
     }
-    setQuickTag('');
+    setSearchQuery('');
+  };
+
+  const handleSearchSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await createAndAssignFromQuery();
   };
 
   return (
@@ -810,7 +900,7 @@ export const TaskTagPickerModal: React.FC<TaskTagPickerModalProps> = ({
       <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Tag size={18} style={{ color: 'var(--things-blue)' }} />
+            <LayoutGrid size={18} style={{ color: 'var(--things-blue)' }} />
             <span>{t.ctxAssignTags}</span>
           </h3>
           <button type="button" className="icon-btn" title={t.actionDone} onClick={onClose}>
@@ -818,22 +908,72 @@ export const TaskTagPickerModal: React.FC<TaskTagPickerModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleQuickCreate} style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          <input
-            type="text"
-            className="text-field"
-            autoFocus
-            value={quickTag}
-            onChange={(e) => setQuickTag(e.target.value)}
-            placeholder={t.tagsNewPlaceholder}
-          />
-          <button type="submit" className="btn-primary" disabled={!quickTag.trim()}>
-            <Plus size={15} />
-          </button>
+        <form onSubmit={handleSearchSubmit} style={{ marginBottom: 12 }}>
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <Search
+              size={15}
+              style={{
+                position: 'absolute',
+                left: 11,
+                color: 'var(--text-tertiary)',
+                pointerEvents: 'none'
+              }}
+            />
+            <input
+              type="text"
+              className="text-field"
+              style={{ width: '100%', paddingLeft: 34, paddingRight: searchQuery ? 30 : 10 }}
+              autoFocus
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t.tagsSearchOrCreatePlaceholder}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                className="icon-btn"
+                style={{ position: 'absolute', right: 4, width: 24, height: 24 }}
+                onClick={() => setSearchQuery('')}
+                aria-label="Clear"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
         </form>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: '48vh', overflowY: 'auto' }}>
-          {activeTags.map((tg) => {
+          {cleanQuery && !exactMatch && (
+            <button
+              type="button"
+              className="dropdown-item"
+              style={{
+                color: 'var(--things-blue)',
+                fontWeight: 600,
+                background: 'var(--things-blue-soft)',
+                borderRadius: 'var(--radius-sm)'
+              }}
+              onClick={createAndAssignFromQuery}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <Plus size={14} />
+                <span>{t.tagsCreateFromSearch(cleanQuery)}</span>
+              </span>
+            </button>
+          )}
+          {filteredTags.length === 0 && (!cleanQuery || Boolean(exactMatch)) && activeTags.length > 0 && (
+            <div
+              style={{
+                padding: '12px 10px',
+                textAlign: 'center',
+                fontSize: 13,
+                color: 'var(--text-tertiary)'
+              }}
+            >
+              {t.tagsNoFilterMatches}
+            </div>
+          )}
+          {filteredTags.map((tg) => {
             const checked = selectedTagIds.includes(tg.id);
             return (
               <button

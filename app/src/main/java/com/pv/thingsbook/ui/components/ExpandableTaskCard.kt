@@ -60,7 +60,7 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.LocalOffer
+import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Repeat
@@ -2136,7 +2136,7 @@ private fun TaskContextDropdownMenu(
             },
             leadingIcon = {
                 Icon(
-                    imageVector = Icons.Outlined.LocalOffer,
+                    imageVector = Icons.Outlined.GridView,
                     contentDescription = null,
                     tint = colors.thingsBlue,
                     modifier = Modifier.size(18.dp)

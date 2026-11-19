@@ -231,7 +231,7 @@ public struct TagPillBadge: View {
     public var body: some View {
         let content = HStack(spacing: 4) {
             if showIcon {
-                Image(systemName: "tag")
+                Image(systemName: "square.grid.2x2")
                     .font(.system(size: 9.5, weight: .semibold))
             }
             Text(title)

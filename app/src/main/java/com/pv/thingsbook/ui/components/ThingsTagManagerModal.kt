@@ -24,7 +24,8 @@ import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.LocalOffer
+import androidx.compose.material.icons.outlined.GridView
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -67,8 +68,8 @@ import com.pv.thingsbook.domain.model.Tag
 import com.pv.thingsbook.ui.theme.ThingsTheme
 
 /**
- * Full Tag Management Modal (`Tags verwalten`):
- * Create new tags, rename existing tags, assign optional keyboard shortcuts, or delete tags.
+ * Full Category Management Modal (`Manage Categories`):
+ * Create new categories, filter/search existing categories, rename, assign shortcuts, or delete.
  */
 @Composable
 fun ThingsTagManagerModal(
@@ -83,9 +84,22 @@ fun ThingsTagManagerModal(
 
     var newTagNameField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
     var newTagShortcutField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
+    var filterQueryField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
     var editingTagId by remember { mutableStateOf<String?>(null) }
     var editingTagTitleField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
     var editingTagShortcutField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
+
+    val normalizedFilter = filterQueryField.text.trim().lowercase(java.util.Locale.ROOT)
+    val filteredTags = remember(allTags, normalizedFilter) {
+        if (normalizedFilter.isEmpty()) {
+            allTags
+        } else {
+            allTags.filter { tg ->
+                tg.title.lowercase(java.util.Locale.ROOT).contains(normalizedFilter) ||
+                    (tg.shortcut?.lowercase(java.util.Locale.ROOT)?.contains(normalizedFilter) == true)
+            }
+        }
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         ThingsTooltipHostBox {
@@ -113,16 +127,34 @@ fun ThingsTagManagerModal(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.LocalOffer,
+                            imageVector = Icons.Outlined.GridView,
                             contentDescription = null,
                             tint = colors.thingsBlue,
-                            modifier = Modifier.size(21.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                         Text(
                             text = stringResource(R.string.tags_manage_title),
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = colors.primaryText
                         )
+                        if (allTags.isNotEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(colors.tagPillBg)
+                                    .padding(horizontal = 7.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = if (normalizedFilter.isEmpty()) {
+                                        allTags.size.toString()
+                                    } else {
+                                        "${filteredTags.size}/${allTags.size}"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = colors.secondaryText
+                                )
+                            }
+                        }
                     }
 
                     ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
@@ -151,7 +183,7 @@ fun ThingsTagManagerModal(
                     }
                 }
 
-                // Create New Tag Bar
+                // Create New Category Bar
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -253,9 +285,52 @@ fun ThingsTagManagerModal(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
                 HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
                 Spacer(modifier = Modifier.height(10.dp))
+
+                if (allTags.isNotEmpty()) {
+                    OutlinedTextField(
+                        value = filterQueryField,
+                        onValueChange = { filterQueryField = it },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Outlined.Search,
+                                contentDescription = null,
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        trailingIcon = {
+                            if (filterQueryField.text.isNotEmpty()) {
+                                IconButton(
+                                    onClick = {
+                                        filterQueryField = TextFieldValue(text = "", selection = TextRange(0))
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Close,
+                                        contentDescription = stringResource(R.string.action_cancel),
+                                        tint = colors.secondaryText,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        },
+                        placeholder = {
+                            Text(
+                                text = stringResource(R.string.tags_filter_placeholder),
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
 
                 if (allTags.isEmpty()) {
                     Text(
@@ -264,14 +339,21 @@ fun ThingsTagManagerModal(
                         color = colors.secondaryText,
                         modifier = Modifier.padding(vertical = 16.dp)
                     )
+                } else if (filteredTags.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.tags_no_filter_matches),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.secondaryText,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
                 } else {
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 280.dp),
+                            .heightIn(max = 250.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        items(allTags, key = { it.id }) { tag ->
+                        items(filteredTags, key = { it.id }) { tag ->
                             val isEditingThis = editingTagId == tag.id
                             Surface(
                                 shape = RoundedCornerShape(10.dp),
@@ -379,7 +461,7 @@ fun ThingsTagManagerModal(
                                             modifier = Modifier.weight(1f)
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Outlined.LocalOffer,
+                                                imageVector = Icons.Outlined.GridView,
                                                 contentDescription = null,
                                                 tint = colors.thingsBlue,
                                                 modifier = Modifier.size(16.dp)
@@ -462,8 +544,8 @@ fun ThingsTagManagerModal(
 }
 
 /**
- * Interactive Tag Assignment Dialog (`Tags für diese Aufgabe`) inside any expanded Task Card.
- * Lets the user check/uncheck tags for a task or create a new tag on the fly.
+ * Interactive Category Assignment Dialog (`Assign Categories`) inside any expanded Task Card.
+ * Lets the user search/filter categories instantly, check/uncheck categories, or create a new category in 1 click.
  */
 @Composable
 fun TaskTagPickerDialog(
@@ -477,7 +559,41 @@ fun TaskTagPickerDialog(
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
     var currentSelection by remember(selectedTagIds) { mutableStateOf(selectedTagIds.toSet()) }
-    var quickNewTagField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
+    var searchField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
+
+    val cleanQuery = searchField.text.trim()
+    val normalizedQuery = cleanQuery.lowercase(java.util.Locale.ROOT)
+    val filteredTags = remember(allTags, normalizedQuery) {
+        if (normalizedQuery.isEmpty()) {
+            allTags
+        } else {
+            allTags.filter { tg ->
+                tg.title.lowercase(java.util.Locale.ROOT).contains(normalizedQuery) ||
+                    (tg.shortcut?.lowercase(java.util.Locale.ROOT)?.contains(normalizedQuery) == true)
+            }
+        }
+    }
+    val exactMatch = remember(allTags, cleanQuery) {
+        if (cleanQuery.isEmpty()) null else allTags.firstOrNull { it.title.equals(cleanQuery, ignoreCase = true) }
+    }
+
+    val submitSearchOrCreate = {
+        if (cleanQuery.isNotEmpty()) {
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            if (exactMatch != null) {
+                val updated = if (exactMatch.id in currentSelection) {
+                    currentSelection - exactMatch.id
+                } else {
+                    currentSelection + exactMatch.id
+                }
+                currentSelection = updated
+                onUpdateSelectedTags(updated.toList())
+            } else {
+                onCreateAndAssignTag(cleanQuery)
+            }
+            searchField = TextFieldValue(text = "", selection = TextRange(0))
+        }
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         ThingsTooltipHostBox {
@@ -504,7 +620,7 @@ fun TaskTagPickerDialog(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.LocalOffer,
+                            imageVector = Icons.Outlined.GridView,
                             contentDescription = null,
                             tint = colors.thingsBlue,
                             modifier = Modifier.size(20.dp)
@@ -529,67 +645,59 @@ fun TaskTagPickerDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Quick Create & Assign Input
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = quickNewTagField,
-                        onValueChange = { quickNewTagField = it },
-                        placeholder = {
-                            Text(
-                                text = stringResource(R.string.tags_new_placeholder),
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(
-                            onDone = {
-                                if (quickNewTagField.text.isNotBlank()) {
-                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onCreateAndAssignTag(quickNewTagField.text.trim())
-                                    quickNewTagField = TextFieldValue(text = "", selection = TextRange(0))
-                                }
-                            }
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .onFocusChanged { focusState ->
-                                if (focusState.isFocused) {
-                                    val txt = quickNewTagField.text
-                                    quickNewTagField = quickNewTagField.copy(
-                                        selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
-                                    )
-                                }
-                            }
-                    )
-
-                    IconButton(
-                        onClick = {
-                            if (quickNewTagField.text.isNotBlank()) {
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onCreateAndAssignTag(quickNewTagField.text.trim())
-                                quickNewTagField = TextFieldValue(text = "", selection = TextRange(0))
-                            }
-                        },
-                        enabled = quickNewTagField.text.isNotBlank(),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (quickNewTagField.text.isNotBlank()) colors.thingsBlue else colors.tagPillBg)
-                            .size(42.dp)
-                    ) {
+                // Instant Search or Create Input
+                OutlinedTextField(
+                    value = searchField,
+                    onValueChange = { searchField = it },
+                    leadingIcon = {
                         Icon(
-                            imageVector = Icons.Outlined.Add,
-                            contentDescription = stringResource(R.string.tags_add_button),
-                            tint = if (quickNewTagField.text.isNotBlank()) Color.White else colors.secondaryText
+                            imageVector = Icons.Outlined.Search,
+                            contentDescription = null,
+                            tint = colors.secondaryText,
+                            modifier = Modifier.size(18.dp)
                         )
-                    }
-                }
+                    },
+                    trailingIcon = {
+                        if (searchField.text.isNotEmpty()) {
+                            IconButton(
+                                onClick = {
+                                    searchField = TextFieldValue(text = "", selection = TextRange(0))
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Close,
+                                    contentDescription = stringResource(R.string.action_cancel),
+                                    tint = colors.secondaryText,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    },
+                    placeholder = {
+                        Text(
+                            text = stringResource(R.string.tags_search_or_create_placeholder),
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { submitSearchOrCreate() }),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onPreviewKeyEvent { keyEvent ->
+                            if (keyEvent.type == KeyEventType.KeyDown &&
+                                (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
+                            ) {
+                                submitSearchOrCreate()
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                )
 
                 Spacer(modifier = Modifier.height(10.dp))
 
@@ -599,7 +707,47 @@ fun TaskTagPickerDialog(
                         .heightIn(max = 240.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    items(allTags, key = { it.id }) { tag ->
+                    if (cleanQuery.isNotEmpty() && exactMatch == null) {
+                        item(key = "__create_from_search__") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(colors.thingsBlueSoft)
+                                    .clickable { submitSearchOrCreate() }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Add,
+                                    contentDescription = null,
+                                    tint = colors.thingsBlue,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = stringResource(R.string.tags_create_from_search, cleanQuery),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = colors.thingsBlue,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+
+                    if (filteredTags.isEmpty() && (cleanQuery.isEmpty() || exactMatch != null) && allTags.isNotEmpty()) {
+                        item(key = "__no_matches__") {
+                            Text(
+                                text = stringResource(R.string.tags_no_filter_matches),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.secondaryText,
+                                modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp)
+                            )
+                        }
+                    }
+
+                    items(filteredTags, key = { it.id }) { tag ->
                         val isChecked = tag.id in currentSelection
                         Row(
                             modifier = Modifier

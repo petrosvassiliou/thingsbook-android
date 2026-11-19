@@ -24,8 +24,8 @@
     <string name="entity_todos">Tâches</string>
     <string name="entity_new_todo">Nouvelle tâche</string>
     <string name="entity_checklist_item">Élément de liste</string>
-    <string name="entity_tag">Tag</string>
-    <string name="entity_tags">Tags</string>
+    <string name="entity_tag">Catégorie</string>
+    <string name="entity_tags">Catégories</string>
 
     <!-- Task Actions & Card Fields -->
     <string name="placeholder_todo_title">Nouvelle tâche</string>
@@ -34,7 +34,7 @@
     <string name="placeholder_add_checklist_item">Ajouter un élément à la liste…</string>
     <string name="action_when">Quand</string>
     <string name="action_deadline">Échéance</string>
-    <string name="action_tags">Tags</string>
+    <string name="action_tags">Catégories</string>
     <string name="action_checklist">Liste</string>
     <string name="action_reminder">Rappel</string>
     <string name="action_move">Déplacer</string>
@@ -52,7 +52,7 @@
     <!-- Quick Find & Search -->
     <string name="quick_find_title">Recherche rapide</string>
     <string name="quick_find_placeholder">Recherche rapide – Saisir pour chercher…</string>
-    <string name="quick_find_no_results">Aucune tâche, projet ou tag correspondant</string>
+    <string name="quick_find_no_results">Aucune tâche, projet ou catégorie correspondant</string>
     <string name="quick_find_hint_swipe">Balayez vers le bas ou touchez rechercher</string>
 
     <!-- Deadlines & Dates -->
@@ -138,14 +138,14 @@
     <string name="notifications_daily_digest_empty">Tout est à jour pour aujourd\'hui !</string>
 
     <!-- Full Tag Management -->
-    <string name="tags_manage_title">Gérer les Tags</string>
-    <string name="tags_assign_title">Attribuer des Tags</string>
-    <string name="tags_new_placeholder">Nom du nouveau tag (ex. Urgent, Maison, Bureau)…</string>
+    <string name="tags_manage_title">Gérer les catégories</string>
+    <string name="tags_assign_title">Attribuer des catégories</string>
+    <string name="tags_new_placeholder">Nom de la nouvelle catégorie (ex. Focus, Maison, Bureau)…</string>
     <string name="tags_shortcut_placeholder">Raccourci</string>
-    <string name="tags_add_button">Créer le tag</string>
-    <string name="tags_edit_title">Renommer le tag</string>
-    <string name="tags_empty_hint">Aucun tag. Créez votre premier tag ci-dessus.</string>
-    <string name="tags_filter_all">Tous</string>
+    <string name="tags_add_button">Créer la catégorie</string>
+    <string name="tags_edit_title">Renommer la catégorie</string>
+    <string name="tags_empty_hint">Aucune catégorie. Créez votre première catégorie ci-dessus.</string>
+    <string name="tags_filter_all">Toutes</string>
 
     <!-- Areas, Projects & Password Reset -->
     <string name="areas_manage_title">Gérer les domaines</string>
@@ -202,15 +202,15 @@
     <string name="settings_stat_today_active">★ Actives aujourd\'hui</string>
     <string name="settings_stat_recurring">🔁 Tâches récurrentes</string>
     <string name="settings_stat_active_projects">📁 Projets actifs</string>
-    <string name="settings_stat_saved_tags">🏷️ Tags enregistrés</string>
+    <string name="settings_stat_saved_tags">⊞ Catégories enregistrées</string>
     <string name="settings_stat_total_records">🗄️ Entrées totales en base</string>
     <string name="settings_stat_tasks_count">%1$d tâches</string>
     <string name="settings_stat_active_count">%1$d actives</string>
     <string name="settings_stat_projects_count">%1$d projets</string>
-    <string name="settings_stat_tags_count">%1$d tags</string>
+    <string name="settings_stat_tags_count">%1$d catégories</string>
     <string name="settings_stat_records_count">%1$d entrées</string>
     <string name="settings_csv_section">Import et export (Fichier CSV)</string>
-    <string name="settings_csv_desc">Exportez toutes les tâches (statut, domaine, projet, date, échéance, tags et sous-tâches inclus) en fichier CSV ou importez des fichiers CSV existants.</string>
+    <string name="settings_csv_desc">Exportez toutes les tâches (statut, domaine, projet, date, échéance, catégories et sous-tâches inclus) en fichier CSV ou importez des fichiers CSV existants.</string>
     <string name="settings_csv_export">Exporter CSV</string>
     <string name="settings_csv_share">Partager CSV</string>
     <string name="settings_csv_import">Importer CSV</string>
@@ -218,11 +218,11 @@
 
     <!-- Backup & Restore -->
     <string name="backup_section_title">Sauvegarde et restauration (Complète)</string>
-    <string name="backup_section_desc">Sauvegarde toutes les tâches, domaines, projets, phases, tags, sous-tâches et paramètres dans un fichier (.tbbackup) — avec protection par mot de passe AES-256 en option — et restaure l\'état complet.</string>
+    <string name="backup_section_desc">Sauvegarde toutes les tâches, domaines, projets, phases, catégories, sous-tâches et paramètres dans un fichier (.tbbackup) — avec protection par mot de passe AES-256 en option — et restaure l\'état complet.</string>
     <string name="backup_create_button">Créer une sauvegarde</string>
     <string name="backup_restore_button">Restaurer un fichier</string>
     <string name="backup_create_dialog_title">Créer une sauvegarde complète</string>
-    <string name="backup_create_dialog_summary">%1$d tâches • %2$d projets • %3$d domaines • %4$d tags</string>
+    <string name="backup_create_dialog_summary">%1$d tâches • %2$d projets • %3$d domaines • %4$d catégories</string>
     <string name="backup_close_dialog_tooltip">Fermer la fenêtre</string>
     <string name="backup_password_protect_title">Protéger par mot de passe (facultatif)</string>
     <string name="backup_password_protect_on">Actif : chiffrement AES-256-GCM et PBKDF2</string>
@@ -239,10 +239,10 @@
     <string name="backup_unknown_date">Date inconnue</string>
     <string name="backup_restore_encrypted_title">Sauvegarde protégée par mot de passe</string>
     <string name="backup_restore_plain_title">Restaurer la sauvegarde</string>
-    <string name="backup_restore_encrypted_desc">Ce fichier de sauvegarde est chiffré. Veuillez saisir le mot de passe pour restaurer toutes les tâches, domaines, projets et tags.</string>
+    <string name="backup_restore_encrypted_desc">Ce fichier de sauvegarde est chiffré. Veuillez saisir le mot de passe pour restaurer toutes les tâches, domaines, projets et catégories.</string>
     <string name="backup_restore_enter_password">Saisir le mot de passe</string>
     <string name="backup_preview_header">Contenu du fichier de sauvegarde :</string>
-    <string name="backup_preview_details">• %1$d tâches et %2$d sous-tâches\n• %3$d projets et %4$d phases\n• %5$d domaines et %6$d tags</string>
+    <string name="backup_preview_details">• %1$d tâches et %2$d sous-tâches\n• %3$d projets et %4$d phases\n• %5$d domaines et %6$d catégories</string>
     <string name="backup_restore_replace_notice">Remarque : la restauration complète remplace toutes les entrées locales actuelles par le contenu de cette sauvegarde.</string>
     <string name="backup_restore_confirm_decrypt">Déchiffrer et tout restaurer</string>
     <string name="backup_restore_confirm_plain">Tout restaurer maintenant</string>
@@ -253,11 +253,11 @@
     <string name="csv_status_imported">✅ %1$d tâches importées depuis le fichier CSV !</string>
     <string name="csv_status_export_failed">❌ Échec de l\'export CSV : %1$s</string>
     <string name="csv_status_import_failed">❌ Échec de l\'import CSV : %1$s</string>
-    <string name="backup_status_saved">✅ Sauvegarde enregistrée (%1$s) : %2$d tâches, %3$d projets, %4$d domaines et %5$d tags.</string>
+    <string name="backup_status_saved">✅ Sauvegarde enregistrée (%1$s) : %2$d tâches, %3$d projets, %4$d domaines et %5$d catégories.</string>
     <string name="backup_badge_encrypted">🔒 Protégée par mot de passe</string>
     <string name="backup_badge_unencrypted">Non chiffrée</string>
     <string name="backup_status_shared">✅ Sauvegarde (%1$s) ouverte pour le partage.</string>
-    <string name="backup_status_restored">✅ Restauration complète réussie : %1$d tâches, %2$d projets, %3$d domaines et %4$d tags restaurés !</string>
+    <string name="backup_status_restored">✅ Restauration complète réussie : %1$d tâches, %2$d projets, %3$d domaines et %4$d catégories restaurés !</string>
     <string name="backup_status_failed">❌ Échec de la sauvegarde : %1$s</string>
     <string name="backup_status_restore_failed">❌ Échec de la restauration : %1$s</string>
     <string name="backup_err_wrong_password">Mot de passe incorrect. Veuillez vérifier le mot de passe saisi.</string>
@@ -314,7 +314,7 @@
     <string name="context_when_date_reminder">Quand ? (Date et rappel)</string>
     <string name="context_adjust_deadline">Ajuster l\'échéance</string>
     <string name="context_configure_repeat">Configurer la répétition</string>
-    <string name="context_assign_tags">Attribuer des tags</string>
+    <string name="context_assign_tags">Attribuer des catégories</string>
     <string name="repeat_dialog_title">Planifier la répétition</string>
     <string name="repeat_mode_fixed">Régulièrement</string>
     <string name="repeat_mode_after">Après achèvement</string>
@@ -403,7 +403,7 @@
     <string name="areas_manage_count_tooltip">Gérer les domaines (%1$d/%2$d)</string>
     <string name="sidebar_new_project_in_area">Nouveau projet dans %1$s</string>
     <string name="quick_find_clear">Effacer la recherche</string>
-    <string name="quick_find_empty_hint">Saisissez un terme pour rechercher instantanément des tâches (notes, dates, domaines, projets, sous-tâches &amp; tags), projets, domaines ou vues.</string>
+    <string name="quick_find_empty_hint">Saisissez un terme pour rechercher instantanément des tâches (notes, dates, domaines, projets, sous-tâches &amp; catégories), projets, domaines ou vues.</string>
     <string name="quick_find_results_for">%1$d résultats pour « %2$s »</string>
     <string name="quick_find_badge_view">Vue</string>
     <string name="quick_find_subtasks_count">☑ %1$d/%2$d sous-tâches</string>
@@ -454,7 +454,7 @@
     <string name="search_filter_date_none">Sans date</string>
     <string name="search_filter_has_deadline">Avec échéance</string>
     <string name="search_filter_has_checklist">Avec sous-tâches</string>
-    <string name="search_filter_all_tags">Tous les tags</string>
+    <string name="search_filter_all_tags">Toutes les catégories</string>
     <string name="search_filter_scope_all">Tous les types</string>
     <string name="search_filter_scope_tasks">Tâches uniquement</string>
     <string name="search_filter_scope_projects">Projets uniquement</string>
@@ -467,7 +467,7 @@
     <string name="topbar_tooltip_quick_entry">Saisie rapide</string>
     <string name="topbar_tooltip_voice_input">Dictée vocale</string>
     <string name="topbar_tooltip_areas">Domaines</string>
-    <string name="topbar_tooltip_tags">Tags</string>
+    <string name="topbar_tooltip_tags">Catégories</string>
     <string name="topbar_tooltip_notifications">Notifications</string>
     <string name="topbar_tooltip_language">Langue</string>
     <string name="topbar_tooltip_cloud_sync">Synchronisation Cloud</string>
@@ -477,4 +477,9 @@
     <string name="phase_clear_end_date">Effacer la date de fin</string>
     <string name="phase_ends_on">Fin le %1$s</string>
     <string name="phase_milestone_badge">Jalon de phase</string>
+    <string name="sidebar_review_short">Revue</string>
+    <string name="tags_search_or_create_placeholder">Rechercher ou créer une catégorie…</string>
+    <string name="tags_filter_placeholder">Filtrer les catégories…</string>
+    <string name="tags_create_from_search">Créer la catégorie « %1$s »</string>
+    <string name="tags_no_filter_matches">Aucune catégorie correspondante</string>
 </resources>

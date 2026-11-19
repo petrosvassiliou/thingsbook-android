@@ -91,13 +91,10 @@ public struct SidebarView: View {
                         }
                     }
 
-                    // 2. Compact Secondary Utility Pills (Someday, Logbook, Trash, Weekly Review, Templates)
-                    ThingsFlowLayout(horizontalSpacing: 5, verticalSpacing: 5) {
-                        utilitySmartPill(.someday, count: store.somedayTasks.count)
-                        utilitySmartPill(.logbook, count: 0)
-                        utilitySmartPill(.trash, count: store.trashedTasks.count + store.trashedProjects.count)
-                        weeklyReviewPill
-                        templatesPill
+                    // 2. 1x2 Slim Secondary Mini-Cards (Someday, Weekly Review)
+                    HStack(spacing: 7) {
+                        slimMiniCard(.someday, count: store.somedayTasks.count)
+                        weeklyReviewMiniCard
                     }
 
                     // 3. Areas -> Nested Projects Hierarchy (Workspace Folders + Linear Progress)
@@ -133,8 +130,8 @@ public struct SidebarView: View {
             Divider()
                 .opacity(0.65)
 
-            // Bottom Sidebar Bar (+ New Project defaults into active/first Area, Areas X/8)
-            HStack(spacing: 10) {
+            // Bottom Sidebar Bar (+ New Project ▾ menu with Templates & Import, quiet Logbook/Trash/Areas footer dock)
+            HStack(spacing: 8) {
                 Menu {
                     Button {
                         store.newProjectDefaultAreaId = defaultNewProjectAreaId
@@ -173,12 +170,15 @@ public struct SidebarView: View {
                         Label(store.tr("gemini_project_architect_title"), systemImage: "sparkles")
                     }
                 } label: {
-                    HStack(spacing: 5) {
+                    HStack(spacing: 4.5) {
                         Image(systemName: "plus")
                             .font(.system(size: 11.5, weight: .semibold))
                         Text(store.tr("entity_new_project"))
                             .font(.system(size: 12.5, weight: .semibold))
                             .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8.5, weight: .bold))
+                            .opacity(0.78)
                     }
                     .foregroundStyle(ThingsMacPalette.accentBlue)
                 }
@@ -186,24 +186,35 @@ public struct SidebarView: View {
                 .fixedSize()
                 .thingsTooltip(store.tr("entity_new_project"))
 
-                Spacer()
+                Spacer(minLength: 4)
 
-                Button {
-                    store.isAreaManagerPresented = true
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "folder")
-                            .font(.system(size: 10.5))
-                        Text("\(store.areas.count)/\(ThingsSQLiteDatabase.maxAreas)")
-                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                HStack(spacing: 4) {
+                    footerSmartIconButton(.logbook)
+                    footerSmartIconButton(.trash)
+
+                    Button {
+                        store.isAreaManagerPresented = true
+                    } label: {
+                        HStack(spacing: 3.5) {
+                            Image(systemName: "folder")
+                                .font(.system(size: 10.5))
+                            Text("\(store.areas.count)/\(ThingsSQLiteDatabase.maxAreas)")
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color.primary.opacity(0.04))
+                        )
                     }
-                    .foregroundStyle(.secondary)
+                    .buttonStyle(.plain)
+                    .thingsTooltip(store.trf("areas_active_count", store.areas.count, ThingsSQLiteDatabase.maxAreas))
                 }
-                .buttonStyle(.plain)
-                .thingsTooltip(store.trf("areas_active_count", store.areas.count, ThingsSQLiteDatabase.maxAreas))
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
         }
         .background {
             ZStack {
@@ -283,89 +294,112 @@ public struct SidebarView: View {
         .thingsTooltip("\(store.tr(view.titleKey)) (\(smartViewShortcut(for: view)))")
     }
 
-    private func utilitySmartPill(_ view: SmartView, count: Int) -> some View {
+    private func slimMiniCard(_ view: SmartView, count: Int) -> some View {
         let dest = NavigationDestination.smartView(view)
         let selected = store.selectedDestination == dest
-        let badgeSuffix = (count > 0 && view != .logbook) ? " · \(count)" : ""
         return Button {
             store.selectedDestination = dest
         } label: {
-            HStack(spacing: 4.5) {
+            HStack(spacing: 6) {
                 Image(systemName: view.sfSymbol)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(ThingsMacPalette.color(for: view, isSelected: selected))
 
-                Text("\(store.tr(view.titleKey))\(badgeSuffix)")
-                    .font(.system(size: 11.5, weight: selected ? .semibold : .medium))
-                    .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .secondary)
+                Text(store.tr(view.titleKey))
+                    .font(.system(size: 11.5, weight: selected ? .bold : .semibold))
+                    .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .primary.opacity(0.88))
                     .lineLimit(1)
+
+                Spacer(minLength: 2)
+
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .secondary)
+                }
             }
-            .fixedSize(horizontal: true, vertical: false)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4.5)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7.5)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                Capsule(style: .continuous)
-                    .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.16) : Color.primary.opacity(0.055))
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.16) : ThingsMacPalette.cardSurface.opacity(0.66))
             )
             .overlay(
-                Capsule(style: .continuous)
-                    .strokeBorder(selected ? ThingsMacPalette.accentBlue.opacity(0.32) : Color.primary.opacity(0.06), lineWidth: 0.75)
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .strokeBorder(
+                        selected ? ThingsMacPalette.accentBlue.opacity(0.42) : Color.primary.opacity(0.07),
+                        lineWidth: selected ? 1.05 : 0.75
+                    )
             )
-            .contentShape(Capsule(style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         }
         .buttonStyle(.plain)
         .thingsTooltip("\(store.tr(view.titleKey)) (\(smartViewShortcut(for: view)))")
     }
 
-    private var weeklyReviewPill: some View {
+    private var weeklyReviewMiniCard: some View {
         let stalledCount = store.stalledProjects.count
-        let suffix = stalledCount > 0 ? " · \(stalledCount)" : ""
+        let active = store.isWeeklyReviewPresented
         return Button {
             store.isWeeklyReviewPresented = true
         } label: {
-            HStack(spacing: 4.5) {
+            HStack(spacing: 6) {
                 Image(systemName: "checklist.checked")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Text("\(store.tr("v2_weekly_review_title"))\(suffix)")
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(active ? ThingsMacPalette.accentBlue : ThingsMacPalette.accentBlue.opacity(0.85))
+
+                Text(store.tr("sidebar_review_short"))
+                    .font(.system(size: 11.5, weight: active ? .bold : .semibold))
+                    .foregroundStyle(active ? ThingsMacPalette.accentBlue : .primary.opacity(0.88))
                     .lineLimit(1)
+
+                Spacer(minLength: 2)
+
+                if stalledCount > 0 {
+                    Text("\(stalledCount)")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(active ? ThingsMacPalette.accentBlue : .secondary)
+                }
             }
-            .fixedSize(horizontal: true, vertical: false)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4.5)
-            .background(Capsule(style: .continuous).fill(Color.primary.opacity(0.055)))
-            .overlay(Capsule(style: .continuous).strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.75))
-            .contentShape(Capsule(style: .continuous))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7.5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(active ? ThingsMacPalette.accentBlue.opacity(0.16) : ThingsMacPalette.cardSurface.opacity(0.66))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .strokeBorder(
+                        active ? ThingsMacPalette.accentBlue.opacity(0.42) : Color.primary.opacity(0.07),
+                        lineWidth: active ? 1.05 : 0.75
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         }
         .buttonStyle(.plain)
         .thingsTooltip(store.tr("v2_weekly_review_title") + " (⇧⌘R)")
     }
 
-    private var templatesPill: some View {
-        Button {
-            store.templatesInitialTab = .gallery
-            store.isTemplatesSheetPresented = true
+    private func footerSmartIconButton(_ view: SmartView) -> some View {
+        let dest = NavigationDestination.smartView(view)
+        let selected = store.selectedDestination == dest
+        return Button {
+            store.selectedDestination = dest
         } label: {
-            HStack(spacing: 4.5) {
-                Image(systemName: "square.on.square")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Text(store.tr("v2_templates_title"))
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .fixedSize(horizontal: true, vertical: false)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4.5)
-            .background(Capsule(style: .continuous).fill(Color.primary.opacity(0.055)))
-            .overlay(Capsule(style: .continuous).strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.75))
-            .contentShape(Capsule(style: .continuous))
+            Image(systemName: view.sfSymbol)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .secondary)
+                .frame(width: 25, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.16) : Color.clear)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
-        .thingsTooltip(store.tr("v2_templates_title"))
+        .thingsTooltip("\(store.tr(view.titleKey)) (\(smartViewShortcut(for: view)))")
     }
 
     private func areaSection(_ area: Area) -> some View {

@@ -231,5 +231,16 @@ test('v2.0.0-beta.20 topbarTooltip* labels are concise, localized across all 5 l
   assert.equal(TRANSLATIONS.de.topbarTooltipCloudSync, 'Cloud-Sync');
   assert.equal(TRANSLATIONS.en.topbarTooltipTemplates, 'Templates & Import');
   assert.equal(TRANSLATIONS.en.topbarTooltipAreas, 'Areas');
-  assert.equal(TRANSLATIONS.en.topbarTooltipTags, 'Tags');
+  assert.equal(TRANSLATIONS.en.topbarTooltipTags, 'Categories');
+  assert.equal(TRANSLATIONS.de.topbarTooltipTags, 'Kategorien');
+  assert.equal(TRANSLATIONS.en.sidebarReviewShort, 'Review');
+  assert.equal(TRANSLATIONS.de.sidebarReviewShort, 'Rückblick');
+
+  for (const lang of ['en', 'de', 'fr', 'it', 'es'] as const) {
+    assert.ok(TRANSLATIONS[lang].sidebarReviewShort.trim().length > 0);
+    assert.ok(TRANSLATIONS[lang].tagsSearchOrCreatePlaceholder.trim().length > 0);
+    assert.ok(TRANSLATIONS[lang].tagsFilterPlaceholder.trim().length > 0);
+    assert.ok(TRANSLATIONS[lang].tagsNoFilterMatches.trim().length > 0);
+    assert.ok(TRANSLATIONS[lang].tagsCreateFromSearch('Focus').includes('Focus'));
+  }
 });

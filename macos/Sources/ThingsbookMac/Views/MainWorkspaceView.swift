@@ -986,7 +986,7 @@ public struct MainWorkspaceView: View {
                 }
 
                 MacToolbarIconButton(
-                    systemImage: "tag",
+                    systemImage: "square.grid.2x2",
                     width: btnW,
                     height: btnH,
                     isDisabled: store.isLocked,

@@ -106,7 +106,7 @@ public enum CsvCodec {
         let idxDeadline = hasHeader ? colIndex(["deadline", "duedate", "due", "frist", "faellig", "fallig", "enddate"]) : 5
         let idxArea = hasHeader ? colIndex(["area", "bereich", "category", "kategorie", "folder"]) : 6
         let idxProject = hasHeader ? colIndex(["project", "projekt", "listname"]) : 7
-        let idxTags = hasHeader ? colIndex(["tags", "tag", "labels", "label", "schlagworte", "stichworte"]) : 8
+        let idxTags = hasHeader ? colIndex(["tags", "tag", "categories", "kategorien", "catégories", "categorie", "categorías", "labels", "label", "schlagworte", "stichworte"]) : 8
         let idxChecklist = hasHeader ? colIndex(["checklist", "checkliste", "subtasks", "unteraufgaben", "steps"]) : 9
 
         let startRow = hasHeader ? 1 : 0

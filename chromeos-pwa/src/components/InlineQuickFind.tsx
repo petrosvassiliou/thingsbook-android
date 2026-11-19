@@ -10,12 +10,12 @@ import {
   Folder,
   History,
   Inbox,
+  LayoutGrid,
   Moon,
   Repeat,
   RotateCcw,
   Search,
   Sun,
-  Tag,
   Trash2,
   X
 } from 'lucide-react';
@@ -583,7 +583,7 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
                       )}
                       {taskTags.map((tg) => (
                         <span key={tg.id} className="meta-badge">
-                          <Tag size={9.5} />
+                          <LayoutGrid size={9.5} />
                           <span>{tg.title}</span>
                         </span>
                       ))}

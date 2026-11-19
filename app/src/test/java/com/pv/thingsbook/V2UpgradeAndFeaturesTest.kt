@@ -761,9 +761,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(75, BuildConfig.VERSION_CODE)
-        assertEquals("3.0.0-alpha.2", BuildConfig.VERSION_NAME)
-        assertTrue("3.0.0-alpha.2 pre-release contains -alpha", BuildConfig.VERSION_NAME.contains("-alpha"))
+        assertEquals(76, BuildConfig.VERSION_CODE)
+        assertEquals("3.0.0-alpha.3", BuildConfig.VERSION_NAME)
+        assertTrue("3.0.0-alpha.3 pre-release contains -alpha", BuildConfig.VERSION_NAME.contains("-alpha"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -830,19 +830,37 @@ class V2UpgradeAndFeaturesTest {
                 assertFalse("Top-bar tooltip $tooltipKey must not mention Room DB", tooltipVal.contains("Room", ignoreCase = true))
             }
 
+            for (alpha3Key in listOf(
+                "sidebar_review_short",
+                "tags_search_or_create_placeholder",
+                "tags_filter_placeholder",
+                "tags_create_from_search",
+                "tags_no_filter_matches"
+            )) {
+                val v = keysInFile[alpha3Key]
+                assertNotNull("Missing $alpha3Key in $folder/strings.xml", v)
+                assertTrue("Blank $alpha3Key in $folder/strings.xml", v!!.isNotBlank())
+            }
+            assertTrue(keysInFile["tags_create_from_search"]!!.contains("%1\$s"))
+
             if (folder == "values") {
                 enMap = keysInFile
                 assertEquals("Quick Entry", keysInFile["topbar_tooltip_quick_entry"])
                 assertEquals("Cloud Sync", keysInFile["topbar_tooltip_cloud_sync"])
                 assertEquals("Templates & Import", keysInFile["topbar_tooltip_templates"])
                 assertEquals("Areas", keysInFile["topbar_tooltip_areas"])
-                assertEquals("Tags", keysInFile["topbar_tooltip_tags"])
+                assertEquals("Categories", keysInFile["topbar_tooltip_tags"])
+                assertEquals("Review", keysInFile["sidebar_review_short"])
             } else {
                 val base = enMap!!
                 assertNotEquals(base["project_delete_prompt_title"], titleTemplate)
                 assertNotEquals(base["project_delete_prompt_tasks_body"], bodyTemplate)
                 assertNotEquals(base["project_delete_with_tasks_btn"], deleteWithTasksBtn)
                 assertNotEquals(base["project_delete_keep_tasks_btn"], keepTasksBtn)
+                if (folder == "values-de") {
+                    assertEquals("Kategorien", keysInFile["topbar_tooltip_tags"])
+                    assertEquals("Rückblick", keysInFile["sidebar_review_short"])
+                }
             }
         }
     }

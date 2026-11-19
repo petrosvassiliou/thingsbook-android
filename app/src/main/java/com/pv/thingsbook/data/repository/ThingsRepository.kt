@@ -2790,7 +2790,7 @@ class ThingsRepository @Inject constructor(
         val idxDeadline = colIndex("deadline", "fälligkeit", "due", "duedate", "zieldatum", defaultIdx = 5)
         val idxArea = colIndex("area", "bereich", defaultIdx = 6)
         val idxProject = colIndex("project", "projekt", defaultIdx = 7)
-        val idxTags = colIndex("tags", "tag", defaultIdx = 8)
+        val idxTags = colIndex("tags", "tag", "categories", "category", "kategorien", "kategorie", "catégories", "categorie", "categorías", defaultIdx = 8)
         val idxChecklist = colIndex("checklist", "subtasks", "unteraufgaben", defaultIdx = 9)
 
         val zone = ZoneId.systemDefault()

@@ -1041,12 +1041,32 @@ public struct TagPickerPopoverView: View {
     let onToggleTag: (String) -> Void
     @Environment(\.dismiss) private var dismiss
 
-    @State private var newTagTitle = ""
+    @State private var searchQuery = ""
     @State private var newTagShortcut = ""
+
+    private var cleanQuery: String {
+        searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var filteredTags: [Tag] {
+        guard !cleanQuery.isEmpty else { return store.tags }
+        let q = cleanQuery.lowercased()
+        return store.tags.filter { tag in
+            tag.title.lowercased().contains(q) || (tag.shortcut?.lowercased().contains(q) == true)
+        }
+    }
+
+    private var exactMatch: Tag? {
+        guard !cleanQuery.isEmpty else { return nil }
+        return store.tags.first { $0.title.caseInsensitiveCompare(cleanQuery) == .orderedSame }
+    }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStack(spacing: 6) {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
                 Text(store.tr("tags_assign_title"))
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(.secondary)
@@ -1064,28 +1084,46 @@ public struct TagPickerPopoverView: View {
             }
 
             HStack(spacing: 6) {
-                TextField(store.tr("tags_new_placeholder"), text: $newTagTitle)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12.5))
-                    .onSubmit(createNewTag)
+                HStack(spacing: 5) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+
+                    TextField(store.tr("tags_search_or_create_placeholder"), text: $searchQuery)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12.5))
+                        .onSubmit(submitSearchOrCreate)
+
+                    if !searchQuery.isEmpty {
+                        Button {
+                            searchQuery = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.primary.opacity(0.055))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.75)
+                )
 
                 TextField("⌃", text: $newTagShortcut)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 38)
+                    .frame(width: 36)
                     .font(.system(size: 12))
                     .thingsTooltip(store.tr("tags_shortcut_placeholder"))
-
-                Button {
-                    createNewTag()
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .foregroundStyle(ThingsMacPalette.accentBlue)
-                }
-                .buttonStyle(.plain)
-                .disabled(newTagTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
-            if store.tags.isEmpty {
+            if store.tags.isEmpty && cleanQuery.isEmpty {
                 Text(store.tr("tags_empty_hint"))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
@@ -1093,7 +1131,38 @@ public struct TagPickerPopoverView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
-                        ForEach(store.tags) { tag in
+                        if !cleanQuery.isEmpty && exactMatch == nil {
+                            Button {
+                                submitSearchOrCreate()
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "plus.circle.fill")
+                                        .font(.system(size: 12.5))
+                                    Text(store.trf("tags_create_from_search", cleanQuery))
+                                        .font(.system(size: 12.5, weight: .semibold))
+                                        .lineLimit(1)
+                                    Spacer()
+                                }
+                                .foregroundStyle(ThingsMacPalette.accentBlue)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(ThingsMacPalette.accentBlue.opacity(0.12))
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if filteredTags.isEmpty && (cleanQuery.isEmpty || exactMatch != nil) {
+                            Text(store.tr("tags_no_filter_matches"))
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.vertical, 8)
+                        }
+
+                        ForEach(filteredTags) { tag in
                             let isChecked = selectedTagIds.contains(tag.id)
                             HStack {
                                 Button {
@@ -1132,21 +1201,23 @@ public struct TagPickerPopoverView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 220)
+                .frame(maxHeight: 230)
             }
         }
         .padding(12)
-        .frame(width: 280)
+        .frame(width: 300)
     }
 
-    private func createNewTag() {
-        let clean = newTagTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func submitSearchOrCreate() {
+        let clean = cleanQuery
         guard !clean.isEmpty else { return }
-        if let created = try? store.database.createOrUpdateTag(title: clean, shortcut: newTagShortcut) {
+        if let existing = exactMatch {
+            onToggleTag(existing.id)
+        } else if let created = try? store.database.createOrUpdateTag(title: clean, shortcut: newTagShortcut) {
             onToggleTag(created.id)
-            newTagTitle = ""
-            newTagShortcut = ""
         }
+        searchQuery = ""
+        newTagShortcut = ""
     }
 }
 
@@ -1524,9 +1595,22 @@ public struct ManageTagsSheetView: View {
 
     @State private var newTagTitle = ""
     @State private var newTagShortcut = ""
+    @State private var filterQuery = ""
     @State private var editingTagId: String?
     @State private var editTitleDraft = ""
     @State private var editShortcutDraft = ""
+
+    private var normalizedFilter: String {
+        filterQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private var filteredTags: [Tag] {
+        guard !normalizedFilter.isEmpty else { return store.tags }
+        return store.tags.filter { tag in
+            tag.title.lowercased().contains(normalizedFilter)
+                || (tag.shortcut?.lowercased().contains(normalizedFilter) == true)
+        }
+    }
 
     public init(store: ThingsbookStore) {
         self.store = store
@@ -1535,10 +1619,14 @@ public struct ManageTagsSheetView: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label(store.tr("tags_manage_title"), systemImage: "tag.fill")
+                Label(store.tr("tags_manage_title"), systemImage: "square.grid.2x2.fill")
                     .font(.system(size: 16, weight: .semibold))
                 Spacer()
-                Text(store.trf("settings_stat_tags_count", store.tags.count))
+                Text(
+                    normalizedFilter.isEmpty
+                        ? store.trf("settings_stat_tags_count", store.tags.count)
+                        : "\(filteredTags.count)/\(store.tags.count)"
+                )
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
             }
@@ -1559,18 +1647,57 @@ public struct ManageTagsSheetView: View {
                 .disabled(newTagTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
+            if !store.tags.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+
+                    TextField(store.tr("tags_filter_placeholder"), text: $filterQuery)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+
+                    if !filterQuery.isEmpty {
+                        Button {
+                            filterQuery = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.primary.opacity(0.05))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.75)
+                )
+            }
+
             if store.tags.isEmpty {
                 Text(store.tr("tags_empty_hint"))
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 28)
+            } else if filteredTags.isEmpty {
+                Text(store.tr("tags_no_filter_matches"))
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 24)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 7) {
-                        ForEach(store.tags) { tag in
+                        ForEach(filteredTags) { tag in
                             HStack(spacing: 10) {
-                                Image(systemName: "tag.fill")
+                                Image(systemName: "square.grid.2x2.fill")
                                     .font(.system(size: 12))
                                     .foregroundStyle(ThingsMacPalette.accentBlue)
 

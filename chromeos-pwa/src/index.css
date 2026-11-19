@@ -297,53 +297,129 @@ button {
   white-space: nowrap;
 }
 
-.sidebar-utility-pills {
+.bento-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-bottom: 6px;
+}
+
+.bento-mini-card {
   display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-bottom: 4px;
-}
-
-.utility-pill {
-  display: inline-flex;
   align-items: center;
-  gap: 5.5px;
-  padding: 5px 9.5px;
-  border-radius: var(--radius-pill);
-  background: transparent;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 7.5px 10px;
+  border-radius: 11px;
+  background: var(--bg-card);
   border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 540;
-  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
-}
-
-.utility-pill:hover {
-  background: var(--bg-sidebar-hover);
   color: var(--text-primary);
+  font-size: 12.2px;
+  font-weight: 560;
+  text-align: left;
+  min-width: 0;
+  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
 }
 
-.utility-pill.active {
+.bento-mini-card:hover {
+  background: var(--bg-sidebar-hover);
+  border-color: var(--border-strong);
+}
+
+.bento-mini-card.active {
   background: var(--things-blue-soft);
-  border-color: rgba(56, 152, 236, 0.4);
+  border-color: rgba(56, 152, 236, 0.42);
   color: var(--active-pill-text);
-  font-weight: 640;
+  font-weight: 650;
 }
 
-.utility-pill.drag-over {
+.bento-mini-card.drag-over {
   outline: 2px solid var(--things-blue);
   background: var(--things-blue-soft);
 }
 
-.utility-pill-label {
+.bento-mini-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.bento-mini-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.utility-pill-count {
-  font-size: 11px;
-  font-weight: 650;
-  color: var(--text-muted);
+.bento-mini-count {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.bento-mini-card.active .bento-mini-count {
+  color: var(--things-blue);
+}
+
+.sidebar-new-project-anchor {
+  position: relative;
+  min-width: 0;
+}
+
+.sidebar-new-project-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  min-width: 214px;
+  z-index: 85;
+  border-radius: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-footer-utilities {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.sidebar-footer-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3.5px;
+  padding: 5px 6.5px;
+  border-radius: var(--radius-xs);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 560;
+  font-variant-numeric: tabular-nums;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.sidebar-footer-icon-btn:hover {
+  background: var(--bg-sidebar-hover);
+  color: var(--text-primary);
+}
+
+.sidebar-footer-icon-btn.active {
+  background: var(--things-blue-soft);
+  color: var(--things-blue);
+  font-weight: 650;
+}
+
+.sidebar-footer-icon-btn.drag-over {
+  outline: 2px solid var(--things-blue);
+  background: var(--things-blue-soft);
 }
 
 /* Horizontal Linear Project Progress Bar */

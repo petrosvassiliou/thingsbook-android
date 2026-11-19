@@ -24,8 +24,8 @@
     <string name="entity_todos">To-Dos</string>
     <string name="entity_new_todo">New To-Do</string>
     <string name="entity_checklist_item">Checklist Item</string>
-    <string name="entity_tag">Tag</string>
-    <string name="entity_tags">Tags</string>
+    <string name="entity_tag">Category</string>
+    <string name="entity_tags">Categories</string>
 
     <!-- Task Actions & Card Fields -->
     <string name="placeholder_todo_title">New To-Do</string>
@@ -34,7 +34,7 @@
     <string name="placeholder_add_checklist_item">Add checklist item…</string>
     <string name="action_when">When</string>
     <string name="action_deadline">Deadline</string>
-    <string name="action_tags">Tags</string>
+    <string name="action_tags">Categories</string>
     <string name="action_checklist">Checklist</string>
     <string name="action_reminder">Reminder</string>
     <string name="action_move">Move</string>
@@ -52,7 +52,7 @@
     <!-- Quick Find & Search -->
     <string name="quick_find_title">Quick Find</string>
     <string name="quick_find_placeholder">Quick Find – Type to search…</string>
-    <string name="quick_find_no_results">No matching To-Dos, Projects, or Tags</string>
+    <string name="quick_find_no_results">No matching To-Dos, Projects, or Categories</string>
     <string name="quick_find_hint_swipe">Swipe down or tap search for Quick Find</string>
 
     <!-- Deadlines & Dates -->
@@ -138,13 +138,13 @@
     <string name="notifications_daily_digest_empty">All clear for Today — no open To-Dos scheduled!</string>
 
     <!-- Full Tag Management -->
-    <string name="tags_manage_title">Manage Tags</string>
-    <string name="tags_assign_title">Assign Tags to To-Do</string>
-    <string name="tags_new_placeholder">New tag name (e.g. Urgent, Home, Office)…</string>
+    <string name="tags_manage_title">Manage Categories</string>
+    <string name="tags_assign_title">Assign Categories</string>
+    <string name="tags_new_placeholder">New category name (e.g. Focus, Home, Office)…</string>
     <string name="tags_shortcut_placeholder">Shortcut</string>
-    <string name="tags_add_button">Create Tag</string>
-    <string name="tags_edit_title">Rename Tag</string>
-    <string name="tags_empty_hint">No tags yet. Create your first tag above.</string>
+    <string name="tags_add_button">Create Category</string>
+    <string name="tags_edit_title">Rename Category</string>
+    <string name="tags_empty_hint">No categories yet. Create your first category above.</string>
     <string name="tags_filter_all">All</string>
 
     <!-- Areas, Projects & Password Reset -->
@@ -202,15 +202,15 @@
     <string name="settings_stat_today_active">★ Active Today</string>
     <string name="settings_stat_recurring">🔁 Recurring To-Dos</string>
     <string name="settings_stat_active_projects">📁 Active Projects</string>
-    <string name="settings_stat_saved_tags">🏷️ Saved Tags</string>
+    <string name="settings_stat_saved_tags">⊞ Saved Categories</string>
     <string name="settings_stat_total_records">🗄️ Total Database Records</string>
     <string name="settings_stat_tasks_count">%1$d To-Dos</string>
     <string name="settings_stat_active_count">%1$d active</string>
     <string name="settings_stat_projects_count">%1$d Projects</string>
-    <string name="settings_stat_tags_count">%1$d Tags</string>
+    <string name="settings_stat_tags_count">%1$d Categories</string>
     <string name="settings_stat_records_count">%1$d records</string>
     <string name="settings_csv_section">Import &amp; Export (CSV File)</string>
-    <string name="settings_csv_desc">Export all To-Dos (including status, area, project, date, deadline, tags &amp; checklist items) as a CSV file, or import existing CSV files.</string>
+    <string name="settings_csv_desc">Export all To-Dos (including status, area, project, date, deadline, categories &amp; checklist items) as a CSV file, or import existing CSV files.</string>
     <string name="settings_csv_export">Export CSV</string>
     <string name="settings_csv_share">Share CSV</string>
     <string name="settings_csv_import">Import CSV</string>
@@ -218,11 +218,11 @@
 
     <!-- Backup & Restore -->
     <string name="backup_section_title">Backup &amp; Restore (Full Backup)</string>
-    <string name="backup_section_desc">Backs up all To-Dos, Areas, Projects, Phases, Tags, checklist items, and settings in a single file (.tbbackup) — optionally with AES-256 password protection — and restores the complete state.</string>
+    <string name="backup_section_desc">Backs up all To-Dos, Areas, Projects, Phases, Categories, checklist items, and settings in a single file (.tbbackup) — optionally with AES-256 password protection — and restores the complete state.</string>
     <string name="backup_create_button">Create Backup</string>
     <string name="backup_restore_button">Restore from File</string>
     <string name="backup_create_dialog_title">Create Full Backup</string>
-    <string name="backup_create_dialog_summary">%1$d To-Dos • %2$d Projects • %3$d Areas • %4$d Tags</string>
+    <string name="backup_create_dialog_summary">%1$d To-Dos • %2$d Projects • %3$d Areas • %4$d Categories</string>
     <string name="backup_close_dialog_tooltip">Close dialog</string>
     <string name="backup_password_protect_title">Protect with password (optional)</string>
     <string name="backup_password_protect_on">Active: AES-256-GCM &amp; PBKDF2 encryption</string>
@@ -239,10 +239,10 @@
     <string name="backup_unknown_date">Unknown date</string>
     <string name="backup_restore_encrypted_title">Password-Protected Backup</string>
     <string name="backup_restore_plain_title">Restore Backup</string>
-    <string name="backup_restore_encrypted_desc">This backup file is encrypted. Please enter the password to restore all To-Dos, Areas, Projects, and Tags.</string>
+    <string name="backup_restore_encrypted_desc">This backup file is encrypted. Please enter the password to restore all To-Dos, Areas, Projects, and Categories.</string>
     <string name="backup_restore_enter_password">Enter backup password</string>
     <string name="backup_preview_header">Backup file contents:</string>
-    <string name="backup_preview_details">• %1$d To-Dos &amp; %2$d checklist items\n• %3$d Projects &amp; %4$d Phases\n• %5$d Areas &amp; %6$d Tags</string>
+    <string name="backup_preview_details">• %1$d To-Dos &amp; %2$d checklist items\n• %3$d Projects &amp; %4$d Phases\n• %5$d Areas &amp; %6$d Categories</string>
     <string name="backup_restore_replace_notice">Note: Full restore replaces all current local entries with the contents of this backup file.</string>
     <string name="backup_restore_confirm_decrypt">Decrypt &amp; Restore Everything</string>
     <string name="backup_restore_confirm_plain">Restore Everything Now</string>
@@ -253,11 +253,11 @@
     <string name="csv_status_imported">✅ %1$d To-Dos imported from CSV file!</string>
     <string name="csv_status_export_failed">❌ CSV export failed: %1$s</string>
     <string name="csv_status_import_failed">❌ CSV import failed: %1$s</string>
-    <string name="backup_status_saved">✅ Backup saved (%1$s): %2$d To-Dos, %3$d Projects, %4$d Areas &amp; %5$d Tags.</string>
+    <string name="backup_status_saved">✅ Backup saved (%1$s): %2$d To-Dos, %3$d Projects, %4$d Areas &amp; %5$d Categories.</string>
     <string name="backup_badge_encrypted">🔒 Password-protected</string>
     <string name="backup_badge_unencrypted">Unencrypted</string>
     <string name="backup_status_shared">✅ Backup (%1$s) opened for sharing.</string>
-    <string name="backup_status_restored">✅ Full restore complete: %1$d To-Dos, %2$d Projects, %3$d Areas &amp; %4$d Tags restored!</string>
+    <string name="backup_status_restored">✅ Full restore complete: %1$d To-Dos, %2$d Projects, %3$d Areas &amp; %4$d Categories restored!</string>
     <string name="backup_status_failed">❌ Backup failed: %1$s</string>
     <string name="backup_status_restore_failed">❌ Restore failed: %1$s</string>
     <string name="backup_err_wrong_password">Incorrect password. Please check the entered password.</string>
@@ -314,7 +314,7 @@
     <string name="context_when_date_reminder">When? (Date &amp; Reminder)</string>
     <string name="context_adjust_deadline">Adjust Deadline</string>
     <string name="context_configure_repeat">Configure Repeat</string>
-    <string name="context_assign_tags">Assign Tags</string>
+    <string name="context_assign_tags">Assign Categories</string>
     <string name="repeat_dialog_title">Repeat Schedule</string>
     <string name="repeat_mode_fixed">Regularly</string>
     <string name="repeat_mode_after">After Completion</string>
@@ -403,7 +403,7 @@
     <string name="areas_manage_count_tooltip">Manage Areas (%1$d/%2$d)</string>
     <string name="sidebar_new_project_in_area">New Project in %1$s</string>
     <string name="quick_find_clear">Clear search</string>
-    <string name="quick_find_empty_hint">Type a search term to instantly search To-Dos (including notes, dates, areas, projects, checklist items &amp; tags), Projects, Areas, or Views inline.</string>
+    <string name="quick_find_empty_hint">Type a search term to instantly search To-Dos (including notes, dates, areas, projects, checklist items &amp; categories), Projects, Areas, or Views inline.</string>
     <string name="quick_find_results_for">%1$d results for “%2$s”</string>
     <string name="quick_find_badge_view">View</string>
     <string name="quick_find_subtasks_count">☑ %1$d/%2$d checklist items</string>
@@ -454,7 +454,7 @@
     <string name="search_filter_date_none">No date</string>
     <string name="search_filter_has_deadline">With deadline</string>
     <string name="search_filter_has_checklist">With checklist</string>
-    <string name="search_filter_all_tags">All tags</string>
+    <string name="search_filter_all_tags">All categories</string>
     <string name="search_filter_scope_all">All types</string>
     <string name="search_filter_scope_tasks">To-Dos only</string>
     <string name="search_filter_scope_projects">Projects only</string>
@@ -467,7 +467,7 @@
     <string name="topbar_tooltip_quick_entry">Quick Entry</string>
     <string name="topbar_tooltip_voice_input">Voice Input</string>
     <string name="topbar_tooltip_areas">Areas</string>
-    <string name="topbar_tooltip_tags">Tags</string>
+    <string name="topbar_tooltip_tags">Categories</string>
     <string name="topbar_tooltip_notifications">Notifications</string>
     <string name="topbar_tooltip_language">Language</string>
     <string name="topbar_tooltip_cloud_sync">Cloud Sync</string>
@@ -477,4 +477,9 @@
     <string name="phase_clear_end_date">Clear End Date</string>
     <string name="phase_ends_on">Ends %1$s</string>
     <string name="phase_milestone_badge">Phase Milestone</string>
+    <string name="sidebar_review_short">Review</string>
+    <string name="tags_search_or_create_placeholder">Search or create category…</string>
+    <string name="tags_filter_placeholder">Filter categories…</string>
+    <string name="tags_create_from_search">Create new category “%1$s”</string>
+    <string name="tags_no_filter_matches">No matching categories</string>
 </resources>

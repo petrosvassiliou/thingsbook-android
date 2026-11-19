@@ -119,7 +119,7 @@ public struct TaskRowCardView: View {
                     if task.isPinned {
                         Image(systemName: "pin.fill")
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(ThingsMacPalette.todayGold)
+                            .foregroundStyle(ThingsMacPalette.todayYellow)
                             .thingsTooltip(store.tr("v25_pinned_badge"))
                     }
 
@@ -395,7 +395,7 @@ public struct TaskRowCardView: View {
                 } label: {
                     Image(systemName: latestTask.isPinned ? "pin.fill" : "pin")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(latestTask.isPinned ? ThingsMacPalette.todayGold : .secondary)
+                        .foregroundStyle(latestTask.isPinned ? ThingsMacPalette.todayYellow : .secondary)
                         .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.plain)

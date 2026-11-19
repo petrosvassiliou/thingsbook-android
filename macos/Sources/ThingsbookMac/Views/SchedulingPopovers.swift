@@ -2229,7 +2229,7 @@ public struct DependenciesPopoverView: View {
                                     .foregroundStyle(
                                         isSelected
                                             ? ThingsMacPalette.accentBlue
-                                            : (wouldCycle ? ThingsMacPalette.todayGold : .secondary)
+                                            : (wouldCycle ? ThingsMacPalette.todayYellow : .secondary)
                                     )
 
                                     VStack(alignment: .leading, spacing: 1.5) {
@@ -2241,7 +2241,7 @@ public struct DependenciesPopoverView: View {
                                         if wouldCycle {
                                             Text(store.tr("v30_blocked_by_cycle_warning"))
                                                 .font(.system(size: 10.5))
-                                                .foregroundStyle(ThingsMacPalette.todayGold)
+                                                .foregroundStyle(ThingsMacPalette.todayYellow)
                                                 .lineLimit(2)
                                         } else if let projectSubtitle, !projectSubtitle.isEmpty {
                                             Text(projectSubtitle)

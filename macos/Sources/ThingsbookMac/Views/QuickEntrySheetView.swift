@@ -66,7 +66,7 @@ public struct QuickEntrySheetView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "sun.max.fill")
                             .font(.system(size: 10.5, weight: .semibold))
-                            .foregroundStyle(ThingsMacPalette.todaySunAmber)
+                            .foregroundStyle(ThingsMacPalette.todayYellow)
                         Text("\(store.todayTotalBadgeCount) · \(store.tr("view_today"))")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(ThingsMacPalette.accentBlue)
@@ -290,7 +290,7 @@ public struct QuickEntrySheetView: View {
             menuBarBentoTabButton(
                 id: "today",
                 icon: "sun.max.fill",
-                iconColor: ThingsMacPalette.todaySunAmber,
+                iconColor: ThingsMacPalette.todayYellow,
                 label: store.tr("view_today")
             ) {
                 menuBarTab = "today"

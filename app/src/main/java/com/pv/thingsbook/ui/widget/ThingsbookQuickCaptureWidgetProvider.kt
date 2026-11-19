@@ -98,6 +98,14 @@ class ThingsbookQuickCaptureWidgetProvider : AppWidgetProvider() {
             val views = RemoteViews(context.packageName, R.layout.widget_thingsbook_quick_capture)
             views.setTextViewText(R.id.qc_label_today, localizedContext.getString(R.string.view_today))
             views.setTextViewText(R.id.qc_today_count, todayCount.toString())
+            views.setContentDescription(
+                R.id.qc_btn_search,
+                localizedContext.getString(R.string.shortcut_quick_find_short)
+            )
+            views.setContentDescription(
+                R.id.qc_btn_voice,
+                localizedContext.getString(R.string.shortcut_voice_capture_short)
+            )
             views.setTextViewText(
                 R.id.qc_btn_new_todo,
                 "+ ${localizedContext.getString(R.string.shortcut_new_todo_short)}"

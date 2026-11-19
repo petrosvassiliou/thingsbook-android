@@ -6,7 +6,6 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.graphics.Color
 import android.net.Uri
 import android.util.Log
 import android.widget.RemoteViews
@@ -347,75 +346,108 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
             }.getOrDefault(emptyList())
 
             val views = RemoteViews(context.packageName, R.layout.widget_thingsbook)
+            val inactiveIconColor = androidx.core.content.ContextCompat.getColor(context, R.color.widget_text_secondary)
 
-            // 1. Configure Header Icon, Color, Title & Task Count Badge
+            // 1. Configure 3.0 Header Vector Icon, Semantic Accent Color, Title & Sky Count Capsule
             if (selectedProject != null) {
-                views.setTextViewText(R.id.widget_view_icon, "🎯")
-                views.setTextColor(R.id.widget_view_icon, Color.parseColor("#2B7BF6"))
+                views.setImageViewResource(R.id.widget_view_icon, R.drawable.ic_widget_folder)
+                views.setInt(
+                    R.id.widget_view_icon,
+                    "setColorFilter",
+                    androidx.core.content.ContextCompat.getColor(context, R.color.widget_icon_project)
+                )
                 views.setTextViewText(R.id.widget_view_title, selectedProject.title)
             } else {
-                val (iconText, iconColorHex, titleRes) = when (selectedView) {
-                    VIEW_INBOX -> Triple("📥", "#2B7BF6", R.string.view_inbox)
-                    VIEW_UPCOMING -> Triple("📅", "#FF3B30", R.string.view_upcoming)
-                    VIEW_ANYTIME -> Triple("🗂️", "#19A096", R.string.view_anytime)
-                    VIEW_SOMEDAY -> Triple("📦", "#B89A52", R.string.view_someday)
-                    else -> Triple("★", "#FFC312", R.string.view_today)
+                val (iconRes, iconColorRes, titleRes) = when (selectedView) {
+                    VIEW_INBOX -> Triple(R.drawable.ic_widget_inbox, R.color.widget_icon_inbox, R.string.view_inbox)
+                    VIEW_UPCOMING -> Triple(R.drawable.ic_widget_calendar, R.color.widget_icon_upcoming, R.string.view_upcoming)
+                    VIEW_ANYTIME -> Triple(R.drawable.ic_widget_compass, R.color.widget_icon_anytime, R.string.view_anytime)
+                    VIEW_SOMEDAY -> Triple(R.drawable.ic_widget_cloud, R.color.widget_icon_someday, R.string.view_someday)
+                    else -> Triple(R.drawable.ic_widget_sun, R.color.widget_icon_today, R.string.view_today)
                 }
-                views.setTextViewText(R.id.widget_view_icon, iconText)
-                views.setTextColor(R.id.widget_view_icon, Color.parseColor(iconColorHex))
+                views.setImageViewResource(R.id.widget_view_icon, iconRes)
+                views.setInt(
+                    R.id.widget_view_icon,
+                    "setColorFilter",
+                    androidx.core.content.ContextCompat.getColor(context, iconColorRes)
+                )
                 views.setTextViewText(R.id.widget_view_title, localizedContext.getString(titleRes))
             }
             views.setTextViewText(R.id.widget_task_count, tasks.size.toString())
             views.setTextViewText(R.id.widget_empty_view, localizedContext.getString(R.string.empty_view))
-
-            // 2. Highlight Active View Tab in Segmented Bar & Attach Click PendingIntents
-            val tabs = listOf(
-                Triple(VIEW_TODAY, R.id.widget_tab_today, R.string.view_today),
-                Triple(VIEW_INBOX, R.id.widget_tab_inbox, R.string.view_inbox),
-                Triple(VIEW_UPCOMING, R.id.widget_tab_upcoming, R.string.view_upcoming),
-                Triple(VIEW_ANYTIME, R.id.widget_tab_anytime, R.string.view_anytime),
-                Triple(VIEW_SOMEDAY, R.id.widget_tab_someday, R.string.view_someday)
+            views.setContentDescription(
+                R.id.widget_btn_voice_capture,
+                localizedContext.getString(R.string.shortcut_voice_capture_short)
             )
-            for ((viewCode, tabViewId, tabTitleRes) in tabs) {
-                val isActive = viewCode == selectedView
-                views.setTextViewText(tabViewId, localizedContext.getString(tabTitleRes))
+            views.setContentDescription(
+                R.id.widget_btn_add_task,
+                localizedContext.getString(R.string.shortcut_new_todo_short)
+            )
+
+            // 2. Highlight Active View Icon Pill in 3.0 Bento Switcher Dock & Attach Click PendingIntents
+            data class WidgetTabSpec(
+                val viewCode: String,
+                val tabViewId: Int,
+                val activeColorRes: Int,
+                val titleRes: Int
+            )
+            val tabs = listOf(
+                WidgetTabSpec(VIEW_TODAY, R.id.widget_tab_today, R.color.widget_icon_today, R.string.view_today),
+                WidgetTabSpec(VIEW_INBOX, R.id.widget_tab_inbox, R.color.widget_icon_inbox, R.string.view_inbox),
+                WidgetTabSpec(VIEW_UPCOMING, R.id.widget_tab_upcoming, R.color.widget_icon_upcoming, R.string.view_upcoming),
+                WidgetTabSpec(VIEW_ANYTIME, R.id.widget_tab_anytime, R.color.widget_icon_anytime, R.string.view_anytime),
+                WidgetTabSpec(VIEW_SOMEDAY, R.id.widget_tab_someday, R.color.widget_icon_someday, R.string.view_someday)
+            )
+            for (tab in tabs) {
+                val isActive = tab.viewCode == selectedView
+                views.setContentDescription(tab.tabViewId, localizedContext.getString(tab.titleRes))
                 views.setInt(
-                    tabViewId,
+                    tab.tabViewId,
                     "setBackgroundResource",
                     if (isActive) R.drawable.bg_things_widget_tab_active else R.drawable.bg_things_widget_tab_inactive
                 )
-                views.setTextColor(
-                    tabViewId,
-                    if (isActive) Color.WHITE else Color.parseColor("#5D6573")
+                views.setInt(
+                    tab.tabViewId,
+                    "setColorFilter",
+                    if (isActive) {
+                        androidx.core.content.ContextCompat.getColor(context, tab.activeColorRes)
+                    } else {
+                        inactiveIconColor
+                    }
                 )
 
                 val switchIntent = Intent(context, ThingsbookWidgetProvider::class.java).apply {
                     action = ACTION_SWITCH_VIEW
                     putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
-                    putExtra(EXTRA_TARGET_VIEW, viewCode)
-                    data = Uri.parse("thingsbook://widget/switch/$appWidgetId/$viewCode")
+                    putExtra(EXTRA_TARGET_VIEW, tab.viewCode)
+                    data = Uri.parse("thingsbook://widget/switch/$appWidgetId/${tab.viewCode}")
                 }
                 val switchPending = PendingIntent.getBroadcast(
                     context,
-                    appWidgetId * 10 + viewCode.hashCode(),
+                    appWidgetId * 10 + tab.viewCode.hashCode(),
                     switchIntent,
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
-                views.setOnClickPendingIntent(tabViewId, switchPending)
+                views.setOnClickPendingIntent(tab.tabViewId, switchPending)
             }
 
-            // Project Tab ("🎯 Project" — cycles through active projects on tap)
+            // Project Folder Tab (cycles through active projects on tap)
             val isProjectActive = selectedProject != null
-            val projectTabText = selectedProject?.title?.take(9) ?: localizedContext.getString(R.string.widget_pin_project_tab)
-            views.setTextViewText(R.id.widget_tab_project, projectTabText)
+            val projectDesc = selectedProject?.title ?: localizedContext.getString(R.string.widget_pin_project_tab)
+            views.setContentDescription(R.id.widget_tab_project, projectDesc)
             views.setInt(
                 R.id.widget_tab_project,
                 "setBackgroundResource",
                 if (isProjectActive) R.drawable.bg_things_widget_tab_active else R.drawable.bg_things_widget_tab_inactive
             )
-            views.setTextColor(
+            views.setInt(
                 R.id.widget_tab_project,
-                if (isProjectActive) Color.WHITE else Color.parseColor("#5D6573")
+                "setColorFilter",
+                if (isProjectActive) {
+                    androidx.core.content.ContextCompat.getColor(context, R.color.widget_icon_project)
+                } else {
+                    inactiveIconColor
+                }
             )
             val cycleProjectIntent = Intent(context, ThingsbookWidgetProvider::class.java).apply {
                 action = ACTION_SWITCH_VIEW
@@ -445,7 +477,7 @@ class ThingsbookWidgetProvider : AppWidgetProvider() {
             )
             views.setOnClickPendingIntent(R.id.widget_header_open_app, openViewPending)
 
-            // 4a. "🎙️" Voice Button Click -> Open App & Launch Voice Quick Capture
+            // 4a. Voice Button Click -> Open App & Launch Voice Quick Capture
             val voiceIntent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra("extra_shortcut_action", "VOICE_CAPTURE")

@@ -209,6 +209,7 @@ if pgrep -x "Thingsbook" >/dev/null 2>&1 || pgrep -x "ThingsbookMac" >/dev/null 
   killall Thingsbook 2>/dev/null || killall ThingsbookMac 2>/dev/null || true
 fi
 
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 TARGET_APP="$INSTALL_DIR/$APP_NAME.app"
 echo "📦 Upgrading / installing $APP_NAME.app in $INSTALL_DIR..."
 if [ -w "$INSTALL_DIR" ] && { [ ! -e "$TARGET_APP" ] || [ -w "$TARGET_APP" ]; }; then
@@ -217,6 +218,8 @@ if [ -w "$INSTALL_DIR" ] && { [ ! -e "$TARGET_APP" ] || [ -w "$TARGET_APP" ]; };
   fi
   if ditto "$MOUNT_POINT/$APP_NAME.app" "$TARGET_APP"; then
     xattr -cr "$TARGET_APP" 2>/dev/null || true
+    touch "$TARGET_APP" 2>/dev/null || true
+    [ -x "$LSREGISTER" ] && "$LSREGISTER" -f "$TARGET_APP" 2>/dev/null || true
   else
     [ -d "$BACKUP_APP" ] && [ ! -d "$TARGET_APP" ] && mv "$BACKUP_APP" "$TARGET_APP" 2>/dev/null || true
     echo "❌ Error: Failed to copy $APP_NAME.app into $INSTALL_DIR." >&2
@@ -229,6 +232,8 @@ else
   fi
   if sudo ditto "$MOUNT_POINT/$APP_NAME.app" "$TARGET_APP"; then
     sudo xattr -cr "$TARGET_APP" 2>/dev/null || true
+    sudo touch "$TARGET_APP" 2>/dev/null || true
+    [ -x "$LSREGISTER" ] && sudo "$LSREGISTER" -f "$TARGET_APP" 2>/dev/null || true
   else
     [ -d "$BACKUP_APP" ] && [ ! -d "$TARGET_APP" ] && sudo mv "$BACKUP_APP" "$TARGET_APP" 2>/dev/null || true
     echo "❌ Error: Failed to copy $APP_NAME.app into $INSTALL_DIR." >&2

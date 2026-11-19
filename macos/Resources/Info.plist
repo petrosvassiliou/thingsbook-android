@@ -15,7 +15,7 @@
     <key>CFBundleExecutable</key>
     <string>Thingsbook</string>
     <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
+    <string>AppIconGlacierV3</string>
     <key>CFBundleIdentifier</key>
     <string>com.thingsbook.macos</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -27,9 +27,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>3.0.0-alpha.6</string>
+    <string>3.0.0-alpha.7</string>
     <key>CFBundleVersion</key>
-    <string>80</string>
+    <string>81</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.productivity</string>
     <key>LSMinimumSystemVersion</key>

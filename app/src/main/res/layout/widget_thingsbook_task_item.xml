@@ -3,14 +3,15 @@
     android:id="@+id/widget_item_row_root"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:background="@drawable/bg_things_widget_task_row"
     android:gravity="center_vertical"
     android:orientation="horizontal"
-    android:paddingLeft="4dp"
+    android:paddingLeft="8dp"
     android:paddingTop="6dp"
-    android:paddingRight="4dp"
+    android:paddingRight="9dp"
     android:paddingBottom="6dp">
 
-    <!-- Interactive Checkbox (Tapping completes the task directly from the Home Screen!) -->
+    <!-- Interactive Thingsbook 3.0 Circular Checkbox (Tapping completes the task directly from the Home Screen) -->
     <FrameLayout
         android:id="@+id/widget_item_checkbox_hit"
         android:layout_width="28dp"
@@ -33,10 +34,10 @@
         android:layout_weight="1"
         android:ellipsize="end"
         android:maxLines="1"
-        android:textColor="#1B1E23"
-        android:textSize="14sp" />
+        android:textColor="@color/widget_text_primary"
+        android:textSize="13.5sp" />
 
-    <!-- Right Metadata Badge (Recurrence / Reminder / Date / Tag) -->
+    <!-- Right Metadata Capsule Pill (Recurrence / Reminder / Date / Category) -->
     <TextView
         android:id="@+id/widget_item_badge"
         android:layout_width="wrap_content"
@@ -44,11 +45,11 @@
         android:background="@drawable/bg_things_widget_badge"
         android:ellipsize="end"
         android:maxLines="1"
-        android:paddingLeft="7dp"
+        android:paddingLeft="8dp"
         android:paddingTop="2dp"
-        android:paddingRight="7dp"
+        android:paddingRight="8dp"
         android:paddingBottom="2dp"
-        android:textColor="#2B7BF6"
+        android:textColor="@color/widget_sky_on_tint"
         android:textSize="10.5sp"
         android:textStyle="bold"
         android:visibility="gone" />

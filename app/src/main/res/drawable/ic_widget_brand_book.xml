@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Glacier Sky Squircle Tile -->
+    <path
+        android:fillColor="#3898EC"
+        android:pathData="M6.2,1.5 L17.8,1.5 C20.4,1.5 22.5,3.6 22.5,6.2 L22.5,17.8 C22.5,20.4 20.4,22.5 17.8,22.5 L6.2,22.5 C3.6,22.5 1.5,20.4 1.5,17.8 L1.5,6.2 C1.5,3.6 3.6,1.5 6.2,1.5 Z" />
+    <!-- Top Specular Frost Highlight -->
+    <path
+        android:fillAlpha="0.34"
+        android:fillColor="#9AD6FF"
+        android:pathData="M6.2,1.5 L17.8,1.5 C20.4,1.5 22.5,3.6 22.5,6.2 L22.5,11.2 C18.8,12.5 15.2,13.0 12.0,13.0 C8.8,13.0 5.2,12.5 1.5,11.2 L1.5,6.2 C1.5,3.6 3.6,1.5 6.2,1.5 Z" />
+    <!-- Back Crystal Book Leaves -->
+    <path
+        android:fillAlpha="0.52"
+        android:fillColor="#DDF1FF"
+        android:pathData="M5.2,8.0 C7.5,8.5 9.8,9.7 11.5,11.5 L11.5,18.2 C9.8,16.7 7.5,15.7 5.2,15.3 Z" />
+    <path
+        android:fillAlpha="0.52"
+        android:fillColor="#DDF1FF"
+        android:pathData="M18.8,8.0 C16.5,8.5 14.2,9.7 12.5,11.5 L12.5,18.2 C14.2,16.7 16.5,15.7 18.8,15.3 Z" />
+    <!-- Sculpted Front White Open Book Pages -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M6.3,6.8 C8.5,7.6 10.3,9.0 11.5,10.8 L11.5,18.0 C10.2,16.3 8.4,15.0 6.3,14.3 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M17.7,6.8 C15.5,7.6 13.7,9.0 12.5,10.8 L12.5,18.0 C13.8,16.3 15.6,15.0 17.7,14.3 Z" />
+</vector>

@@ -1013,10 +1013,7 @@ public struct SettingsWindowView: View {
     // MARK: - Tab 6: Updates & About
 
     private var appIconImage: NSImage? {
-        guard let url = ThingsResourceLoader.url(forResource: "AppIcon-1024", withExtension: "png") else {
-            return nil
-        }
-        return NSImage(contentsOf: url)
+        ThingsResourceLoader.appIconImage()
     }
 
     private var aboutTab: some View {
@@ -1026,12 +1023,10 @@ public struct SettingsWindowView: View {
                     Image(nsImage: icon)
                         .resizable()
                         .interpolation(.high)
-                        .frame(width: 64, height: 64)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .shadow(color: .black.opacity(0.14), radius: 6, y: 2)
+                        .frame(width: 68, height: 68)
                 } else {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 48))
+                    Image(systemName: "book.pages.fill")
+                        .font(.system(size: 46))
                         .foregroundStyle(ThingsMacPalette.accentBlue)
                 }
 

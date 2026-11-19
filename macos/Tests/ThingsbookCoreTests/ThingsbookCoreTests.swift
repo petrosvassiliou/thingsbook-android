@@ -408,14 +408,15 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-alpha.6")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-alpha.6")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 80)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-alpha.7")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-alpha.7")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 81)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.6", current: "2.1.2", includeBeta: false))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.6", current: "2.1.2", includeBeta: true))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.7", current: "3.0.0-alpha.6"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-alpha.6"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.7", current: "2.1.2", includeBeta: false))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.7", current: "2.1.2", includeBeta: true))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.8", current: "3.0.0-alpha.7"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-alpha.7"))
+        XCTAssertNotNil(ThingsResourceLoader.appIconImage(), "3.0 Glacier Liquid Glass Book AppIcon must be loadable at runtime")
         for lang in [AppLanguage.en, .de, .fr, .it, .es] {
             XCTAssertFalse(ThingsStrings.shared.text("v2_beta_channel_desc", lang: lang).contains("2.0"))
         }

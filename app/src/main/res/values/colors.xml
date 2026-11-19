@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Thingsbook 3.0 Light Mode Widget Palette (Pure Crisp White + Soft Bento + Sky Light Blue) -->
+    <color name="widget_surface">#FFFFFF</color>
+    <color name="widget_surface_stroke">#E7EBF1</color>
+    <color name="widget_bento_bg">#F4F6FA</color>
+    <color name="widget_bento_stroke">#E7EBF1</color>
+    <color name="widget_row_bg">#F8FAFD</color>
+    <color name="widget_row_stroke">#ECF0F6</color>
+    <color name="widget_sky_accent">#3898EC</color>
+    <color name="widget_sky_tint">#E5F3FF</color>
+    <color name="widget_sky_tint_stroke">#B5DCFF</color>
+    <color name="widget_sky_on_tint">#0C4B86</color>
+    <color name="widget_text_primary">#111827</color>
+    <color name="widget_text_secondary">#5F6B7C</color>
+    <color name="widget_text_muted">#8A94A6</color>
+    <color name="widget_checkbox_fill">#FFFFFF</color>
+    <color name="widget_checkbox_stroke">#B5BDCA</color>
+    <color name="widget_icon_today">#F59E0B</color>
+    <color name="widget_icon_inbox">#3898EC</color>
+    <color name="widget_icon_upcoming">#EC4899</color>
+    <color name="widget_icon_anytime">#0EA5A4</color>
+    <color name="widget_icon_someday">#64748B</color>
+    <color name="widget_icon_project">#3898EC</color>
+</resources>

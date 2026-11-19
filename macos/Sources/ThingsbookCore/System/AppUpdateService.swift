@@ -58,9 +58,9 @@ public enum MacInAppUpdateError: LocalizedError, Equatable, Sendable {
 }
 
 public enum AppUpdateService {
-    public static let currentVersion = "3.0.0-alpha.6"
-    public static let displayVersion = "3.0.0-alpha.6"
-    public static let currentBuildNumber = 80
+    public static let currentVersion = "3.0.0-alpha.7"
+    public static let displayVersion = "3.0.0-alpha.7"
+    public static let currentBuildNumber = 81
     public static let expectedBundleIdentifier = "com.thingsbook.macos"
     private static let releasesEndpoint = "https://api.github.com/repos/petrosvassiliou/thingsbook-android/releases?per_page=30"
     private static let rawAlphaManifestEndpoint = "https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/alpha-3.0/macos/PARITY_MANIFEST.json"
@@ -444,8 +444,9 @@ public enum AppUpdateService {
             ""
         ]
 
+        let lsRegisterPath = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
         if requiresAdmin {
-            let privilegedCmd = "mkdir -p \(qParent) && rm -rf \(qTarget) && /usr/bin/ditto \(qStaged) \(qTarget) && (/usr/bin/xattr -cr \(qTarget) 2>/dev/null || true)"
+            let privilegedCmd = "mkdir -p \(qParent) && rm -rf \(qTarget) && /usr/bin/ditto \(qStaged) \(qTarget) && (/usr/bin/xattr -cr \(qTarget) 2>/dev/null || true) && (/usr/bin/touch \(qTarget) 2>/dev/null || true) && ([ -x \(lsRegisterPath) ] && \(lsRegisterPath) -f \(qTarget) 2>/dev/null || true)"
             let escapedForAppleScript = privilegedCmd
                 .replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "\"", with: "\\\"")
@@ -464,6 +465,8 @@ public enum AppUpdateService {
             lines.append("fi")
             lines.append("if /usr/bin/ditto \"$STAGED_APP\" \"$TARGET_APP\"; then")
             lines.append("  /usr/bin/xattr -cr \"$TARGET_APP\" 2>/dev/null || true")
+            lines.append("  /usr/bin/touch \"$TARGET_APP\" 2>/dev/null || true")
+            lines.append("  [ -x \"\(lsRegisterPath)\" ] && \"\(lsRegisterPath)\" -f \"$TARGET_APP\" 2>/dev/null || true")
             lines.append("  rm -rf \"$STAGING_ROOT\" 2>/dev/null || true")
             lines.append("  /usr/bin/open \"$TARGET_APP\"")
             lines.append("else")

@@ -38,25 +38,32 @@ public struct SidebarView: View {
         VStack(spacing: 0) {
             // Brand Header (Icon B Glacier Liquid Glass Book Emblem)
             HStack(spacing: 9) {
-                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [ThingsMacPalette.inboxBlue, ThingsMacPalette.accentBlue],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+                if let appIcon = ThingsResourceLoader.appIconImage() {
+                    Image(nsImage: appIcon)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 28, height: 28)
+                } else {
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [ThingsMacPalette.inboxBlue, ThingsMacPalette.accentBlue],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
-                    )
-                    .frame(width: 26, height: 26)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.55), lineWidth: 0.9)
-                    )
-                    .overlay {
-                        Image(systemName: "book.pages.fill")
-                            .font(.system(size: 12.5, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
-                    .shadow(color: ThingsMacPalette.accentBlue.opacity(0.28), radius: 5, y: 2)
+                        .frame(width: 26, height: 26)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.55), lineWidth: 0.9)
+                        )
+                        .overlay {
+                            Image(systemName: "book.pages.fill")
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                        .shadow(color: ThingsMacPalette.accentBlue.opacity(0.28), radius: 5, y: 2)
+                }
 
                 Text(store.tr("app_name"))
                     .font(.system(size: 15, weight: .bold))

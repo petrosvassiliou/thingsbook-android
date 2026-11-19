@@ -89,6 +89,18 @@ public enum ThingsResourceLoader {
         }
         return nil
     }
+
+    public static func appIconImage() -> NSImage? {
+        if let pngURL = url(forResource: "AppIcon-1024", withExtension: "png"),
+           let img = NSImage(contentsOf: pngURL) {
+            return img
+        }
+        if let icnsURL = url(forResource: "AppIconGlacierV3", withExtension: "icns"),
+           let img = NSImage(contentsOf: icnsURL) {
+            return img
+        }
+        return nil
+    }
 }
 
 public final class ThingsStrings: @unchecked Sendable {

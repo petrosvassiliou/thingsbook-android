@@ -48,16 +48,35 @@ public struct QuickEntrySheetView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(ThingsMacPalette.accentBlue)
+            HStack(spacing: 8) {
+                if let appIcon = ThingsResourceLoader.appIconImage() {
+                    Image(nsImage: appIcon)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 24, height: 24)
+                } else {
+                    Image(systemName: "book.pages.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(ThingsMacPalette.accentBlue)
+                }
                 Text(store.tr("topbar_tooltip_quick_entry"))
-                    .font(.system(size: 14.5, weight: .semibold))
+                    .font(.system(size: 14.5, weight: .bold))
                 Spacer()
                 if isMenuBarPopover {
-                    Text("\(store.todayTotalBadgeCount) · \(store.tr("view_today"))")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Image(systemName: "sun.max.fill")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(ThingsMacPalette.todaySunAmber)
+                        Text("\(store.todayTotalBadgeCount) · \(store.tr("view_today"))")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(ThingsMacPalette.accentBlue)
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 3.5)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(ThingsMacPalette.accentBlue.opacity(0.13))
+                    )
                 }
             }
 
@@ -117,7 +136,7 @@ public struct QuickEntrySheetView: View {
                     .font(.system(size: 12.5))
                     .frame(height: 68)
                     .padding(3)
-                    .background(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.primary.opacity(0.14)))
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.primary.opacity(0.12)))
             }
 
             // 1-Tap Gemini Smart Parse Pill when spoken/typed brain dump is present
@@ -169,7 +188,7 @@ public struct QuickEntrySheetView: View {
                     if !activeProjects.isEmpty {
                         Divider()
                         ForEach(activeProjects) { proj in
-                            Text("◉ \(proj.title)").tag("proj:\(proj.id)")
+                            Text("📁 \(proj.title)").tag("proj:\(proj.id)")
                         }
                     }
                 }
@@ -224,11 +243,12 @@ public struct QuickEntrySheetView: View {
                     saveQuickTask()
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(ThingsMacPalette.accentBlue)
                 .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSmartParsing)
             }
         }
         .padding(16)
-        .frame(width: isMenuBarPopover ? 375 : 460)
+        .frame(width: isMenuBarPopover ? 386 : 460)
         .onAppear {
             if !isMenuBarPopover {
                 title = store.quickEntryPrefillTitle
@@ -266,21 +286,33 @@ public struct QuickEntrySheetView: View {
     @ViewBuilder
     private var menuBarQuickListSection: some View {
         Divider()
-        HStack(spacing: 8) {
-            Picker("", selection: $menuBarTab) {
-                Text(store.tr("view_today")).tag("today")
-                Text(store.tr("widget_pin_project_tab")).tag("project")
+        HStack(spacing: 6) {
+            menuBarBentoTabButton(
+                id: "today",
+                icon: "sun.max.fill",
+                iconColor: ThingsMacPalette.todaySunAmber,
+                label: store.tr("view_today")
+            ) {
+                menuBarTab = "today"
+                store.preferences.menuBarSelectedProjectId = nil
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .onChange(of: menuBarTab) { _, nextTab in
-                if nextTab == "today" {
-                    store.preferences.menuBarSelectedProjectId = nil
-                } else if store.preferences.menuBarSelectedProjectId == nil, let first = activeProjects.first {
+            menuBarBentoTabButton(
+                id: "project",
+                icon: "folder.fill",
+                iconColor: ThingsMacPalette.accentBlue,
+                label: store.tr("widget_pin_project_tab")
+            ) {
+                menuBarTab = "project"
+                if store.preferences.menuBarSelectedProjectId == nil, let first = activeProjects.first {
                     store.preferences.menuBarSelectedProjectId = first.id
                 }
             }
         }
+        .padding(3)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.primary.opacity(0.05))
+        )
 
         if menuBarTab == "project" {
             if activeProjects.isEmpty {
@@ -304,7 +336,7 @@ public struct QuickEntrySheetView: View {
 
                 Picker(store.tr("entity_project"), selection: currentProjId) {
                     ForEach(activeProjects) { proj in
-                        Text("◉ \(proj.title)").tag(proj.id)
+                        Text("📁 \(proj.title)").tag(proj.id)
                     }
                 }
                 .labelsHidden()
@@ -315,8 +347,10 @@ public struct QuickEntrySheetView: View {
                         .font(.system(size: 11.5))
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(projTasks.prefix(5)) { task in
-                        menuBarTaskRow(task)
+                    VStack(spacing: 4) {
+                        ForEach(projTasks.prefix(5)) { task in
+                            menuBarTaskRow(task)
+                        }
                     }
                 }
             }
@@ -327,11 +361,45 @@ public struct QuickEntrySheetView: View {
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(todayCombined.prefix(5)) { task in
-                    menuBarTaskRow(task)
+                VStack(spacing: 4) {
+                    ForEach(todayCombined.prefix(5)) { task in
+                        menuBarTaskRow(task)
+                    }
                 }
             }
         }
+    }
+
+    private func menuBarBentoTabButton(
+        id: String,
+        icon: String,
+        iconColor: Color,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        let isActive = menuBarTab == id
+        return Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(isActive ? iconColor : .secondary)
+                Text(label)
+                    .font(.system(size: 11.5, weight: isActive ? .semibold : .medium))
+                    .foregroundStyle(isActive ? .primary : .secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                    .fill(isActive ? ThingsMacPalette.accentBlue.opacity(0.14) : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                    .strokeBorder(isActive ? ThingsMacPalette.accentBlue.opacity(0.30) : Color.clear, lineWidth: 0.9)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func menuBarTaskRow(_ task: TaskItem) -> some View {
@@ -343,15 +411,29 @@ public struct QuickEntrySheetView: View {
                 onCancelTask: { store.cancelTask(task) }
             )
             Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
-                .font(.system(size: 12.5))
+                .font(.system(size: 12.5, weight: .medium))
                 .lineLimit(1)
             Spacer()
+            if let firstTag = task.tags.first {
+                Text(firstTag.title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1.5)
+                    .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.12)))
+            }
             if !task.attachments.isEmpty {
                 Image(systemName: "paperclip")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(0.035))
+        )
     }
 
     private var combinedCaptureText: String {

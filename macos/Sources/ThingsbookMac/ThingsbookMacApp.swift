@@ -8,6 +8,37 @@ public final class ThingsbookAppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.servicesProvider = self
+        if let icon = ThingsResourceLoader.appIconImage() {
+            NSApp.applicationIconImage = icon
+            NSApp.dockTile.display()
+        }
+        refreshBundleIconRegistrationIfNeeded()
+    }
+
+    private func refreshBundleIconRegistrationIfNeeded() {
+        let bundleURL = Bundle.main.bundleURL
+        guard bundleURL.pathExtension.lowercased() == "app" else { return }
+        let buildKey = "thingsbook.iconRegisteredBuild"
+        let currentBuild = String(AppUpdateService.currentBuildNumber)
+        guard UserDefaults.standard.string(forKey: buildKey) != currentBuild else { return }
+        UserDefaults.standard.set(currentBuild, forKey: buildKey)
+
+        let bundlePath = bundleURL.path
+        DispatchQueue.global(qos: .utility).async {
+            if FileManager.default.isWritableFile(atPath: bundlePath) {
+                try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: bundlePath)
+            }
+            let lsRegister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+            guard FileManager.default.isExecutableFile(atPath: lsRegister) else { return }
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: lsRegister)
+            proc.arguments = ["-f", bundlePath]
+            proc.standardInput = FileHandle.nullDevice
+            proc.standardOutput = FileHandle.nullDevice
+            proc.standardError = FileHandle.nullDevice
+            try? proc.run()
+            proc.waitUntilExit()
+        }
     }
 
     public func application(_ application: NSApplication, open urls: [URL]) {
@@ -137,7 +168,7 @@ public struct ThingsbookMacApp: App {
             if let img = ThingsResourceLoader.menuBarIconImage() {
                 Image(nsImage: img)
             } else {
-                Image(systemName: "checkmark.circle.fill")
+                Image(systemName: "book.pages.fill")
             }
         }
         .menuBarExtraStyle(.window)

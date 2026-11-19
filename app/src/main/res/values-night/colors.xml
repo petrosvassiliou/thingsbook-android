@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Thingsbook 3.0 Dark Mode Widget Palette (Obsidian Slate + Soft Bento + Sky Light Blue) -->
+    <color name="widget_surface">#131720</color>
+    <color name="widget_surface_stroke">#242B38</color>
+    <color name="widget_bento_bg">#1B212E</color>
+    <color name="widget_bento_stroke">#283142</color>
+    <color name="widget_row_bg">#181E2A</color>
+    <color name="widget_row_stroke">#232B3A</color>
+    <color name="widget_sky_accent">#3898EC</color>
+    <color name="widget_sky_tint">#17324D</color>
+    <color name="widget_sky_tint_stroke">#295480</color>
+    <color name="widget_sky_on_tint">#BBE0FF</color>
+    <color name="widget_text_primary">#F3F6FA</color>
+    <color name="widget_text_secondary">#9AA5B5</color>
+    <color name="widget_text_muted">#707B8C</color>
+    <color name="widget_checkbox_fill">#161B26</color>
+    <color name="widget_checkbox_stroke">#4D596B</color>
+    <color name="widget_icon_today">#FBBF24</color>
+    <color name="widget_icon_inbox">#64B5F6</color>
+    <color name="widget_icon_upcoming">#F472B6</color>
+    <color name="widget_icon_anytime">#2DD4BF</color>
+    <color name="widget_icon_someday">#94A3B8</color>
+    <color name="widget_icon_project">#64B5F6</color>
+</resources>

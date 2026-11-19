@@ -7,7 +7,7 @@
     android:orientation="vertical"
     android:padding="14dp">
 
-    <!-- Top Header Row: View Icon + Bold View Name + Count Badge + Voice "🎙️" + Quick-Add "+" Button -->
+    <!-- Thingsbook 3.0 Bento Header: Glacier Book Brand + Active View Icon + Full View Title + Sky Count Pill + Voice & Sky + Actions -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -22,182 +22,153 @@
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <TextView
+            <ImageView
+                android:id="@+id/widget_brand_emblem"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:contentDescription="@string/app_name"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_widget_brand_book" />
+
+            <ImageView
                 android:id="@+id/widget_view_icon"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="★"
-                android:textColor="#FFC312"
-                android:textSize="18sp"
-                android:textStyle="bold" />
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_marginStart="7dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_widget_sun" />
 
             <TextView
                 android:id="@+id/widget_view_title"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="7dp"
+                android:layout_marginStart="6dp"
                 android:ellipsize="end"
                 android:maxLines="1"
                 android:text="@string/view_today"
-                android:textColor="#1A1D21"
-                android:textSize="18sp"
+                android:textColor="@color/widget_text_primary"
+                android:textSize="17sp"
                 android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/widget_task_count"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
+                android:layout_marginStart="7dp"
                 android:background="@drawable/bg_things_widget_badge"
-                android:paddingLeft="7dp"
+                android:paddingLeft="8dp"
                 android:paddingTop="2dp"
-                android:paddingRight="7dp"
+                android:paddingRight="8dp"
                 android:paddingBottom="2dp"
                 android:text="0"
-                android:textColor="#6B7380"
+                android:textColor="@color/widget_sky_on_tint"
                 android:textSize="11sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
-        <TextView
+        <ImageView
             android:id="@+id/widget_btn_voice_capture"
-            android:layout_width="30dp"
-            android:layout_height="30dp"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
             android:layout_marginEnd="6dp"
             android:background="@drawable/bg_things_widget_plus_btn"
-            android:gravity="center"
-            android:text="🎙️"
-            android:textSize="13sp" />
+            android:contentDescription="@string/shortcut_voice_capture_short"
+            android:padding="7dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_widget_mic" />
 
-        <TextView
+        <ImageView
             android:id="@+id/widget_btn_add_task"
-            android:layout_width="30dp"
-            android:layout_height="30dp"
-            android:background="@drawable/bg_things_widget_plus_btn"
-            android:gravity="center"
-            android:text="+"
-            android:textColor="#2B7BF6"
-            android:textSize="18sp"
-            android:textStyle="bold" />
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:background="@drawable/bg_things_widget_primary_btn"
+            android:contentDescription="@string/shortcut_new_todo_short"
+            android:padding="7dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_widget_plus" />
     </LinearLayout>
 
-    <!-- Things-for-Mac Interactive View Switcher Segmented Bar (Today, Inbox, Upcoming, Anytime, Someday, Project) -->
+    <!-- Thingsbook 3.0 Soft Bento Icon Switcher Dock (Zero Truncation Across All 5 Languages) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
-        android:layout_marginBottom="8dp"
+        android:layout_marginBottom="9dp"
         android:background="@drawable/bg_things_widget_tab_bar"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:padding="3dp"
         android:weightSum="6">
 
-        <TextView
+        <ImageView
             android:id="@+id/widget_tab_today"
             android:layout_width="0dp"
-            android:layout_height="26dp"
+            android:layout_height="28dp"
             android:layout_weight="1"
             android:background="@drawable/bg_things_widget_tab_active"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="1"
-            android:paddingLeft="2dp"
-            android:paddingRight="2dp"
-            android:text="@string/view_today"
-            android:textColor="#FFFFFF"
-            android:textSize="10sp"
-            android:textStyle="bold" />
+            android:contentDescription="@string/view_today"
+            android:padding="5dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_widget_sun" />
 
-        <TextView
+        <ImageView
             android:id="@+id/widget_tab_inbox"
             android:layout_width="0dp"
-            android:layout_height="26dp"
+            android:layout_height="28dp"
             android:layout_weight="1"
             android:background="@drawable/bg_things_widget_tab_inactive"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="1"
-            android:paddingLeft="2dp"
-            android:paddingRight="2dp"
-            android:text="@string/view_inbox"
-            android:textColor="#5D6573"
-            android:textSize="10sp"
-            android:textStyle="bold" />
+            android:contentDescription="@string/view_inbox"
+            android:padding="5dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_widget_inbox" />
 
-        <TextView
+        <ImageView
             android:id="@+id/widget_tab_upcoming"
             android:layout_width="0dp"
-            android:layout_height="26dp"
+            android:layout_height="28dp"
             android:layout_weight="1"
             android:background="@drawable/bg_things_widget_tab_inactive"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="1"
-            android:paddingLeft="2dp"
-            android:paddingRight="2dp"
-            android:text="@string/view_upcoming"
-            android:textColor="#5D6573"
-            android:textSize="10sp"
-            android:textStyle="bold" />
+            android:contentDescription="@string/view_upcoming"
+            android:padding="5dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_widget_calendar" />
 
-        <TextView
+        <ImageView
             android:id="@+id/widget_tab_anytime"
             android:layout_width="0dp"
-            android:layout_height="26dp"
+            android:layout_height="28dp"
             android:layout_weight="1"
             android:background="@drawable/bg_things_widget_tab_inactive"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="1"
-            android:paddingLeft="2dp"
-            android:paddingRight="2dp"
-            android:text="@string/view_anytime"
-            android:textColor="#5D6573"
-            android:textSize="10sp"
-            android:textStyle="bold" />
+            android:contentDescription="@string/view_anytime"
+            android:padding="5dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_widget_compass" />
 
-        <TextView
+        <ImageView
             android:id="@+id/widget_tab_someday"
             android:layout_width="0dp"
-            android:layout_height="26dp"
+            android:layout_height="28dp"
             android:layout_weight="1"
             android:background="@drawable/bg_things_widget_tab_inactive"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="1"
-            android:paddingLeft="2dp"
-            android:paddingRight="2dp"
-            android:text="@string/view_someday"
-            android:textColor="#5D6573"
-            android:textSize="10sp"
-            android:textStyle="bold" />
+            android:contentDescription="@string/view_someday"
+            android:padding="5dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_widget_cloud" />
 
-        <TextView
+        <ImageView
             android:id="@+id/widget_tab_project"
             android:layout_width="0dp"
-            android:layout_height="26dp"
+            android:layout_height="28dp"
             android:layout_weight="1"
             android:background="@drawable/bg_things_widget_tab_inactive"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="1"
-            android:paddingLeft="2dp"
-            android:paddingRight="2dp"
-            android:text="@string/widget_pin_project_tab"
-            android:textColor="#5D6573"
-            android:textSize="10sp"
-            android:textStyle="bold" />
+            android:contentDescription="@string/widget_pin_project_tab"
+            android:padding="5dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_widget_folder" />
     </LinearLayout>
 
-    <!-- Hairline Divider -->
-    <FrameLayout
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:layout_marginBottom="4dp"
-        android:background="#ECEFF5" />
-
-    <!-- Scrollable Task List + Empty State -->
+    <!-- Scrollable Bento Task List + Calm Empty State -->
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -208,7 +179,7 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:divider="@null"
-            android:dividerHeight="2dp"
+            android:dividerHeight="4dp"
             android:scrollbars="none" />
 
         <TextView
@@ -217,7 +188,7 @@
             android:layout_height="match_parent"
             android:gravity="center"
             android:text="@string/empty_view"
-            android:textColor="#8A92A1"
+            android:textColor="@color/widget_text_muted"
             android:textSize="13sp" />
     </FrameLayout>
 

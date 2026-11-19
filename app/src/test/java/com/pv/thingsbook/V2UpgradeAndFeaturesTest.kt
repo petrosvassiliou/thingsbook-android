@@ -761,9 +761,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(80, BuildConfig.VERSION_CODE)
-        assertEquals("3.0.0-alpha.6", BuildConfig.VERSION_NAME)
-        assertTrue("3.0.0-alpha.6 pre-release contains -alpha", BuildConfig.VERSION_NAME.contains("-alpha"))
+        assertEquals(81, BuildConfig.VERSION_CODE)
+        assertEquals("3.0.0-alpha.7", BuildConfig.VERSION_NAME)
+        assertTrue("3.0.0-alpha.7 pre-release contains -alpha", BuildConfig.VERSION_NAME.contains("-alpha"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -2007,5 +2007,39 @@ class V2UpgradeAndFeaturesTest {
                 assertTrue("Missing or blank $pk in $folder/strings.xml", !map[pk].isNullOrBlank())
             }
         }
+    }
+
+    @Test
+    fun `v3_0_0_alpha_7 Home Screen widgets and macOS bundle use Glacier Book 3_0 design with zero legacy Things symbols`() {
+        val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
+        val repoRoot = if (appSrcMain.path.startsWith("app/")) File(".") else File("..")
+
+        val mainWidgetXml = File(appSrcMain, "res/layout/widget_thingsbook.xml").readText()
+        val qcWidgetXml = File(appSrcMain, "res/layout/widget_thingsbook_quick_capture.xml").readText()
+        val itemWidgetXml = File(appSrcMain, "res/layout/widget_thingsbook_task_item.xml").readText()
+        val widgetProviderKt = File(appSrcMain, "java/com/pv/thingsbook/ui/widget/ThingsbookWidgetProvider.kt").readText()
+
+        assertTrue(mainWidgetXml.contains("@drawable/ic_widget_brand_book"))
+        assertTrue(mainWidgetXml.contains("@drawable/ic_widget_sun"))
+        assertTrue(mainWidgetXml.contains("@drawable/ic_widget_compass"))
+        assertTrue(mainWidgetXml.contains("@drawable/ic_widget_cloud"))
+        assertTrue(mainWidgetXml.contains("@drawable/ic_widget_folder"))
+        assertTrue(qcWidgetXml.contains("@drawable/ic_widget_brand_book"))
+        assertTrue(qcWidgetXml.contains("@drawable/ic_widget_sun"))
+        assertTrue(itemWidgetXml.contains("@drawable/bg_things_widget_task_row"))
+        assertTrue(File(appSrcMain, "res/values/colors.xml").isFile)
+        assertTrue(File(appSrcMain, "res/values-night/colors.xml").isFile)
+
+        val forbiddenLegacyTokens = listOf("★", "#FFC312", "#2B7BF6", "🗂️", "📦")
+        for (legacy in forbiddenLegacyTokens) {
+            assertFalse("Legacy token $legacy found in widget_thingsbook.xml", mainWidgetXml.contains(legacy))
+            assertFalse("Legacy token $legacy found in widget_thingsbook_quick_capture.xml", qcWidgetXml.contains(legacy))
+            assertFalse("Legacy token $legacy found in widget_thingsbook_task_item.xml", itemWidgetXml.contains(legacy))
+            assertFalse("Legacy token $legacy found in ThingsbookWidgetProvider.kt", widgetProviderKt.contains(legacy))
+        }
+
+        val infoPlist = File(repoRoot, "macos/Resources/Info.plist").readText()
+        assertTrue(infoPlist.contains("<string>AppIconGlacierV3</string>"))
+        assertTrue(infoPlist.contains("<string>com.thingsbook.macos</string>"))
     }
 }

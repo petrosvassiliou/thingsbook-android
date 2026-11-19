@@ -72,7 +72,7 @@ public struct MainWorkspaceView: View {
         ZStack {
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView(store: store)
-                    .navigationSplitViewColumnWidth(min: 232, ideal: 262, max: 330)
+                    .navigationSplitViewColumnWidth(min: 252, ideal: 274, max: 340)
             } detail: {
                 ZStack(alignment: .bottom) {
                     VStack(spacing: 0) {

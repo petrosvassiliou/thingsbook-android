@@ -207,11 +207,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         <div className="sidebar-scroll">
-          {/* 1. 2x2 Bento Focus Grid (Inbox, Today, Upcoming, Anytime) */}
+          {/* 1. 2x2 Bento Focus Grid (Inbox, Today, Upcoming, Anytime — never truncated) */}
           <div className="bento-focus-grid">
             {bentoPrimaryItems.map((item) => {
               const isActive = activeNav.kind === 'smart' && activeNav.view === item.view;
               const dKey = `smart-${item.view}`;
+              const labelStyle =
+                item.label.length > 14 ? { fontSize: '11.4px' } : undefined;
               return (
                 <button
                   key={item.view}
@@ -231,13 +233,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       {item.count != null && item.count > 0 ? item.count : ''}
                     </span>
                   </div>
-                  <span className="bento-tile-label">{item.label}</span>
+                  <span className="bento-tile-label" style={labelStyle}>
+                    {item.label}
+                  </span>
                 </button>
               );
             })}
           </div>
 
-          {/* 2. Slim 1x2 Mini-Cards (Someday & Weekly Review — aligned to grid, zero wrapping) */}
+          {/* 2. Compact 2-Row Micro-Bento Cards (Someday & Weekly Review — full-width labels, zero truncation) */}
           <div className="bento-mini-grid">
             <button
               type="button"
@@ -248,13 +252,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onClick={() => onSelectNav({ kind: 'smart', view: 'SOMEDAY' })}
               {...makeDropHandlers('smart-SOMEDAY', { kind: 'smart', view: 'SOMEDAY' })}
             >
-              <span className="bento-mini-left">
-                {renderMonochromeSmartIcon('SOMEDAY', 14.5, isSomedayActive)}
-                <span className="bento-mini-label">{t.viewSomeday}</span>
+              <div className="bento-mini-top">
+                <span className="bento-tile-icon">
+                  {renderMonochromeSmartIcon('SOMEDAY', 14, isSomedayActive)}
+                </span>
+                <span className="bento-mini-count">
+                  {counts.someday > 0 ? counts.someday : ''}
+                </span>
+              </div>
+              <span
+                className="bento-mini-label"
+                style={t.viewSomeday.length > 13 ? { fontSize: '11.1px' } : undefined}
+              >
+                {t.viewSomeday}
               </span>
-              {counts.someday > 0 && (
-                <span className="bento-mini-count">{counts.someday}</span>
-              )}
             </button>
 
             <button
@@ -267,24 +278,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onOpenWeeklyReview();
               }}
             >
-              <span className="bento-mini-left">
+              <div className="bento-mini-top">
                 <ListChecks
-                  size={14.5}
+                  size={14}
                   style={{
                     color: stalledProjectsCount > 0 ? 'var(--things-blue)' : 'var(--text-secondary)',
                     flexShrink: 0
                   }}
                 />
-                <span className="bento-mini-label">{t.sidebarReviewShort}</span>
-              </span>
-              {stalledProjectsCount > 0 && (
                 <span
                   className="bento-mini-count"
-                  style={{ color: 'var(--things-blue)' }}
+                  style={stalledProjectsCount > 0 ? { color: 'var(--things-blue)' } : undefined}
                 >
-                  {stalledProjectsCount}
+                  {stalledProjectsCount > 0 ? stalledProjectsCount : ''}
                 </span>
-              )}
+              </div>
+              <span
+                className="bento-mini-label"
+                style={t.sidebarReviewShort.length > 13 ? { fontSize: '11.1px' } : undefined}
+              >
+                {t.sidebarReviewShort}
+              </span>
             </button>
           </div>
 

@@ -6038,11 +6038,13 @@ private fun ThingsChromebookSidebar(
                                     Text(
                                         text = viewLabel,
                                         style = MaterialTheme.typography.labelMedium.copy(
+                                            fontSize = if (viewLabel.length > 14) 11.2.sp else 12.5.sp,
+                                            lineHeight = 14.sp,
                                             fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
                                             color = if (selected) colors.thingsBlue else colors.primaryText
                                         ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        maxLines = 2,
+                                        softWrap = true
                                     )
                                 }
                             }
@@ -6052,7 +6054,7 @@ private fun ThingsChromebookSidebar(
             }
         }
 
-        // 2. 1x2 Slim Secondary Mini-Cards (Someday, Weekly Review)
+        // 2. Option A Compact 2-Row Micro-Bento Cards (Someday, Weekly Review — full-width labels, zero truncation)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(7.dp)
@@ -6067,53 +6069,51 @@ private fun ThingsChromebookSidebar(
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(11.dp))
+                        .clip(RoundedCornerShape(12.dp))
                         .clickable {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onSelectSmartView(SmartViewType.SOMEDAY)
                         },
-                    shape = RoundedCornerShape(11.dp),
-                    color = if (somedaySelected) colors.thingsBlueSoft else colors.cardSurface.copy(alpha = 0.74f),
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (somedaySelected) colors.thingsBlueSoft else colors.cardSurface.copy(alpha = 0.78f),
                     border = BorderStroke(
                         width = if (somedaySelected) 1.1.dp else 0.75.dp,
                         color = if (somedaySelected) colors.thingsBlue.copy(alpha = 0.45f) else colors.hairlineDivider
                     )
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Row(
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             SmartViewIcon(
                                 viewType = SmartViewType.SOMEDAY,
-                                modifier = Modifier.size(16.dp),
+                                modifier = Modifier.size(15.dp),
                                 isSelected = somedaySelected
                             )
                             Text(
-                                text = somedayLabel,
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = if (somedaySelected) FontWeight.Bold else FontWeight.SemiBold,
-                                    color = if (somedaySelected) colors.thingsBlue else colors.primaryText
-                                ),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        if (somedayCount > 0) {
-                            Text(
-                                text = somedayCount.toString(),
+                                text = if (somedayCount > 0) somedayCount.toString() else "",
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = if (somedaySelected) colors.thingsBlue else colors.secondaryText,
-                                modifier = Modifier.padding(start = 4.dp)
+                                color = if (somedaySelected) colors.thingsBlue else colors.secondaryText
                             )
                         }
+                        Text(
+                            text = somedayLabel,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = if (somedayLabel.length > 13) 11.sp else 12.sp,
+                                lineHeight = 13.5.sp,
+                                fontWeight = if (somedaySelected) FontWeight.Bold else FontWeight.SemiBold,
+                                color = if (somedaySelected) colors.thingsBlue else colors.primaryText
+                            ),
+                            maxLines = 2,
+                            softWrap = true
+                        )
                     }
                 }
             }
@@ -6127,54 +6127,52 @@ private fun ThingsChromebookSidebar(
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(11.dp))
+                        .clip(RoundedCornerShape(12.dp))
                         .clickable {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onOpenWeeklyReview()
                         },
-                    shape = RoundedCornerShape(11.dp),
-                    color = colors.cardSurface.copy(alpha = 0.74f),
+                    shape = RoundedCornerShape(12.dp),
+                    color = colors.cardSurface.copy(alpha = 0.78f),
                     border = BorderStroke(
                         width = 0.75.dp,
                         color = colors.hairlineDivider
                     )
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Row(
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.Checklist,
                                 contentDescription = reviewFullTitle,
-                                tint = colors.thingsBlue,
-                                modifier = Modifier.size(16.dp)
+                                tint = if (stalledCount > 0) colors.thingsBlue else colors.secondaryText,
+                                modifier = Modifier.size(15.dp)
                             )
                             Text(
-                                text = reviewShortLabel,
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = colors.primaryText
-                                ),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        if (stalledCount > 0) {
-                            Text(
-                                text = stalledCount.toString(),
+                                text = if (stalledCount > 0) stalledCount.toString() else "",
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = colors.secondaryText,
-                                modifier = Modifier.padding(start = 4.dp)
+                                color = if (stalledCount > 0) colors.thingsBlue else colors.secondaryText
                             )
                         }
+                        Text(
+                            text = reviewShortLabel,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = if (reviewShortLabel.length > 13) 11.sp else 12.sp,
+                                lineHeight = 13.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.primaryText
+                            ),
+                            maxLines = 2,
+                            softWrap = true
+                        )
                     }
                 }
             }

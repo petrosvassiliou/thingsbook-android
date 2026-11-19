@@ -244,3 +244,22 @@ test('v2.0.0-beta.20 topbarTooltip* labels are concise, localized across all 5 l
     assert.ok(TRANSLATIONS[lang].tagsCreateFromSearch('Focus').includes('Focus'));
   }
 });
+
+test('v3.0.0-alpha.4 sidebar Bento and Micro-Bento cards use 2-row layout and never truncate labels with ellipsis', async () => {
+  const fs = await import('node:fs/promises');
+  const cssUrl = new URL('../src/index.css', import.meta.url);
+  const css = await fs.readFile(cssUrl, 'utf8');
+
+  const bentoLabelBlock = css.match(/\.bento-tile-label\s*\{([^}]*)\}/)?.[1] ?? '';
+  const miniCardBlock = css.match(/\.bento-mini-card\s*\{([^}]*)\}/)?.[1] ?? '';
+  const miniLabelBlock = css.match(/\.bento-mini-label\s*\{([^}]*)\}/)?.[1] ?? '';
+
+  assert.ok(bentoLabelBlock.length > 0, 'Missing .bento-tile-label rule');
+  assert.ok(!bentoLabelBlock.includes('ellipsis'), '.bento-tile-label must not truncate with ellipsis');
+  assert.ok(!bentoLabelBlock.includes('nowrap'), '.bento-tile-label must allow full-width wrapping');
+
+  assert.ok(miniCardBlock.includes('flex-direction: column'), '.bento-mini-card must use 2-row column layout');
+  assert.ok(miniLabelBlock.length > 0, 'Missing .bento-mini-label rule');
+  assert.ok(!miniLabelBlock.includes('ellipsis'), '.bento-mini-label must not truncate with ellipsis');
+  assert.ok(!miniLabelBlock.includes('nowrap'), '.bento-mini-label must allow full-width wrapping');
+});

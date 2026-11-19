@@ -272,7 +272,9 @@ public struct SidebarView: View {
                 Text(store.tr(view.titleKey))
                     .font(.system(size: 12.5, weight: selected ? .bold : .semibold))
                     .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .primary)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 11)
             .padding(.vertical, 9)
@@ -300,39 +302,43 @@ public struct SidebarView: View {
         return Button {
             store.selectedDestination = dest
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: view.sfSymbol)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(ThingsMacPalette.color(for: view, isSelected: selected))
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .center) {
+                    Image(systemName: view.sfSymbol)
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(ThingsMacPalette.color(for: view, isSelected: selected))
+
+                    Spacer(minLength: 4)
+
+                    if count > 0 {
+                        Text("\(count)")
+                            .font(.system(size: 11.5, weight: .bold, design: .rounded))
+                            .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .secondary)
+                    }
+                }
 
                 Text(store.tr(view.titleKey))
-                    .font(.system(size: 11.5, weight: selected ? .bold : .semibold))
-                    .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .primary.opacity(0.88))
-                    .lineLimit(1)
-
-                Spacer(minLength: 2)
-
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .secondary)
-                }
+                    .font(.system(size: 12, weight: selected ? .bold : .semibold))
+                    .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .primary.opacity(0.9))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 7.5)
+            .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.16) : ThingsMacPalette.cardSurface.opacity(0.66))
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.16) : ThingsMacPalette.cardSurface.opacity(0.68))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(
                         selected ? ThingsMacPalette.accentBlue.opacity(0.42) : Color.primary.opacity(0.07),
                         lineWidth: selected ? 1.05 : 0.75
                     )
             )
-            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
         .thingsTooltip("\(store.tr(view.titleKey)) (\(smartViewShortcut(for: view)))")
@@ -344,39 +350,43 @@ public struct SidebarView: View {
         return Button {
             store.isWeeklyReviewPresented = true
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "checklist.checked")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(active ? ThingsMacPalette.accentBlue : ThingsMacPalette.accentBlue.opacity(0.85))
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .center) {
+                    Image(systemName: "checklist.checked")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(active ? ThingsMacPalette.accentBlue : ThingsMacPalette.accentBlue.opacity(0.85))
+
+                    Spacer(minLength: 4)
+
+                    if stalledCount > 0 {
+                        Text("\(stalledCount)")
+                            .font(.system(size: 11.5, weight: .bold, design: .rounded))
+                            .foregroundStyle(active ? ThingsMacPalette.accentBlue : .secondary)
+                    }
+                }
 
                 Text(store.tr("sidebar_review_short"))
-                    .font(.system(size: 11.5, weight: active ? .bold : .semibold))
-                    .foregroundStyle(active ? ThingsMacPalette.accentBlue : .primary.opacity(0.88))
-                    .lineLimit(1)
-
-                Spacer(minLength: 2)
-
-                if stalledCount > 0 {
-                    Text("\(stalledCount)")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundStyle(active ? ThingsMacPalette.accentBlue : .secondary)
-                }
+                    .font(.system(size: 12, weight: active ? .bold : .semibold))
+                    .foregroundStyle(active ? ThingsMacPalette.accentBlue : .primary.opacity(0.9))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 7.5)
+            .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(active ? ThingsMacPalette.accentBlue.opacity(0.16) : ThingsMacPalette.cardSurface.opacity(0.66))
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(active ? ThingsMacPalette.accentBlue.opacity(0.16) : ThingsMacPalette.cardSurface.opacity(0.68))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(
                         active ? ThingsMacPalette.accentBlue.opacity(0.42) : Color.primary.opacity(0.07),
                         lineWidth: active ? 1.05 : 0.75
                     )
             )
-            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
         .thingsTooltip(store.tr("v2_weekly_review_title") + " (⇧⌘R)")

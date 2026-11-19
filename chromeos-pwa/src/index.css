@@ -50,7 +50,7 @@
   --radius-lg: 18px;
   --radius-pill: 999px;
 
-  --sidebar-width: 268px;
+  --sidebar-width: 278px;
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Roboto', 'Segoe UI', sans-serif;
 }
 
@@ -292,9 +292,10 @@ button {
 .bento-tile-label {
   font-size: 12.6px;
   font-weight: 620;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.18;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 
 .bento-mini-grid {
@@ -306,16 +307,16 @@ button {
 
 .bento-mini-card {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   justify-content: space-between;
-  gap: 6px;
-  padding: 7.5px 10px;
-  border-radius: 11px;
+  gap: 4px;
+  padding: 7px 10px;
+  border-radius: 12px;
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   color: var(--text-primary);
-  font-size: 12.2px;
-  font-weight: 560;
+  font-size: 12px;
+  font-weight: 590;
   text-align: left;
   min-width: 0;
   transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
@@ -330,7 +331,7 @@ button {
   background: var(--things-blue-soft);
   border-color: rgba(56, 152, 236, 0.42);
   color: var(--active-pill-text);
-  font-weight: 650;
+  font-weight: 660;
 }
 
 .bento-mini-card.drag-over {
@@ -338,18 +339,19 @@ button {
   background: var(--things-blue-soft);
 }
 
-.bento-mini-left {
-  display: inline-flex;
+.bento-mini-top {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  min-width: 0;
-  flex: 1;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 16px;
 }
 
 .bento-mini-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.16;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 
 .bento-mini-count {

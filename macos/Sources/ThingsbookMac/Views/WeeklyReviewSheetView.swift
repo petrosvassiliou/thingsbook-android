@@ -7,6 +7,8 @@ public struct WeeklyReviewSheetView: View {
 
     @State private var currentStep: Int = 0
     @State private var nextActionDrafts: [String: String] = [:]
+    @State private var feedbackMessage: String? = nil
+    @State private var feedbackDismissTask: Task<Void, Never>? = nil
 
     public init() {}
 
@@ -98,12 +100,32 @@ public struct WeeklyReviewSheetView: View {
 
             Spacer()
 
+            if let feedbackMessage {
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 11.5, weight: .semibold))
+                    Text(feedbackMessage)
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(ThingsMacPalette.logbookGreen)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(ThingsMacPalette.logbookGreen.opacity(0.14))
+                )
+                .transition(.opacity)
+            }
+
             Button {
                 dismiss()
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 18))
                     .foregroundStyle(.secondary)
+                    .padding(4)
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .thingsTooltip(store.tr("action_cancel"))
@@ -145,6 +167,7 @@ public struct WeeklyReviewSheetView: View {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(isSelected ? ThingsMacPalette.accentBlue : ThingsMacPalette.subtleContainer)
                     )
+                    .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
@@ -161,45 +184,57 @@ public struct WeeklyReviewSheetView: View {
             calmEmptyState(icon: "checkmark.circle.fill", color: ThingsMacPalette.logbookGreen, message: store.tr("empty_inbox"))
         } else {
             ForEach(store.inboxTasks) { task in
+                let displayTitle = task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 10) {
                         ThingsCheckboxButton(
                             status: task.status,
                             isSomeday: false,
                             helpText: store.tr("macos_checkbox_help"),
-                            onToggleComplete: { store.toggleTaskCompletion(task) },
+                            onToggleComplete: {
+                                store.toggleTaskCompletion(task)
+                                showReviewFeedback("\(displayTitle) → \(store.tr("action_complete"))")
+                            },
                             onCancelTask: { store.cancelTask(task) }
                         )
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
-                                .font(.system(size: 13.5, weight: .medium))
-                            if !task.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                Text(task.notes.trimmingCharacters(in: .whitespacesAndNewlines))
-                                    .font(.system(size: 11.5))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
+                        Button {
+                            openTaskInWorkspace(task)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(displayTitle)
+                                    .font(.system(size: 13.5, weight: .medium))
+                                    .foregroundStyle(.primary)
+                                if !task.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    Text(task.notes.trimmingCharacters(in: .whitespacesAndNewlines))
+                                        .font(.system(size: 11.5))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
-                        Spacer()
+                        .buttonStyle(.plain)
                     }
 
                     HStack(spacing: 6) {
                         reviewActionChip(icon: "sun.max.fill", tint: ThingsMacPalette.todayYellow, label: store.tr("view_today")) {
-                            scheduleTask(task, to: .today, daysOffset: 0)
+                            scheduleTask(task, to: .today, daysOffset: 0, actionLabel: store.tr("view_today"))
                         }
                         reviewActionChip(icon: "moon.stars.fill", tint: ThingsMacPalette.eveningPurple, label: store.tr("view_this_evening")) {
-                            scheduleTask(task, to: .thisEvening, daysOffset: 0)
+                            scheduleTask(task, to: .thisEvening, daysOffset: 0, actionLabel: store.tr("view_this_evening"))
                         }
                         reviewActionChip(icon: "sun.horizon.fill", tint: ThingsMacPalette.upcomingRed, label: store.tr("date_tomorrow")) {
-                            scheduleTask(task, to: .upcoming, daysOffset: 1)
+                            scheduleTask(task, to: .upcoming, daysOffset: 1, actionLabel: store.tr("date_tomorrow"))
                         }
                         reviewActionChip(icon: "cloud.fill", tint: ThingsMacPalette.somedayAmber, label: store.tr("view_someday")) {
-                            scheduleTask(task, to: .someday, daysOffset: nil)
+                            scheduleTask(task, to: .someday, daysOffset: nil, actionLabel: store.tr("view_someday"))
                         }
                         Spacer()
                         Button {
                             store.toggleTaskCompletion(task)
+                            showReviewFeedback("\(displayTitle) → \(store.tr("action_complete"))")
                         } label: {
                             Label(store.tr("action_complete"), systemImage: "checkmark")
                                 .font(.system(size: 11.5, weight: .medium))
@@ -208,6 +243,7 @@ public struct WeeklyReviewSheetView: View {
 
                         Button(role: .destructive) {
                             store.deleteTask(task)
+                            showReviewFeedback("\(displayTitle) → \(store.tr("action_delete"))")
                         } label: {
                             Image(systemName: "trash")
                                 .font(.system(size: 11.5))
@@ -228,51 +264,88 @@ public struct WeeklyReviewSheetView: View {
     @ViewBuilder
     private var todayAndDeadlinesStepContent: some View {
         let items = todayAndDeadlineTasks
+        let todayDay = DateEpochConverter.epochDay(for: Date())
         if items.isEmpty {
             calmEmptyState(icon: "sun.max.circle.fill", color: ThingsMacPalette.todayYellow, message: store.tr("empty_today"))
         } else {
             ForEach(items) { task in
+                let displayTitle = task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title
+                let whenDay = task.whenDate.map { DateEpochConverter.epochDay(forMillis: $0) }
+                let isTodaySelected = task.scheduleState == .today || task.scheduleState == .thisEvening || whenDay == todayDay
+                let isTomorrowSelected = task.scheduleState == .upcoming && whenDay == (todayDay + 1)
+                let isPlus7Selected = task.scheduleState == .upcoming && whenDay == (todayDay + 7)
+
                 HStack(spacing: 10) {
                     ThingsCheckboxButton(
                         status: task.status,
                         isSomeday: task.scheduleState == .someday,
                         helpText: store.tr("macos_checkbox_help"),
-                        onToggleComplete: { store.toggleTaskCompletion(task) },
+                        onToggleComplete: {
+                            store.toggleTaskCompletion(task)
+                            showReviewFeedback("\(displayTitle) → \(store.tr("action_complete"))")
+                        },
                         onCancelTask: { store.cancelTask(task) }
                     )
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
-                            .font(.system(size: 13.5, weight: .medium))
-                        HStack(spacing: 8) {
-                            if let proj = store.project(byId: task.projectId) {
-                                Text(proj.title)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                            }
-                            if let dlMillis = task.deadline {
-                                deadlinePill(dlMillis)
+                    Button {
+                        openTaskInWorkspace(task)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(displayTitle)
+                                .font(.system(size: 13.5, weight: .medium))
+                                .foregroundStyle(.primary)
+                            HStack(spacing: 6) {
+                                if let proj = store.project(byId: task.projectId) {
+                                    Text(proj.title)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.secondary)
+                                }
+                                taskSchedulePill(task, todayDay: todayDay)
+                                if let dlMillis = task.deadline {
+                                    deadlinePill(dlMillis)
+                                }
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
 
                     Spacer()
 
                     HStack(spacing: 6) {
-                        reviewActionChip(icon: "sun.max.fill", tint: ThingsMacPalette.todayYellow, label: store.tr("view_today")) {
-                            scheduleTask(task, to: .today, daysOffset: 0)
+                        reviewActionChip(
+                            icon: "sun.max.fill",
+                            tint: ThingsMacPalette.todayYellow,
+                            label: store.tr("view_today"),
+                            isSelected: isTodaySelected
+                        ) {
+                            scheduleTask(task, to: .today, daysOffset: 0, actionLabel: store.tr("view_today"))
                         }
-                        reviewActionChip(icon: "sun.horizon.fill", tint: ThingsMacPalette.upcomingRed, label: store.tr("date_tomorrow")) {
-                            scheduleTask(task, to: .upcoming, daysOffset: 1)
+                        reviewActionChip(
+                            icon: "sun.horizon.fill",
+                            tint: ThingsMacPalette.upcomingRed,
+                            label: store.tr("date_tomorrow"),
+                            isSelected: isTomorrowSelected
+                        ) {
+                            scheduleTask(task, to: .upcoming, daysOffset: 1, actionLabel: store.tr("date_tomorrow"))
                         }
-                        reviewActionChip(icon: "calendar.badge.plus", tint: ThingsMacPalette.accentBlue, label: store.tr("macos_deadline_plus_7d")) {
-                            scheduleTask(task, to: .upcoming, daysOffset: 7)
+                        reviewActionChip(
+                            icon: "calendar.badge.plus",
+                            tint: ThingsMacPalette.accentBlue,
+                            label: store.tr("macos_deadline_plus_7d"),
+                            isSelected: isPlus7Selected
+                        ) {
+                            scheduleTask(task, to: .upcoming, daysOffset: 7, actionLabel: store.tr("macos_deadline_plus_7d"))
                         }
                         Button {
                             store.toggleTaskCompletion(task)
+                            showReviewFeedback("\(displayTitle) → \(store.tr("action_complete"))")
                         } label: {
                             Image(systemName: "checkmark.circle")
-                                .font(.system(size: 13))
+                                .font(.system(size: 13.5))
+                                .padding(3)
+                                .contentShape(Circle())
                         }
                         .buttonStyle(.borderless)
                         .thingsTooltip(store.tr("action_complete"))
@@ -304,6 +377,7 @@ public struct WeeklyReviewSheetView: View {
                         } label: {
                             Text(project.title)
                                 .font(.system(size: 14, weight: .semibold))
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
 
@@ -337,11 +411,11 @@ public struct WeeklyReviewSheetView: View {
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 12.5))
                         .onSubmit {
-                            submitNextAction(for: project.id)
+                            submitNextAction(for: project.id, projectTitle: project.title)
                         }
 
                         Button(store.tr("macos_action_add")) {
-                            submitNextAction(for: project.id)
+                            submitNextAction(for: project.id, projectTitle: project.title)
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
@@ -349,11 +423,13 @@ public struct WeeklyReviewSheetView: View {
 
                         Button(store.tr("v2_mark_reviewed")) {
                             store.markProjectReviewed(project.id)
+                            showReviewFeedback("\(project.title) → \(store.tr("v2_mark_reviewed"))")
                         }
                         .controlSize(.small)
 
                         Button(store.tr("view_someday")) {
                             store.moveProjectToSomeday(project)
+                            showReviewFeedback("\(project.title) → \(store.tr("view_someday"))")
                         }
                         .controlSize(.small)
                     }
@@ -394,28 +470,39 @@ public struct WeeklyReviewSheetView: View {
             calmEmptyState(icon: "cloud.circle.fill", color: ThingsMacPalette.somedayAmber, message: store.tr("empty_view"))
         } else {
             ForEach(store.somedayTasks) { task in
+                let displayTitle = task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title
                 HStack(spacing: 10) {
                     ThingsCheckboxButton(
                         status: task.status,
                         isSomeday: true,
                         helpText: store.tr("macos_checkbox_help"),
-                        onToggleComplete: { store.toggleTaskCompletion(task) },
+                        onToggleComplete: {
+                            store.toggleTaskCompletion(task)
+                            showReviewFeedback("\(displayTitle) → \(store.tr("action_complete"))")
+                        },
                         onCancelTask: { store.cancelTask(task) }
                     )
 
-                    Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
-                        .font(.system(size: 13.5, weight: .medium))
-
-                    Spacer()
+                    Button {
+                        openTaskInWorkspace(task)
+                    } label: {
+                        Text(displayTitle)
+                            .font(.system(size: 13.5, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
 
                     reviewActionChip(icon: "sun.max.fill", tint: ThingsMacPalette.todayYellow, label: store.tr("view_today")) {
-                        scheduleTask(task, to: .today, daysOffset: 0)
+                        scheduleTask(task, to: .today, daysOffset: 0, actionLabel: store.tr("view_today"))
                     }
                     reviewActionChip(icon: "safari.fill", tint: ThingsMacPalette.anytimeTeal, label: store.tr("view_anytime")) {
-                        scheduleTask(task, to: .anytime, daysOffset: nil)
+                        scheduleTask(task, to: .anytime, daysOffset: nil, actionLabel: store.tr("view_anytime"))
                     }
                     Button(role: .destructive) {
                         store.deleteTask(task)
+                        showReviewFeedback("\(displayTitle) → \(store.tr("action_delete"))")
                     } label: {
                         Image(systemName: "trash")
                             .font(.system(size: 11.5))
@@ -475,23 +562,115 @@ public struct WeeklyReviewSheetView: View {
 
     // MARK: - Helpers
 
-    private func submitNextAction(for projectId: String) {
+    private func openTaskInWorkspace(_ task: TaskItem) {
+        if let pid = task.projectId {
+            store.selectedDestination = .project(pid)
+        } else if let aid = task.areaId {
+            store.selectedDestination = .area(aid)
+        } else {
+            switch task.scheduleState {
+            case .today, .thisEvening:
+                store.selectedDestination = .smartView(.today)
+            case .upcoming:
+                store.selectedDestination = .smartView(.upcoming)
+            case .someday:
+                store.selectedDestination = .smartView(.someday)
+            case .anytime:
+                store.selectedDestination = .smartView(.anytime)
+            case .inbox:
+                store.selectedDestination = .smartView(.inbox)
+            }
+        }
+        dismiss()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            store.selectedTaskIds = [task.id]
+            store.expandedTaskId = task.id
+        }
+    }
+
+    private func showReviewFeedback(_ message: String) {
+        feedbackDismissTask?.cancel()
+        withAnimation(.easeOut(duration: 0.15)) {
+            feedbackMessage = message
+        }
+        feedbackDismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_800_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.2)) {
+                if feedbackMessage == message {
+                    feedbackMessage = nil
+                }
+            }
+        }
+    }
+
+    private func submitNextAction(for projectId: String, projectTitle: String) {
         let raw = nextActionDrafts[projectId] ?? ""
         guard store.addNextActionToProject(projectId, title: raw) != nil else { return }
         nextActionDrafts[projectId] = ""
+        showReviewFeedback("\(projectTitle) → \(store.tr("view_today"))")
     }
 
-    private func scheduleTask(_ task: TaskItem, to state: ScheduleState, daysOffset: Int?) {
+    private func scheduleTask(_ task: TaskItem, to state: ScheduleState, daysOffset: Int?, actionLabel: String) {
         var copy = task
         copy.scheduleState = state
         if let daysOffset {
             let base = Calendar.current.startOfDay(for: Date())
             let target = Calendar.current.date(byAdding: .day, value: daysOffset, to: base) ?? base
-            copy.whenDate = DateEpochConverter.startOfDayMillis(for: target)
+            let targetMillis = DateEpochConverter.startOfDayMillis(for: target)
+            copy.whenDate = targetMillis
+            if daysOffset > 0, let existingDl = copy.deadline, existingDl < targetMillis {
+                copy.deadline = targetMillis
+            }
         } else {
             copy.whenDate = nil
         }
         store.updateTask(copy)
+        let displayTitle = task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title
+        showReviewFeedback("\(displayTitle) → \(actionLabel)")
+    }
+
+    @ViewBuilder
+    private func taskSchedulePill(_ task: TaskItem, todayDay: Int) -> some View {
+        let spec: (icon: String, text: String, tint: Color)? = {
+            switch task.scheduleState {
+            case .today:
+                return ("sun.max.fill", store.tr("view_today"), ThingsMacPalette.todayYellow)
+            case .thisEvening:
+                return ("moon.stars.fill", store.tr("view_this_evening"), ThingsMacPalette.eveningPurple)
+            case .upcoming:
+                if let whenMs = task.whenDate {
+                    let wDay = DateEpochConverter.epochDay(forMillis: whenMs)
+                    if wDay == todayDay + 1 {
+                        return ("sun.horizon.fill", store.tr("date_tomorrow"), ThingsMacPalette.upcomingRed)
+                    }
+                    let df = DateFormatter()
+                    df.locale = Locale(identifier: store.preferences.language.resolvedCode)
+                    df.setLocalizedDateFormatFromTemplate("dMMM")
+                    return ("calendar", df.string(from: DateEpochConverter.date(fromMillis: whenMs)), ThingsMacPalette.accentBlue)
+                }
+                return ("calendar", store.tr("view_upcoming"), ThingsMacPalette.accentBlue)
+            case .someday:
+                return ("cloud.fill", store.tr("view_someday"), ThingsMacPalette.somedayAmber)
+            case .anytime:
+                return ("safari.fill", store.tr("view_anytime"), ThingsMacPalette.anytimeTeal)
+            case .inbox:
+                return ("tray.fill", store.tr("view_inbox"), ThingsMacPalette.inboxBlue)
+            }
+        }()
+
+        if let spec {
+            HStack(spacing: 3.5) {
+                Image(systemName: spec.icon)
+                    .font(.system(size: 9))
+                Text(spec.text)
+                    .font(.system(size: 10.5, weight: .semibold))
+            }
+            .foregroundStyle(spec.tint)
+            .padding(.horizontal, 6.5)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(spec.tint.opacity(0.13)))
+        }
     }
 
     private func deadlinePill(_ dlMillis: Int64) -> some View {
@@ -529,22 +708,29 @@ public struct WeeklyReviewSheetView: View {
         icon: String,
         tint: Color,
         label: String,
+        isSelected: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 10, weight: .semibold))
+                Image(systemName: isSelected ? "checkmark" : icon)
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(tint)
                 Text(label)
-                    .font(.system(size: 11.5, weight: .medium))
+                    .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(isSelected ? tint : .primary)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 8.5)
+            .padding(.vertical, 4.5)
             .background(
                 Capsule(style: .continuous)
-                    .fill(Color.primary.opacity(0.06))
+                    .fill(isSelected ? tint.opacity(0.18) : Color.primary.opacity(0.06))
             )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(isSelected ? tint.opacity(0.55) : Color.clear, lineWidth: 1)
+            )
+            .contentShape(Capsule(style: .continuous))
         }
         .buttonStyle(.plain)
     }

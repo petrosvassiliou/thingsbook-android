@@ -791,6 +791,26 @@ class ThingsRepository @Inject constructor(
         syncRepository.triggerBackgroundSync()
     }
 
+    suspend fun updateTaskScheduleAndDeadline(
+        taskId: String,
+        newState: ScheduleState,
+        newWhenDate: Long?,
+        newDeadline: Long?
+    ) {
+        val existing = database.taskDao().getById(taskId) ?: return
+        val now = System.currentTimeMillis()
+        database.taskDao().upsert(
+            existing.copy(
+                scheduleState = newState,
+                whenDate = newWhenDate,
+                deadline = newDeadline,
+                updatedAt = now,
+                isDirty = true
+            )
+        )
+        syncRepository.triggerBackgroundSync()
+    }
+
     suspend fun updateTaskScheduleWithReminder(
         taskId: String,
         newState: ScheduleState,

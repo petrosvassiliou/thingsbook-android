@@ -59,6 +59,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -101,6 +102,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 @Composable
 fun ThingsCelebrationSnackbarBanner(
@@ -181,6 +183,8 @@ fun ThingsWeeklyReviewModal(
     lastWeeklyReviewAt: Long?,
     locale: Locale = Locale.getDefault(),
     onScheduleTask: (TaskItem, ScheduleState, Long?) -> Unit,
+    onScheduleTaskWithOptionalDeadline: ((TaskItem, ScheduleState, Long?, Long?) -> Unit)? = null,
+    onOpenTask: (TaskItem) -> Unit = {},
     onCompleteTask: (String) -> Unit,
     onDeleteTask: (String) -> Unit,
     onAddNextActionToProject: (projectId: String, title: String) -> Unit,
@@ -197,10 +201,50 @@ fun ThingsWeeklyReviewModal(
     val todayDate = remember { LocalDate.now(zone) }
     val todayStartMillis = remember(todayDate) { todayDate.atStartOfDay(zone).toInstant().toEpochMilli() }
     val tomorrowStartMillis = remember(todayDate) { todayDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() }
+    val plusSevenStartMillis = remember(todayDate) { todayDate.plusDays(7).atStartOfDay(zone).toInstant().toEpochMilli() }
     val threeDaysAheadEndMillis = remember(todayDate) { todayDate.plusDays(4).atStartOfDay(zone).toInstant().toEpochMilli() - 1L }
 
     var currentStep by remember(initialStep) { mutableIntStateOf(initialStep.coerceIn(0, 3)) }
     val nextActionDrafts = remember { mutableStateMapOf<String, String>() }
+    var reviewFeedback by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(reviewFeedback) {
+        if (reviewFeedback != null) {
+            delay(2800L)
+            reviewFeedback = null
+        }
+    }
+
+    val projectsById = remember(activeProjects) { activeProjects.associateBy { it.id } }
+    val plusSevenLabel = remember(locale) {
+        when (locale.language.lowercase(Locale.ROOT)) {
+            "de" -> "+7 T."
+            "fr" -> "+7 j"
+            "it" -> "+7 gg"
+            "es", "pt" -> "+7 d"
+            else -> "+7d"
+        }
+    }
+
+    val scheduleWithOptionalDeadlineShift: (TaskItem, ScheduleState, Long?, String) -> Unit = { task, targetState, targetWhenMillis, targetLabel ->
+        val updatedDeadline = if (
+            targetWhenMillis != null &&
+            targetWhenMillis > todayStartMillis &&
+            task.deadline != null &&
+            task.deadline < targetWhenMillis
+        ) {
+            targetWhenMillis
+        } else {
+            task.deadline
+        }
+        if (onScheduleTaskWithOptionalDeadline != null) {
+            onScheduleTaskWithOptionalDeadline(task, targetState, targetWhenMillis, updatedDeadline)
+        } else {
+            onScheduleTask(task, targetState, targetWhenMillis)
+        }
+        val titleText = task.title.trim().ifBlank { "Task" }
+        reviewFeedback = "$titleText → $targetLabel"
+    }
 
     val dueAndOverdueTasks = remember(todayTasks, upcomingTasks, anytimeTasks, inboxTasks, threeDaysAheadEndMillis) {
         (todayTasks + upcomingTasks + anytimeTasks + inboxTasks)
@@ -249,6 +293,15 @@ fun ThingsWeeklyReviewModal(
         somedayTasks.size + somedayProjects.size
     )
     val doneToastMsg = stringResource(R.string.v2_weekly_review_done_toast)
+    val todayLabel = stringResource(R.string.view_today)
+    val eveningLabel = stringResource(R.string.view_this_evening)
+    val tomorrowLabel = stringResource(R.string.date_tomorrow)
+    val somedayLabel = stringResource(R.string.view_someday)
+    val anytimeLabel = stringResource(R.string.view_anytime)
+    val completeLabel = stringResource(R.string.action_complete)
+    val deleteLabel = stringResource(R.string.action_delete)
+    val markReviewedLabel = stringResource(R.string.v2_mark_reviewed)
+    val untitledLabel = stringResource(R.string.placeholder_todo_title)
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -387,7 +440,37 @@ fun ThingsWeeklyReviewModal(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                AnimatedVisibility(visible = !reviewFeedback.isNullOrBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = colors.logbookGreen.copy(alpha = 0.14f),
+                        modifier = Modifier
+                            .padding(top = 8.dp)
+                            .border(1.dp, colors.logbookGreen.copy(alpha = 0.35f), RoundedCornerShape(999.dp))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Check,
+                                contentDescription = null,
+                                tint = colors.logbookGreen,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = reviewFeedback.orEmpty(),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.logbookGreen,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
                 HorizontalDivider(color = colors.hairlineDivider)
                 Spacer(modifier = Modifier.height(10.dp))
 
@@ -412,48 +495,61 @@ fun ThingsWeeklyReviewModal(
                                     contentPadding = PaddingValues(bottom = 8.dp)
                                 ) {
                                     items(inboxTasks, key = { it.id }) { task ->
+                                        val taskDisplayTitle = task.title.ifBlank { untitledLabel }
                                         Surface(
                                             shape = RoundedCornerShape(12.dp),
                                             color = colors.tagPillBg.copy(alpha = 0.55f),
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
                                             Column(modifier = Modifier.padding(12.dp)) {
-                                                Text(
-                                                    text = task.title.ifBlank { stringResource(R.string.placeholder_todo_title) },
-                                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                                    color = colors.primaryText
-                                                )
-                                                if (task.notes.isNotBlank()) {
+                                                Column(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(6.dp))
+                                                        .clickable {
+                                                            onDismiss()
+                                                            onOpenTask(task)
+                                                        }
+                                                ) {
                                                     Text(
-                                                        text = task.notes,
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = colors.secondaryText,
-                                                        maxLines = 2,
-                                                        overflow = TextOverflow.Ellipsis,
-                                                        modifier = Modifier.padding(top = 2.dp)
+                                                        text = taskDisplayTitle,
+                                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                                        color = colors.primaryText
                                                     )
+                                                    if (task.notes.isNotBlank()) {
+                                                        Text(
+                                                            text = task.notes,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = colors.secondaryText,
+                                                            maxLines = 2,
+                                                            overflow = TextOverflow.Ellipsis,
+                                                            modifier = Modifier.padding(top = 2.dp)
+                                                        )
+                                                    }
                                                 }
                                                 Spacer(modifier = Modifier.height(8.dp))
                                                 FlowRow(
                                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                                 ) {
-                                                    QuickReviewChip("⭐ ${stringResource(R.string.view_today)}", colors.thingsBlueSoft, colors.thingsBlue) {
-                                                        onScheduleTask(task, ScheduleState.TODAY, todayStartMillis)
+                                                    QuickReviewChip("☀️ $todayLabel", colors.thingsBlueSoft, colors.thingsBlue) {
+                                                        scheduleWithOptionalDeadlineShift(task, ScheduleState.TODAY, todayStartMillis, todayLabel)
                                                     }
-                                                    QuickReviewChip("🌙 ${stringResource(R.string.view_this_evening)}", colors.tagPillBg, colors.eveningMoonIndigo) {
-                                                        onScheduleTask(task, ScheduleState.THIS_EVENING, todayStartMillis)
+                                                    QuickReviewChip("🌙 $eveningLabel", colors.tagPillBg, colors.eveningMoonIndigo) {
+                                                        scheduleWithOptionalDeadlineShift(task, ScheduleState.THIS_EVENING, todayStartMillis, eveningLabel)
                                                     }
-                                                    QuickReviewChip("📅 ${stringResource(R.string.date_tomorrow)}", colors.tagPillBg, colors.upcomingCoralRed) {
-                                                        onScheduleTask(task, ScheduleState.UPCOMING, tomorrowStartMillis)
+                                                    QuickReviewChip("📅 $tomorrowLabel", colors.tagPillBg, colors.upcomingCoralRed) {
+                                                        scheduleWithOptionalDeadlineShift(task, ScheduleState.UPCOMING, tomorrowStartMillis, tomorrowLabel)
                                                     }
-                                                    QuickReviewChip("📦 ${stringResource(R.string.view_someday)}", colors.tagPillBg, colors.somedayWarmAmber) {
-                                                        onScheduleTask(task, ScheduleState.SOMEDAY, null)
+                                                    QuickReviewChip("☁️ $somedayLabel", colors.tagPillBg, colors.somedayWarmAmber) {
+                                                        scheduleWithOptionalDeadlineShift(task, ScheduleState.SOMEDAY, null, somedayLabel)
                                                     }
-                                                    QuickReviewChip("✓ ${stringResource(R.string.action_complete)}", colors.logbookGreen.copy(alpha = 0.16f), colors.logbookGreen) {
+                                                    QuickReviewChip("✓ $completeLabel", colors.logbookGreen.copy(alpha = 0.16f), colors.logbookGreen) {
+                                                        reviewFeedback = "$taskDisplayTitle → $completeLabel"
                                                         onCompleteTask(task.id)
                                                     }
-                                                    QuickReviewChip("🗑 ${stringResource(R.string.action_delete)}", colors.deadlineSoftBg, colors.deadlineUrgentRed) {
+                                                    QuickReviewChip("🗑 $deleteLabel", colors.deadlineSoftBg, colors.deadlineUrgentRed) {
+                                                        reviewFeedback = "$taskDisplayTitle → $deleteLabel"
                                                         onDeleteTask(task.id)
                                                     }
                                                 }
@@ -477,7 +573,40 @@ fun ThingsWeeklyReviewModal(
                                     contentPadding = PaddingValues(bottom = 8.dp)
                                 ) {
                                     items(dueAndOverdueTasks, key = { it.id }) { task ->
+                                        val taskDisplayTitle = task.title.ifBlank { untitledLabel }
                                         val isOverdue = task.deadline != null && task.deadline < todayStartMillis
+                                        val taskWhenDayStart = task.whenDate?.let { wd ->
+                                            runCatching {
+                                                Instant.ofEpochMilli(wd).atZone(zone).toLocalDate()
+                                                    .atStartOfDay(zone).toInstant().toEpochMilli()
+                                            }.getOrNull()
+                                        }
+                                        val isScheduledToday = task.scheduleState == ScheduleState.TODAY || task.scheduleState == ScheduleState.THIS_EVENING
+                                        val isScheduledTomorrow = task.scheduleState == ScheduleState.UPCOMING && taskWhenDayStart == tomorrowStartMillis
+                                        val isScheduledPlusSeven = task.scheduleState == ScheduleState.UPCOMING && taskWhenDayStart == plusSevenStartMillis
+                                        val isScheduledSomeday = task.scheduleState == ScheduleState.SOMEDAY
+
+                                        val (scheduleBadgeText, scheduleBadgeBg, scheduleBadgeFg) = when (task.scheduleState) {
+                                            ScheduleState.TODAY -> Triple("☀️ $todayLabel", colors.thingsBlueSoft, colors.thingsBlue)
+                                            ScheduleState.THIS_EVENING -> Triple("🌙 $eveningLabel", colors.eveningMoonIndigo.copy(alpha = 0.14f), colors.eveningMoonIndigo)
+                                            ScheduleState.UPCOMING -> {
+                                                val dateStr = if (taskWhenDayStart == tomorrowStartMillis) {
+                                                    tomorrowLabel
+                                                } else {
+                                                    task.whenDate?.let { wd ->
+                                                        runCatching {
+                                                            Instant.ofEpochMilli(wd).atZone(zone).toLocalDate()
+                                                                .format(DateTimeFormatter.ofPattern("d MMM", locale))
+                                                        }.getOrNull()
+                                                    } ?: stringResource(R.string.view_upcoming)
+                                                }
+                                                Triple("📅 $dateStr", colors.upcomingCoralRed.copy(alpha = 0.14f), colors.upcomingCoralRed)
+                                            }
+                                            ScheduleState.SOMEDAY -> Triple("☁️ $somedayLabel", colors.somedayWarmAmber.copy(alpha = 0.16f), colors.somedayWarmAmber)
+                                            else -> Triple("🧭 $anytimeLabel", colors.anytimeTeal.copy(alpha = 0.14f), colors.anytimeTeal)
+                                        }
+                                        val projectName = task.projectId?.let { projectsById[it]?.title }
+
                                         Surface(
                                             shape = RoundedCornerShape(12.dp),
                                             color = if (isOverdue) colors.deadlineSoftBg.copy(alpha = 0.7f) else colors.tagPillBg.copy(alpha = 0.55f),
@@ -485,16 +614,52 @@ fun ThingsWeeklyReviewModal(
                                         ) {
                                             Column(modifier = Modifier.padding(12.dp)) {
                                                 Row(
-                                                    modifier = Modifier.fillMaxWidth(),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(6.dp))
+                                                        .clickable {
+                                                            onDismiss()
+                                                            onOpenTask(task)
+                                                        },
                                                     verticalAlignment = Alignment.CenterVertically,
                                                     horizontalArrangement = Arrangement.SpaceBetween
                                                 ) {
-                                                    Text(
-                                                        text = task.title.ifBlank { stringResource(R.string.placeholder_todo_title) },
-                                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                                        color = colors.primaryText,
-                                                        modifier = Modifier.weight(1f)
-                                                    )
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(
+                                                            text = taskDisplayTitle,
+                                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                                            color = colors.primaryText
+                                                        )
+                                                        Row(
+                                                            modifier = Modifier.padding(top = 4.dp),
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                        ) {
+                                                            Surface(
+                                                                shape = RoundedCornerShape(999.dp),
+                                                                color = scheduleBadgeBg
+                                                            ) {
+                                                                Text(
+                                                                    text = scheduleBadgeText,
+                                                                    style = MaterialTheme.typography.labelSmall.copy(
+                                                                        fontSize = 10.sp,
+                                                                        fontWeight = FontWeight.SemiBold
+                                                                    ),
+                                                                    color = scheduleBadgeFg,
+                                                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                                                )
+                                                            }
+                                                            if (!projectName.isNullOrBlank()) {
+                                                                Text(
+                                                                    text = projectName,
+                                                                    style = MaterialTheme.typography.labelSmall,
+                                                                    color = colors.secondaryText,
+                                                                    maxLines = 1,
+                                                                    overflow = TextOverflow.Ellipsis
+                                                                )
+                                                            }
+                                                        }
+                                                    }
                                                     task.deadline?.let { dl ->
                                                         ThingsDeadlineBadge(deadlineEpochMillis = dl, locale = locale)
                                                     }
@@ -504,16 +669,40 @@ fun ThingsWeeklyReviewModal(
                                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                                 ) {
-                                                    QuickReviewChip("⭐ ${stringResource(R.string.view_today)}", colors.thingsBlueSoft, colors.thingsBlue) {
-                                                        onScheduleTask(task, ScheduleState.TODAY, todayStartMillis)
+                                                    QuickReviewChip(
+                                                        label = "☀️ $todayLabel",
+                                                        bg = if (isScheduledToday) colors.thingsBlue.copy(alpha = 0.22f) else colors.thingsBlueSoft,
+                                                        fg = colors.thingsBlue,
+                                                        isSelected = isScheduledToday
+                                                    ) {
+                                                        scheduleWithOptionalDeadlineShift(task, ScheduleState.TODAY, todayStartMillis, todayLabel)
                                                     }
-                                                    QuickReviewChip("📅 ${stringResource(R.string.date_tomorrow)}", colors.tagPillBg, colors.upcomingCoralRed) {
-                                                        onScheduleTask(task, ScheduleState.UPCOMING, tomorrowStartMillis)
+                                                    QuickReviewChip(
+                                                        label = "📅 $tomorrowLabel",
+                                                        bg = if (isScheduledTomorrow) colors.upcomingCoralRed.copy(alpha = 0.2f) else colors.tagPillBg,
+                                                        fg = colors.upcomingCoralRed,
+                                                        isSelected = isScheduledTomorrow
+                                                    ) {
+                                                        scheduleWithOptionalDeadlineShift(task, ScheduleState.UPCOMING, tomorrowStartMillis, tomorrowLabel)
                                                     }
-                                                    QuickReviewChip("📦 ${stringResource(R.string.view_someday)}", colors.tagPillBg, colors.somedayWarmAmber) {
-                                                        onScheduleTask(task, ScheduleState.SOMEDAY, null)
+                                                    QuickReviewChip(
+                                                        label = "📅 $plusSevenLabel",
+                                                        bg = if (isScheduledPlusSeven) colors.upcomingCoralRed.copy(alpha = 0.2f) else colors.tagPillBg,
+                                                        fg = colors.upcomingCoralRed,
+                                                        isSelected = isScheduledPlusSeven
+                                                    ) {
+                                                        scheduleWithOptionalDeadlineShift(task, ScheduleState.UPCOMING, plusSevenStartMillis, plusSevenLabel)
                                                     }
-                                                    QuickReviewChip("✓ ${stringResource(R.string.action_complete)}", colors.logbookGreen.copy(alpha = 0.16f), colors.logbookGreen) {
+                                                    QuickReviewChip(
+                                                        label = "☁️ $somedayLabel",
+                                                        bg = if (isScheduledSomeday) colors.somedayWarmAmber.copy(alpha = 0.22f) else colors.tagPillBg,
+                                                        fg = colors.somedayWarmAmber,
+                                                        isSelected = isScheduledSomeday
+                                                    ) {
+                                                        scheduleWithOptionalDeadlineShift(task, ScheduleState.SOMEDAY, null, somedayLabel)
+                                                    }
+                                                    QuickReviewChip("✓ $completeLabel", colors.logbookGreen.copy(alpha = 0.16f), colors.logbookGreen) {
+                                                        reviewFeedback = "$taskDisplayTitle → $completeLabel"
                                                         onCompleteTask(task.id)
                                                     }
                                                 }
@@ -658,6 +847,7 @@ fun ThingsWeeklyReviewModal(
                                                     if (clean.isNotEmpty()) {
                                                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                                         onAddNextActionToProject(proj.id, clean)
+                                                        reviewFeedback = "${proj.title} → +$clean"
                                                         nextActionDrafts[proj.id] = ""
                                                     }
                                                 }
@@ -707,17 +897,19 @@ fun ThingsWeeklyReviewModal(
                                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                                 ) {
                                                     QuickReviewChip(
-                                                        label = "✓ ${stringResource(R.string.v2_mark_reviewed)}",
+                                                        label = "✓ $markReviewedLabel",
                                                         bg = colors.thingsBlueSoft,
                                                         fg = colors.thingsBlue
                                                     ) {
+                                                        reviewFeedback = "${proj.title} → $markReviewedLabel"
                                                         onMarkProjectReviewed(proj.id)
                                                     }
                                                     QuickReviewChip(
-                                                        label = "📦 ${stringResource(R.string.view_someday)}",
+                                                        label = "☁️ $somedayLabel",
                                                         bg = colors.cardSurface,
                                                         fg = colors.somedayWarmAmber
                                                     ) {
+                                                        reviewFeedback = "${proj.title} → $somedayLabel"
                                                         onMoveProjectToSomeday(proj.id)
                                                     }
                                                 }
@@ -778,16 +970,23 @@ fun ThingsWeeklyReviewModal(
                                                 horizontalArrangement = Arrangement.SpaceBetween
                                             ) {
                                                 Text(
-                                                    text = "📦 ${proj.title}",
+                                                    text = "☁️ ${proj.title}",
                                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                                     color = colors.primaryText,
-                                                    modifier = Modifier.weight(1f)
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .clip(RoundedCornerShape(6.dp))
+                                                        .clickable {
+                                                            onDismiss()
+                                                            onOpenProject(proj.id)
+                                                        }
                                                 )
                                                 QuickReviewChip(
-                                                    label = "🗂 ${stringResource(R.string.view_anytime)}",
+                                                    label = "🧭 $anytimeLabel",
                                                     bg = colors.thingsBlueSoft,
                                                     fg = colors.thingsBlue
                                                 ) {
+                                                    reviewFeedback = "${proj.title} → $anytimeLabel"
                                                     onActivateSomedayProject(proj.id)
                                                 }
                                             }
@@ -796,6 +995,7 @@ fun ThingsWeeklyReviewModal(
                                 }
 
                                 items(somedayTasks, key = { "st_${it.id}" }) { task ->
+                                    val taskDisplayTitle = task.title.ifBlank { untitledLabel }
                                     Surface(
                                         shape = RoundedCornerShape(11.dp),
                                         color = colors.tagPillBg.copy(alpha = 0.55f),
@@ -809,27 +1009,33 @@ fun ThingsWeeklyReviewModal(
                                             horizontalArrangement = Arrangement.SpaceBetween
                                         ) {
                                             Text(
-                                                text = task.title.ifBlank { stringResource(R.string.placeholder_todo_title) },
+                                                text = taskDisplayTitle,
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 color = colors.primaryText,
                                                 maxLines = 2,
                                                 overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.weight(1f)
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .clickable {
+                                                        onDismiss()
+                                                        onOpenTask(task)
+                                                    }
                                             )
                                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                 QuickReviewChip(
-                                                    label = "⭐ ${stringResource(R.string.view_today)}",
+                                                    label = "☀️ $todayLabel",
                                                     bg = colors.thingsBlueSoft,
                                                     fg = colors.thingsBlue
                                                 ) {
-                                                    onScheduleTask(task, ScheduleState.TODAY, todayStartMillis)
+                                                    scheduleWithOptionalDeadlineShift(task, ScheduleState.TODAY, todayStartMillis, todayLabel)
                                                 }
                                                 QuickReviewChip(
-                                                    label = "🗂",
+                                                    label = "🧭",
                                                     bg = colors.cardSurface,
                                                     fg = colors.anytimeTeal
                                                 ) {
-                                                    onScheduleTask(task, ScheduleState.ANYTIME, null)
+                                                    scheduleWithOptionalDeadlineShift(task, ScheduleState.ANYTIME, null, anytimeLabel)
                                                 }
                                             }
                                         }
@@ -932,20 +1138,31 @@ private fun QuickReviewChip(
     label: String,
     bg: Color,
     fg: Color,
+    isSelected: Boolean = false,
     onClick: () -> Unit
 ) {
     val haptics = LocalHapticFeedback.current
     Surface(
         shape = RoundedCornerShape(8.dp),
         color = bg,
-        modifier = Modifier.clickable {
-            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            onClick()
-        }
+        modifier = Modifier
+            .then(
+                if (isSelected) {
+                    Modifier.border(1.dp, fg.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                } else {
+                    Modifier
+                }
+            )
+            .clickable {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            }
     ) {
         Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+            text = if (isSelected) "✓ $label" else label,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
+            ),
             color = fg,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
         )

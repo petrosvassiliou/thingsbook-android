@@ -4151,6 +4151,24 @@ export const App: React.FC = () => {
             setWeeklyReviewModal((prev) => ({ ...prev, open: false }));
             handleSelectNav({ kind: 'project', projectId });
           }}
+          onOpenTask={(task) => {
+            setWeeklyReviewModal((prev) => ({ ...prev, open: false }));
+            if (task.projectId) {
+              handleSelectNav({ kind: 'project', projectId: task.projectId }, task.id);
+            } else if (task.areaId) {
+              handleSelectNav({ kind: 'area', areaId: task.areaId }, task.id);
+            } else if (task.scheduleState === 'TODAY' || task.scheduleState === 'THIS_EVENING') {
+              handleSelectNav({ kind: 'smart', view: 'TODAY' }, task.id);
+            } else if (task.scheduleState === 'UPCOMING') {
+              handleSelectNav({ kind: 'smart', view: 'UPCOMING' }, task.id);
+            } else if (task.scheduleState === 'SOMEDAY') {
+              handleSelectNav({ kind: 'smart', view: 'SOMEDAY' }, task.id);
+            } else if (task.scheduleState === 'ANYTIME') {
+              handleSelectNav({ kind: 'smart', view: 'ANYTIME' }, task.id);
+            } else {
+              handleSelectNav({ kind: 'smart', view: 'INBOX' }, task.id);
+            }
+          }}
           onCompleteReview={() => {
             const now = Date.now();
             updatePrefs({ lastWeeklyReviewAt: now });

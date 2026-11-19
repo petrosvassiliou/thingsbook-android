@@ -146,15 +146,35 @@ class ThingsbookViewModel @Inject constructor(
     private val deviceCalendarRepository: DeviceCalendarRepository
 ) : ViewModel() {
 
+    private val _appLanguageTag = MutableStateFlow(
+        runCatching { AppCompatDelegate.getApplicationLocales().toLanguageTags().trim() }.getOrDefault("")
+    )
+    val appLanguageTag: StateFlow<String> = _appLanguageTag.asStateFlow()
+
+    @Volatile
+    private var lastInAppLanguageSwitchMs: Long = 0L
+
+    fun syncAppLanguageFromSystemIfIdle() {
+        if (android.os.SystemClock.elapsedRealtime() - lastInAppLanguageSwitchMs < 600L) return
+        val currentSysTag = runCatching {
+            AppCompatDelegate.getApplicationLocales().toLanguageTags().trim()
+        }.getOrDefault("")
+        if (_appLanguageTag.value != currentSysTag) {
+            _appLanguageTag.value = currentSysTag
+        }
+    }
+
     private fun getLocalizedString(@StringRes resId: Int, vararg args: Any): String {
-        val localizedCtx = runCatching { ContextCompat.getContextForLanguage(appContext) }.getOrDefault(appContext)
+        val localizedCtx = com.pv.thingsbook.ui.theme.createLocalizedContextForTag(
+            appContext,
+            _appLanguageTag.value
+        )
         return localizedCtx.getString(resId, *args)
     }
 
     private fun activeLangCode(): String {
-        val localizedCtx = runCatching { ContextCompat.getContextForLanguage(appContext) }.getOrDefault(appContext)
-        val lang = runCatching { localizedCtx.resources.configuration.locales[0]?.language }.getOrNull()
-        return (lang?.takeIf { it.isNotBlank() } ?: Locale.getDefault().language)
+        val lang = com.pv.thingsbook.ui.theme.resolveEffectiveAppLocale(_appLanguageTag.value).language
+        return (lang.takeIf { it.isNotBlank() } ?: Locale.getDefault().language)
             .lowercase(Locale.ROOT)
             .take(2)
     }
@@ -563,10 +583,14 @@ class ThingsbookViewModel @Inject constructor(
      */
     fun switchAppLanguage(languageTag: String) {
         runCatching {
-            val localeList = if (languageTag.isBlank()) {
+            val normalized = languageTag.trim()
+            lastInAppLanguageSwitchMs = android.os.SystemClock.elapsedRealtime()
+            _appLanguageTag.value = normalized
+            Locale.setDefault(com.pv.thingsbook.ui.theme.resolveEffectiveAppLocale(normalized))
+            val localeList = if (normalized.isBlank()) {
                 LocaleListCompat.getEmptyLocaleList()
             } else {
-                LocaleListCompat.forLanguageTags(languageTag)
+                LocaleListCompat.forLanguageTags(normalized)
             }
             AppCompatDelegate.setApplicationLocales(localeList)
             com.pv.thingsbook.ui.widget.ThingsbookWidgetProvider.refreshAllWidgets(appContext)
@@ -2078,7 +2102,7 @@ class ThingsbookViewModel @Inject constructor(
 
     private fun currentBackupPreferencesSnapshot(): BackupPreferencesDto {
         val digest = runCatching { reminderScheduler.getDailyDigestConfig() }.getOrNull()
-        val langTag = runCatching { AppCompatDelegate.getApplicationLocales().toLanguageTags() }.getOrDefault("")
+        val langTag = _appLanguageTag.value
         return BackupPreferencesDto(
             sidebarVisible = _isSidebarVisible.value,
             dailyDigestEnabled = digest?.enabled,

@@ -377,60 +377,62 @@ fun ThingsTooltipHostBox(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    if (LocalThingsTooltipHostState.current != null) {
-        if (modifier === Modifier) {
-            content()
-        } else {
-            Box(modifier = modifier) {
+    com.pv.thingsbook.ui.theme.ApplyInheritedLiveAppLocaleIfNeeded {
+        if (LocalThingsTooltipHostState.current != null) {
+            if (modifier === Modifier) {
                 content()
+            } else {
+                Box(modifier = modifier) {
+                    content()
+                }
+            }
+            return@ApplyInheritedLiveAppLocaleIfNeeded
+        }
+
+        val hostState = remember { ThingsTooltipHostState() }
+        var hostSize by remember { mutableStateOf(IntSize.Zero) }
+        var rootOffsetInWindow by remember { mutableStateOf(IntRect.Zero) }
+        val hasReleasedTouch = hostState.releasedTouchTick > 0 && hostState.hasReleasedTouchPreview()
+
+        // Auto-expire post-release touch tooltips after 1.8s so they stay readable once finger lifts
+        LaunchedEffect(hostState.releasedTouchTick) {
+            if (hostState.hasReleasedTouchPreview()) {
+                delay(TooltipTimingPolicy.DEFAULT_TOUCH_RELEASE_HIDE_MS)
+                hostState.dismissReleasedTouchPreviews()
             }
         }
-        return
-    }
 
-    val hostState = remember { ThingsTooltipHostState() }
-    var hostSize by remember { mutableStateOf(IntSize.Zero) }
-    var rootOffsetInWindow by remember { mutableStateOf(IntRect.Zero) }
-    val hasReleasedTouch = hostState.releasedTouchTick > 0 && hostState.hasReleasedTouchPreview()
-
-    // Auto-expire post-release touch tooltips after 1.8s so they stay readable once finger lifts
-    LaunchedEffect(hostState.releasedTouchTick) {
-        if (hostState.hasReleasedTouchPreview()) {
-            delay(TooltipTimingPolicy.DEFAULT_TOUCH_RELEASE_HIDE_MS)
-            hostState.dismissReleasedTouchPreviews()
-        }
-    }
-
-    CompositionLocalProvider(LocalThingsTooltipHostState provides hostState) {
-        Box(
-            modifier = modifier
-                .onSizeChanged { hostSize = it }
-                .onGloballyPositioned { coords ->
-                    rootOffsetInWindow = coords.boundsInRoot().roundToIntRect()
-                }
-                .then(
-                    if (hasReleasedTouch) {
-                        Modifier.pointerInput(hostState) {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    val ev = awaitPointerEvent(PointerEventPass.Initial)
-                                    if (ev.type == PointerEventType.Press || ev.type == PointerEventType.Scroll) {
-                                        hostState.dismissReleasedTouchPreviews()
+        CompositionLocalProvider(LocalThingsTooltipHostState provides hostState) {
+            Box(
+                modifier = modifier
+                    .onSizeChanged { hostSize = it }
+                    .onGloballyPositioned { coords ->
+                        rootOffsetInWindow = coords.boundsInRoot().roundToIntRect()
+                    }
+                    .then(
+                        if (hasReleasedTouch) {
+                            Modifier.pointerInput(hostState) {
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                        if (ev.type == PointerEventType.Press || ev.type == PointerEventType.Scroll) {
+                                            hostState.dismissReleasedTouchPreviews()
+                                        }
                                     }
                                 }
                             }
+                        } else {
+                            Modifier
                         }
-                    } else {
-                        Modifier
-                    }
+                    )
+            ) {
+                content()
+                ThingsTooltipOverlayLayer(
+                    hostState = hostState,
+                    hostSize = hostSize,
+                    hostBoundsInRoot = rootOffsetInWindow
                 )
-        ) {
-            content()
-            ThingsTooltipOverlayLayer(
-                hostState = hostState,
-                hostSize = hostSize,
-                hostBoundsInRoot = rootOffsetInWindow
-            )
+            }
         }
     }
 }

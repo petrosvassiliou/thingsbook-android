@@ -761,9 +761,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(84, BuildConfig.VERSION_CODE)
-        assertEquals("3.0.0-alpha.9", BuildConfig.VERSION_NAME)
-        assertTrue("3.0.0-alpha.9 pre-release contains -alpha", BuildConfig.VERSION_NAME.contains("-alpha"))
+        assertEquals(86, BuildConfig.VERSION_CODE)
+        assertEquals("3.0.0-alpha.10", BuildConfig.VERSION_NAME)
+        assertTrue("3.0.0-alpha.10 pre-release contains -alpha", BuildConfig.VERSION_NAME.contains("-alpha"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -2083,5 +2083,25 @@ class V2UpgradeAndFeaturesTest {
         val macDomainSwift = File(repoRoot, "macos/Sources/ThingsbookCore/Domain/DomainModels.swift").readText()
         assertTrue(macDomainSwift.contains("public let showGeminiLabel: Bool"))
         assertTrue(macDomainSwift.contains("max(446.0, rawUsable)"))
+    }
+
+    @Test
+    fun `v3_0_0_alpha_10 Android switches app language live in place without Activity recreation or screen flash`() {
+        val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
+        val manifestXml = File(appSrcMain, "AndroidManifest.xml").readText()
+        assertTrue(
+            "MainActivity must declare locale|layoutDirection in android:configChanges to prevent Activity recreation flash",
+            manifestXml.contains("locale|layoutDirection")
+        )
+
+        val mainActivityKt = File(appSrcMain, "java/com/pv/thingsbook/MainActivity.kt").readText()
+        assertTrue(mainActivityKt.contains("ProvideLiveAppLocale("))
+        assertTrue(mainActivityKt.contains("override fun onConfigurationChanged("))
+
+        val tooltipKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ThingsTooltip.kt").readText()
+        assertTrue(tooltipKt.contains("ApplyInheritedLiveAppLocaleIfNeeded"))
+
+        val settingsKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ThingsSettingsModal.kt").readText()
+        assertTrue(settingsKt.contains("LocalLiveAppLocaleOverride.current?.languageTag"))
     }
 }

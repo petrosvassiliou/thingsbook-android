@@ -268,7 +268,7 @@ fun ThingsSmartViewScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.onAppResumed()
             } else if (event == Lifecycle.Event.ON_STOP) {
-                if ((appCtx as? android.app.Activity)?.isChangingConfigurations != true) {
+                if (com.pv.thingsbook.ui.components.findHostActivity(appCtx)?.isChangingConfigurations != true) {
                     viewModel.onAppStopped()
                 }
             }
@@ -546,7 +546,7 @@ fun ThingsSmartViewScreen(
     }
 
     DisposableEffect(context) {
-        val activity = context as? MainActivity
+        val activity = com.pv.thingsbook.ui.components.findHostActivity(context) as? MainActivity
         val delegate: (android.view.KeyEvent) -> Boolean = { ev -> currentHardwareShortcutHandler(ev) }
         activity?.hardwareKeyShortcutHandler = delegate
         onDispose {
@@ -3731,30 +3731,32 @@ private fun TopThingsbookBar(
                         expanded = showLanguageMenu,
                         onDismissRequest = { onToggleLanguageMenu(false) }
                     ) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.settings_system_default)) },
-                            onClick = { onSelectLanguage("") }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("🇬🇧 " + stringResource(R.string.lang_en)) },
-                            onClick = { onSelectLanguage("en") }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("🇩🇪 " + stringResource(R.string.lang_de)) },
-                            onClick = { onSelectLanguage("de") }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("🇮🇹 " + stringResource(R.string.lang_it)) },
-                            onClick = { onSelectLanguage("it") }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("🇫🇷 " + stringResource(R.string.lang_fr)) },
-                            onClick = { onSelectLanguage("fr") }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("🇪🇸 " + stringResource(R.string.lang_es)) },
-                            onClick = { onSelectLanguage("es") }
-                        )
+                        com.pv.thingsbook.ui.theme.ApplyInheritedLiveAppLocaleIfNeeded {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.settings_system_default)) },
+                                onClick = { onSelectLanguage("") }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("🇬🇧 " + stringResource(R.string.lang_en)) },
+                                onClick = { onSelectLanguage("en") }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("🇩🇪 " + stringResource(R.string.lang_de)) },
+                                onClick = { onSelectLanguage("de") }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("🇮🇹 " + stringResource(R.string.lang_it)) },
+                                onClick = { onSelectLanguage("it") }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("🇫🇷 " + stringResource(R.string.lang_fr)) },
+                                onClick = { onSelectLanguage("fr") }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("🇪🇸 " + stringResource(R.string.lang_es)) },
+                                onClick = { onSelectLanguage("es") }
+                            )
+                        }
                     }
                 }
             }

@@ -242,6 +242,8 @@ test('v2.0.0-beta.20 topbarTooltip* labels are concise, localized across all 5 l
     assert.ok(TRANSLATIONS[lang].tagsFilterPlaceholder.trim().length > 0);
     assert.ok(TRANSLATIONS[lang].tagsNoFilterMatches.trim().length > 0);
     assert.ok(TRANSLATIONS[lang].tagsCreateFromSearch('Focus').includes('Focus'));
+    assert.ok(!/\b[23]\.0\b/.test(TRANSLATIONS[lang].settingsIncludeBetaTitle));
+    assert.ok(!/\b[23]\.0\b/.test(TRANSLATIONS[lang].settingsIncludeBetaDesc));
   }
 });
 

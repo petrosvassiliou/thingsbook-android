@@ -238,6 +238,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.activity.result.PickVisualMediaRequest
 import com.pv.thingsbook.domain.model.TaskAttachment
 import com.pv.thingsbook.ui.components.TaskAttachmentsStrip
+import com.pv.thingsbook.ui.components.findHostActivity
 import com.pv.thingsbook.ui.components.processCapturedPhotoBitmap
 import com.pv.thingsbook.ui.components.processPickedAttachmentUri
 import kotlinx.coroutines.launch
@@ -268,7 +269,7 @@ fun ThingsSmartViewScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.onAppResumed()
             } else if (event == Lifecycle.Event.ON_STOP) {
-                if (com.pv.thingsbook.ui.components.findHostActivity(appCtx)?.isChangingConfigurations != true) {
+                if (appCtx.findHostActivity()?.isChangingConfigurations != true) {
                     viewModel.onAppStopped()
                 }
             }
@@ -546,7 +547,7 @@ fun ThingsSmartViewScreen(
     }
 
     DisposableEffect(context) {
-        val activity = com.pv.thingsbook.ui.components.findHostActivity(context) as? MainActivity
+        val activity = context.findHostActivity() as? MainActivity
         val delegate: (android.view.KeyEvent) -> Boolean = { ev -> currentHardwareShortcutHandler(ev) }
         activity?.hardwareKeyShortcutHandler = delegate
         onDispose {

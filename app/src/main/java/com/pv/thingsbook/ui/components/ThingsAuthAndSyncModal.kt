@@ -64,8 +64,6 @@ internal tailrec fun Context.findHostActivity(): Activity? = when (this) {
     else -> null
 }
 
-internal fun findHostActivity(context: Context): Activity? = context.findHostActivity()
-
 @Composable
 fun ThingsAuthAndSyncModal(
     syncStatus: CloudSyncStatus,

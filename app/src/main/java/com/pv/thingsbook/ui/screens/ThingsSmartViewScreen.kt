@@ -2289,7 +2289,7 @@ private fun ThingsMainTaskLazyList(
                     val endMillis = heading.endDate ?: return@mapNotNull null
                     val project = activeProjectById[heading.projectId] ?: return@mapNotNull null
                     val filterTag = selectedFilterTagId
-                    if (filterTag != null && project.tags.none { it.id == filterTag }) return@mapNotNull null
+                    if (filterTag != null && filterTag !in project.tagIds) return@mapNotNull null
                     val endLocalDate = runCatching {
                         Instant.ofEpochMilli(endMillis).atZone(zone).toLocalDate()
                     }.getOrNull() ?: return@mapNotNull null

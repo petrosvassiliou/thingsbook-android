@@ -3080,7 +3080,7 @@ final class ThingsbookCoreTests: XCTestCase {
         let milestoneMs: Int64 = DateEpochConverter.startOfDayMillis(
             for: Calendar.current.date(byAdding: .day, value: 5, to: Date()) ?? Date()
         )
-        try db.setHeadingEndDate(headingId: phase.id, endDate: milestoneMs)
+        try db.updateHeadingEndDate(phase.id, endDate: milestoneMs)
 
         var snap = try db.loadWorkspaceSnapshot()
         let updatedPhase = try XCTUnwrap(snap.headingsByProject[proj.id]?.first(where: { $0.id == phase.id }))

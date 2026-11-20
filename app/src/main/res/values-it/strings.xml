@@ -574,4 +574,8 @@
     <string name="v30_external_select_project">Progetto da esportare</string>
     <string name="v30_external_no_projects">Nessun progetto attivo disponibile per l\'esportazione.</string>
     <string name="v30_external_export_success">\"%1$s\" esportato</string>
+    <string name="v30_timeline_fullscreen">Schermo intero</string>
+    <string name="v30_timeline_exit_fullscreen">Esci da schermo intero</string>
+    <string name="v30_quick_edit_action">Modifica rapida</string>
+    <string name="v30_open_details_action">Apri dettagli</string>
 </resources>

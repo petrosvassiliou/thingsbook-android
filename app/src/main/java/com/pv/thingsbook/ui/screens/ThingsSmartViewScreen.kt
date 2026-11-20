@@ -21,7 +21,6 @@ import com.pv.thingsbook.ui.components.ProjectTaskDragHandle
 import com.pv.thingsbook.ui.components.ProjectWorkspaceSegmentedSwitcher
 import com.pv.thingsbook.ui.components.ProjectDropIndicatorOverlay
 import com.pv.thingsbook.ui.components.ProjectDragAutoScrollEffect
-import com.pv.thingsbook.ui.components.RoadmapExportMenuPill
 import com.pv.thingsbook.ui.components.RoadmapExporter
 import com.pv.thingsbook.ui.components.RoadmapPdfExportDialog
 import com.pv.thingsbook.ui.components.WorkspaceDragDropDestination
@@ -49,6 +48,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -66,11 +66,15 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
@@ -93,6 +97,7 @@ import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.CloseFullscreen
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.CloudSync
@@ -107,7 +112,9 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.NotificationsActive
+import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Search
@@ -149,6 +156,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -280,6 +288,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.TreeSet
 
+@OptIn(ExperimentalAnimationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun ThingsSmartViewScreen(
     viewModel: ThingsbookViewModel,
@@ -349,6 +358,7 @@ fun ThingsSmartViewScreen(
     val undoSnackbarMessage by viewModel.undoSnackbarMessage.collectAsState()
     val celebrationToastMessage by viewModel.celebrationToastMessage.collectAsState()
     val isTodayTimelineMode by viewModel.isTodayTimelineMode.collectAsState()
+    val isTimelineFullScreen by viewModel.isTimelineFullScreen.collectAsState()
     val focusTimerState by viewModel.focusTimerState.collectAsState()
     val biometricAppLockEnabled by viewModel.biometricAppLockEnabled.collectAsState()
     val isAppUnlocked by viewModel.isAppUnlocked.collectAsState()
@@ -495,18 +505,31 @@ fun ThingsSmartViewScreen(
     }
 
     // Adaptive Layout Detection: Tablets & Foldables (>= 700dp) vs. Android Phones (< 700dp)
+    val isTodayTimelineActive = navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) &&
+        isTodayTimelineMode &&
+        !isQuickFindOpen
+    val isProjectRoadmapActive = isProjectView &&
+        currentProject != null &&
+        currentProjectWorkspaceMode == ProjectWorkspaceMode.ROADMAP &&
+        !isQuickFindOpen
+    val isEffectiveTimelineFullScreen = isTimelineFullScreen && (isTodayTimelineActive || isProjectRoadmapActive)
+
     val isWideScreen = configuration.screenWidthDp >= 700
-    val showSidebar = isWideScreen && isSidebarVisible
+    val showSidebar = isWideScreen && isSidebarVisible && !isEffectiveTimelineFullScreen
     var isMobileDrawerOpen by remember { mutableStateOf(false) }
 
-    LaunchedEffect(isWideScreen) {
-        if (isWideScreen && isMobileDrawerOpen) {
+    LaunchedEffect(isWideScreen, isEffectiveTimelineFullScreen) {
+        if ((isWideScreen || isEffectiveTimelineFullScreen) && isMobileDrawerOpen) {
             isMobileDrawerOpen = false
         }
     }
 
     BackHandler(enabled = !isWideScreen && isMobileDrawerOpen) {
         isMobileDrawerOpen = false
+    }
+
+    BackHandler(enabled = isEffectiveTimelineFullScreen && expandedTaskId == null && !isMobileDrawerOpen) {
+        viewModel.setTimelineFullScreen(false)
     }
 
     val upcomingPhaseMilestoneCount = remember(allHeadingsTop, activeProjects, currentEpochDayTop) {
@@ -898,6 +921,7 @@ fun ThingsSmartViewScreen(
                         showPerspectiveEditorDialog = true
                     },
                     onOpenAreaManager = { viewModel.setAreaManagerOpen(true) },
+                    onOpenTagManager = { viewModel.setTagManagerOpen(true) },
                     onCreateNewProject = { areaId ->
                         projectDialogPreselectedAreaId = areaId
                         editingProject = null
@@ -932,6 +956,7 @@ fun ThingsSmartViewScreen(
                         )
                         .widthIn(
                             max = when {
+                                isEffectiveTimelineFullScreen -> 4000.dp
                                 isExpandedProjectWorkspace -> 2400.dp
                                 isWideScreen -> 1040.dp
                                 else -> 2000.dp
@@ -939,17 +964,19 @@ fun ThingsSmartViewScreen(
                         )
                         .fillMaxSize()
                 ) {
-                    ThingsTopHeaderAndQuickFindSection(
-                        viewModel = viewModel,
-                        isWideScreen = isWideScreen,
-                        isSidebarVisible = isSidebarVisible,
-                        isMobileDrawerOpen = isMobileDrawerOpen,
-                        onToggleMobileDrawer = { isMobileDrawerOpen = !isMobileDrawerOpen },
-                        isQuickFindOpen = isQuickFindOpen,
-                        areas = areas,
-                        activeProjects = activeProjects,
-                        activeLocale = activeLocale
-                    )
+                    if (!isEffectiveTimelineFullScreen) {
+                        ThingsTopHeaderAndQuickFindSection(
+                            viewModel = viewModel,
+                            isWideScreen = isWideScreen,
+                            isSidebarVisible = isSidebarVisible,
+                            isMobileDrawerOpen = isMobileDrawerOpen,
+                            onToggleMobileDrawer = { isMobileDrawerOpen = !isMobileDrawerOpen },
+                            isQuickFindOpen = isQuickFindOpen,
+                            areas = areas,
+                            activeProjects = activeProjects,
+                            activeLocale = activeLocale
+                        )
+                    }
 
                     focusTimerState?.let { timerState ->
                         ThingsFocusTimerBanner(
@@ -962,185 +989,234 @@ fun ThingsSmartViewScreen(
                         )
                     }
 
-                    // On Foldables & Googlebook (>= 700dp), show horizontal strip when the permanent sidebar is collapsed
-                    if (isWideScreen && !showSidebar) {
-                        SmartViewNavigationStrip(
-                            navTarget = navTarget,
-                            areas = areas,
-                            projects = activeProjects,
-                            savedPerspectives = savedPerspectives,
-                            dragController = projectDragController,
-                            onSelectSmartView = { viewModel.selectSmartView(it) },
-                            onSelectArea = { viewModel.selectArea(it) },
-                            onSelectProject = { viewModel.selectProject(it) },
-                            onSelectPerspective = { viewModel.selectPerspective(it) },
-                            onCreateNewPerspective = {
-                                editingPerspective = null
-                                showPerspectiveEditorDialog = true
-                            },
-                            onOpenAreaManager = { viewModel.setAreaManagerOpen(true) },
-                            onCreateNewProject = {
-                                projectDialogPreselectedAreaId = currentArea?.id
-                                editingProject = null
-                                showCreateProjectDialog = true
-                            },
-                            onOpenWeeklyReview = { viewModel.openWeeklyReviewModal() },
-                            onOpenTemplatesAndImport = {
-                                viewModel.openTemplatesModal(
-                                    initialTab = 0,
-                                    defaultAreaId = currentArea?.id ?: currentProject?.areaId
-                                )
-                            }
-                        )
-                    }
+                    if (isEffectiveTimelineFullScreen && isTodayTimelineActive) {
+                        // Compact Full Screen Today Timeline Header Bar
+                        val plannedFmt = formatDurationCompact(todayCapacitySummary.first) ?: "${todayCapacitySummary.first}m"
+                        val freeFmt = formatDurationCompact(todayCapacitySummary.second) ?: "0m"
+                        val exitFsLabel = stringResource(R.string.v30_timeline_exit_fullscreen)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            FlowRow(
+                                modifier = Modifier.weight(1f),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.padding(vertical = 3.dp)
+                                ) {
+                                    SmartViewIcon(
+                                        viewType = SmartViewType.TODAY,
+                                        modifier = Modifier.size(20.dp),
+                                        isSelected = true
+                                    )
+                                    Text(
+                                        text = stringResource(SmartViewType.TODAY.titleRes),
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = colors.primaryText,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
 
-                    var showTopRoadmapPdfDialog by remember { mutableStateOf(false) }
-
-                    // View Title Header (Smart View, Project with 3-Mode Workspace Switcher & Target Date, Area, or Custom Perspective)
-                    ViewTitleHeader(
-                        navTarget = navTarget,
-                        currentProject = currentProject,
-                        projectWorkspaceMode = currentProjectWorkspaceMode,
-                        onSelectProjectWorkspaceMode = { nextMode ->
-                            currentProject?.let { proj -> viewModel.updateProjectViewMode(proj.id, nextMode) }
-                        },
-                        onExportProjectRoadmap = { asPdf ->
-                            val proj = currentProject ?: return@ViewTitleHeader
-                            if (asPdf) {
-                                showTopRoadmapPdfDialog = true
-                            } else {
-                                topCoroutineScope.launch {
-                                    runCatching {
-                                        val roadmapLayout = ProjectRoadmapEngine.buildRoadmapLayout(
-                                            project = proj,
-                                            headings = projectHeadings,
-                                            tasks = primaryTasks,
-                                            todayEpochDay = currentEpochDayTop,
-                                            zoneId = zoneTop
-                                        )
-                                        RoadmapExporter.exportAndShareRoadmap(
-                                            context = appCtx,
-                                            layout = roadmapLayout,
-                                            headingCounts = headingTaskCountsTop,
-                                            locale = activeLocale,
-                                            isDark = colors.isDark,
-                                            asPdf = false,
-                                            exportChooserTitle = exportRoadmapChooserTitle
-                                        )
-                                    }.onFailure { err ->
-                                        viewModel.showUiMessage(err.localizedMessage ?: err.message ?: "Export failed")
+                                if (todayCapacitySummary.first > 0) {
+                                    val capacityText = if (calendarEventsEnabledTop) {
+                                        stringResource(R.string.v30_today_capacity_summary, plannedFmt, freeFmt)
+                                    } else {
+                                        stringResource(R.string.v30_today_planned_only, plannedFmt)
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = colors.thingsBlueSoft,
+                                        border = BorderStroke(0.75.dp, colors.thingsBlue.copy(alpha = 0.35f))
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Schedule,
+                                                contentDescription = null,
+                                                tint = colors.thingsBlue,
+                                                modifier = Modifier.size(13.5.dp)
+                                            )
+                                            Text(
+                                                text = capacityText,
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                                color = colors.thingsBlue,
+                                                maxLines = 1
+                                            )
+                                        }
                                     }
                                 }
                             }
-                        },
-                        currentArea = currentArea,
-                        currentPerspective = currentPerspective,
-                        areas = areas,
-                        projects = activeProjects,
-                        projectAttachments = projectAttachments,
-                        locale = activeLocale,
-                        trashItemCount = deletedTasks.size + deletedProjects.size,
-                        isTodayTimelineMode = isTodayTimelineMode,
-                        onToggleTodayTimelineMode = { viewModel.setTodayTimelineMode(it) },
-                        todayPlannedMinutes = todayCapacitySummary.first,
-                        todayFreeMinutes = todayCapacitySummary.second,
-                        calendarEventsEnabled = calendarEventsEnabledTop,
-                        viewSortMode = viewSortMode,
-                        onSelectViewSortMode = { viewModel.setViewSortMode(it) },
-                        onEditPerspective = { persp ->
-                            editingPerspective = persp
-                            showPerspectiveEditorDialog = true
-                        },
-                        onDeletePerspective = { pId ->
-                            viewModel.deletePerspective(pId)
-                        },
-                        onSaveProjectAsTemplate = { pId, toastMsg ->
-                            viewModel.saveProjectAsTemplate(pId, toastMsg)
-                        },
-                        onOpenExternalImportExport = { areaId ->
-                            viewModel.openTemplatesModal(initialTab = 2, defaultAreaId = areaId)
-                        },
-                        onOpenStalledProjectReview = {
-                            viewModel.openWeeklyReviewModal(initialStep = 2)
-                        },
-                        onMarkProjectReviewed = { pId ->
-                            viewModel.markProjectReviewed(pId)
-                        },
-                        onUpdateProjectDeadline = { pId, dl -> viewModel.updateProjectDeadline(pId, dl) },
-                        onUpdateProjectArea = { pId, aId -> viewModel.updateProjectArea(pId, aId) },
-                        onEditProject = { proj ->
-                            editingProject = proj
-                            showCreateProjectDialog = true
-                        },
-                        onDuplicateProject = { pId -> viewModel.duplicateProject(pId) },
-                        onCompleteProject = { pId -> viewModel.completeProject(pId) },
-                        onMoveProject = { pId, up -> viewModel.moveProject(pId, up) },
-                        onDeleteProject = { pId -> viewModel.deleteProject(pId) },
-                        onAddProjectAttachment = { pId, fName, mime, bytes ->
-                            viewModel.addProjectAttachment(pId, fName, mime, bytes)
-                        },
-                        onDeleteProjectAttachment = { attId -> viewModel.deleteAttachment(attId) },
-                        onShowMessage = { msg -> viewModel.showUiMessage(msg) },
-                        onRequestEmptyTrash = { showEmptyTrashConfirmDialog = true },
-                        onAddTaskInCurrentView = {
-                            viewModel.createTaskAtPosition(primaryTasks, 0, "")
-                        },
-                        onAddHeadingInProject = {
-                            viewModel.createHeadingInCurrentProject(projectHeadings.size, "")
-                        },
-                        onRenameArea = { aId, newName -> viewModel.renameArea(aId, newName) },
-                        onMoveArea = { aId, up -> viewModel.moveArea(aId, up) },
-                        onDeleteArea = { aId -> viewModel.deleteArea(aId) }
-                    )
 
-                    if (showTopRoadmapPdfDialog && currentProject != null) {
-                        val topPdfLayout = remember(currentProject, projectHeadings, primaryTasks, currentEpochDayTop, zoneTop) {
-                            ProjectRoadmapEngine.buildRoadmapLayout(
-                                project = currentProject,
-                                headings = projectHeadings,
-                                tasks = primaryTasks,
-                                todayEpochDay = currentEpochDayTop,
-                                zoneId = zoneTop
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                ThingsTodayModeSegmentedToggle(
+                                    isTimelineMode = isTodayTimelineMode,
+                                    onModeChange = { viewModel.setTodayTimelineMode(it) }
+                                )
+                                ThingsHoverTooltip(text = exitFsLabel) {
+                                    Surface(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .clickable {
+                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                viewModel.setTimelineFullScreen(false)
+                                            },
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = colors.thingsBlueSoft,
+                                        border = BorderStroke(0.75.dp, colors.thingsBlue.copy(alpha = 0.45f))
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.CloseFullscreen,
+                                                contentDescription = exitFsLabel,
+                                                tint = colors.thingsBlue,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                            Text(
+                                                text = exitFsLabel,
+                                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                                color = colors.thingsBlue,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
+                    }
+
+                    if (!isEffectiveTimelineFullScreen) {
+                        // On Foldables & Googlebook (>= 700dp), show horizontal strip when the permanent sidebar is collapsed
+                        if (isWideScreen && !showSidebar) {
+                            SmartViewNavigationStrip(
+                                navTarget = navTarget,
+                                areas = areas,
+                                projects = activeProjects,
+                                savedPerspectives = savedPerspectives,
+                                dragController = projectDragController,
+                                onSelectSmartView = { viewModel.selectSmartView(it) },
+                                onSelectArea = { viewModel.selectArea(it) },
+                                onSelectProject = { viewModel.selectProject(it) },
+                                onSelectPerspective = { viewModel.selectPerspective(it) },
+                                onCreateNewPerspective = {
+                                    editingPerspective = null
+                                    showPerspectiveEditorDialog = true
+                                },
+                                onOpenAreaManager = { viewModel.setAreaManagerOpen(true) },
+                                onOpenTagManager = { viewModel.setTagManagerOpen(true) },
+                                onCreateNewProject = {
+                                    projectDialogPreselectedAreaId = currentArea?.id
+                                    editingProject = null
+                                    showCreateProjectDialog = true
+                                },
+                                onOpenWeeklyReview = { viewModel.openWeeklyReviewModal() },
+                                onOpenTemplatesAndImport = {
+                                    viewModel.openTemplatesModal(
+                                        initialTab = 0,
+                                        defaultAreaId = currentArea?.id ?: currentProject?.areaId
+                                    )
+                                }
                             )
                         }
-                        RoadmapPdfExportDialog(
-                            project = currentProject,
-                            projectHeadings = projectHeadings,
-                            primaryTasks = primaryTasks,
-                            layout = topPdfLayout,
+
+                        // View Title Header (Smart View, Project with 3-Mode Workspace Switcher & Target Date, Area, or Custom Perspective)
+                        ViewTitleHeader(
+                            navTarget = navTarget,
+                            currentProject = currentProject,
+                            projectWorkspaceMode = currentProjectWorkspaceMode,
+                            onSelectProjectWorkspaceMode = { nextMode ->
+                                currentProject?.let { proj -> viewModel.updateProjectViewMode(proj.id, nextMode) }
+                            },
+                            currentArea = currentArea,
+                            currentPerspective = currentPerspective,
+                            areas = areas,
+                            projects = activeProjects,
+                            projectAttachments = projectAttachments,
                             locale = activeLocale,
-                            onDismiss = { showTopRoadmapPdfDialog = false },
-                            onConfirmExport = { pdfConfig ->
-                                showTopRoadmapPdfDialog = false
-                                topCoroutineScope.launch {
-                                    runCatching {
-                                        RoadmapExporter.exportPdf(
-                                            context = appCtx,
-                                            project = currentProject,
-                                            layout = topPdfLayout,
-                                            config = pdfConfig,
-                                            headingCounts = headingTaskCountsTop,
-                                            locale = activeLocale,
-                                            isDark = colors.isDark,
-                                            exportChooserTitle = exportRoadmapChooserTitle
-                                        )
-                                    }.onFailure { err ->
-                                        viewModel.showUiMessage(err.localizedMessage ?: err.message ?: "Export failed")
-                                    }
-                                }
-                            }
+                            trashItemCount = deletedTasks.size + deletedProjects.size,
+                            isTodayTimelineMode = isTodayTimelineMode,
+                            onToggleTodayTimelineMode = { viewModel.setTodayTimelineMode(it) },
+                            onToggleTimelineFullScreen = { viewModel.toggleTimelineFullScreen() },
+                            todayPlannedMinutes = todayCapacitySummary.first,
+                            todayFreeMinutes = todayCapacitySummary.second,
+                            calendarEventsEnabled = calendarEventsEnabledTop,
+                            viewSortMode = viewSortMode,
+                            onSelectViewSortMode = { viewModel.setViewSortMode(it) },
+                            onEditPerspective = { persp ->
+                                editingPerspective = persp
+                                showPerspectiveEditorDialog = true
+                            },
+                            onDeletePerspective = { pId ->
+                                viewModel.deletePerspective(pId)
+                            },
+                            onSaveProjectAsTemplate = { pId, toastMsg ->
+                                viewModel.saveProjectAsTemplate(pId, toastMsg)
+                            },
+                            onOpenExternalImportExport = { areaId ->
+                                viewModel.openTemplatesModal(initialTab = 2, defaultAreaId = areaId)
+                            },
+                            onOpenStalledProjectReview = {
+                                viewModel.openWeeklyReviewModal(initialStep = 2)
+                            },
+                            onMarkProjectReviewed = { pId ->
+                                viewModel.markProjectReviewed(pId)
+                            },
+                            onUpdateProjectDeadline = { pId, dl -> viewModel.updateProjectDeadline(pId, dl) },
+                            onUpdateProjectArea = { pId, aId -> viewModel.updateProjectArea(pId, aId) },
+                            onEditProject = { proj ->
+                                editingProject = proj
+                                showCreateProjectDialog = true
+                            },
+                            onDuplicateProject = { pId -> viewModel.duplicateProject(pId) },
+                            onCompleteProject = { pId -> viewModel.completeProject(pId) },
+                            onMoveProject = { pId, up -> viewModel.moveProject(pId, up) },
+                            onDeleteProject = { pId -> viewModel.deleteProject(pId) },
+                            onAddProjectAttachment = { pId, fName, mime, bytes ->
+                                viewModel.addProjectAttachment(pId, fName, mime, bytes)
+                            },
+                            onDeleteProjectAttachment = { attId -> viewModel.deleteAttachment(attId) },
+                            onShowMessage = { msg -> viewModel.showUiMessage(msg) },
+                            onRequestEmptyTrash = { showEmptyTrashConfirmDialog = true },
+                            onAddTaskInCurrentView = {
+                                viewModel.createTaskAtPosition(primaryTasks, 0, "")
+                            },
+                            onAddHeadingInProject = {
+                                viewModel.createHeadingInCurrentProject(projectHeadings.size, "")
+                            },
+                            onRenameArea = { aId, newName -> viewModel.renameArea(aId, newName) },
+                            onMoveArea = { aId, up -> viewModel.moveArea(aId, up) },
+                            onDeleteArea = { aId -> viewModel.deleteArea(aId) }
+                        )
+
+                        // Interactive Tag Filter Strip (displays ONLY tags used by tasks in the current view)
+                        TagFilterAndManageStrip(
+                            allTags = allTags,
+                            rawPrimaryTasks = rawPrimaryTasks,
+                            eveningTasks = eveningTasks,
+                            navTarget = navTarget,
+                            selectedTagId = selectedFilterTagId,
+                            onSelectTag = { viewModel.selectFilterTag(it) }
                         )
                     }
-
-                    // Interactive Tag Filter Strip (displays ONLY tags used by tasks in the current view)
-                    TagFilterAndManageStrip(
-                        allTags = allTags,
-                        rawPrimaryTasks = rawPrimaryTasks,
-                        eveningTasks = eveningTasks,
-                        navTarget = navTarget,
-                        selectedTagId = selectedFilterTagId,
-                        onSelectTag = { viewModel.selectFilterTag(it) }
-                    )
 
                     ThingsMainTaskLazyList(
                         viewModel = viewModel,
@@ -1182,9 +1258,9 @@ fun ThingsSmartViewScreen(
             }
         }
 
-        // App Version Badge at bottom-left when Sidebar is hidden or on phones (hidden when soft keyboard is open)
+        // App Version Badge at bottom-left when Sidebar is hidden or on phones (hidden when soft keyboard or full-screen timeline is open)
         val isKeyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-        if (!showSidebar && !isKeyboardOpen) {
+        if (!showSidebar && !isKeyboardOpen && !isEffectiveTimelineFullScreen) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
@@ -1356,6 +1432,10 @@ fun ThingsSmartViewScreen(
                             isMobileDrawerOpen = false
                             viewModel.setAreaManagerOpen(true)
                         },
+                        onOpenTagManager = {
+                            isMobileDrawerOpen = false
+                            viewModel.setTagManagerOpen(true)
+                        },
                         onCreateNewProject = { areaId ->
                             isMobileDrawerOpen = false
                             projectDialogPreselectedAreaId = areaId
@@ -1399,54 +1479,101 @@ fun ThingsSmartViewScreen(
         // Full-window Soft Bento Floating Drag Ghost Card (with "%1$d To-Dos" multi-select badge)
         WorkspaceDragFloatingOverlay(controller = projectDragController)
 
-        // Unified Soft Bento Task Modal across ALL views (v3.0.0-beta.4)
-        if (!(biometricAppLockEnabled && !isAppUnlocked) && expandedTaskId != null) {
-            val deletedTaskIdsSet = remember(deletedTasks) { deletedTasks.mapTo(HashSet()) { it.id } }
-            val modalTask = remember(
-                expandedTaskId,
-                primaryTasks,
-                allOpenTasks,
-                logbookTasks,
-                somedayTasks,
-                inboxTasks,
-                todayTasks,
-                eveningTasks,
-                upcomingTasks,
-                anytimeTasks,
-                projectTasks,
-                areaTasks,
-                deletedTaskIdsSet
-            ) {
-                resolveUnifiedModalTask(
-                    expandedTaskId = expandedTaskId,
-                    primaryTasks = primaryTasks,
-                    allOpenTasks = allOpenTasks,
-                    logbookTasks = logbookTasks,
-                    somedayTasks = somedayTasks,
-                    inboxTasks = inboxTasks,
-                    todayTasks = todayTasks,
-                    eveningTasks = eveningTasks,
-                    upcomingTasks = upcomingTasks,
-                    anytimeTasks = anytimeTasks,
-                    projectTasks = projectTasks,
-                    areaTasks = areaTasks,
-                    deletedTaskIds = deletedTaskIdsSet
-                )
-            }
-            if (modalTask != null) {
+        // Unified Soft Bento Task Modal across ALL views (v3.0.0-beta.5 flash-free in-window Compose overlay)
+        val deletedTaskIdsSet = remember(deletedTasks) { deletedTasks.mapTo(HashSet()) { it.id } }
+        val modalTask = remember(
+            expandedTaskId,
+            primaryTasks,
+            allOpenTasks,
+            logbookTasks,
+            somedayTasks,
+            inboxTasks,
+            todayTasks,
+            eveningTasks,
+            upcomingTasks,
+            anytimeTasks,
+            projectTasks,
+            areaTasks,
+            deletedTaskIdsSet
+        ) {
+            resolveUnifiedModalTask(
+                expandedTaskId = expandedTaskId,
+                primaryTasks = primaryTasks,
+                allOpenTasks = allOpenTasks,
+                logbookTasks = logbookTasks,
+                somedayTasks = somedayTasks,
+                inboxTasks = inboxTasks,
+                todayTasks = todayTasks,
+                eveningTasks = eveningTasks,
+                upcomingTasks = upcomingTasks,
+                anytimeTasks = anytimeTasks,
+                projectTasks = projectTasks,
+                areaTasks = areaTasks,
+                deletedTaskIds = deletedTaskIdsSet
+            )
+        }
+        var lastResolvedModalTask by remember { mutableStateOf<TaskItem?>(null) }
+        if (modalTask != null) {
+            lastResolvedModalTask = modalTask
+        }
+        val isModalVisible = !(biometricAppLockEnabled && !isAppUnlocked) && modalTask != null
+        val maxModalHeight = (configuration.screenHeightDp.dp - 40.dp).coerceIn(300.dp, 680.dp)
+
+        AnimatedVisibility(
+            visible = isModalVisible,
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(35f),
+            enter = fadeIn(animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)),
+            exit = fadeOut(animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing))
+        ) {
+            val activeModalTask = modalTask ?: lastResolvedModalTask
+            if (activeModalTask != null) {
                 val magicBreakdownTaskIdTop by viewModel.magicBreakdownTaskId.collectAsState()
-                val modalScrollState = rememberScrollState()
-                Dialog(
-                    onDismissRequest = { viewModel.collapseExpandedTask() },
-                    properties = DialogProperties(usePlatformDefaultWidth = false)
+                BackHandler(enabled = isModalVisible) {
+                    viewModel.collapseExpandedTask()
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(35f),
+                    contentAlignment = Alignment.Center
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.44f))
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = { viewModel.collapseExpandedTask() }
+                            )
+                    )
                     Surface(
                         modifier = Modifier
+                            .statusBarsPadding()
+                            .navigationBarsPadding()
+                            .imePadding()
+                            .padding(horizontal = 12.dp, vertical = 12.dp)
+                            .animateEnterExit(
+                                enter = scaleIn(
+                                    initialScale = 0.96f,
+                                    animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
+                                ),
+                                exit = scaleOut(
+                                    targetScale = 0.97f,
+                                    animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing)
+                                )
+                            )
                             .widthIn(max = 780.dp)
                             .fillMaxWidth(0.95f)
-                            .heightIn(max = 680.dp)
-                            .imePadding()
+                            .heightIn(max = maxModalHeight)
                             .clip(RoundedCornerShape(22.dp))
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = {}
+                            )
                             .onPreviewKeyEvent { modalKeyEvent ->
                                 if (modalKeyEvent.type == KeyEventType.KeyDown) {
                                     val ctrlOrMeta = modalKeyEvent.isCtrlPressed || modalKeyEvent.isMetaPressed
@@ -1475,11 +1602,11 @@ fun ThingsSmartViewScreen(
                                             true
                                         }
                                         ctrlOrMeta && !modalKeyEvent.isShiftPressed && modalKeyEvent.key == Key.D -> {
-                                            viewModel.duplicateTask(modalTask.id)
+                                            viewModel.duplicateTask(activeModalTask.id)
                                             true
                                         }
                                         ctrlOrMeta && (modalKeyEvent.key == Key.Backspace || modalKeyEvent.key == Key.Delete) -> {
-                                            viewModel.deleteTask(modalTask.id)
+                                            viewModel.deleteTask(activeModalTask.id)
                                             true
                                         }
                                         else -> false
@@ -1494,28 +1621,23 @@ fun ThingsSmartViewScreen(
                         tonalElevation = 8.dp,
                         shadowElevation = 16.dp
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .verticalScroll(modalScrollState)
-                        ) {
-                            ThingsTaskRowItem(
-                                task = modalTask,
-                                viewModel = viewModel,
-                                allTags = allTags,
-                                areas = areas,
-                                activeProjects = activeProjects,
-                                allHeadings = allHeadingsTop,
-                                expandedTaskId = expandedTaskId,
-                                isQuickFindOpen = isQuickFindOpen,
-                                selectedTaskIds = selectedTaskIds,
-                                allVisibleTaskIds = allVisibleTaskIds,
-                                magicBreakdownTaskId = magicBreakdownTaskIdTop,
-                                activeLocale = activeLocale,
-                                externalDialogTriggerToken = externalDialogTriggerToken,
-                                externalDialogTriggerType = externalDialogTriggerType
-                            )
-                        }
+                        ThingsTaskRowItem(
+                            task = activeModalTask,
+                            viewModel = viewModel,
+                            allTags = allTags,
+                            areas = areas,
+                            activeProjects = activeProjects,
+                            allHeadings = allHeadingsTop,
+                            expandedTaskId = expandedTaskId,
+                            forceModalExpanded = true,
+                            isQuickFindOpen = isQuickFindOpen,
+                            selectedTaskIds = selectedTaskIds,
+                            allVisibleTaskIds = allVisibleTaskIds,
+                            magicBreakdownTaskId = magicBreakdownTaskIdTop,
+                            activeLocale = activeLocale,
+                            externalDialogTriggerToken = externalDialogTriggerToken,
+                            externalDialogTriggerType = externalDialogTriggerType
+                        )
                     }
                 }
             }
@@ -2011,7 +2133,6 @@ private fun ThingsTopHeaderAndQuickFindSection(
     activeLocale: Locale
 ) {
     val syncStatus by viewModel.syncStatus.collectAsState()
-    val dailyDigestConfig by viewModel.dailyDigestConfig.collectAsState()
     val quickFindQuery by viewModel.quickFindQuery.collectAsState()
     val quickFindFilter by viewModel.quickFindFilter.collectAsState()
     val quickFindTasks by viewModel.quickFindTaskResults.collectAsState()
@@ -2022,19 +2143,13 @@ private fun ThingsTopHeaderAndQuickFindSection(
     val isInitialSetupBannerDismissed by viewModel.isInitialSetupBannerDismissed.collectAsState()
     val currentUserIdentifier by viewModel.currentUserIdentifier.collectAsState()
     val appUpdateState by viewModel.appUpdateState.collectAsState()
-    var showLanguageMenu by remember { mutableStateOf(false) }
 
-    val showSidebar = isWideScreen && isSidebarVisible
-
-    // Top Utility & Navigation Bar (Sidebar/Hamburger Toggle, Thingsbook Symbol when sidebar hidden, Quick Find, Voice 🎙️, Weekly Review, Gemini AI ✨, Areas 📦, Tags 🏷️, Notifications 🔔, Language, Cloud Sync, Settings ⚙️)
+    // Calm Single-Row Top Bar (Sidebar/Hamburger Toggle + Quick Find on Left; Voice 🎙️, Gemini ✨, Cloud Sync ☁️, Settings ⚙️ on Right)
     TopThingsbookBar(
         isWideScreen = isWideScreen,
         isSidebarVisible = if (isWideScreen) isSidebarVisible else isMobileDrawerOpen,
-        showBrandSymbol = !showSidebar,
         isQuickFindOpen = isQuickFindOpen,
         syncStatus = syncStatus,
-        dailyDigestEnabled = dailyDigestConfig.enabled,
-        showLanguageMenu = showLanguageMenu,
         onToggleSidebar = {
             if (isWideScreen) {
                 viewModel.toggleSidebarVisible()
@@ -2042,19 +2157,9 @@ private fun ThingsTopHeaderAndQuickFindSection(
                 onToggleMobileDrawer()
             }
         },
-        onSelectTodayView = { viewModel.selectSmartView(SmartViewType.TODAY) },
-        onToggleLanguageMenu = { showLanguageMenu = it },
-        onSelectLanguage = { tag ->
-            showLanguageMenu = false
-            viewModel.switchAppLanguage(tag)
-        },
         onOpenQuickFind = { viewModel.setQuickFindOpen(!isQuickFindOpen) },
         onOpenVoiceCapture = { viewModel.openVoiceQuickCapture() },
-        onOpenWeeklyReview = { viewModel.openWeeklyReviewModal() },
         onOpenGeminiHub = { viewModel.setGeminiModalOpen(true) },
-        onOpenAreaManager = { viewModel.setAreaManagerOpen(true) },
-        onOpenTagManager = { viewModel.setTagManagerOpen(true) },
-        onOpenNotificationSettings = { viewModel.setNotificationSettingsOpen(true) },
         onManualSync = { viewModel.setAuthModalOpen(true) },
         onOpenSettings = { viewModel.setSettingsModalOpen(true) }
     )
@@ -2168,6 +2273,7 @@ private fun ThingsTaskRowItem(
     activeProjects: List<Project>,
     allHeadings: List<Heading>,
     expandedTaskId: String?,
+    forceModalExpanded: Boolean = false,
     isQuickFindOpen: Boolean,
     selectedTaskIds: Set<String>,
     allVisibleTaskIds: List<String>,
@@ -2187,7 +2293,7 @@ private fun ThingsTaskRowItem(
     val allOpenTasks by viewModel.allOpenTasks.collectAsState()
     val openTaskIds by viewModel.openTaskIds.collectAsState()
     val isTodayView = navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
-    val isModalExpanded = expandedTaskId == task.id
+    val isModalExpanded = forceModalExpanded || expandedTaskId == task.id
     androidx.compose.runtime.key(currentEpochDay) {
         ExpandableTaskCard(
             modifier = modifier,
@@ -2340,6 +2446,7 @@ private fun ThingsMainTaskLazyList(
     val deletedProjects by viewModel.deletedProjects.collectAsState()
     val groupTodayByProjectOrArea by viewModel.groupTodayByProjectOrArea.collectAsState()
     val isTodayTimelineMode by viewModel.isTodayTimelineMode.collectAsState()
+    val isTimelineFullScreen by viewModel.isTimelineFullScreen.collectAsState()
 
     // Project sections as displayed: tasks without (valid) heading first, then one section per heading
     val projectSections: Map<String?, List<TaskItem>> = remember(
@@ -2496,6 +2603,9 @@ private fun ThingsMainTaskLazyList(
                 onShowError = { msg ->
                     viewModel.showUiMessage(msg)
                 },
+                isFullScreen = isTimelineFullScreen,
+                onToggleFullScreen = { viewModel.toggleTimelineFullScreen() },
+                projectTitle = currentProject.title,
                 modifier = modifier.imePadding()
             )
             return
@@ -2506,21 +2616,11 @@ private fun ThingsMainTaskLazyList(
     val listState = remember(navScopeKey) {
         LazyListState(firstVisibleItemIndex = 0, firstVisibleItemScrollOffset = 0)
     }
-    var focusScrollRequestTick by remember { mutableIntStateOf(0) }
-    var preferBottomForExpandedTask by remember(expandedTaskId) { mutableStateOf(false) }
-    val lastKnownTaskIndices = remember(navScopeKey) { HashMap<String, Int>() }
-    val lastKnownTaskBounds = remember(navScopeKey) { HashMap<String, Pair<Int, Int>>() }
+    val handleEnsureVisibleRequest: (Boolean) -> Unit = remember { { _ -> } }
 
     LaunchedEffect(navScopeKey) {
         if (navTarget.shouldResetScrollToTop(expandedTaskId)) {
             runCatching { listState.scrollToItem(0, 0) }
-        }
-    }
-
-    val handleEnsureVisibleRequest: (Boolean) -> Unit = remember {
-        { preferBottom ->
-            preferBottomForExpandedTask = preferBottom
-            focusScrollRequestTick++
         }
     }
 
@@ -2532,26 +2632,7 @@ private fun ThingsMainTaskLazyList(
         !(navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) && groupTodayByProjectOrArea)
 
     // Register list geometry semantics for position-based Drag & Drop (Magic Plus + task handles)
-    // and track latest visible task item indices/bounds for keyboard-aware auto-scrolling
     SideEffect {
-        listState.layoutInfo.visibleItemsInfo.forEach { info ->
-            val keyStr = info.key?.toString() ?: return@forEach
-            if (
-                keyStr.startsWith("today_calendar_") ||
-                keyStr.startsWith("upcoming_cal_events_") ||
-                keyStr.startsWith("upcoming_day_header_") ||
-                keyStr.startsWith("upcoming_phase_milestone_") ||
-                keyStr.startsWith("top_scroll_anchor_") ||
-                keyStr.startsWith("trailing_magic_plus_gap")
-            ) return@forEach
-            val resolvedId = when {
-                keyStr.startsWith("ungrouped_") -> keyStr.removePrefix("ungrouped_")
-                keyStr.startsWith("upcoming_") -> keyStr.substringAfter("_").substringAfter("_")
-                else -> keyStr
-            }
-            lastKnownTaskIndices[resolvedId] = info.index
-            lastKnownTaskBounds[resolvedId] = info.offset to (info.offset + info.size)
-        }
         projectDragController.isProjectListActive = isProjectView
         projectDragController.isGeneralListReorderActive = isGeneralManualFlatList
         projectDragController.generalListTasks = if (isGeneralManualFlatList) primaryTasks else emptyList()
@@ -2586,128 +2667,6 @@ private fun ThingsMainTaskLazyList(
     LaunchedEffect(isProjectView) {
         if (!isProjectView && projectDragController.session?.kind != ProjectDragKind.MOVE_TASK) {
             projectDragController.cancel()
-        }
-    }
-
-    suspend fun ensureExpandedTaskVisibleAboveKeyboard(targetId: String, animate: Boolean) {
-        val topMarginPx = with(density) { 12.dp.roundToPx() }
-        val bottomMarginPx = with(density) { 20.dp.roundToPx() }
-
-        var itemInfo = listState.layoutInfo.visibleItemsInfo.firstOrNull {
-            matchesTaskItemKey(it.key, targetId)
-        }
-
-        if (itemInfo == null) {
-            val viewportEnd = listState.layoutInfo.viewportEndOffset
-            val safeBottom = (viewportEnd - bottomMarginPx).coerceAtLeast(topMarginPx + 1)
-            val lastBounds = lastKnownTaskBounds[targetId]
-            val knownIdx = lastKnownTaskIndices[targetId]
-            if (lastBounds != null && lastBounds.second > safeBottom) {
-                val scrollNeeded = (lastBounds.second - safeBottom).toFloat().coerceAtLeast(1f)
-                runCatching { listState.scrollBy(scrollNeeded) }
-            } else if (knownIdx != null) {
-                runCatching { listState.scrollToItem(knownIdx) }
-            } else if (primaryTasks.firstOrNull()?.id == targetId) {
-                runCatching { listState.scrollToItem(0) }
-            }
-            itemInfo = listState.layoutInfo.visibleItemsInfo.firstOrNull {
-                matchesTaskItemKey(it.key, targetId)
-            } ?: return
-        }
-
-        val viewportStart = listState.layoutInfo.viewportStartOffset
-        val viewportEnd = listState.layoutInfo.viewportEndOffset
-        val safeTop = viewportStart + topMarginPx
-        val safeBottom = (viewportEnd - bottomMarginPx).coerceAtLeast(safeTop + 1)
-        val itemTop = itemInfo.offset
-        val itemBottom = itemInfo.offset + itemInfo.size
-
-        val scrollDelta = when {
-            itemBottom > safeBottom -> {
-                val neededDown = (itemBottom - safeBottom).toFloat()
-                if (preferBottomForExpandedTask) {
-                    neededDown
-                } else {
-                    val maxWithoutHidingTitle = (itemTop - safeTop).toFloat().coerceAtLeast(0f)
-                    neededDown.coerceAtMost(maxWithoutHidingTitle)
-                }
-            }
-            itemTop < safeTop -> (itemTop - safeTop).toFloat()
-            else -> 0f
-        }
-
-        if (kotlin.math.abs(scrollDelta) > 1.5f) {
-            runCatching {
-                if (animate) {
-                    listState.animateScrollBy(
-                        value = scrollDelta,
-                        animationSpec = spring(dampingRatio = 0.88f, stiffness = 420f)
-                    )
-                } else {
-                    listState.scrollBy(scrollDelta)
-                }
-            }
-        }
-    }
-
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.layoutInfo.visibleItemsInfo }
-            .collect { visibleItems ->
-                visibleItems.forEach { info ->
-                    val keyStr = info.key?.toString() ?: return@forEach
-                    if (
-                        keyStr.startsWith("today_calendar_") ||
-                        keyStr.startsWith("upcoming_cal_events_") ||
-                        keyStr.startsWith("upcoming_day_header_") ||
-                        keyStr.startsWith("top_scroll_anchor_") ||
-                        keyStr.startsWith("trailing_magic_plus_gap")
-                    ) return@forEach
-                    val resolvedId = when {
-                        keyStr.startsWith("ungrouped_") -> keyStr.removePrefix("ungrouped_")
-                        keyStr.startsWith("upcoming_") -> keyStr.substringAfter("_").substringAfter("_")
-                        else -> keyStr
-                    }
-                    lastKnownTaskIndices[resolvedId] = info.index
-                    lastKnownTaskBounds[resolvedId] = info.offset to (info.offset + info.size)
-                }
-            }
-    }
-
-    LaunchedEffect(expandedTaskId, focusScrollRequestTick, primaryTasks.size) {
-        val targetId = expandedTaskId ?: return@LaunchedEffect
-        kotlinx.coroutines.delay(16)
-        ensureExpandedTaskVisibleAboveKeyboard(targetId, animate = true)
-        kotlinx.coroutines.delay(110)
-        ensureExpandedTaskVisibleAboveKeyboard(targetId, animate = true)
-        kotlinx.coroutines.delay(150)
-        ensureExpandedTaskVisibleAboveKeyboard(targetId, animate = true)
-        kotlinx.coroutines.delay(140)
-        ensureExpandedTaskVisibleAboveKeyboard(targetId, animate = true)
-    }
-
-    LaunchedEffect(expandedTaskId) {
-        val targetId = expandedTaskId ?: return@LaunchedEffect
-        var prevImeBottom = 0
-        var prevViewportEnd = Int.MAX_VALUE
-        var prevItemSize = 0
-        snapshotFlow {
-            val layoutInfo = listState.layoutInfo
-            val imePx = imeInsets.getBottom(density)
-            val viewportEnd = layoutInfo.viewportEndOffset
-            val curSize = layoutInfo.visibleItemsInfo
-                .firstOrNull { matchesTaskItemKey(it.key, targetId) }
-                ?.size ?: 0
-            Triple(imePx, viewportEnd, curSize)
-        }.collect { (imePx, viewportEnd, curSize) ->
-            val imeGrew = imePx > prevImeBottom
-            val viewportShrunk = viewportEnd in 1 until prevViewportEnd
-            val sizeGrew = curSize > prevItemSize && prevItemSize > 0
-            prevImeBottom = imePx
-            if (viewportEnd > 0) prevViewportEnd = viewportEnd
-            if (curSize > 0) prevItemSize = curSize
-            if ((imeGrew || viewportShrunk || sizeGrew) && !listState.isScrollInProgress) {
-                ensureExpandedTaskVisibleAboveKeyboard(targetId, animate = false)
-            }
         }
     }
 
@@ -4435,22 +4394,12 @@ private fun AreaProjectOverviewRow(
 private fun TopThingsbookBar(
     isWideScreen: Boolean,
     isSidebarVisible: Boolean,
-    showBrandSymbol: Boolean,
     isQuickFindOpen: Boolean,
     syncStatus: CloudSyncStatus,
-    dailyDigestEnabled: Boolean,
-    showLanguageMenu: Boolean,
     onToggleSidebar: () -> Unit,
-    onSelectTodayView: () -> Unit,
-    onToggleLanguageMenu: (Boolean) -> Unit,
-    onSelectLanguage: (String) -> Unit,
     onOpenQuickFind: () -> Unit,
     onOpenVoiceCapture: () -> Unit,
-    onOpenWeeklyReview: () -> Unit = {},
     onOpenGeminiHub: () -> Unit,
-    onOpenAreaManager: () -> Unit,
-    onOpenTagManager: () -> Unit,
-    onOpenNotificationSettings: () -> Unit,
     onManualSync: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
@@ -4459,19 +4408,11 @@ private fun TopThingsbookBar(
     ThingsTopBarTooltipScope {
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
             val barWidth = maxWidth
-            val isTwoRowWrap = barWidth < 430.dp
-            val showSearchText = barWidth >= 660.dp || isTwoRowWrap
-            val showGeminiText = barWidth >= 660.dp || isTwoRowWrap
-            val iconButtonSize = when {
-                isTwoRowWrap -> 34.dp
-                barWidth >= 540.dp -> 34.dp
-                else -> 30.dp
-            }
-            val iconGlyphSize = when {
-                isTwoRowWrap -> 18.5.dp
-                barWidth >= 540.dp -> 19.dp
-                else -> 17.5.dp
-            }
+            val showSearchText = barWidth >= 460.dp
+            val showVoiceButton = barWidth >= 420.dp
+            val showGeminiText = barWidth >= 400.dp
+            val iconButtonSize = if (barWidth >= 520.dp) 34.dp else 32.dp
+            val iconGlyphSize = if (barWidth >= 520.dp) 19.dp else 18.dp
 
             val sidebarTooltip = if (isSidebarVisible) {
                 stringResource(R.string.topbar_tooltip_hide_sidebar)
@@ -4479,325 +4420,156 @@ private fun TopThingsbookBar(
                 stringResource(R.string.topbar_tooltip_show_sidebar)
             }
 
-            val renderSidebarAndBrand: @Composable () -> Unit = {
-                ThingsHoverTooltip(text = sidebarTooltip) {
-                    IconButton(
-                        onClick = onToggleSidebar,
-                        modifier = Modifier.size(iconButtonSize)
-                    ) {
-                        Icon(
-                            imageVector = if (isSidebarVisible) Icons.AutoMirrored.Outlined.MenuOpen else Icons.Outlined.Menu,
-                            contentDescription = sidebarTooltip,
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(if (isWideScreen) 20.dp else 19.dp)
-                        )
-                    }
-                }
-
-                if (showBrandSymbol) {
-                    ThingsHoverTooltip(text = stringResource(R.string.view_today)) {
-                        ThingsbookBrandSymbol(
-                            size = if (isWideScreen) 28.dp else 25.dp,
-                            onClick = onSelectTodayView
-                        )
-                    }
-                }
-
-                ThingsHoverTooltip(
-                    text = stringResource(R.string.topbar_tooltip_quick_find),
-                    enabled = !showSearchText
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        horizontal = if (barWidth >= 600.dp) 16.dp else 10.dp,
+                        vertical = 8.dp
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Left cluster: ☰ Sidebar Toggle + 🔍 Quick Find pill
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(if (barWidth >= 520.dp) 8.dp else 6.dp)
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (isQuickFindOpen) colors.thingsBlueSoft else colors.tagPillBg)
-                            .clickable(onClick = onOpenQuickFind)
-                            .padding(
-                                horizontal = if (showSearchText) 11.dp else 8.dp,
-                                vertical = if (showSearchText) 6.5.dp else 6.dp
-                            ),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Search,
-                            contentDescription = stringResource(R.string.topbar_tooltip_quick_find),
-                            tint = if (isQuickFindOpen) colors.thingsBlue else colors.secondaryText,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        if (showSearchText) {
-                            Text(
-                                text = stringResource(R.string.quick_find_title),
-                                style = MaterialTheme.typography.labelMedium.copy(
-                                    fontWeight = if (isQuickFindOpen) FontWeight.Bold else FontWeight.Medium
-                                ),
-                                color = if (isQuickFindOpen) colors.thingsBlue else colors.secondaryText,
-                                maxLines = 1
-                            )
-                        }
-                    }
-                }
-            }
-
-            val renderGeminiPill: @Composable () -> Unit = {
-                ThingsHoverTooltip(
-                    text = stringResource(R.string.gemini_hub_title),
-                    enabled = !showGeminiText
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(colors.thingsBlueSoft)
-                            .clickable(onClick = onOpenGeminiHub)
-                            .padding(
-                                horizontal = if (showGeminiText) 10.dp else 8.dp,
-                                vertical = 6.dp
-                            ),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.AutoAwesome,
-                            contentDescription = stringResource(R.string.gemini_hub_title),
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(15.5.dp)
-                        )
-                        if (showGeminiText) {
-                            Text(
-                                text = "Gemini",
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = colors.thingsBlue,
-                                maxLines = 1
-                            )
-                        }
-                    }
-                }
-            }
-
-            val renderQuickToolButtons: @Composable () -> Unit = {
-                // Voice Quick Capture Button
-                ThingsHoverTooltip(text = stringResource(R.string.topbar_tooltip_voice_input)) {
-                    IconButton(
-                        onClick = onOpenVoiceCapture,
-                        modifier = Modifier.size(iconButtonSize)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Mic,
-                            contentDescription = stringResource(R.string.topbar_tooltip_voice_input),
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(iconGlyphSize)
-                        )
-                    }
-                }
-
-                // Guided GTD Weekly Review Button
-                ThingsHoverTooltip(text = stringResource(R.string.topbar_tooltip_weekly_review)) {
-                    IconButton(
-                        onClick = onOpenWeeklyReview,
-                        modifier = Modifier.size(iconButtonSize)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Checklist,
-                            contentDescription = stringResource(R.string.topbar_tooltip_weekly_review),
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(iconGlyphSize)
-                        )
-                    }
-                }
-
-                if (!isTwoRowWrap) {
-                    renderGeminiPill()
-                }
-
-                // Areas Manager Button
-                ThingsHoverTooltip(text = stringResource(R.string.topbar_tooltip_areas)) {
-                    IconButton(
-                        onClick = onOpenAreaManager,
-                        modifier = Modifier.size(iconButtonSize)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Folder,
-                            contentDescription = stringResource(R.string.topbar_tooltip_areas),
-                            tint = colors.anytimeTeal,
-                            modifier = Modifier.size(iconGlyphSize)
-                        )
-                    }
-                }
-
-                // Categories Management Button
-                ThingsHoverTooltip(text = stringResource(R.string.topbar_tooltip_tags)) {
-                    IconButton(
-                        onClick = onOpenTagManager,
-                        modifier = Modifier.size(iconButtonSize)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.GridView,
-                            contentDescription = stringResource(R.string.topbar_tooltip_tags),
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(iconGlyphSize)
-                        )
-                    }
-                }
-
-                // Daily & Task Notifications Button
-                ThingsHoverTooltip(text = stringResource(R.string.topbar_tooltip_notifications)) {
-                    IconButton(
-                        onClick = onOpenNotificationSettings,
-                        modifier = Modifier.size(iconButtonSize)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.NotificationsActive,
-                            contentDescription = stringResource(R.string.topbar_tooltip_notifications),
-                            tint = if (dailyDigestEnabled) colors.thingsBlue else colors.secondaryText,
-                            modifier = Modifier.size(iconGlyphSize)
-                        )
-                    }
-                }
-
-                // In-App Language Switcher (EN, DE, IT, FR, ES)
-                Box {
-                    ThingsHoverTooltip(text = stringResource(R.string.topbar_tooltip_language)) {
+                    ThingsHoverTooltip(text = sidebarTooltip) {
                         IconButton(
-                            onClick = { onToggleLanguageMenu(true) },
+                            onClick = onToggleSidebar,
                             modifier = Modifier.size(iconButtonSize)
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.Language,
-                                contentDescription = stringResource(R.string.topbar_tooltip_language),
-                                tint = colors.secondaryText,
+                                imageVector = if (isSidebarVisible) Icons.AutoMirrored.Outlined.MenuOpen else Icons.Outlined.Menu,
+                                contentDescription = sidebarTooltip,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(if (isWideScreen) 20.dp else 19.dp)
+                            )
+                        }
+                    }
+
+                    ThingsHoverTooltip(
+                        text = stringResource(R.string.topbar_tooltip_quick_find),
+                        enabled = !showSearchText
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isQuickFindOpen) colors.thingsBlueSoft else colors.tagPillBg)
+                                .clickable(onClick = onOpenQuickFind)
+                                .padding(
+                                    horizontal = if (showSearchText) 11.dp else 8.5.dp,
+                                    vertical = 6.5.dp
+                                ),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Search,
+                                contentDescription = stringResource(R.string.topbar_tooltip_quick_find),
+                                tint = if (isQuickFindOpen) colors.thingsBlue else colors.secondaryText,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            if (showSearchText) {
+                                Text(
+                                    text = stringResource(R.string.quick_find_title),
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = if (isQuickFindOpen) FontWeight.Bold else FontWeight.Medium
+                                    ),
+                                    color = if (isQuickFindOpen) colors.thingsBlue else colors.secondaryText,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Right cluster: 🎙️ Voice (>= 420dp) + ✨ Gemini + ☁️ Cloud Sync + ⚙️ Settings
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(if (barWidth >= 520.dp) 4.dp else 2.dp)
+                ) {
+                    if (showVoiceButton) {
+                        ThingsHoverTooltip(text = stringResource(R.string.topbar_tooltip_voice_input)) {
+                            IconButton(
+                                onClick = onOpenVoiceCapture,
+                                modifier = Modifier.size(iconButtonSize)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Mic,
+                                    contentDescription = stringResource(R.string.topbar_tooltip_voice_input),
+                                    tint = colors.thingsBlue,
+                                    modifier = Modifier.size(iconGlyphSize)
+                                )
+                            }
+                        }
+                    }
+
+                    ThingsHoverTooltip(
+                        text = stringResource(R.string.gemini_hub_title),
+                        enabled = !showGeminiText
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(colors.thingsBlueSoft)
+                                .clickable(onClick = onOpenGeminiHub)
+                                .padding(
+                                    horizontal = if (showGeminiText) 10.dp else 8.5.dp,
+                                    vertical = 6.dp
+                                ),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.AutoAwesome,
+                                contentDescription = stringResource(R.string.gemini_hub_title),
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(15.5.dp)
+                            )
+                            if (showGeminiText) {
+                                Text(
+                                    text = "Gemini",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = colors.thingsBlue,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+
+                    ThingsHoverTooltip(text = stringResource(R.string.topbar_tooltip_cloud_sync)) {
+                        IconButton(
+                            onClick = onManualSync,
+                            modifier = Modifier.size(iconButtonSize)
+                        ) {
+                            val (syncIcon, syncTint) = when (syncStatus) {
+                                CloudSyncStatus.SYNCED -> Icons.Outlined.CloudDone to colors.logbookGreen
+                                CloudSyncStatus.SYNCING -> Icons.Outlined.CloudSync to colors.thingsBlue
+                                CloudSyncStatus.OFFLINE -> Icons.Outlined.CloudOff to colors.secondaryText
+                            }
+                            Icon(
+                                imageVector = syncIcon,
+                                contentDescription = stringResource(R.string.topbar_tooltip_cloud_sync),
+                                tint = syncTint,
                                 modifier = Modifier.size(iconGlyphSize)
                             )
                         }
                     }
 
-                    DropdownMenu(
-                        expanded = showLanguageMenu,
-                        onDismissRequest = { onToggleLanguageMenu(false) }
-                    ) {
-                        com.pv.thingsbook.ui.theme.ApplyInheritedLiveAppLocaleIfNeeded {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.settings_system_default)) },
-                                onClick = { onSelectLanguage("") }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("🇬🇧 " + stringResource(R.string.lang_en)) },
-                                onClick = { onSelectLanguage("en") }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("🇩🇪 " + stringResource(R.string.lang_de)) },
-                                onClick = { onSelectLanguage("de") }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("🇮🇹 " + stringResource(R.string.lang_it)) },
-                                onClick = { onSelectLanguage("it") }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("🇫🇷 " + stringResource(R.string.lang_fr)) },
-                                onClick = { onSelectLanguage("fr") }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("🇪🇸 " + stringResource(R.string.lang_es)) },
-                                onClick = { onSelectLanguage("es") }
-                            )
-                        }
-                    }
-                }
-            }
-
-            val renderSyncAndSettings: @Composable () -> Unit = {
-                ThingsHoverTooltip(text = stringResource(R.string.topbar_tooltip_cloud_sync)) {
-                    IconButton(
-                        onClick = onManualSync,
-                        modifier = Modifier.size(iconButtonSize)
-                    ) {
-                        val (syncIcon, syncTint) = when (syncStatus) {
-                            CloudSyncStatus.SYNCED -> Icons.Outlined.CloudDone to colors.logbookGreen
-                            CloudSyncStatus.SYNCING -> Icons.Outlined.CloudSync to colors.thingsBlue
-                            CloudSyncStatus.OFFLINE -> Icons.Outlined.CloudOff to colors.secondaryText
-                        }
-                        Icon(
-                            imageVector = syncIcon,
-                            contentDescription = stringResource(R.string.topbar_tooltip_cloud_sync),
-                            tint = syncTint,
-                            modifier = Modifier.size(iconGlyphSize)
-                        )
-                    }
-                }
-
-                ThingsHoverTooltip(text = stringResource(R.string.topbar_tooltip_settings)) {
-                    IconButton(
-                        onClick = onOpenSettings,
-                        modifier = Modifier.size(iconButtonSize)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Settings,
-                            contentDescription = stringResource(R.string.topbar_tooltip_settings),
-                            tint = colors.primaryText,
-                            modifier = Modifier.size(iconGlyphSize)
-                        )
-                    }
-                }
-            }
-
-            if (isTwoRowWrap) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ThingsHoverTooltip(text = stringResource(R.string.topbar_tooltip_settings)) {
+                        IconButton(
+                            onClick = onOpenSettings,
+                            modifier = Modifier.size(iconButtonSize)
                         ) {
-                            renderSidebarAndBrand()
+                            Icon(
+                                imageVector = Icons.Outlined.Settings,
+                                contentDescription = stringResource(R.string.topbar_tooltip_settings),
+                                tint = colors.primaryText,
+                                modifier = Modifier.size(iconGlyphSize)
+                            )
                         }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            renderGeminiPill()
-                            renderSyncAndSettings()
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceEvenly
-                    ) {
-                        renderQuickToolButtons()
-                    }
-                }
-            } else {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(
-                            horizontal = if (barWidth >= 660.dp) 16.dp else 10.dp,
-                            vertical = 8.dp
-                        ),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(if (barWidth >= 660.dp) 8.dp else 4.dp)
-                    ) {
-                        renderSidebarAndBrand()
-                    }
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(if (barWidth >= 600.dp) 2.dp else 1.dp)
-                    ) {
-                        renderQuickToolButtons()
-                        renderSyncAndSettings()
                     }
                 }
             }
@@ -4911,6 +4683,7 @@ private fun SmartViewNavigationStrip(
     onSelectPerspective: (String) -> Unit = {},
     onCreateNewPerspective: () -> Unit = {},
     onOpenAreaManager: () -> Unit,
+    onOpenTagManager: () -> Unit = {},
     onCreateNewProject: () -> Unit,
     onOpenWeeklyReview: () -> Unit = {},
     onOpenTemplatesAndImport: () -> Unit = {}
@@ -5307,6 +5080,37 @@ private fun SmartViewNavigationStrip(
                 }
             }
         }
+
+        // 6. Quiet Categories Manager Quick Trigger
+        item(key = "nav_manage_tags") {
+            val categoriesLabel = stringResource(R.string.topbar_tooltip_tags)
+            ThingsHoverTooltip(text = categoriesLabel) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(colors.tagPillBg)
+                        .clickable {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onOpenTagManager()
+                        }
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.GridView,
+                        contentDescription = categoriesLabel,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = categoriesLabel,
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                        color = colors.primaryText
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -5415,7 +5219,6 @@ private fun ViewTitleHeader(
     currentProject: Project?,
     projectWorkspaceMode: ProjectWorkspaceMode = ProjectWorkspaceMode.LIST,
     onSelectProjectWorkspaceMode: (ProjectWorkspaceMode) -> Unit = {},
-    onExportProjectRoadmap: (Boolean) -> Unit = {},
     currentArea: Area?,
     currentPerspective: SavedPerspective? = null,
     areas: List<Area>,
@@ -5425,6 +5228,7 @@ private fun ViewTitleHeader(
     trashItemCount: Int = 0,
     isTodayTimelineMode: Boolean = false,
     onToggleTodayTimelineMode: (Boolean) -> Unit = {},
+    onToggleTimelineFullScreen: (() -> Unit)? = null,
     todayPlannedMinutes: Int = 0,
     todayFreeMinutes: Int = 480,
     calendarEventsEnabled: Boolean = false,
@@ -5455,11 +5259,14 @@ private fun ViewTitleHeader(
 ) {
     val colors = ThingsTheme.colors
     val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
     val coroutineScope = rememberCoroutineScope()
     val zone = ZoneId.systemDefault()
     var showProjectDeadlineDialog by remember(currentProject?.id) { mutableStateOf(false) }
     var showProjectAreaMenu by remember(currentProject?.id) { mutableStateOf(false) }
     var showProjectAttachMenu by remember(currentProject?.id) { mutableStateOf(false) }
+    var showProjectMoreMenu by remember(currentProject?.id) { mutableStateOf(false) }
+    var showAreaMoreMenu by remember(currentArea?.id) { mutableStateOf(false) }
     val tooLargeMsg = stringResource(R.string.attachment_too_large)
     val attachmentImportErrorMsg = stringResource(R.string.attachment_import_error)
     val templateSavedToastMsg = stringResource(R.string.v2_template_saved_toast)
@@ -5553,24 +5360,110 @@ private fun ViewTitleHeader(
     }
 
     val areaWord = stringResource(R.string.entity_area)
+    val hasSmartViewControls = navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) ||
+        (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TRASH) && trashItemCount > 0) ||
+        (navTarget is ActiveNavigationTarget.SmartView && supportsViewSorting)
+
+    val renderSmartViewControls: @Composable () -> Unit = {
+        if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY)) {
+            ViewSortMenuPill(
+                viewSortMode = viewSortMode,
+                onSelectViewSortMode = onSelectViewSortMode
+            )
+            ThingsTodayModeSegmentedToggle(
+                isTimelineMode = isTodayTimelineMode,
+                onModeChange = onToggleTodayTimelineMode
+            )
+            if (isTodayTimelineMode && onToggleTimelineFullScreen != null) {
+                val fullscreenLabel = stringResource(R.string.v30_timeline_fullscreen)
+                ThingsHoverTooltip(text = fullscreenLabel) {
+                    Surface(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onToggleTimelineFullScreen()
+                            },
+                        shape = RoundedCornerShape(10.dp),
+                        color = colors.tagPillBg,
+                        border = BorderStroke(0.75.dp, colors.hairlineDivider)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.OpenInFull,
+                                contentDescription = fullscreenLabel,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text(
+                                text = fullscreenLabel,
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.thingsBlue,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        } else if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TRASH) && trashItemCount > 0) {
+            ThingsHoverTooltip(text = stringResource(R.string.trash_empty_btn)) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(colors.deadlineSoftBg)
+                        .clickable(onClick = onRequestEmptyTrash)
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.DeleteOutline,
+                        contentDescription = stringResource(R.string.trash_empty_btn),
+                        tint = colors.deadlineUrgentRed,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.trash_empty_btn),
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = colors.deadlineUrgentRed,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        } else if (navTarget is ActiveNavigationTarget.SmartView && supportsViewSorting) {
+            ViewSortMenuPill(
+                viewSortMode = viewSortMode,
+                onSelectViewSortMode = onSelectViewSortMode
+            )
+        }
+    }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 14.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                modifier = Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                when (navTarget) {
-                    is ActiveNavigationTarget.SmartView -> {
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val isCompactSmartViewHeader = maxWidth < 600.dp && navTarget is ActiveNavigationTarget.SmartView
+
+            if (isCompactSmartViewHeader && navTarget is ActiveNavigationTarget.SmartView) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         SmartViewIcon(
                             viewType = navTarget.type,
                             modifier = Modifier.size(28.dp),
@@ -5579,403 +5472,479 @@ private fun ViewTitleHeader(
                         Text(
                             text = stringResource(navTarget.type.titleRes),
                             style = MaterialTheme.typography.headlineLarge,
-                            color = colors.primaryText
-                        )
-                    }
-                    is ActiveNavigationTarget.PerspectiveDetail -> {
-                        Icon(
-                            imageVector = Icons.Outlined.AutoAwesomeMosaic,
-                            contentDescription = null,
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(26.dp)
-                        )
-                        Text(
-                            text = currentPerspective?.title ?: stringResource(R.string.v30_perspectives_section),
-                            style = MaterialTheme.typography.headlineLarge,
                             color = colors.primaryText,
-                            maxLines = 2,
+                            maxLines = 1,
+                            softWrap = false,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    is ActiveNavigationTarget.ProjectDetail -> {
-                        ProjectProgressRing(
-                            progress = currentProject?.progress ?: 0f,
-                            size = 26.dp
-                        )
-                        Text(
-                            text = currentProject?.title ?: stringResource(R.string.entity_project),
-                            style = MaterialTheme.typography.headlineLarge,
-                            color = colors.primaryText,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                        if (stalledStatus?.hasNoNextAction == true) {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = colors.todayStarYellow.copy(alpha = 0.24f),
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable(onClick = onOpenStalledProjectReview)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    if (hasSmartViewControls) {
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            renderSmartViewControls()
+                        }
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        when (navTarget) {
+                            is ActiveNavigationTarget.SmartView -> {
+                                SmartViewIcon(
+                                    viewType = navTarget.type,
+                                    modifier = Modifier.size(28.dp),
+                                    isSelected = true
+                                )
+                                Text(
+                                    text = stringResource(navTarget.type.titleRes),
+                                    style = MaterialTheme.typography.headlineLarge,
+                                    color = colors.primaryText,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            is ActiveNavigationTarget.PerspectiveDetail -> {
+                                val perspTitle = currentPerspective?.title ?: stringResource(R.string.v30_perspectives_section)
+                                Icon(
+                                    imageVector = Icons.Outlined.AutoAwesomeMosaic,
+                                    contentDescription = null,
+                                    tint = colors.thingsBlue,
+                                    modifier = Modifier.size(26.dp)
+                                )
+                                ThingsHoverTooltip(
+                                    text = perspTitle,
+                                    modifier = Modifier.weight(1f)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.WarningAmber,
-                                        contentDescription = null,
-                                        tint = colors.somedayWarmAmber,
-                                        modifier = Modifier.size(13.dp)
-                                    )
                                     Text(
-                                        text = stringResource(R.string.v2_stalled_project_badge),
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = colors.somedayWarmAmber
+                                        text = perspTitle,
+                                        style = MaterialTheme.typography.headlineLarge,
+                                        color = colors.primaryText,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
-                        } else if (stalledStatus?.isUnreviewed == true) {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = colors.thingsBlueSoft,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable(onClick = onOpenStalledProjectReview)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            is ActiveNavigationTarget.ProjectDetail -> {
+                                val projTitle = currentProject?.title ?: stringResource(R.string.entity_project)
+                                ProjectProgressRing(
+                                    progress = currentProject?.progress ?: 0f,
+                                    size = 26.dp
+                                )
+                                ThingsHoverTooltip(
+                                    text = projTitle,
+                                    modifier = Modifier.weight(1f)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.Schedule,
-                                        contentDescription = null,
-                                        tint = colors.thingsBlue,
-                                        modifier = Modifier.size(13.dp)
-                                    )
                                     Text(
-                                        text = stringResource(R.string.v2_requires_review_badge),
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = colors.thingsBlue
+                                        text = projTitle,
+                                        style = MaterialTheme.typography.headlineLarge,
+                                        color = colors.primaryText,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
                                     )
+                                }
+                            }
+                            is ActiveNavigationTarget.AreaDetail -> {
+                                Icon(
+                                    imageVector = Icons.Outlined.Folder,
+                                    contentDescription = null,
+                                    tint = colors.thingsBlue,
+                                    modifier = Modifier.size(26.dp)
+                                )
+                                if (isRenamingAreaInline && currentArea != null) {
+                                    val commitAreaRename = {
+                                        if (inlineAreaField.text.isNotBlank()) {
+                                            onRenameArea(currentArea.id, inlineAreaField.text.trim())
+                                            isRenamingAreaInline = false
+                                        }
+                                    }
+                                    OutlinedTextField(
+                                        value = inlineAreaField,
+                                        onValueChange = { inlineAreaField = it },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                        keyboardActions = KeyboardActions(onDone = { commitAreaRename() }),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .onPreviewKeyEvent { keyEvent ->
+                                                if (keyEvent.type == KeyEventType.KeyDown &&
+                                                    (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
+                                                ) {
+                                                    commitAreaRename()
+                                                    true
+                                                } else {
+                                                    false
+                                                }
+                                            }
+                                            .onFocusChanged { focusState ->
+                                                if (focusState.isFocused) {
+                                                    val txt = inlineAreaField.text
+                                                    inlineAreaField = inlineAreaField.copy(
+                                                        selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                                    )
+                                                }
+                                            }
+                                    )
+                                    ThingsHoverTooltip(text = stringResource(R.string.action_save)) {
+                                        IconButton(onClick = commitAreaRename) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Check,
+                                                contentDescription = stringResource(R.string.action_save),
+                                                tint = colors.thingsBlue
+                                            )
+                                        }
+                                    }
+                                    ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
+                                        IconButton(onClick = { isRenamingAreaInline = false }) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Close,
+                                                contentDescription = stringResource(R.string.action_cancel),
+                                                tint = colors.secondaryText
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    val areaTitle = currentArea?.title ?: stringResource(R.string.entity_area)
+                                    ThingsHoverTooltip(
+                                        text = areaTitle,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            text = areaTitle,
+                                            style = MaterialTheme.typography.headlineLarge,
+                                            color = colors.primaryText,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
-                    is ActiveNavigationTarget.AreaDetail -> {
-                        Icon(
-                            imageVector = Icons.Outlined.Folder,
-                            contentDescription = null,
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(26.dp)
-                        )
-                        if (isRenamingAreaInline && currentArea != null) {
-                            val commitAreaRename = {
-                                if (inlineAreaField.text.isNotBlank()) {
-                                    onRenameArea(currentArea.id, inlineAreaField.text.trim())
-                                    isRenamingAreaInline = false
+
+                    // Compact Row 1 Trailing Actions (never crowding the title!)
+                    if (navTarget is ActiveNavigationTarget.SmartView) {
+                        if (hasSmartViewControls) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                renderSmartViewControls()
+                            }
+                        }
+                    } else if (currentPerspective != null) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            ThingsHoverTooltip(text = stringResource(R.string.v30_perspective_edit)) {
+                                IconButton(
+                                    onClick = { onEditPerspective(currentPerspective) },
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Edit,
+                                        contentDescription = stringResource(R.string.v30_perspective_edit),
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(17.dp)
+                                    )
                                 }
                             }
-                            OutlinedTextField(
-                                value = inlineAreaField,
-                                onValueChange = { inlineAreaField = it },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = { commitAreaRename() }),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .onPreviewKeyEvent { keyEvent ->
-                                        if (keyEvent.type == KeyEventType.KeyDown &&
-                                            (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
-                                        ) {
-                                            commitAreaRename()
-                                            true
-                                        } else {
-                                            false
-                                        }
+                            ThingsHoverTooltip(text = stringResource(R.string.v30_perspective_delete)) {
+                                IconButton(
+                                    onClick = { onDeletePerspective(currentPerspective.id) },
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.DeleteOutline,
+                                        contentDescription = stringResource(R.string.v30_perspective_delete),
+                                        tint = colors.deadlineUrgentRed,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    } else if (currentProject != null) {
+                        val projIdx = projects.indexOfFirst { it.id == currentProject.id }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            ThingsHoverTooltip(text = stringResource(R.string.project_edit_title)) {
+                                IconButton(
+                                    onClick = { onEditProject(currentProject) },
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Edit,
+                                        contentDescription = stringResource(R.string.project_edit_title),
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                }
+                            }
+                            Box {
+                                ThingsHoverTooltip(text = stringResource(R.string.action_more_options)) {
+                                    IconButton(
+                                        onClick = { showProjectMoreMenu = true },
+                                        modifier = Modifier.size(30.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.MoreHoriz,
+                                            contentDescription = stringResource(R.string.action_more_options),
+                                            tint = colors.secondaryText,
+                                            modifier = Modifier.size(18.dp)
+                                        )
                                     }
-                                    .onFocusChanged { focusState ->
-                                        if (focusState.isFocused) {
-                                            val txt = inlineAreaField.text
-                                            inlineAreaField = inlineAreaField.copy(
-                                                selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                }
+                                DropdownMenu(
+                                    expanded = showProjectMoreMenu,
+                                    onDismissRequest = { showProjectMoreMenu = false }
+                                ) {
+                                    if (projIdx > 0) {
+                                        DropdownMenuItem(
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.ArrowUpward,
+                                                    contentDescription = null,
+                                                    tint = colors.secondaryText,
+                                                    modifier = Modifier.size(17.dp)
+                                                )
+                                            },
+                                            text = { Text(stringResource(R.string.project_move_up)) },
+                                            onClick = {
+                                                showProjectMoreMenu = false
+                                                onMoveProject(currentProject.id, true)
+                                            }
+                                        )
+                                    }
+                                    if (projIdx != -1 && projIdx < projects.lastIndex) {
+                                        DropdownMenuItem(
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.ArrowDownward,
+                                                    contentDescription = null,
+                                                    tint = colors.secondaryText,
+                                                    modifier = Modifier.size(17.dp)
+                                                )
+                                            },
+                                            text = { Text(stringResource(R.string.project_move_down)) },
+                                            onClick = {
+                                                showProjectMoreMenu = false
+                                                onMoveProject(currentProject.id, false)
+                                            }
+                                        )
+                                    }
+                                    DropdownMenuItem(
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Outlined.ContentCopy,
+                                                contentDescription = null,
+                                                tint = colors.secondaryText,
+                                                modifier = Modifier.size(17.dp)
                                             )
+                                        },
+                                        text = { Text(stringResource(R.string.action_duplicate_project)) },
+                                        onClick = {
+                                            showProjectMoreMenu = false
+                                            onDuplicateProject(currentProject.id)
                                         }
+                                    )
+                                    DropdownMenuItem(
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Checklist,
+                                                contentDescription = null,
+                                                tint = colors.thingsBlue,
+                                                modifier = Modifier.size(17.dp)
+                                            )
+                                        },
+                                        text = { Text(stringResource(R.string.v2_save_as_template)) },
+                                        onClick = {
+                                            showProjectMoreMenu = false
+                                            onSaveProjectAsTemplate(currentProject.id, templateSavedToastMsg)
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Outlined.SystemUpdateAlt,
+                                                contentDescription = null,
+                                                tint = colors.thingsBlue,
+                                                modifier = Modifier.size(17.dp)
+                                            )
+                                        },
+                                        text = { Text(stringResource(R.string.v30_external_import_export_tab)) },
+                                        onClick = {
+                                            showProjectMoreMenu = false
+                                            onOpenExternalImportExport(currentProject.areaId)
+                                        }
+                                    )
+                                    HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
+                                    DropdownMenuItem(
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Outlined.CheckCircleOutline,
+                                                contentDescription = null,
+                                                tint = colors.logbookGreen,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        },
+                                        text = { Text(stringResource(R.string.project_complete_tooltip)) },
+                                        onClick = {
+                                            showProjectMoreMenu = false
+                                            onCompleteProject(currentProject.id)
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Outlined.DeleteOutline,
+                                                contentDescription = null,
+                                                tint = colors.deadlineUrgentRed,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        },
+                                        text = {
+                                            Text(
+                                                text = stringResource(R.string.project_delete_tooltip),
+                                                color = colors.deadlineUrgentRed
+                                            )
+                                        },
+                                        onClick = {
+                                            showProjectMoreMenu = false
+                                            onDeleteProject(currentProject.id)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    } else if (currentArea != null && !isRenamingAreaInline) {
+                        val areaIdx = areas.indexOfFirst { it.id == currentArea.id }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            ThingsHoverTooltip(text = stringResource(R.string.areas_rename_label)) {
+                                IconButton(
+                                    onClick = {
+                                        inlineAreaField = TextFieldValue(
+                                            text = currentArea.title,
+                                            selection = TextRange(0, currentArea.title.length)
+                                        )
+                                        isRenamingAreaInline = true
+                                    },
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Edit,
+                                        contentDescription = stringResource(R.string.areas_rename_label),
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                }
+                            }
+                            Box {
+                                ThingsHoverTooltip(text = stringResource(R.string.action_more_options)) {
+                                    IconButton(
+                                        onClick = { showAreaMoreMenu = true },
+                                        modifier = Modifier.size(30.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.MoreHoriz,
+                                            contentDescription = stringResource(R.string.action_more_options),
+                                            tint = colors.secondaryText,
+                                            modifier = Modifier.size(18.dp)
+                                        )
                                     }
-                            )
-                            ThingsHoverTooltip(text = stringResource(R.string.action_save)) {
-                                IconButton(onClick = commitAreaRename) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.Check,
-                                        contentDescription = stringResource(R.string.action_save),
-                                        tint = colors.thingsBlue
+                                }
+                                DropdownMenu(
+                                    expanded = showAreaMoreMenu,
+                                    onDismissRequest = { showAreaMoreMenu = false }
+                                ) {
+                                    if (areaIdx > 0) {
+                                        DropdownMenuItem(
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.ArrowUpward,
+                                                    contentDescription = null,
+                                                    tint = colors.secondaryText,
+                                                    modifier = Modifier.size(17.dp)
+                                                )
+                                            },
+                                            text = { Text(stringResource(R.string.area_move_up)) },
+                                            onClick = {
+                                                showAreaMoreMenu = false
+                                                onMoveArea(currentArea.id, true)
+                                            }
+                                        )
+                                    }
+                                    if (areaIdx != -1 && areaIdx < areas.lastIndex) {
+                                        DropdownMenuItem(
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.ArrowDownward,
+                                                    contentDescription = null,
+                                                    tint = colors.secondaryText,
+                                                    modifier = Modifier.size(17.dp)
+                                                )
+                                            },
+                                            text = { Text(stringResource(R.string.area_move_down)) },
+                                            onClick = {
+                                                showAreaMoreMenu = false
+                                                onMoveArea(currentArea.id, false)
+                                            }
+                                        )
+                                    }
+                                    DropdownMenuItem(
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Outlined.DeleteOutline,
+                                                contentDescription = null,
+                                                tint = colors.deadlineUrgentRed,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        },
+                                        text = {
+                                            Text(
+                                                text = stringResource(R.string.area_delete_tooltip),
+                                                color = colors.deadlineUrgentRed
+                                            )
+                                        },
+                                        onClick = {
+                                            showAreaMoreMenu = false
+                                            onDeleteArea(currentArea.id)
+                                        }
                                     )
                                 }
                             }
-                            ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
-                                IconButton(onClick = { isRenamingAreaInline = false }) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.Close,
-                                        contentDescription = stringResource(R.string.action_cancel),
-                                        tint = colors.secondaryText
-                                    )
-                                }
-                            }
-                        } else {
-                            Text(
-                                text = currentArea?.title ?: stringResource(R.string.entity_area),
-                                style = MaterialTheme.typography.headlineLarge,
-                                color = colors.primaryText
-                            )
                         }
                     }
                 }
             }
+        }
 
-            // Quick Actions for Today (Sort + List | Timeline toggle), Perspective, Project, Area, Smart Views, or Trash in Header
-            if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    ViewSortMenuPill(
-                        viewSortMode = viewSortMode,
-                        onSelectViewSortMode = onSelectViewSortMode
-                    )
-                    ThingsTodayModeSegmentedToggle(
-                        isTimelineMode = isTodayTimelineMode,
-                        onModeChange = onToggleTodayTimelineMode
-                    )
-                }
-            } else if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TRASH) && trashItemCount > 0) {
-                ThingsHoverTooltip(text = stringResource(R.string.trash_empty_btn)) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(colors.deadlineSoftBg)
-                            .clickable(onClick = onRequestEmptyTrash)
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.DeleteOutline,
-                            contentDescription = stringResource(R.string.trash_empty_btn),
-                            tint = colors.deadlineUrgentRed,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = stringResource(R.string.trash_empty_btn),
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                            color = colors.deadlineUrgentRed
-                        )
-                    }
-                }
-            } else if (currentPerspective != null) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    ViewSortMenuPill(
-                        viewSortMode = viewSortMode,
-                        onSelectViewSortMode = onSelectViewSortMode
-                    )
-                    ThingsHoverTooltip(text = stringResource(R.string.v30_perspective_edit)) {
-                        IconButton(
-                            onClick = { onEditPerspective(currentPerspective) },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Edit,
-                                contentDescription = stringResource(R.string.v30_perspective_edit),
-                                tint = colors.thingsBlue,
-                                modifier = Modifier.size(17.dp)
-                            )
-                        }
-                    }
-                    ThingsHoverTooltip(text = stringResource(R.string.v30_perspective_delete)) {
-                        IconButton(
-                            onClick = { onDeletePerspective(currentPerspective.id) },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.DeleteOutline,
-                                contentDescription = stringResource(R.string.v30_perspective_delete),
-                                tint = colors.deadlineUrgentRed,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                }
-            } else if (currentProject != null) {
-                val projIdx = projects.indexOfFirst { it.id == currentProject.id }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    ViewSortMenuPill(
-                        viewSortMode = viewSortMode,
-                        onSelectViewSortMode = onSelectViewSortMode
-                    )
-                    if (projIdx > 0) {
-                        ThingsHoverTooltip(text = stringResource(R.string.project_move_up)) {
-                            IconButton(
-                                onClick = { onMoveProject(currentProject.id, true) },
-                                modifier = Modifier.size(30.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.ArrowUpward,
-                                    contentDescription = stringResource(R.string.project_move_up),
-                                    tint = colors.secondaryText,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                    }
-                    if (projIdx != -1 && projIdx < projects.lastIndex) {
-                        ThingsHoverTooltip(text = stringResource(R.string.project_move_down)) {
-                            IconButton(
-                                onClick = { onMoveProject(currentProject.id, false) },
-                                modifier = Modifier.size(30.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.ArrowDownward,
-                                    contentDescription = stringResource(R.string.project_move_down),
-                                    tint = colors.secondaryText,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                    }
-                    ThingsHoverTooltip(text = "${stringResource(R.string.action_duplicate_project)} (Ctrl+D)") {
-                        IconButton(
-                            onClick = { onDuplicateProject(currentProject.id) },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.ContentCopy,
-                                contentDescription = stringResource(R.string.action_duplicate_project),
-                                tint = colors.secondaryText,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                    ThingsHoverTooltip(text = stringResource(R.string.project_edit_title)) {
-                        IconButton(
-                            onClick = { onEditProject(currentProject) },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Edit,
-                                contentDescription = stringResource(R.string.project_edit_title),
-                                tint = colors.thingsBlue,
-                                modifier = Modifier.size(17.dp)
-                            )
-                        }
-                    }
-                    ThingsHoverTooltip(text = stringResource(R.string.project_complete_tooltip)) {
-                        IconButton(
-                            onClick = { onCompleteProject(currentProject.id) },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.CheckCircleOutline,
-                                contentDescription = stringResource(R.string.project_complete_tooltip),
-                                tint = colors.logbookGreen,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                    ThingsHoverTooltip(text = stringResource(R.string.project_delete_tooltip)) {
-                        IconButton(
-                            onClick = { onDeleteProject(currentProject.id) },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.DeleteOutline,
-                                contentDescription = stringResource(R.string.project_delete_tooltip),
-                                tint = colors.deadlineUrgentRed,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                }
-            } else if (currentArea != null && !isRenamingAreaInline) {
-                val areaIdx = areas.indexOfFirst { it.id == currentArea.id }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    ViewSortMenuPill(
-                        viewSortMode = viewSortMode,
-                        onSelectViewSortMode = onSelectViewSortMode
-                    )
-                    if (areaIdx > 0) {
-                        ThingsHoverTooltip(text = stringResource(R.string.area_move_up)) {
-                            IconButton(
-                                onClick = { onMoveArea(currentArea.id, true) },
-                                modifier = Modifier.size(30.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.ArrowUpward,
-                                    contentDescription = stringResource(R.string.area_move_up),
-                                    tint = colors.secondaryText,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                    }
-                    if (areaIdx != -1 && areaIdx < areas.lastIndex) {
-                        ThingsHoverTooltip(text = stringResource(R.string.area_move_down)) {
-                            IconButton(
-                                onClick = { onMoveArea(currentArea.id, false) },
-                                modifier = Modifier.size(30.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.ArrowDownward,
-                                    contentDescription = stringResource(R.string.area_move_down),
-                                    tint = colors.secondaryText,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                    }
-                    ThingsHoverTooltip(text = stringResource(R.string.areas_rename_label)) {
-                        IconButton(
-                            onClick = {
-                                inlineAreaField = TextFieldValue(
-                                    text = currentArea.title,
-                                    selection = TextRange(0, currentArea.title.length)
-                                )
-                                isRenamingAreaInline = true
-                            },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Edit,
-                                contentDescription = stringResource(R.string.areas_rename_label),
-                                tint = colors.thingsBlue,
-                                modifier = Modifier.size(17.dp)
-                            )
-                        }
-                    }
-                    ThingsHoverTooltip(text = stringResource(R.string.area_delete_tooltip)) {
-                        IconButton(
-                            onClick = { onDeleteArea(currentArea.id) },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.DeleteOutline,
-                                contentDescription = stringResource(R.string.area_delete_tooltip),
-                                tint = colors.deadlineUrgentRed,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                }
-            } else if (supportsViewSorting) {
+        // Row 2 Sort Control for Area & Perspective Detail views
+        if ((currentPerspective != null || (currentArea != null && !isRenamingAreaInline)) && supportsViewSorting) {
+            Spacer(modifier = Modifier.height(8.dp))
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
                 ViewSortMenuPill(
                     viewSortMode = viewSortMode,
                     onSelectViewSortMode = onSelectViewSortMode
@@ -6018,7 +5987,7 @@ private fun ViewTitleHeader(
             }
         }
 
-        // Project Notes, 3-Mode Workspace Switcher, Target Date (Zieldatum / Deadline), Area Assignment, Attachments & Quick Buttons
+        // Project Notes, Row 2 (3-Mode Workspace Switcher + Sort + Review Status), Target Date, Area, Attachments & Quick Buttons
         if (currentProject != null) {
             if (currentProject.notes.isNotBlank()) {
                 Spacer(modifier = Modifier.height(4.dp))
@@ -6053,11 +6022,62 @@ private fun ViewTitleHeader(
                     currentMode = projectWorkspaceMode,
                     onSelectMode = onSelectProjectWorkspaceMode
                 )
-                if (projectWorkspaceMode == ProjectWorkspaceMode.ROADMAP) {
-                    RoadmapExportMenuPill(
-                        onExportPdf = { onExportProjectRoadmap(true) },
-                        onExportPng = { onExportProjectRoadmap(false) }
-                    )
+                ViewSortMenuPill(
+                    viewSortMode = viewSortMode,
+                    onSelectViewSortMode = onSelectViewSortMode
+                )
+                if (stalledStatus?.hasNoNextAction == true) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = colors.todayStarYellow.copy(alpha = 0.24f),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClick = onOpenStalledProjectReview)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.WarningAmber,
+                                contentDescription = null,
+                                tint = colors.somedayWarmAmber,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.v2_stalled_project_badge),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = colors.somedayWarmAmber
+                            )
+                        }
+                    }
+                } else if (stalledStatus?.isUnreviewed == true) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = colors.thingsBlueSoft,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClick = onOpenStalledProjectReview)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Schedule,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.v2_requires_review_badge),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = colors.thingsBlue
+                            )
+                        }
+                    }
                 }
             }
 
@@ -6199,26 +6219,6 @@ private fun ViewTitleHeader(
                     ThingsTagPill(
                         title = "+ ${stringResource(R.string.entity_heading)}",
                         onClick = onAddHeadingInProject
-                    )
-                }
-
-                // v2 Pillar 2: "Save as Template"
-                ThingsHoverTooltip(text = stringResource(R.string.v2_save_as_template)) {
-                    ThingsTagPill(
-                        title = "📋 ${stringResource(R.string.v2_save_as_template)}",
-                        onClick = {
-                            onSaveProjectAsTemplate(currentProject.id, templateSavedToastMsg)
-                        }
-                    )
-                }
-
-                // v3 Milestone 4: "Asana & Planner" Import / Export
-                ThingsHoverTooltip(text = stringResource(R.string.v30_external_import_export_tab)) {
-                    ThingsTagPill(
-                        title = "⇄ ${stringResource(R.string.v30_external_import_export_tab)}",
-                        onClick = {
-                            onOpenExternalImportExport(currentProject.areaId)
-                        }
                     )
                 }
 
@@ -7370,6 +7370,7 @@ private fun ThingsChromebookSidebar(
     onCreateNewPerspective: () -> Unit = {},
     onEditPerspective: (SavedPerspective) -> Unit = {},
     onOpenAreaManager: () -> Unit,
+    onOpenTagManager: () -> Unit = {},
     onCreateNewProject: (String?) -> Unit,
     onOpenWeeklyReview: () -> Unit = {},
     onOpenTemplatesAndImport: () -> Unit = {},
@@ -7900,14 +7901,14 @@ private fun ThingsChromebookSidebar(
                                                 controller = dragController,
                                                 key = "${sidebarKeyPrefix}_proj_${project.id}",
                                                 destination = WorkspaceDragDropDestination.ProjectTarget(project.id, project.title),
-                                                cornerRadius = 50.dp,
+                                                cornerRadius = 12.dp,
                                                 priority = 24
                                             )
                                         } else {
                                             Modifier
                                         }
                                     )
-                                    .clip(RoundedCornerShape(50))
+                                    .clip(RoundedCornerShape(12.dp))
                                     .background(if (selected) colors.thingsBlueSoft else Color.Transparent)
                                     .clickable {
                                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -7917,18 +7918,22 @@ private fun ThingsChromebookSidebar(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text(
+                                ThingsHoverTooltip(
                                     text = project.title,
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                        color = if (selected) colors.thingsBlue else colors.primaryText
-                                    ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier
                                         .weight(1f)
                                         .padding(end = 8.dp)
-                                )
+                                ) {
+                                    Text(
+                                        text = project.title,
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                            color = if (selected) colors.thingsBlue else colors.primaryText
+                                        ),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(5.dp)
@@ -7978,14 +7983,14 @@ private fun ThingsChromebookSidebar(
                                     controller = dragController,
                                     key = "${sidebarKeyPrefix}_proj_unassigned_${project.id}",
                                     destination = WorkspaceDragDropDestination.ProjectTarget(project.id, project.title),
-                                    cornerRadius = 50.dp,
+                                    cornerRadius = 12.dp,
                                     priority = 24
                                 )
                             } else {
                                 Modifier
                             }
                         )
-                        .clip(RoundedCornerShape(50))
+                        .clip(RoundedCornerShape(12.dp))
                         .background(if (selected) colors.thingsBlueSoft else Color.Transparent)
                         .clickable {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -7995,18 +8000,22 @@ private fun ThingsChromebookSidebar(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(
+                    ThingsHoverTooltip(
                         text = project.title,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (selected) colors.thingsBlue else colors.primaryText
-                        ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
                             .weight(1f)
                             .padding(end = 8.dp)
-                    )
+                    ) {
+                        Text(
+                            text = project.title,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (selected) colors.thingsBlue else colors.primaryText
+                            ),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
@@ -8040,7 +8049,7 @@ private fun ThingsChromebookSidebar(
             }
         }
 
-        // Bottom Sidebar Actions: "+ New Project ▾" (with Templates & Import) + quiet Logbook / Trash / Areas X/8 dock
+        // Bottom Sidebar Actions: "+ New Project ▾" (with Templates & Import) + quiet Logbook / Trash / Categories / Areas X/8 dock
         HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
         var showNewProjectFooterMenu by remember { mutableStateOf(false) }
         Row(
@@ -8050,7 +8059,7 @@ private fun ThingsChromebookSidebar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Box {
+            Box(modifier = Modifier.weight(1f, fill = false)) {
                 ThingsHoverTooltip(text = "${stringResource(R.string.entity_new_project)} (Ctrl+Shift+N)") {
                     Row(
                         modifier = Modifier
@@ -8187,6 +8196,26 @@ private fun ThingsChromebookSidebar(
                             viewType = SmartViewType.TRASH,
                             modifier = Modifier.size(15.dp),
                             isSelected = trashSelected
+                        )
+                    }
+                }
+
+                val categoriesLabel = stringResource(R.string.topbar_tooltip_tags)
+                ThingsHoverTooltip(text = categoriesLabel) {
+                    IconButton(
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onOpenTagManager()
+                        },
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.GridView,
+                            contentDescription = categoriesLabel,
+                            tint = colors.secondaryText,
+                            modifier = Modifier.size(15.dp)
                         )
                     }
                 }

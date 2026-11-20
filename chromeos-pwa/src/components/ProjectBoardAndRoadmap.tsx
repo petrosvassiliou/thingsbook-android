@@ -20,6 +20,8 @@ import {
   Hourglass,
   LayoutGrid,
   Link2,
+  Maximize2,
+  Minimize2,
   Moon,
   Pin,
   PinOff,
@@ -1143,6 +1145,9 @@ interface BarDragState {
 
 export interface ProjectRoadmapWorkspaceProps {
   project: ProjectRecord;
+  projectTitle?: string;
+  isFullScreen?: boolean;
+  onToggleFullScreen?: () => void;
   layout: ProjectRoadmapLayout;
   selectedTaskIds: string[];
   orderedVisibleTaskIds: string[];
@@ -1161,6 +1166,9 @@ export interface ProjectRoadmapWorkspaceProps {
 
 export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = ({
   project,
+  projectTitle,
+  isFullScreen = false,
+  onToggleFullScreen,
   layout,
   selectedTaskIds,
   orderedVisibleTaskIds,
@@ -1609,13 +1617,22 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
 
   return (
     <div
-      className="project-roadmap-workspace"
+      className={`project-roadmap-workspace ${isFullScreen ? 'fullscreen' : ''}`}
       data-testid="project-roadmap-workspace"
       onClick={(e) => e.stopPropagation()}
     >
       {/* Calm Soft Bento Roadmap Toolbar */}
       <div className="roadmap-toolbar">
         <div className="roadmap-toolbar-left">
+          {isFullScreen && (
+            <span
+              className="roadmap-fullscreen-title"
+              data-testid="roadmap-fullscreen-project-title"
+              title={projectTitle || project.title}
+            >
+              {projectTitle || project.title}
+            </span>
+          )}
           <span className="roadmap-range-pill">{rangeSummaryLabel}</span>
           <button
             type="button"
@@ -1706,6 +1723,19 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
               </>
             )}
           </div>
+
+          {onToggleFullScreen && (
+            <button
+              type="button"
+              className={`chip-btn ${isFullScreen ? 'active' : ''}`}
+              data-testid="roadmap-fullscreen-btn"
+              title={isFullScreen ? t.timelineExitFullscreen : t.timelineFullscreen}
+              onClick={onToggleFullScreen}
+            >
+              {isFullScreen ? <Minimize2 size={12.5} /> : <Maximize2 size={12.5} />}
+              <span>{isFullScreen ? t.timelineExitFullscreen : t.timelineFullscreen}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -2799,3 +2829,5 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
     </div>
   );
 };
+
+export const ProjectRoadmapView = ProjectRoadmapWorkspace;

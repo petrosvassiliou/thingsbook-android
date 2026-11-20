@@ -58,6 +58,7 @@ import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.CloseFullscreen
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
@@ -67,6 +68,7 @@ import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material.icons.outlined.WbSunny
@@ -1521,6 +1523,9 @@ fun ProjectRoadmapWorkspace(
     onUpdateTaskStatus: (taskId: String, status: TaskStatus) -> Unit,
     onOpenTaskEditor: (taskId: String) -> Unit,
     onShowError: (String) -> Unit,
+    isFullScreen: Boolean = false,
+    onToggleFullScreen: (() -> Unit)? = null,
+    projectTitle: String? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = ThingsTheme.colors
@@ -1624,9 +1629,9 @@ fun ProjectRoadmapWorkspace(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .padding(horizontal = 16.dp, vertical = if (isFullScreen) 10.dp else 4.dp)
     ) {
-        // 1. Roadmap Toolbar (Date window, Jump to Today, Zoom Toggle, Export PDF/PNG)
+        // 1. Roadmap Toolbar (Optional Full-Screen Project Title, Date window, Jump to Today, Zoom Toggle, Export PDF/PNG, Full Screen)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1639,6 +1644,33 @@ fun ProjectRoadmapWorkspace(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                if (isFullScreen && !projectTitle.isNullOrBlank()) {
+                    ThingsHoverTooltip(text = projectTitle) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = colors.cardSurface,
+                            border = BorderStroke(0.75.dp, colors.hairlineDivider)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .widthIn(max = if (isWideScreen) 360.dp else 220.dp)
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(7.dp)
+                            ) {
+                                ProjectProgressRing(progress = project.progress, size = 16.dp)
+                                Text(
+                                    text = projectTitle,
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = colors.primaryText,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = colors.tagPillBg
@@ -1739,10 +1771,57 @@ fun ProjectRoadmapWorkspace(
                 }
             }
 
-            RoadmapExportMenuPill(
-                onExportPdf = { showPdfExportDialog = true },
-                onExportPng = { triggerPngExport() }
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                RoadmapExportMenuPill(
+                    onExportPdf = { showPdfExportDialog = true },
+                    onExportPng = { triggerPngExport() }
+                )
+
+                if (onToggleFullScreen != null) {
+                    val fsLabel = stringResource(
+                        if (isFullScreen) R.string.v30_timeline_exit_fullscreen else R.string.v30_timeline_fullscreen
+                    )
+                    ThingsHoverTooltip(text = fsLabel) {
+                        Surface(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .pointerHoverIcon(PointerIcon.Hand)
+                                .clickable {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onToggleFullScreen()
+                                },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isFullScreen) colors.thingsBlueSoft else colors.tagPillBg,
+                            border = BorderStroke(
+                                width = 0.75.dp,
+                                color = if (isFullScreen) colors.thingsBlue.copy(alpha = 0.45f) else colors.hairlineDivider
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isFullScreen) Icons.Outlined.CloseFullscreen else Icons.Outlined.OpenInFull,
+                                    contentDescription = fsLabel,
+                                    tint = if (isFullScreen) colors.thingsBlue else colors.primaryText,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Text(
+                                    text = fsLabel,
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = if (isFullScreen) colors.thingsBlue else colors.primaryText,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // 2. Scrollable Gantt Card + Unscheduled Section

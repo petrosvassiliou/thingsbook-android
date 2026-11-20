@@ -152,18 +152,21 @@ class V3Beta4UnifiedTaskModalTest {
         val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
         val smartViewKt = File(appSrcMain, "java/com/pv/thingsbook/ui/screens/ThingsSmartViewScreen.kt").readText()
 
-        // Modal Dialog is hosted whenever expandedTaskId != null (never gated on isExpandedProjectWorkspace)
+        // Flash-free Soft Bento Modal overlay is hosted whenever modalTask != null (never gated on isExpandedProjectWorkspace)
         assertTrue(
-            smartViewKt.contains("if (!(biometricAppLockEnabled && !isAppUnlocked) && expandedTaskId != null)")
+            smartViewKt.contains("val isModalVisible = !(biometricAppLockEnabled && !isAppUnlocked) && modalTask != null")
         )
+        assertTrue(smartViewKt.contains("AnimatedVisibility("))
+        assertTrue(smartViewKt.contains("scaleIn("))
         assertFalse(
             smartViewKt.contains("isExpandedProjectWorkspace &&\n            expandedTaskId != null")
         )
 
-        // Spacious Soft Bento modal geometry & multi-pool task resolution
+        // Spacious Soft Bento modal geometry bounded to live window height & multi-pool task resolution
         assertTrue(smartViewKt.contains(".widthIn(max = 780.dp)"))
         assertTrue(smartViewKt.contains(".fillMaxWidth(0.95f)"))
-        assertTrue(smartViewKt.contains(".heightIn(max = 680.dp)"))
+        assertTrue(smartViewKt.contains("val maxModalHeight = (configuration.screenHeightDp.dp - 40.dp).coerceIn(300.dp, 680.dp)"))
+        assertTrue(smartViewKt.contains(".heightIn(max = maxModalHeight)"))
         assertTrue(smartViewKt.contains("RoundedCornerShape(22.dp)"))
         assertTrue(smartViewKt.contains("resolveUnifiedModalTask("))
         assertTrue(smartViewKt.contains("logbookTasks = logbookTasks"))

@@ -41,10 +41,12 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.outlined.Add
@@ -61,6 +63,7 @@ import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.GridView
@@ -185,7 +188,7 @@ private fun PointerEvent.isRightClickTrigger(previousButtonsSecondary: Boolean):
  * - Mouse/Touch Multi-Task Selection
  * - Smart Right-Click Context Menu suppression whenever inside an expanded task or when any textbox has focus
  */
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun ExpandableTaskCard(
     task: TaskItem,
@@ -248,12 +251,16 @@ fun ExpandableTaskCard(
     val currentOnStatusChange by rememberUpdatedState(onStatusChange)
 
     // Focus tracking across all text inputs inside this card so right-click NEVER hijacks native text editing
+    var isInlineQuickEditing by remember(task.id) { mutableStateOf(false) }
+    val inlineQuickTitleFocusRequester = remember(task.id) { FocusRequester() }
+    var showQuickStripEffortMenu by remember(task.id) { mutableStateOf(false) }
     var isTitleFocused by remember(task.id) { mutableStateOf(false) }
     var isNotesFocused by remember(task.id) { mutableStateOf(false) }
     var isNewChecklistFocused by remember(task.id) { mutableStateOf(false) }
     var focusedSubtaskCount by remember(task.id) { mutableIntStateOf(0) }
 
     val suppressCustomContextMenu = isExpanded ||
+        isInlineQuickEditing ||
         suppressContextMenuExternal ||
         isTitleFocused ||
         isNotesFocused ||
@@ -278,11 +285,20 @@ fun ExpandableTaskCard(
     }
 
     LaunchedEffect(task.id, task.title) {
-        if (!isTitleFocused && editedTitleField.text != task.title) {
+        if (!isTitleFocused && !isInlineQuickEditing && editedTitleField.text != task.title) {
             editedTitleField = TextFieldValue(
                 text = task.title,
                 selection = TextRange(task.title.length)
             )
+        }
+    }
+
+    LaunchedEffect(isInlineQuickEditing, isExpanded, isSelectionModeActive, isCompletingAnim) {
+        if ((isExpanded || isSelectionModeActive || isCompletingAnim) && isInlineQuickEditing) {
+            isInlineQuickEditing = false
+        } else if (isInlineQuickEditing && !isExpanded) {
+            delay(30)
+            runCatching { inlineQuickTitleFocusRequester.requestFocus() }
         }
     }
 
@@ -458,26 +474,10 @@ fun ExpandableTaskCard(
         allHeadings.firstOrNull { it.id == task.headingId }
     }
 
-    val horizontalPadding by animateDpAsState(
-        targetValue = if (isExpanded) 0.dp else 16.dp,
-        animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
-        label = "cardHorizontalMargin"
-    )
-    val verticalPadding by animateDpAsState(
-        targetValue = if (isExpanded) 0.dp else 1.dp,
-        animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
-        label = "cardVerticalMargin"
-    )
-    val cornerRadius by animateDpAsState(
-        targetValue = if (isExpanded) 22.dp else 12.dp,
-        animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
-        label = "cardCornerRadius"
-    )
-    val shadowElevation by animateDpAsState(
-        targetValue = 0.dp,
-        animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
-        label = "cardShadowElevation"
-    )
+    val horizontalPadding = if (isExpanded) 0.dp else 16.dp
+    val verticalPadding = if (isExpanded) 0.dp else 1.dp
+    val cornerRadius = if (isExpanded) 22.dp else 12.dp
+    val shadowElevation = 0.dp
 
     val strikeFrac = if (isCompletedPendingCommit) 1f else completionStrikeProgress.value.coerceIn(0f, 1f)
     val exitFrac = if (isCompletedPendingCommit && task.status == TaskStatus.OPEN) {
@@ -490,12 +490,14 @@ fun ExpandableTaskCard(
         isTaskActivelyBlocked(task, openTaskIds)
     }
 
-    val isContextMenuTargeted = (!isExpanded && showContextMenu && !suppressCustomContextMenu) ||
-        (!isExpanded && (showWhenDialog || showDeadlineDialog || showRepeatDialog || showDependenciesDialog || showMoveDialog || showTagPickerDialog))
+    val isContextMenuTargeted = (!isExpanded && isInlineQuickEditing) ||
+        (!isExpanded && showContextMenu && !suppressCustomContextMenu) ||
+        (!isExpanded && (showWhenDialog || showDeadlineDialog || showTimeblockDialog || showRepeatDialog || showDependenciesDialog || showMoveDialog || showTagPickerDialog))
 
     val surfaceColor by animateColorAsState(
         targetValue = when {
             isExpanded -> colors.cardSurface
+            isInlineQuickEditing -> colors.cardElevatedSurface
             isContextMenuTargeted -> colors.thingsBlue.copy(alpha = 0.16f)
             isSelected -> colors.thingsBlueSoft
             else -> Color.Transparent
@@ -503,6 +505,30 @@ fun ExpandableTaskCard(
         animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
         label = "cardSurfaceColor"
     )
+
+    val startInlineQuickEdit = {
+        editedTitleField = TextFieldValue(
+            text = task.title,
+            selection = TextRange(task.title.length)
+        )
+        isInlineQuickEditing = true
+    }
+
+    val commitInlineQuickEdit = {
+        val sanitized = editedTitleField.text.replace("\r", "").replace("\n", " ").trim()
+        if (sanitized != task.title) {
+            editedTitleField = TextFieldValue(text = sanitized, selection = TextRange(sanitized.length))
+            onTitleNotesChange(sanitized, editedNotesField.text)
+        }
+        isInlineQuickEditing = false
+        isTitleFocused = false
+    }
+
+    val cancelInlineQuickEdit = {
+        editedTitleField = TextFieldValue(text = task.title, selection = TextRange(task.title.length))
+        isInlineQuickEditing = false
+        isTitleFocused = false
+    }
 
     Box(
         modifier = modifier
@@ -514,7 +540,7 @@ fun ExpandableTaskCard(
                 }
             }
     ) {
-        if (!isExpanded && !isCompletingAnim && !isCompletedPendingCommit && kotlin.math.abs(animatedSwipeOffsetPx) > 6f) {
+        if (!isExpanded && !isInlineQuickEditing && !isCompletingAnim && !isCompletedPendingCommit && kotlin.math.abs(animatedSwipeOffsetPx) > 6f) {
             SwipeActionBackgroundLayer(
                 animatedSwipeOffsetPx = animatedSwipeOffsetPx,
                 deleteSwipeThresholdPx = deleteSwipeThresholdPx,
@@ -551,11 +577,17 @@ fun ExpandableTaskCard(
                         else -> Modifier
                     }
                 )
-                .animateContentSize(
-                    animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f)
+                .then(
+                    if (!isExpanded) {
+                        Modifier.animateContentSize(
+                            animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)
+                        )
+                    } else {
+                        Modifier
+                    }
                 )
-                .pointerInput(task.id, isExpanded, isCompletingAnim) {
-                    if (!isExpanded && !isCompletingAnim) {
+                .pointerInput(task.id, isExpanded, isCompletingAnim, isInlineQuickEditing) {
+                    if (!isExpanded && !isCompletingAnim && !isInlineQuickEditing) {
                         detectHorizontalDragGestures(
                             onDragEnd = {
                                 when {
@@ -630,7 +662,7 @@ fun ExpandableTaskCard(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                     onClick = {
-                        if (isCompletingAnim) return@combinedClickable
+                        if (isCompletingAnim || isInlineQuickEditing) return@combinedClickable
                         if (isSelectionModeActive && !isExpanded && onToggleSelection != null) {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onToggleSelection()
@@ -639,7 +671,7 @@ fun ExpandableTaskCard(
                             onExpandToggle()
                         }
                     },
-                    onLongClick = if (isExpanded) {
+                    onLongClick = if (isExpanded || isInlineQuickEditing) {
                         null
                     } else if (task.status == TaskStatus.OPEN && onToggleSelection != null) {
                         {
@@ -768,7 +800,7 @@ fun ExpandableTaskCard(
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.Top
+                        verticalAlignment = if (isInlineQuickEditing) Alignment.CenterVertically else Alignment.Top
                     ) {
                         val checkboxTooltip = if (effectiveVisualStatus == TaskStatus.OPEN) {
                             stringResource(R.string.action_complete)
@@ -788,58 +820,275 @@ fun ExpandableTaskCard(
 
                         Spacer(modifier = Modifier.width(10.dp))
 
-                        CollapsedTaskTitleWithStrike(
-                            task = task,
-                            assignedProject = assignedProject,
-                            assignedArea = assignedArea,
-                            isCompletingAnim = isCompletingAnim,
-                            strikeProgress = strikeFrac,
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(top = 3.dp)
-                        )
-
-                        if (task.isPinned && !isCompletingAnim) {
-                            Spacer(modifier = Modifier.width(6.dp))
-                            val pinnedTooltip = if (onTogglePin != null) {
-                                stringResource(R.string.v25_unpin_task)
-                            } else {
-                                stringResource(R.string.v25_pinned_badge)
-                            }
-                            ThingsHoverTooltip(
-                                text = pinnedTooltip,
-                                enableTouchLongPress = false
+                        if (isInlineQuickEditing) {
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(9.dp))
+                                    .background(colors.cardSurface)
+                                    .border(
+                                        width = 1.dp,
+                                        color = colors.thingsBlue.copy(alpha = 0.55f),
+                                        shape = RoundedCornerShape(9.dp)
+                                    )
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.PushPin,
-                                    contentDescription = stringResource(R.string.v25_pinned_badge),
-                                    tint = colors.thingsBlue.copy(alpha = 0.88f),
+                                BasicTextField(
+                                    value = editedTitleField,
+                                    onValueChange = { incoming ->
+                                        val clean = incoming.text.replace("\r", "").replace("\n", "")
+                                        editedTitleField = if (clean == incoming.text) {
+                                            incoming
+                                        } else {
+                                            incoming.copy(
+                                                text = clean,
+                                                selection = TextRange(incoming.selection.start.coerceIn(0, clean.length))
+                                            )
+                                        }
+                                    },
+                                    singleLine = true,
+                                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                        color = colors.primaryText,
+                                        fontWeight = FontWeight.Medium
+                                    ),
+                                    cursorBrush = SolidColor(colors.thingsBlue),
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                    keyboardActions = KeyboardActions(onDone = { commitInlineQuickEdit() }),
                                     modifier = Modifier
-                                        .padding(top = 4.dp)
-                                        .size(14.dp)
-                                        .let { base ->
-                                            if (onTogglePin != null) {
-                                                base
-                                                    .clip(RoundedCornerShape(4.dp))
-                                                    .clickable {
-                                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                        onTogglePin()
+                                        .weight(1f)
+                                        .focusRequester(inlineQuickTitleFocusRequester)
+                                        .onPreviewKeyEvent { keyEvent ->
+                                            if (keyEvent.type == KeyEventType.KeyDown) {
+                                                when (keyEvent.key) {
+                                                    Key.Enter, Key.NumPadEnter -> {
+                                                        commitInlineQuickEdit()
+                                                        true
                                                     }
+                                                    Key.Escape -> {
+                                                        cancelInlineQuickEdit()
+                                                        true
+                                                    }
+                                                    else -> false
+                                                }
                                             } else {
-                                                base
+                                                false
                                             }
                                         }
+                                        .onFocusChanged { focusState ->
+                                            isTitleFocused = focusState.isFocused
+                                        },
+                                    decorationBox = { inner ->
+                                        Box(modifier = Modifier.fillMaxWidth()) {
+                                            if (editedTitleField.text.isEmpty()) {
+                                                Text(
+                                                    text = stringResource(R.string.placeholder_todo_title),
+                                                    style = MaterialTheme.typography.bodyLarge,
+                                                    color = colors.tertiaryText
+                                                )
+                                            }
+                                            inner()
+                                        }
+                                    }
                                 )
                             }
-                        }
 
-                        if (collapsedTrailingContent != null && !isCompletingAnim) {
-                            Spacer(modifier = Modifier.width(4.dp))
-                            collapsedTrailingContent()
+                            Spacer(modifier = Modifier.width(6.dp))
+
+                            ThingsHoverTooltip(
+                                text = stringResource(R.string.action_save),
+                                enableTouchLongPress = false
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(colors.thingsBlue)
+                                        .clickable {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            commitInlineQuickEdit()
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Check,
+                                        contentDescription = stringResource(R.string.action_save),
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        } else {
+                            CollapsedTaskTitleWithStrike(
+                                task = task,
+                                assignedProject = assignedProject,
+                                assignedArea = assignedArea,
+                                isCompletingAnim = isCompletingAnim,
+                                strikeProgress = strikeFrac,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(top = 3.dp)
+                            )
+
+                            if (task.isPinned && !isCompletingAnim) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                val pinnedTooltip = if (onTogglePin != null) {
+                                    stringResource(R.string.v25_unpin_task)
+                                } else {
+                                    stringResource(R.string.v25_pinned_badge)
+                                }
+                                ThingsHoverTooltip(
+                                    text = pinnedTooltip,
+                                    enableTouchLongPress = false
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.PushPin,
+                                        contentDescription = stringResource(R.string.v25_pinned_badge),
+                                        tint = colors.thingsBlue.copy(alpha = 0.88f),
+                                        modifier = Modifier
+                                            .padding(top = 4.dp)
+                                            .size(14.dp)
+                                            .let { base ->
+                                                if (onTogglePin != null) {
+                                                    base
+                                                        .clip(RoundedCornerShape(4.dp))
+                                                        .clickable {
+                                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                            onTogglePin()
+                                                        }
+                                                } else {
+                                                    base
+                                                }
+                                            }
+                                    )
+                                }
+                            }
+
+                            if (!isCompletingAnim && !isSelected) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                val quickEditLabel = stringResource(R.string.v30_quick_edit_action)
+                                ThingsHoverTooltip(
+                                    text = quickEditLabel,
+                                    enableTouchLongPress = false
+                                ) {
+                                    IconButton(
+                                        onClick = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            startInlineQuickEdit()
+                                        },
+                                        modifier = Modifier.size(26.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Edit,
+                                            contentDescription = quickEditLabel,
+                                            tint = colors.secondaryText.copy(alpha = 0.72f),
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (collapsedTrailingContent != null && !isCompletingAnim) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                collapsedTrailingContent()
+                            }
                         }
                     }
 
-                    if (task.notes.isNotBlank()) {
+                    if (isInlineQuickEditing) {
+                        FlowRow(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 40.dp, top = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            ThingsTagPill(
+                                title = "📅 ${stringResource(R.string.action_when)}",
+                                onClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    showWhenDialog = true
+                                }
+                            )
+                            ThingsTagPill(
+                                title = "🏁 ${stringResource(R.string.action_deadline)}",
+                                onClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    showDeadlineDialog = true
+                                }
+                            )
+                            if (onUpdateTimeblock != null) {
+                                ThingsTagPill(
+                                    title = "⏱ ${stringResource(R.string.v2_timeblock_title)}",
+                                    onClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        showTimeblockDialog = true
+                                    }
+                                )
+                            }
+                            if (onUpdateEffortLevel != null) {
+                                val normalizedEffort = EffortLevel.normalize(task.effortLevel)
+                                Box {
+                                    ThingsTagPill(
+                                        title = "⚡ ${stringResource(R.string.v30_effort_label)}",
+                                        onClick = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            showQuickStripEffortMenu = true
+                                        }
+                                    )
+                                    DropdownMenu(
+                                        expanded = showQuickStripEffortMenu,
+                                        onDismissRequest = { showQuickStripEffortMenu = false },
+                                        modifier = Modifier.background(colors.cardElevatedSurface)
+                                    ) {
+                                        listOf(
+                                            null to stringResource(R.string.v30_effort_none),
+                                            EffortLevel.QUICK_WIN to "⚡ ${stringResource(R.string.v30_effort_quick_win)}",
+                                            EffortLevel.MEDIUM to "◐ ${stringResource(R.string.v30_effort_medium)}",
+                                            EffortLevel.DEEP_FOCUS to "🧠 ${stringResource(R.string.v30_effort_deep_focus)}"
+                                        ).forEach { (effKey, effLabel) ->
+                                            val effSelected = normalizedEffort == effKey
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = effLabel,
+                                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                                            fontWeight = if (effSelected) FontWeight.Bold else FontWeight.Normal
+                                                        ),
+                                                        color = if (effSelected) colors.thingsBlue else colors.primaryText
+                                                    )
+                                                },
+                                                onClick = {
+                                                    showQuickStripEffortMenu = false
+                                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    onUpdateEffortLevel(effKey)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            if (onUpdateTaskTags != null) {
+                                ThingsTagPill(
+                                    title = "# ${stringResource(R.string.action_tags)}",
+                                    onClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        showTagPickerDialog = true
+                                    }
+                                )
+                            }
+                            ThingsTagPill(
+                                title = "⤢ ${stringResource(R.string.v30_open_details_action)}",
+                                onClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    commitInlineQuickEdit()
+                                    onExpandToggle()
+                                }
+                            )
+                        }
+                    }
+
+                    if (task.notes.isNotBlank() && !isInlineQuickEditing) {
                         Text(
                             text = task.notes,
                             style = MaterialTheme.typography.bodyMedium,
@@ -856,8 +1105,14 @@ fun ExpandableTaskCard(
                             allOpenTasks = allOpenTasks,
                             openTaskIds = openTaskIds,
                             locale = locale,
+                            onOpenWhenDialog = { showWhenDialog = true },
+                            onOpenDeadlineDialog = { showDeadlineDialog = true },
                             onOpenTimeblockDialog = if (onUpdateTimeblock != null) ({ showTimeblockDialog = true }) else null,
+                            onUpdateStandaloneDuration = onUpdateStandaloneDuration,
+                            onUpdateEffortLevel = onUpdateEffortLevel,
+                            onOpenRepeatDialog = if (onRecurrenceChange != null) ({ showRepeatDialog = true }) else null,
                             onOpenDependenciesDialog = if (onUpdateBlockedBy != null) ({ showDependenciesDialog = true }) else null,
+                            onOpenTagPickerDialog = if (onUpdateTaskTags != null) ({ showTagPickerDialog = true }) else null,
                             modifier = Modifier.padding(start = 40.dp, top = 6.dp)
                         )
                     }
@@ -870,6 +1125,7 @@ fun ExpandableTaskCard(
                 task = task,
                 isSelected = isSelected,
                 offset = contextMenuOffsetDp,
+                onStartInlineQuickEdit = if (!isCompletingAnim) ({ startInlineQuickEdit() }) else null,
                 onToggleSelection = onToggleSelection,
                 onStatusChange = handleStatusRequest,
                 onOpenWhenDialog = { showWhenDialog = true },
@@ -1052,6 +1308,8 @@ private fun CollapsedTaskTitleWithStrike(
 
 private fun hasCollapsedTaskBadges(task: TaskItem, isActivelyBlocked: Boolean = false): Boolean {
     return task.scheduleState == ScheduleState.THIS_EVENING ||
+        task.scheduleState == ScheduleState.UPCOMING ||
+        task.scheduleState == ScheduleState.SOMEDAY ||
         task.scheduledStartMinutes != null ||
         task.durationMinutes != null ||
         EffortLevel.normalize(task.effortLevel) != null ||
@@ -1071,10 +1329,20 @@ private fun CollapsedTaskInlineBadges(
     allOpenTasks: List<TaskItem> = emptyList(),
     openTaskIds: Set<String> = emptySet(),
     locale: Locale,
+    onOpenWhenDialog: (() -> Unit)? = null,
+    onOpenDeadlineDialog: (() -> Unit)? = null,
     onOpenTimeblockDialog: (() -> Unit)? = null,
+    onUpdateStandaloneDuration: ((durationMinutes: Int?) -> Unit)? = null,
+    onUpdateEffortLevel: ((effortLevel: String?) -> Unit)? = null,
+    onOpenRepeatDialog: (() -> Unit)? = null,
     onOpenDependenciesDialog: (() -> Unit)? = null,
+    onOpenTagPickerDialog: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val colors = ThingsTheme.colors
+    val haptics = LocalHapticFeedback.current
+    var showInlineEffortMenu by remember(task.id) { mutableStateOf(false) }
+    var showInlineDurationMenu by remember(task.id) { mutableStateOf(false) }
     val activeOpenBlockerIds = remember(task.blockedByTaskIds, openTaskIds) {
         task.blockedByTaskIds.filter { it in openTaskIds }.distinct()
     }
@@ -1104,37 +1372,70 @@ private fun CollapsedTaskInlineBadges(
                 )
             }
         }
-        when (EffortLevel.normalize(task.effortLevel)) {
-            EffortLevel.QUICK_WIN -> {
-                val label = stringResource(R.string.v30_effort_quick_win)
-                ThingsHoverTooltip(text = label, enableTouchLongPress = false) {
-                    ThingsTagPill(title = "⚡ $label")
-                }
+        val normalizedEffort = EffortLevel.normalize(task.effortLevel)
+        if (normalizedEffort != null) {
+            val (effortIcon, effortLabelRes) = when (normalizedEffort) {
+                EffortLevel.QUICK_WIN -> "⚡" to R.string.v30_effort_quick_win
+                EffortLevel.MEDIUM -> "◐" to R.string.v30_effort_medium
+                else -> "🧠" to R.string.v30_effort_deep_focus
             }
-            EffortLevel.MEDIUM -> {
-                val label = stringResource(R.string.v30_effort_medium)
-                ThingsHoverTooltip(text = label, enableTouchLongPress = false) {
-                    ThingsTagPill(title = "◐ $label")
+            val effortLabel = stringResource(effortLabelRes)
+            Box {
+                ThingsHoverTooltip(text = effortLabel, enableTouchLongPress = false) {
+                    ThingsTagPill(
+                        title = "$effortIcon $effortLabel",
+                        onClick = if (onUpdateEffortLevel != null) {
+                            {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                showInlineEffortMenu = true
+                            }
+                        } else null
+                    )
                 }
-            }
-            EffortLevel.DEEP_FOCUS -> {
-                val label = stringResource(R.string.v30_effort_deep_focus)
-                ThingsHoverTooltip(text = label, enableTouchLongPress = false) {
-                    ThingsTagPill(title = "🧠 $label")
+                if (onUpdateEffortLevel != null) {
+                    DropdownMenu(
+                        expanded = showInlineEffortMenu,
+                        onDismissRequest = { showInlineEffortMenu = false },
+                        modifier = Modifier.background(colors.cardElevatedSurface)
+                    ) {
+                        listOf(
+                            null to stringResource(R.string.v30_effort_none),
+                            EffortLevel.QUICK_WIN to "⚡ ${stringResource(R.string.v30_effort_quick_win)}",
+                            EffortLevel.MEDIUM to "◐ ${stringResource(R.string.v30_effort_medium)}",
+                            EffortLevel.DEEP_FOCUS to "🧠 ${stringResource(R.string.v30_effort_deep_focus)}"
+                        ).forEach { (key, label) ->
+                            val selected = normalizedEffort == key
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                        ),
+                                        color = if (selected) colors.thingsBlue else colors.primaryText
+                                    )
+                                },
+                                onClick = {
+                                    showInlineEffortMenu = false
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onUpdateEffortLevel(key)
+                                }
+                            )
+                        }
+                    }
                 }
             }
         }
-        if (task.scheduleState == ScheduleState.THIS_EVENING) {
-            ThingsHoverTooltip(
-                text = stringResource(R.string.view_this_evening),
-                enableTouchLongPress = false
-            ) {
-                ThingsWhenBadge(
-                    scheduleState = task.scheduleState,
-                    whenDateEpochMillis = task.whenDate,
-                    locale = locale
-                )
-            }
+        if (task.scheduleState == ScheduleState.THIS_EVENING ||
+            task.scheduleState == ScheduleState.UPCOMING ||
+            task.scheduleState == ScheduleState.SOMEDAY
+        ) {
+            ThingsWhenBadge(
+                scheduleState = task.scheduleState,
+                whenDateEpochMillis = task.whenDate,
+                locale = locale,
+                onClick = onOpenWhenDialog
+            )
         }
         if (task.scheduledStartMinutes != null) {
             val tbBadge = TimeblockScheduleUtils.formatTimeblockBadge(
@@ -1152,14 +1453,72 @@ private fun CollapsedTaskInlineBadges(
             }
         } else if (task.durationMinutes != null) {
             val durFormatted = formatDurationCompact(task.durationMinutes) ?: "${task.durationMinutes}m"
-            ThingsHoverTooltip(
-                text = "${stringResource(R.string.v30_duration_label)}: $durFormatted",
-                enableTouchLongPress = false
-            ) {
-                ThingsTagPill(
-                    title = "⏱ $durFormatted",
-                    onClick = onOpenTimeblockDialog
-                )
+            Box {
+                ThingsHoverTooltip(
+                    text = "${stringResource(R.string.v30_duration_label)}: $durFormatted",
+                    enableTouchLongPress = false
+                ) {
+                    ThingsTagPill(
+                        title = "⏱ $durFormatted",
+                        onClick = if (onUpdateStandaloneDuration != null) {
+                            {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                showInlineDurationMenu = true
+                            }
+                        } else {
+                            onOpenTimeblockDialog
+                        }
+                    )
+                }
+                if (onUpdateStandaloneDuration != null) {
+                    DropdownMenu(
+                        expanded = showInlineDurationMenu,
+                        onDismissRequest = { showInlineDurationMenu = false },
+                        modifier = Modifier.background(colors.cardElevatedSurface)
+                    ) {
+                        listOf(
+                            5 to "5m",
+                            15 to "15m",
+                            30 to "30m",
+                            60 to "1h",
+                            120 to "2h",
+                            240 to "4h"
+                        ).forEach { (mins, label) ->
+                            val selected = task.durationMinutes == mins
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                        ),
+                                        color = if (selected) colors.thingsBlue else colors.primaryText
+                                    )
+                                },
+                                onClick = {
+                                    showInlineDurationMenu = false
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onUpdateStandaloneDuration(mins)
+                                }
+                            )
+                        }
+                        HorizontalDivider(color = colors.hairlineDivider)
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = stringResource(R.string.v30_duration_clear),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = colors.secondaryText
+                                )
+                            },
+                            onClick = {
+                                showInlineDurationMenu = false
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onUpdateStandaloneDuration(null)
+                            }
+                        )
+                    }
+                }
             }
         }
         task.recurrenceRule?.let { rr ->
@@ -1167,16 +1526,17 @@ private fun CollapsedTaskInlineBadges(
                 text = stringResource(R.string.context_configure_repeat),
                 enableTouchLongPress = false
             ) {
-                ThingsRepeatBadge(rule = rr)
+                ThingsRepeatBadge(
+                    rule = rr,
+                    onClick = onOpenRepeatDialog
+                )
             }
         }
         task.reminderTime?.let { rt ->
-            ThingsHoverTooltip(
-                text = stringResource(R.string.context_when_date_reminder),
-                enableTouchLongPress = false
-            ) {
-                ThingsReminderBadge(reminderEpochMillis = rt)
-            }
+            ThingsReminderBadge(
+                reminderEpochMillis = rt,
+                onClick = onOpenWhenDialog
+            )
         }
         if (task.checklistItems.isNotEmpty()) {
             val doneCount = task.checklistItems.count { it.isCompleted }
@@ -1200,16 +1560,18 @@ private fun CollapsedTaskInlineBadges(
                 text = "#${tag.title}",
                 enableTouchLongPress = false
             ) {
-                ThingsTagPill(title = tag.title)
+                ThingsTagPill(
+                    title = tag.title,
+                    onClick = onOpenTagPickerDialog
+                )
             }
         }
         task.deadline?.let { dl ->
-            ThingsHoverTooltip(
-                text = stringResource(R.string.action_deadline),
-                enableTouchLongPress = false
-            ) {
-                ThingsDeadlineBadge(deadlineEpochMillis = dl, locale = locale)
-            }
+            ThingsDeadlineBadge(
+                deadlineEpochMillis = dl,
+                locale = locale,
+                onClick = onOpenDeadlineDialog
+            )
         }
     }
 }
@@ -1465,144 +1827,149 @@ private fun ExpandedTaskCardBody(
     }
     val bentoZoneBorder = BorderStroke(width = 0.75.dp, color = colors.hairlineDivider)
 
-    val renderContentZone: @Composable (Modifier) -> Unit = { zoneModifier ->
-        Column(
-            modifier = zoneModifier,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+    val renderPinnedHeaderRow: @Composable () -> Unit = {
+        // Pinned Top Header Row: Checkbox + Large Title BasicTextField + Pin + Close ✕
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            // Header Row: Checkbox + Large Title BasicTextField + Pin + Close ✕
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+            val checkboxTooltip = if (effectiveVisualStatus == TaskStatus.OPEN) {
+                stringResource(R.string.action_complete)
+            } else {
+                stringResource(R.string.action_reopen_todo)
+            }
+            ThingsHoverTooltip(
+                text = checkboxTooltip,
+                enableTouchLongPress = false
             ) {
-                val checkboxTooltip = if (effectiveVisualStatus == TaskStatus.OPEN) {
-                    stringResource(R.string.action_complete)
-                } else {
-                    stringResource(R.string.action_reopen_todo)
-                }
-                ThingsHoverTooltip(
-                    text = checkboxTooltip,
-                    enableTouchLongPress = false
-                ) {
-                    ThingsCheckbox(
-                        status = effectiveVisualStatus,
-                        onStatusChange = onStatusChange,
-                        isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY,
-                        size = 22.dp
-                    )
-                }
+                ThingsCheckbox(
+                    status = effectiveVisualStatus,
+                    onStatusChange = onStatusChange,
+                    isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY,
+                    size = 22.dp
+                )
+            }
 
-                Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(12.dp))
 
-                BasicTextField(
-                    value = editedTitleField,
-                    onValueChange = onTitleFieldChange,
-                    textStyle = MaterialTheme.typography.headlineMedium.copy(
-                        fontSize = 19.sp,
-                        lineHeight = 25.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.primaryText
-                    ),
-                    maxLines = 4,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                    cursorBrush = SolidColor(colors.thingsBlue),
-                    modifier = Modifier
-                        .weight(1f)
-                        .focusRequester(titleFocusRequester)
-                        .pointerInput(task.id) {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    val ev = awaitPointerEvent(PointerEventPass.Initial)
-                                    if (ev.type == PointerEventType.Press) {
-                                        onRequestEnsureVisible?.invoke(false)
-                                    }
+            BasicTextField(
+                value = editedTitleField,
+                onValueChange = onTitleFieldChange,
+                textStyle = MaterialTheme.typography.headlineMedium.copy(
+                    fontSize = 19.sp,
+                    lineHeight = 25.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.primaryText
+                ),
+                maxLines = 4,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                cursorBrush = SolidColor(colors.thingsBlue),
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(titleFocusRequester)
+                    .pointerInput(task.id) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                if (ev.type == PointerEventType.Press) {
+                                    onRequestEnsureVisible?.invoke(false)
                                 }
                             }
                         }
-                        .onFocusChanged { focusState ->
-                            onTitleFocusChanged(focusState.isFocused)
-                        },
-                    decorationBox = { innerTitleField ->
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            if (editedTitleField.text.isEmpty()) {
-                                Text(
-                                    text = stringResource(R.string.placeholder_todo_title),
-                                    style = MaterialTheme.typography.headlineMedium.copy(
-                                        fontSize = 19.sp,
-                                        lineHeight = 25.sp,
-                                        fontWeight = FontWeight.Medium
-                                    ),
-                                    color = colors.tertiaryText
-                                )
-                            }
-                            innerTitleField()
-                        }
                     }
-                )
-
-                if (onTogglePin != null) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    val pinLabel = stringResource(
-                        if (task.isPinned) R.string.v25_unpin_task else R.string.v25_pin_task
-                    )
-                    ThingsHoverTooltip(text = pinLabel) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(RoundedCornerShape(9.dp))
-                                .background(
-                                    if (task.isPinned) colors.thingsBlueSoft else colors.tagPillBg.copy(alpha = 0.65f)
-                                )
-                                .border(
-                                    width = 0.75.dp,
-                                    color = if (task.isPinned) colors.thingsBlue.copy(alpha = 0.45f) else colors.hairlineDivider,
-                                    shape = RoundedCornerShape(9.dp)
-                                )
-                                .clickable {
-                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    onTogglePin()
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.PushPin,
-                                contentDescription = pinLabel,
-                                tint = if (task.isPinned) colors.thingsBlue else colors.secondaryText,
-                                modifier = Modifier.size(16.dp)
+                    .onFocusChanged { focusState ->
+                        onTitleFocusChanged(focusState.isFocused)
+                    },
+                decorationBox = { innerTitleField ->
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        if (editedTitleField.text.isEmpty()) {
+                            Text(
+                                text = stringResource(R.string.placeholder_todo_title),
+                                style = MaterialTheme.typography.headlineMedium.copy(
+                                    fontSize = 19.sp,
+                                    lineHeight = 25.sp,
+                                    fontWeight = FontWeight.Medium
+                                ),
+                                color = colors.tertiaryText
                             )
                         }
+                        innerTitleField()
                     }
                 }
+            )
 
-                Spacer(modifier = Modifier.width(6.dp))
-
-                ThingsHoverTooltip(text = stringResource(R.string.action_done)) {
+            if (onTogglePin != null) {
+                Spacer(modifier = Modifier.width(8.dp))
+                val pinLabel = stringResource(
+                    if (task.isPinned) R.string.v25_unpin_task else R.string.v25_pin_task
+                )
+                ThingsHoverTooltip(text = pinLabel) {
                     Box(
                         modifier = Modifier
                             .size(32.dp)
                             .clip(RoundedCornerShape(9.dp))
-                            .background(colors.tagPillBg.copy(alpha = 0.65f))
+                            .background(
+                                if (task.isPinned) colors.thingsBlueSoft else colors.tagPillBg.copy(alpha = 0.65f)
+                            )
                             .border(
                                 width = 0.75.dp,
-                                color = colors.hairlineDivider,
+                                color = if (task.isPinned) colors.thingsBlue.copy(alpha = 0.45f) else colors.hairlineDivider,
                                 shape = RoundedCornerShape(9.dp)
                             )
                             .clickable {
                                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                flushPendingChecklistIfNeeded()
-                                onDoneCollapse()
+                                onTogglePin()
                             },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = stringResource(R.string.action_done),
-                            tint = colors.secondaryText,
+                            imageVector = Icons.Outlined.PushPin,
+                            contentDescription = pinLabel,
+                            tint = if (task.isPinned) colors.thingsBlue else colors.secondaryText,
                             modifier = Modifier.size(16.dp)
                         )
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.width(6.dp))
+
+            ThingsHoverTooltip(text = stringResource(R.string.action_done)) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(colors.tagPillBg.copy(alpha = 0.65f))
+                        .border(
+                            width = 0.75.dp,
+                            color = colors.hairlineDivider,
+                            shape = RoundedCornerShape(9.dp)
+                        )
+                        .clickable {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            flushPendingChecklistIfNeeded()
+                            onDoneCollapse()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Close,
+                        contentDescription = stringResource(R.string.action_done),
+                        tint = colors.secondaryText,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+    }
+
+    val renderContentZone: @Composable (Modifier) -> Unit = { zoneModifier ->
+        Column(
+            modifier = zoneModifier,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
 
             // Soft Bento Notes Container (Markdown notes + detected URL / Email / Phone / Map chips)
             Surface(
@@ -2251,6 +2618,7 @@ private fun ExpandedTaskCardBody(
     }
 
     var showInlineMoreMenu by remember(task.id) { mutableStateOf(false) }
+    val bodyScrollState = rememberScrollState()
 
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val isWideModal = maxWidth >= 600.dp && isWideSoftBentoTaskModal(maxWidth.value)
@@ -2259,35 +2627,51 @@ private fun ExpandedTaskCardBody(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(
-                    horizontal = if (isWideModal) 22.dp else 16.dp,
-                    vertical = if (isWideModal) 20.dp else 16.dp
-                ),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                    start = if (isWideModal) 22.dp else 16.dp,
+                    end = if (isWideModal) 22.dp else 16.dp,
+                    top = if (isWideModal) 18.dp else 14.dp,
+                    bottom = if (isWideModal) 12.dp else 10.dp
+                )
         ) {
-            if (isWideModal) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    renderContentZone(Modifier.weight(1.35f))
-                    renderPropertiesZone(Modifier.weight(1f))
+            // Zone 1: Pinned Top Header Row
+            renderPinnedHeaderRow()
+
+            // Zone 2: Scrollable Middle Content & Properties Body
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false)
+                    .verticalScroll(bodyScrollState)
+            ) {
+                if (isWideModal) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        renderContentZone(Modifier.weight(1.35f))
+                        renderPropertiesZone(Modifier.weight(1f))
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        renderContentZone(Modifier.fillMaxWidth())
+                        renderPropertiesZone(Modifier.fillMaxWidth())
+                    }
                 }
-            } else {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    renderContentZone(Modifier.fillMaxWidth())
-                    renderPropertiesZone(Modifier.fillMaxWidth())
-                }
+                Spacer(modifier = Modifier.height(10.dp))
             }
 
+            // Zone 3: Pinned Non-Clipped Unified Footer
             HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
 
             // v2.1 Unified Single Footer Row: Quick Utility Pills on Left + [Focus, ⋯ Menu, ✓ Done] on Right
             FlowRow(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp, bottom = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -2613,6 +2997,7 @@ private fun TaskContextDropdownMenu(
     task: TaskItem,
     isSelected: Boolean,
     offset: DpOffset,
+    onStartInlineQuickEdit: (() -> Unit)? = null,
     onToggleSelection: (() -> Unit)?,
     onStatusChange: (TaskStatus) -> Unit,
     onOpenWhenDialog: () -> Unit,
@@ -2664,6 +3049,30 @@ private fun TaskContextDropdownMenu(
             )
         }
         HorizontalDivider(color = colors.hairlineDivider)
+
+        if (onStartInlineQuickEdit != null) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = stringResource(R.string.v30_quick_edit_action),
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                        color = colors.thingsBlue
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.Edit,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    onDismiss()
+                    onStartInlineQuickEdit()
+                }
+            )
+        }
 
         if (onToggleSelection != null) {
             DropdownMenuItem(

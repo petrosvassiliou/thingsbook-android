@@ -14,6 +14,7 @@ import {
   FolderKanban,
   History,
   Inbox,
+  LayoutGrid,
   ListChecks,
   Plus,
   SlidersHorizontal,
@@ -72,6 +73,7 @@ interface SidebarProps {
   onOpenTemplates: (areaId: string | null) => void;
   onOpenWeeklyReview: () => void;
   onOpenManageAreas: () => void;
+  onOpenManageTags?: () => void;
   onCreatePerspective?: () => void;
   onEditPerspective?: (perspective: SavedPerspective) => void;
   onDropTaskOnTarget?: (taskId: string, target: SidebarDropTarget) => void;
@@ -120,6 +122,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenTemplates,
   onOpenWeeklyReview,
   onOpenManageAreas,
+  onOpenManageTags,
   onCreatePerspective,
   onEditPerspective,
   onDropTaskOnTarget,
@@ -468,10 +471,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       <button
                         key={proj.id}
                         type="button"
-                        className={`nav-item indented ${isProjActive ? 'active' : ''} ${
-                          dragTargetKey === projKey ? 'drag-over' : ''
-                        }`}
-                        title={`${proj.title} (${prog.done}/${prog.total})`}
+                        className={`nav-item indented project-nav-item ${
+                          isProjActive ? 'active' : ''
+                        } ${dragTargetKey === projKey ? 'drag-over' : ''}`}
+                        title={proj.title}
                         onClick={() => onSelectNav({ kind: 'project', projectId: proj.id })}
                         {...makeDropHandlers(projKey, { kind: 'project', projectId: proj.id })}
                       >
@@ -514,10 +517,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <button
                     key={proj.id}
                     type="button"
-                    className={`nav-item ${isProjActive ? 'active' : ''} ${
+                    className={`nav-item project-nav-item ${isProjActive ? 'active' : ''} ${
                       dragTargetKey === projKey ? 'drag-over' : ''
                     }`}
-                    title={`${proj.title} (${prog.done}/${prog.total})`}
+                    title={proj.title}
                     onClick={() => onSelectNav({ kind: 'project', projectId: proj.id })}
                     {...makeDropHandlers(projKey, { kind: 'project', projectId: proj.id })}
                   >
@@ -659,14 +662,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               type="button"
               className="sidebar-footer-icon-btn"
+              data-testid="sidebar-manage-areas-btn"
               title={`${t.areasManageTitle} (${activeAreas.length}/${MAX_AREAS})`}
-              onClick={onOpenManageAreas}
+              aria-label={t.areasManageTitle}
+              onClick={() => {
+                onCloseMobile();
+                onOpenManageAreas();
+              }}
             >
               <Folder size={13.5} />
               <span>
                 {activeAreas.length}/{MAX_AREAS}
               </span>
             </button>
+
+            {onOpenManageTags && (
+              <button
+                type="button"
+                className="sidebar-footer-icon-btn"
+                data-testid="sidebar-manage-categories-btn"
+                title={t.tagsManageTitle}
+                aria-label={t.tagsManageTitle}
+                onClick={() => {
+                  onCloseMobile();
+                  onOpenManageTags();
+                }}
+              >
+                <LayoutGrid size={13.5} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -702,6 +726,7 @@ interface SmartViewNavigationStripProps {
   onOpenTemplates: () => void;
   onOpenWeeklyReview: () => void;
   onOpenManageAreas: () => void;
+  onOpenManageTags?: () => void;
 }
 
 export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> = ({
@@ -719,7 +744,8 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
   onCreateProject,
   onOpenTemplates,
   onOpenWeeklyReview,
-  onOpenManageAreas
+  onOpenManageAreas,
+  onOpenManageTags
 }) => {
   const [dragStripKey, setDragStripKey] = useState<string | null>(null);
   const activeAreas = areas.filter((a) => !a.isDeleted);
@@ -855,7 +881,7 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
                     className={`strip-pill ${isProjActive ? 'active' : ''} ${
                       dragStripKey === projKey ? 'drag-over' : ''
                     }`}
-                    title={`${area.title} › ${proj.title} (${prog.done}/${prog.total})`}
+                    title={proj.title}
                     onClick={() => onSelectNav({ kind: 'project', projectId: proj.id })}
                     {...makeStripDropHandlers(projKey, {
                       kind: 'project',
@@ -886,7 +912,7 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
               className={`strip-pill ${isActive ? 'active' : ''} ${
                 dragStripKey === projKey ? 'drag-over' : ''
               }`}
-              title={`${proj.title} (${prog.done}/${prog.total})`}
+              title={proj.title}
               onClick={() => onSelectNav({ kind: 'project', projectId: proj.id })}
               {...makeStripDropHandlers(projKey, { kind: 'project', projectId: proj.id })}
             >
@@ -920,6 +946,17 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
             {t.entityAreas} ({activeAreas.length}/{MAX_AREAS})
           </span>
         </button>
+        {onOpenManageTags && (
+          <button
+            type="button"
+            className="strip-pill"
+            title={t.tagsManageTitle}
+            onClick={onOpenManageTags}
+          >
+            <LayoutGrid size={13} />
+            <span>{t.entityTags}</span>
+          </button>
+        )}
       </div>
       {!isSoftKeyboardOpen && (
         <div className="floating-version-pill">Thingsbook v{APP_VERSION}</div>

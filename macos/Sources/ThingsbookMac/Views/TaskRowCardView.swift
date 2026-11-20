@@ -9,7 +9,16 @@ public struct TaskRowCardView: View {
 
     @State private var isCollapsedTimeblockPopoverOpen = false
     @State private var isCollapsedDependenciesPopoverOpen = false
+    @State private var isCollapsedDeadlinePopoverOpen = false
+    @State private var isCollapsedRepeatPopoverOpen = false
+    @State private var isCollapsedReminderPopoverOpen = false
+    @State private var isInlineQuickEditing = false
+    @State private var inlineDraftTitle = ""
+    @FocusState private var isInlineTitleFocused: Bool
+    @State private var isRowWhenPopoverOpen = false
     @State private var isHoveringRow = false
+    @State private var isHoveringQuickEditIcon = false
+    @State private var isHoveringQuickWhenIcon = false
     @State private var isHoveringOpenIcon = false
 
     private var isSelected: Bool {
@@ -31,6 +40,11 @@ public struct TaskRowCardView: View {
             .contextMenu {
                 taskContextMenu
             }
+            .onChange(of: isInlineTitleFocused) { wasFocused, nowFocused in
+                if wasFocused && !nowFocused && isInlineQuickEditing {
+                    commitInlineQuickEdit()
+                }
+            }
     }
 
     // MARK: - Always-Collapsed Calm Things-for-Mac Row
@@ -43,8 +57,18 @@ public struct TaskRowCardView: View {
                 status: task.status,
                 isSomeday: task.scheduleState == .someday,
                 helpText: store.tr("macos_checkbox_help"),
-                onToggleComplete: { store.toggleTaskCompletion(latestTask) },
-                onCancelTask: { store.cancelTask(latestTask) }
+                onToggleComplete: {
+                    if isInlineQuickEditing {
+                        commitInlineQuickEdit()
+                    }
+                    store.toggleTaskCompletion(latestTask)
+                },
+                onCancelTask: {
+                    if isInlineQuickEditing {
+                        commitInlineQuickEdit()
+                    }
+                    store.cancelTask(latestTask)
+                }
             )
 
             VStack(alignment: .leading, spacing: 2.5) {
@@ -62,20 +86,62 @@ public struct TaskRowCardView: View {
                             .foregroundStyle(ThingsMacPalette.eveningPurple)
                     }
 
-                    Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(
-                            task.status == .open
-                                ? (task.title.isEmpty ? Color.secondary : Color.primary)
-                                : Color.secondary
-                        )
-                        .strikethrough(task.status == .canceled, color: .secondary)
-                        .lineLimit(1)
+                    if isInlineQuickEditing {
+                        HStack(spacing: 6) {
+                            TextField(store.tr("placeholder_todo_title"), text: $inlineDraftTitle)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(.primary)
+                                .focused($isInlineTitleFocused)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(ThingsMacPalette.cardSurface)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                                .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.55), lineWidth: 1)
+                                        )
+                                )
+                                .onSubmit {
+                                    commitInlineQuickEdit()
+                                }
+                                .onExitCommand {
+                                    cancelInlineQuickEdit()
+                                }
 
-                    if !task.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !showNotesPreviewInCollapsed {
-                        Image(systemName: "doc.text")
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(.tertiary)
+                            Button {
+                                commitInlineQuickEdit()
+                            } label: {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 10.5, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 22, height: 22)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .fill(ThingsMacPalette.accentBlue)
+                                    )
+                                    .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                            .thingsTooltip(store.tr("action_done"))
+                        }
+                    } else {
+                        Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(
+                                task.status == .open
+                                    ? (task.title.isEmpty ? Color.secondary : Color.primary)
+                                    : Color.secondary
+                            )
+                            .strikethrough(task.status == .canceled, color: .secondary)
+                            .lineLimit(1)
+
+                        if !task.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !showNotesPreviewInCollapsed {
+                            Image(systemName: "doc.text")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                 }
 
@@ -94,7 +160,7 @@ public struct TaskRowCardView: View {
 
             Spacer(minLength: 8)
 
-            // Trailing metadata badges + subtle hover Open Modal button
+            // Trailing metadata badges + subtle hover Quick Edit / When / Open Details buttons
             HStack(spacing: 6) {
                 if let blockedBadge = store.blockedByBadgeText(for: task) {
                     Button {
@@ -112,6 +178,7 @@ public struct TaskRowCardView: View {
                         .padding(.horizontal, 7.5)
                         .padding(.vertical, 2.5)
                         .background(Capsule().fill(ThingsMacPalette.somedayAmber.opacity(0.14)))
+                        .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
                     .thingsTooltip(blockedBadge)
@@ -173,6 +240,7 @@ public struct TaskRowCardView: View {
                         .padding(.horizontal, 7.5)
                         .padding(.vertical, 2.5)
                         .background(Capsule().fill(ThingsMacPalette.anytimeTeal.opacity(0.12)))
+                        .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
                     .thingsTooltip("\(store.tr("macos_tooltip_timeblock")) — \(tbPill)")
@@ -208,17 +276,33 @@ public struct TaskRowCardView: View {
                 }
 
                 if let rem = task.reminderTime {
-                    HStack(spacing: 3) {
-                        Image(systemName: "bell")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text(shortTimeString(rem))
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    Button {
+                        isCollapsedReminderPopoverOpen = true
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "bell")
+                                .font(.system(size: 10, weight: .semibold))
+                            Text(shortTimeString(rem))
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .foregroundStyle(ThingsMacPalette.accentBlue)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2.5)
+                        .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.11)))
+                        .contentShape(Capsule())
                     }
-                    .foregroundStyle(ThingsMacPalette.accentBlue)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2.5)
-                    .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.11)))
+                    .buttonStyle(.plain)
                     .thingsTooltip(store.trf("when_task_reminder_set", shortTimeString(rem)))
+                    .popover(isPresented: $isCollapsedReminderPopoverOpen) {
+                        WhenPopoverView(
+                            store: store,
+                            currentSchedule: latestTask.scheduleState,
+                            currentWhenMillis: latestTask.whenDate,
+                            currentReminderMillis: latestTask.reminderTime,
+                            onApply: applyRowWhenSelection
+                        )
+                    }
                 }
 
                 if !task.checklistItems.isEmpty {
@@ -237,17 +321,35 @@ public struct TaskRowCardView: View {
                 }
 
                 if let rule = task.recurrenceRule {
-                    HStack(spacing: 3.5) {
-                        Image(systemName: "repeat")
-                            .font(.system(size: 10))
-                        Text(rule.formatShortLabel(locale: store.preferences.language.locale))
-                            .font(.system(size: 11, weight: .medium))
+                    Button {
+                        isCollapsedRepeatPopoverOpen = true
+                    } label: {
+                        HStack(spacing: 3.5) {
+                            Image(systemName: "repeat")
+                                .font(.system(size: 10))
+                            Text(rule.formatShortLabel(locale: store.preferences.language.locale))
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2.5)
+                        .background(Capsule().fill(Color.primary.opacity(0.055)))
+                        .contentShape(Capsule())
                     }
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2.5)
-                    .background(Capsule().fill(Color.primary.opacity(0.055)))
+                    .buttonStyle(.plain)
                     .thingsTooltip("\(store.tr("action_repeat")): \(rule.formatShortLabel(locale: store.preferences.language.locale))")
+                    .popover(isPresented: $isCollapsedRepeatPopoverOpen) {
+                        RepeatEditorPopoverView(store: store, currentRule: latestTask.recurrenceRule) { newRule in
+                            var copy = latestTask
+                            copy.recurrenceRule = newRule
+                            if newRule != nil && copy.whenDate == nil {
+                                copy.scheduleState = .today
+                                copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
+                            }
+                            store.updateTask(copy)
+                        }
+                    }
                 }
 
                 ForEach(task.tags.prefix(3)) { tag in
@@ -264,29 +366,44 @@ public struct TaskRowCardView: View {
                     deadlineChip(dl)
                 }
 
-                if isHoveringRow {
-                    Button {
-                        store.openTaskModal(task.id)
-                    } label: {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(isHoveringOpenIcon ? ThingsMacPalette.accentBlue : .secondary)
-                            .frame(width: 24, height: 22)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(
-                                        isHoveringOpenIcon
-                                            ? ThingsMacPalette.accentBlue.opacity(0.13)
-                                            : Color.primary.opacity(0.055)
-                                    )
+                if (isHoveringRow || isRowWhenPopoverOpen) && !isInlineQuickEditing {
+                    HStack(spacing: 4) {
+                        rowHoverActionButton(
+                            systemImage: "pencil",
+                            isHovered: isHoveringQuickEditIcon,
+                            tooltip: store.tr("v30_quick_edit_action"),
+                            onHoverChange: { isHoveringQuickEditIcon = $0 }
+                        ) {
+                            beginInlineQuickEdit()
+                        }
+
+                        rowHoverActionButton(
+                            systemImage: "calendar",
+                            isHovered: isHoveringQuickWhenIcon || isRowWhenPopoverOpen,
+                            tooltip: store.tr("action_when"),
+                            onHoverChange: { isHoveringQuickWhenIcon = $0 }
+                        ) {
+                            isRowWhenPopoverOpen = true
+                        }
+                        .popover(isPresented: $isRowWhenPopoverOpen) {
+                            WhenPopoverView(
+                                store: store,
+                                currentSchedule: latestTask.scheduleState,
+                                currentWhenMillis: latestTask.whenDate,
+                                currentReminderMillis: latestTask.reminderTime,
+                                onApply: applyRowWhenSelection
                             )
-                            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        }
+
+                        rowHoverActionButton(
+                            systemImage: "slider.horizontal.3",
+                            isHovered: isHoveringOpenIcon,
+                            tooltip: store.tr("v30_open_details_action"),
+                            onHoverChange: { isHoveringOpenIcon = $0 }
+                        ) {
+                            store.openTaskModal(task.id)
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .onHover { hovering in
-                        isHoveringOpenIcon = hovering
-                    }
-                    .thingsTooltip(store.tr("action_more_options"))
                 }
             }
         }
@@ -305,17 +422,89 @@ public struct TaskRowCardView: View {
         .onHover { hovering in
             isHoveringRow = hovering
             if !hovering {
+                isHoveringQuickEditIcon = false
+                isHoveringQuickWhenIcon = false
                 isHoveringOpenIcon = false
             }
         }
         .simultaneousGesture(
             TapGesture(count: 2).onEnded {
+                guard !isInlineQuickEditing else { return }
                 store.openTaskModal(task.id)
             }
         )
         .onTapGesture {
+            guard !isInlineQuickEditing else { return }
             store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
         }
+    }
+
+    private func rowHoverActionButton(
+        systemImage: String,
+        isHovered: Bool,
+        tooltip: String,
+        onHoverChange: @escaping (Bool) -> Void,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(isHovered ? ThingsMacPalette.accentBlue : .secondary)
+                .frame(width: 24, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(
+                            isHovered
+                                ? ThingsMacPalette.accentBlue.opacity(0.13)
+                                : Color.primary.opacity(0.055)
+                        )
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover(perform: onHoverChange)
+        .thingsTooltip(tooltip)
+    }
+
+    private func beginInlineQuickEdit() {
+        inlineDraftTitle = latestTask.title
+        isInlineQuickEditing = true
+        store.selectedTaskIds = [task.id]
+        store.lastSelectedTaskId = task.id
+        DispatchQueue.main.async {
+            isInlineTitleFocused = true
+        }
+    }
+
+    private func commitInlineQuickEdit() {
+        let trimmed = inlineDraftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        isInlineQuickEditing = false
+        isInlineTitleFocused = false
+        var copy = latestTask
+        if copy.title != trimmed {
+            copy.title = trimmed
+            store.updateTask(copy)
+        }
+    }
+
+    private func cancelInlineQuickEdit() {
+        isInlineQuickEditing = false
+        isInlineTitleFocused = false
+        inlineDraftTitle = latestTask.title
+    }
+
+    private func applyRowWhenSelection(_ resolved: ResolvedWhenSelection) {
+        var copy = latestTask
+        if isInlineQuickEditing {
+            let trimmed = inlineDraftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                copy.title = trimmed
+            }
+        }
+        copy.scheduleState = resolved.scheduleState
+        copy.whenDate = resolved.whenDateEpochMillis
+        copy.reminderTime = resolved.reminderEpochMillis
+        store.updateTask(copy)
     }
 
     private var showNotesPreviewInCollapsed: Bool {
@@ -352,9 +541,19 @@ public struct TaskRowCardView: View {
             }
         } else {
             Button {
+                beginInlineQuickEdit()
+            } label: {
+                Label(store.tr("v30_quick_edit_action"), systemImage: "pencil")
+            }
+            Button {
+                isRowWhenPopoverOpen = true
+            } label: {
+                Label(store.tr("action_when"), systemImage: "calendar")
+            }
+            Button {
                 store.openTaskModal(task.id)
             } label: {
-                Label("\(store.tr("action_more_options"))…", systemImage: "slider.horizontal.3")
+                Label(store.tr("v30_open_details_action"), systemImage: "slider.horizontal.3")
             }
             Divider()
             Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
@@ -523,21 +722,34 @@ public struct TaskRowCardView: View {
 
     private func deadlineChip(_ millis: Int64) -> some View {
         let info = deadlineSummaryInfo(for: millis)
-        return HStack(spacing: 3.5) {
-            Image(systemName: "flag")
-                .font(.system(size: 10, weight: .semibold))
-            Text(info.label)
-                .font(.system(size: 11, weight: .semibold))
-                .lineLimit(1)
+        return Button {
+            isCollapsedDeadlinePopoverOpen = true
+        } label: {
+            HStack(spacing: 3.5) {
+                Image(systemName: "flag")
+                    .font(.system(size: 10, weight: .semibold))
+                Text(info.label)
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .foregroundStyle(info.isUrgent ? ThingsMacPalette.deadlineCrimson : Color.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2.5)
+            .background(
+                Capsule().fill(info.isUrgent ? ThingsMacPalette.deadlineCrimson.opacity(0.12) : Color.primary.opacity(0.055))
+            )
+            .contentShape(Capsule())
         }
-        .fixedSize(horizontal: true, vertical: false)
-        .foregroundStyle(info.isUrgent ? ThingsMacPalette.deadlineCrimson : Color.secondary)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 2.5)
-        .background(
-            Capsule().fill(info.isUrgent ? ThingsMacPalette.deadlineCrimson.opacity(0.12) : Color.primary.opacity(0.055))
-        )
+        .buttonStyle(.plain)
         .thingsTooltip("\(store.tr("action_deadline")): \(info.label)")
+        .popover(isPresented: $isCollapsedDeadlinePopoverOpen) {
+            DeadlinePopoverView(store: store, currentDeadlineMillis: latestTask.deadline) { dl in
+                var copy = latestTask
+                copy.deadline = dl
+                store.updateTask(copy)
+            }
+        }
     }
 
     private func shortTimeString(_ millis: Int64) -> String {

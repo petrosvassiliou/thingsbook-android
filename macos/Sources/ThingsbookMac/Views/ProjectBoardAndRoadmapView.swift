@@ -1185,7 +1185,48 @@ public struct ProjectRoadmapWorkspaceView: View {
         layout: ProjectRoadmapLayout,
         onJumpToday: @escaping () -> Void
     ) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                roadmapLeadingControls(layout: layout, onJumpToday: onJumpToday)
+                Spacer(minLength: 8)
+                roadmapTrailingControls(layout: layout)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                roadmapLeadingControls(layout: layout, onJumpToday: onJumpToday)
+                HStack(spacing: 8) {
+                    roadmapTrailingControls(layout: layout)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    private func roadmapLeadingControls(
+        layout: ProjectRoadmapLayout,
+        onJumpToday: @escaping () -> Void
+    ) -> some View {
         HStack(spacing: 10) {
+            if store.isTimelineFullScreen {
+                HStack(spacing: 8) {
+                    ProjectProgressRing(
+                        progress: project.progress,
+                        size: 16,
+                        tint: ThingsMacPalette.accentBlue,
+                        isCompleted: project.status == .completed
+                    )
+                    .fixedSize()
+
+                    Text(project.title)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: 320, alignment: .leading)
+                        .thingsTooltip(project.title)
+                }
+            }
+
             HStack(spacing: 6) {
                 Image(systemName: "calendar")
                     .font(.system(size: 11.5, weight: .semibold))
@@ -1247,9 +1288,15 @@ public struct ProjectRoadmapWorkspaceView: View {
                     .fixedSize(horizontal: true, vertical: false)
                 }
             }
+        }
+    }
 
-            Spacer()
+    private func roadmapTrailingControls(layout: ProjectRoadmapLayout) -> some View {
+        let isFull = store.isTimelineFullScreen
+        let fullScreenLabel = isFull ? store.tr("v30_timeline_exit_fullscreen") : store.tr("v30_timeline_fullscreen")
+        let fullScreenIcon = isFull ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right"
 
+        return HStack(spacing: 8) {
             // Day-width zoom controls
             HStack(spacing: 2) {
                 Button {
@@ -1299,6 +1346,7 @@ public struct ProjectRoadmapWorkspaceView: View {
                             .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
                     )
             )
+            .fixedSize()
 
             // Export Roadmap Menu (Configurable PDF Dialog & 1-Click PNG)
             Menu {
@@ -1342,6 +1390,38 @@ public struct ProjectRoadmapWorkspaceView: View {
             .menuIndicator(.hidden)
             .fixedSize()
             .thingsTooltip(store.tr("v30_roadmap_export"))
+
+            // Full Screen / Exit Full Screen Toggle Button
+            Button {
+                store.toggleTimelineFullScreen()
+            } label: {
+                HStack(spacing: 5.5) {
+                    Image(systemName: fullScreenIcon)
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(fullScreenLabel)
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                }
+                .fixedSize(horizontal: true, vertical: false)
+                .foregroundStyle(isFull ? ThingsMacPalette.accentBlue : Color.primary.opacity(0.88))
+                .padding(.horizontal, 11)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(isFull ? ThingsMacPalette.accentBlue.opacity(0.14) : ThingsMacPalette.subtleContainer)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(
+                                    isFull ? ThingsMacPalette.accentBlue.opacity(0.32) : Color.primary.opacity(0.08),
+                                    lineWidth: 0.8
+                                )
+                        )
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .fixedSize(horizontal: true, vertical: false)
+            .thingsTooltip(isFull ? "\(fullScreenLabel) (Esc)" : fullScreenLabel)
         }
     }
 

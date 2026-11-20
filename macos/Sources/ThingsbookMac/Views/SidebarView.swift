@@ -212,9 +212,25 @@ public struct SidebarView: View {
 
                 Spacer(minLength: 4)
 
-                HStack(spacing: 4) {
+                HStack(spacing: 3) {
                     footerSmartIconButton(.logbook)
                     footerSmartIconButton(.trash)
+
+                    Button {
+                        store.isTagManagerPresented = true
+                    } label: {
+                        Image(systemName: "square.grid.2x2")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(store.isTagManagerPresented ? ThingsMacPalette.accentBlue : .secondary)
+                            .frame(width: 24, height: 24)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(store.isTagManagerPresented ? ThingsMacPalette.accentBlue.opacity(0.16) : Color.clear)
+                            )
+                            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .thingsTooltip(store.tr("tags_manage_title"))
 
                     Button {
                         store.isAreaManagerPresented = true
@@ -560,11 +576,14 @@ public struct SidebarView: View {
         return Button {
             store.selectedDestination = dest
         } label: {
-            HStack(spacing: 7) {
+            HStack(alignment: .center, spacing: 7) {
                 Text(proj.title)
                     .font(.system(size: 13, weight: selected ? .semibold : .regular))
                     .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .primary)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .thingsTooltip(proj.title)
 
                 Spacer(minLength: 4)
 
@@ -592,18 +611,18 @@ public struct SidebarView: View {
             .padding(.trailing, 10)
             .padding(.vertical, 5.5)
             .background(
-                Capsule(style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.15) : Color.clear)
             )
             .overlay(
-                Capsule(style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .strokeBorder(selected ? ThingsMacPalette.accentBlue.opacity(0.28) : Color.clear, lineWidth: 0.8)
             )
-            .contentShape(Capsule(style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
         .thingsTooltip(statusHelpText.map { "\(proj.title) — \($0)" } ?? proj.title)
-        .thingsDropTarget(isCapsule: true) { payloads in
+        .thingsDropTarget(cornerRadius: 10) { payloads in
             store.dropTasks(payloads, onto: dest)
         }
         .contextMenu {

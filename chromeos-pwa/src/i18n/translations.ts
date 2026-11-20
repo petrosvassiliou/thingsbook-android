@@ -459,6 +459,10 @@ export interface TranslationStrings {
   externalNoProjects: string;
   externalImportSuccessTitle: (title: string, count?: number) => string;
   externalExportSuccessTitle: (title: string) => string;
+  timelineFullscreen: string;
+  timelineExitFullscreen: string;
+  quickEditAction: string;
+  openDetailsAction: string;
 }
 
 export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
@@ -941,7 +945,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     externalSelectProject: 'Project to Export',
     externalNoProjects: 'No active projects available to export yet.',
     externalImportSuccessTitle: (title, count = 0) => `Imported project "${title}" (${count} to-dos)`,
-    externalExportSuccessTitle: (title) => `Exported "${title}"`
+    externalExportSuccessTitle: (title) => `Exported "${title}"`,
+    timelineFullscreen: 'Full Screen',
+    timelineExitFullscreen: 'Exit Full Screen',
+    quickEditAction: 'Quick Edit',
+    openDetailsAction: 'Open Details'
   },
   de: {
     appName: 'Thingsbook',
@@ -1425,7 +1433,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     externalSelectProject: 'Zu exportierendes Projekt',
     externalNoProjects: 'Noch keine aktiven Projekte zum Exportieren vorhanden.',
     externalImportSuccessTitle: (title, count = 0) => `Projekt „${title}“ importiert (${count} Aufgaben)`,
-    externalExportSuccessTitle: (title) => `„${title}“ exportiert`
+    externalExportSuccessTitle: (title) => `„${title}“ exportiert`,
+    timelineFullscreen: 'Vollbild',
+    timelineExitFullscreen: 'Vollbild beenden',
+    quickEditAction: 'Schnellbearbeitung',
+    openDetailsAction: 'Details öffnen'
   },
   fr: {
     appName: 'Thingsbook',
@@ -1907,7 +1919,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     externalSelectProject: 'Projet à exporter',
     externalNoProjects: "Aucun projet actif disponible pour l'exportation.",
     externalImportSuccessTitle: (title, count = 0) => `Projet « ${title} » importé (${count} tâches)`,
-    externalExportSuccessTitle: (title) => `« ${title} » exporté`
+    externalExportSuccessTitle: (title) => `« ${title} » exporté`,
+    timelineFullscreen: 'Plein écran',
+    timelineExitFullscreen: 'Quitter le plein écran',
+    quickEditAction: 'Modification rapide',
+    openDetailsAction: 'Ouvrir les détails'
   },
   it: {
     appName: 'Thingsbook',
@@ -2389,7 +2405,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     externalSelectProject: 'Progetto da esportare',
     externalNoProjects: "Nessun progetto attivo disponibile per l'esportazione.",
     externalImportSuccessTitle: (title, count = 0) => `Progetto "${title}" importato (${count} attività)`,
-    externalExportSuccessTitle: (title) => `"${title}" esportato`
+    externalExportSuccessTitle: (title) => `"${title}" esportato`,
+    timelineFullscreen: 'Schermo intero',
+    timelineExitFullscreen: 'Esci da schermo intero',
+    quickEditAction: 'Modifica rapida',
+    openDetailsAction: 'Apri dettagli'
   },
   es: {
     appName: 'Thingsbook',
@@ -2871,7 +2891,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     externalSelectProject: 'Proyecto a exportar',
     externalNoProjects: 'Aún no hay proyectos activos disponibles para exportar.',
     externalImportSuccessTitle: (title, count = 0) => `Proyecto «${title}» importado (${count} tareas)`,
-    externalExportSuccessTitle: (title) => `«${title}» exportado`
+    externalExportSuccessTitle: (title) => `«${title}» exportado`,
+    timelineFullscreen: 'Pantalla completa',
+    timelineExitFullscreen: 'Salir de pantalla completa',
+    quickEditAction: 'Edición rápida',
+    openDetailsAction: 'Abrir detalles'
   }
 };
 

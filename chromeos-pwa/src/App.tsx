@@ -3,7 +3,6 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
-  Bell,
   CalendarDays,
   Check,
   CheckCircle2,
@@ -18,24 +17,24 @@ import {
   Flag,
   Folder,
   FolderInput,
-  Globe,
   Heading as HeadingIcon,
   History,
   Inbox,
   LayoutGrid,
   List,
-  ListChecks,
+  Maximize2,
   Menu,
   Mic,
   Milestone,
+  Minimize2,
   Moon,
+  MoreHorizontal,
   PanelLeftClose,
   Pin,
   PinOff,
   Plus,
   Search,
   Settings,
-  Share2,
   SlidersHorizontal,
   Sparkles,
   Sun,
@@ -244,15 +243,20 @@ export const App: React.FC = () => {
   const cancelingHeadingEditRef = useRef(false);
   const [dragOverHeadingId, setDragOverHeadingId] = useState<string | null>(null);
 
-  // Area inline title editing & Project area dropdown
+  // Area inline title editing & Project area/menu dropdowns
   const [editingAreaHeader, setEditingAreaHeader] = useState(false);
   const [editingAreaTitle, setEditingAreaTitle] = useState('');
   const [projectAreaDropdownOpen, setProjectAreaDropdownOpen] = useState(false);
+  const [projectHeaderMenuOpen, setProjectHeaderMenuOpen] = useState(false);
 
-  // Topbar Popovers, Magic Plus & Inline Quick Find
-  const [langDropdownOpen, setLangDropdownOpen] = useState(false);
+  // Magic Plus, Inline Quick Find & v3.0-beta.5 Full-Screen / Inline Quick Edit
   const [quickFindOpen, setQuickFindOpen] = useState(false);
   const [magicFabOpen, setMagicFabOpen] = useState(false);
+  const [isTimelineFullScreen, setIsTimelineFullScreen] = useState(false);
+  const [inlineQuickEditRequest, setInlineQuickEditRequest] = useState<{
+    taskId: string;
+    nonce: number;
+  } | null>(null);
 
   // Modals (store entity IDs so modals always read live snapshot records and never overwrite titles)
   const [whenModalTaskId, setWhenModalTaskId] = useState<string | null>(null);
@@ -1530,13 +1534,39 @@ export const App: React.FC = () => {
     snapshot.headings
   ]);
 
+  const isTodayTimelineFullScreen =
+    isTimelineFullScreen &&
+    activeNav.kind === 'smart' &&
+    activeNav.view === 'TODAY' &&
+    todayViewMode === 'timeline';
+  const isRoadmapFullScreen =
+    isTimelineFullScreen &&
+    activeNav.kind === 'project' &&
+    activeProjectViewMode === 'roadmap';
+  const isAnyTimelineFullScreen = isTodayTimelineFullScreen || isRoadmapFullScreen;
+
+  useEffect(() => {
+    if (!isTimelineFullScreen) return;
+    const inTodayTimeline =
+      activeNav.kind === 'smart' &&
+      activeNav.view === 'TODAY' &&
+      todayViewMode === 'timeline';
+    const inProjectRoadmap =
+      activeNav.kind === 'project' && activeProjectViewMode === 'roadmap';
+    if (!inTodayTimeline && !inProjectRoadmap) {
+      setIsTimelineFullScreen(false);
+    }
+  }, [isTimelineFullScreen, activeNav, todayViewMode, activeProjectViewMode]);
+
   const handleSelectNav = useCallback(
     (nav: ActiveNavigation, highlightTaskId?: string) => {
       setActiveNav(nav);
       setMobileDrawerOpen(false);
       setEditingAreaHeader(false);
       setProjectAreaDropdownOpen(false);
+      setProjectHeaderMenuOpen(false);
       setViewSortDropdownOpen(false);
+      setIsTimelineFullScreen(false);
       setSelectedTaskIds([]);
       if (highlightTaskId) {
         setExpandedTaskId(highlightTaskId);
@@ -1958,11 +1988,12 @@ export const App: React.FC = () => {
         if (authModalOpen) return setAuthModalOpen(false);
         if (settingsModalOpen) return setSettingsModalOpen(false);
         if (magicFabOpen) return setMagicFabOpen(false);
-        if (langDropdownOpen) return setLangDropdownOpen(false);
+        if (projectHeaderMenuOpen) return setProjectHeaderMenuOpen(false);
         if (projectAreaDropdownOpen) return setProjectAreaDropdownOpen(false);
         if (viewSortDropdownOpen) return setViewSortDropdownOpen(false);
         if (quickFindOpen) return setQuickFindOpen(false);
         if (expandedTaskId) return setExpandedTaskId(null);
+        if (isTimelineFullScreen) return setIsTimelineFullScreen(false);
         if (selectedTaskIds.length > 0) return setSelectedTaskIds([]);
         if (mobileDrawerOpen) return setMobileDrawerOpen(false);
         return;
@@ -2008,6 +2039,24 @@ export const App: React.FC = () => {
       ) {
         e.preventDefault();
         setExpandedTaskId(selectedTaskIds[0]);
+        return;
+      }
+
+      if (
+        !inInput &&
+        !expandedTaskId &&
+        !anyOtherModalOpen &&
+        selectedTaskIds.length === 1 &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        e.key === 'F2'
+      ) {
+        e.preventDefault();
+        setInlineQuickEditRequest({
+          taskId: selectedTaskIds[0],
+          nonce: Date.now()
+        });
         return;
       }
 
@@ -2200,11 +2249,12 @@ export const App: React.FC = () => {
     authModalOpen,
     settingsModalOpen,
     magicFabOpen,
-    langDropdownOpen,
+    projectHeaderMenuOpen,
     projectAreaDropdownOpen,
     viewSortDropdownOpen,
     quickFindOpen,
     expandedTaskId,
+    isTimelineFullScreen,
     selectedTaskIds,
     mobileDrawerOpen,
     activeNav,
@@ -2497,6 +2547,9 @@ export const App: React.FC = () => {
       geminiApiKey={prefs.geminiApiKey}
       t={t}
       dragTaskIds={orderedSelectedDragIds}
+      quickEditRequestNonce={
+        inlineQuickEditRequest?.taskId === tk.id ? inlineQuickEditRequest.nonce : 0
+      }
       onSelect={(multiToggle, shiftRange) =>
         handleSelectTask(tk.id, multiToggle, Boolean(shiftRange))
       }
@@ -2506,6 +2559,12 @@ export const App: React.FC = () => {
         setExpandedTaskId(tk.id);
       }}
       onCollapse={() => setExpandedTaskId(null)}
+      onUpdateTitleNotes={(nextTitle, nextNotes) =>
+        void localDb.upsertTask({ id: tk.id, title: nextTitle, notes: nextNotes })
+      }
+      onUpdateEffortLevel={(nextEffort) =>
+        void localDb.upsertTask({ id: tk.id, effortLevel: nextEffort })
+      }
       onRequestEnsureVisible={handleRequestEnsureTaskVisible}
       onOpenWhenModal={(taskId) => setWhenModalTaskId(taskId)}
       onOpenDeadlineModal={(taskId) => setDeadlineModalTarget({ kind: 'task', taskId })}
@@ -2744,7 +2803,7 @@ export const App: React.FC = () => {
     >
       {/* Left Sidebar / Mobile Drawer */}
       <Sidebar
-        visible={effectiveSidebarVisible}
+        visible={effectiveSidebarVisible && !isAnyTimelineFullScreen}
         activeNav={activeNav}
         areas={snapshot.areas}
         projects={snapshot.projects}
@@ -2768,6 +2827,7 @@ export const App: React.FC = () => {
         }
         onOpenWeeklyReview={() => setWeeklyReviewModal({ open: true, step: 1 })}
         onOpenManageAreas={() => setAreaManagerOpen(true)}
+        onOpenManageTags={() => setTagManagerOpen(true)}
         onCreatePerspective={() =>
           setPerspectiveModalState({ open: true, perspective: null })
         }
@@ -2780,263 +2840,148 @@ export const App: React.FC = () => {
 
       {/* Right Workspace */}
       <main ref={workspaceContainerRef} className="workspace">
-        {/* TopThingsbookBar */}
-        <header
-          className="workspace-topbar"
-          data-topbar-tier={resolveTopBarLayoutTier(workspaceWidthPx)}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="topbar-left">
-            <button
-              type="button"
-              className="icon-btn"
-              onClick={() => {
-                if (isWideScreen) {
-                  updatePrefs({ sidebarVisible: !prefs.sidebarVisible });
-                } else {
-                  setMobileDrawerOpen((v) => !v);
-                }
-              }}
-              title={effectiveSidebarVisible ? t.topbarTooltipHideSidebar : t.topbarTooltipShowSidebar}
-            >
-              {effectiveSidebarVisible && isWideScreen ? (
-                <PanelLeftClose size={18} />
-              ) : (
-                <Menu size={18} />
-              )}
-            </button>
-
-            {(!isWideScreen || !prefs.sidebarVisible) && (
-              <button
-                type="button"
-                className="brand-title-group"
-                title={t.viewToday}
-                onClick={() => handleSelectNav({ kind: 'smart', view: 'TODAY' })}
-              >
-                <span className="brand-app-icon">
-                  <CheckSquare size={13.5} strokeWidth={2.6} />
-                </span>
-                <span className="brand-name topbar-label-hide-sm">{t.appName}</span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              className={`topbar-pill ${quickFindOpen ? 'active' : ''}`}
-              title={t.topbarTooltipQuickFind}
-              onClick={() => setQuickFindOpen((v) => !v)}
-            >
-              <Search size={14} />
-              <span className="topbar-label-hide-xs">{t.quickFindTitle}</span>
-              <kbd className="topbar-label-hide-sm">Ctrl+F</kbd>
-            </button>
-          </div>
-
-          <div className="topbar-right">
-            {/* Guided GTD Weekly Review Pill (v2.0) */}
-            <button
-              type="button"
-              className="topbar-pill"
-              data-testid="topbar-weekly-review-btn"
-              title={t.topbarTooltipWeeklyReview}
-              onClick={() => setWeeklyReviewModal({ open: true, step: 1 })}
-            >
-              <ListChecks size={14} style={{ color: 'var(--things-blue)' }} />
-              <span className="topbar-label-hide-sm">{t.weeklyReviewBtn}</span>
-              {stalledProjects.length > 0 && (
-                <span className="v2-stalled-count-dot">
-                  {stalledProjects.length}
-                </span>
-              )}
-            </button>
-
-            {/* Templates & Markdown Importer Icon (v2.0) */}
-            <button
-              type="button"
-              className="icon-btn"
-              data-testid="topbar-templates-btn"
-              title={t.topbarTooltipTemplates}
-              onClick={() =>
-                setTemplatesModal({
-                  open: true,
-                  tab: 'gallery',
-                  areaId: defaultAreaIdForNewProject
-                })
-              }
-            >
-              <ClipboardList size={17} />
-            </button>
-
-            {/* Gemini Hub Pill */}
-            <button
-              type="button"
-              className="topbar-pill gemini-pill"
-              onClick={() => setGeminiModalOpen(true)}
-              title="Gemini"
-            >
-              <Sparkles size={14} />
-              <span className="topbar-label-hide-md">Gemini</span>
-            </button>
-
-            {/* Voice Capture Icon (v1.8.0) */}
-            <button
-              type="button"
-              className="icon-btn"
-              data-testid="topbar-voice-capture-btn"
-              title={t.topbarTooltipVoiceInput}
-              onClick={() =>
-                setQuickShareDraft({
-                  initialTitle: '',
-                  initialNotes: '',
-                  autoLaunchVoice: true
-                })
-              }
-            >
-              <Mic size={17} />
-            </button>
-
-            {/* Quick Entry Icon */}
-            <button
-              type="button"
-              className="icon-btn"
-              data-testid="topbar-quick-share-btn"
-              title={t.topbarTooltipQuickEntry}
-              onClick={() => setQuickShareDraft({ initialTitle: '', initialNotes: '' })}
-            >
-              <Share2 size={17} />
-            </button>
-
-            {/* Areas Icon */}
-            <button
-              type="button"
-              className="icon-btn"
-              title={t.topbarTooltipAreas}
-              onClick={() => setAreaManagerOpen(true)}
-            >
-              <Folder size={17} />
-            </button>
-
-            {/* Tags Icon */}
-            <button
-              type="button"
-              className="icon-btn"
-              title={t.topbarTooltipTags}
-              onClick={() => setTagManagerOpen(true)}
-            >
-              <LayoutGrid size={17} />
-            </button>
-
-            {/* Notifications Icon (blue when dailyDigestEnabled) */}
-            <button
-              type="button"
-              className={`icon-btn ${prefs.dailyDigestEnabled ? 'active' : ''}`}
-              title={t.topbarTooltipNotifications}
-              onClick={() => setNotificationsModalOpen(true)}
-            >
-              <Bell size={17} />
-            </button>
-
-            {/* Language Dropdown */}
-            <div className="dropdown-anchor">
+        {/* TopThingsbookBar (Calm Single-Row Bar; hidden when Timeline/Roadmap Full Screen is active) */}
+        {!isAnyTimelineFullScreen && (
+          <header
+            className="workspace-topbar"
+            data-topbar-tier={resolveTopBarLayoutTier(workspaceWidthPx)}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="topbar-left">
               <button
                 type="button"
                 className="icon-btn"
-                title={t.topbarTooltipLanguage}
-                onClick={() => setLangDropdownOpen((v) => !v)}
+                onClick={() => {
+                  if (isWideScreen) {
+                    updatePrefs({ sidebarVisible: !prefs.sidebarVisible });
+                  } else {
+                    setMobileDrawerOpen((v) => !v);
+                  }
+                }}
+                title={
+                  effectiveSidebarVisible
+                    ? t.topbarTooltipHideSidebar
+                    : t.topbarTooltipShowSidebar
+                }
               >
-                <Globe size={17} />
+                {effectiveSidebarVisible && isWideScreen ? (
+                  <PanelLeftClose size={18} />
+                ) : (
+                  <Menu size={18} />
+                )}
               </button>
 
-              {langDropdownOpen && (
-                <>
-                  <div
-                    style={{ position: 'fixed', inset: 0, zIndex: 70 }}
-                    onClick={() => setLangDropdownOpen(false)}
-                  />
-                  <div className="dropdown-popover">
-                    {(
-                      [
-                        ['system', t.settingsSystemDefault],
-                        ['en', '🇬🇧 English'],
-                        ['de', '🇩🇪 Deutsch'],
-                        ['it', '🇮🇹 Italiano'],
-                        ['fr', '🇫🇷 Français'],
-                        ['es', '🇪🇸 Español']
-                      ] as Array<[SupportedLang | 'system', string]>
-                    ).map(([code, label]) => (
-                      <button
-                        key={code}
-                        type="button"
-                        className="dropdown-item"
-                        onClick={() => {
-                          updatePrefs({ language: code });
-                          setLangDropdownOpen(false);
-                        }}
-                      >
-                        <span>{label}</span>
-                        {prefs.language === code && <Check size={14} />}
-                      </button>
-                    ))}
-                  </div>
-                </>
+              {(!isWideScreen || !prefs.sidebarVisible) && (
+                <button
+                  type="button"
+                  className="brand-title-group"
+                  title={t.viewToday}
+                  onClick={() => handleSelectNav({ kind: 'smart', view: 'TODAY' })}
+                >
+                  <span className="brand-app-icon">
+                    <CheckSquare size={13.5} strokeWidth={2.6} />
+                  </span>
+                  <span className="brand-name topbar-label-hide-sm">{t.appName}</span>
+                </button>
               )}
-            </div>
 
-            {/* Cloud Sync Icon */}
-            <button
-              type="button"
-              className="icon-btn sync-icon-btn"
-              title={t.topbarTooltipCloudSync}
-              onClick={() => setAuthModalOpen(true)}
-            >
-              <Cloud
-                size={17}
-                style={{
-                  color:
-                    syncState.status === 'SYNCED'
-                      ? 'var(--logbook-green)'
-                      : syncState.status === 'SYNCING'
-                        ? 'var(--things-blue)'
-                        : undefined
-                }}
-              />
-              <span
-                className={`sync-status-dot ${
-                  syncState.status === 'SYNCED'
-                    ? 'synced'
-                    : syncState.status === 'SYNCING'
-                      ? 'syncing'
-                      : ''
-                }`}
-              />
-            </button>
-
-            {availableUpdate?.hasUpdate && (
               <button
                 type="button"
-                className="chip-btn active"
-                data-testid="topbar-update-available-btn"
-                title={`${t.settingsApplyUpdateBtn} (v${availableUpdate.latestVersion})`}
-                onClick={() => void applyPendingSwUpdate(availableUpdate)}
+                className={`topbar-pill ${quickFindOpen ? 'active' : ''}`}
+                title={t.topbarTooltipQuickFind}
+                onClick={() => setQuickFindOpen((v) => !v)}
               >
-                <span>v{availableUpdate.latestVersion}</span>
+                <Search size={14} />
+                <span className="topbar-label-hide-xs">{t.quickFindTitle}</span>
+                <kbd className="topbar-label-hide-sm">Ctrl+F</kbd>
               </button>
-            )}
+            </div>
 
-            {/* Pinned Far-Right Settings Icon */}
-            <button
-              type="button"
-              className="icon-btn"
-              title={t.topbarTooltipSettings}
-              onClick={() => setSettingsModalOpen(true)}
-            >
-              <Settings size={17.5} />
-            </button>
-          </div>
-        </header>
+            <div className="topbar-right">
+              {/* Voice Capture Icon */}
+              <button
+                type="button"
+                className="icon-btn"
+                data-testid="topbar-voice-capture-btn"
+                title={t.topbarTooltipVoiceInput}
+                onClick={() =>
+                  setQuickShareDraft({
+                    initialTitle: '',
+                    initialNotes: '',
+                    autoLaunchVoice: true
+                  })
+                }
+              >
+                <Mic size={17} />
+              </button>
+
+              {/* Gemini Hub Pill */}
+              <button
+                type="button"
+                className="topbar-pill gemini-pill"
+                onClick={() => setGeminiModalOpen(true)}
+                title="Gemini"
+              >
+                <Sparkles size={14} />
+                <span className="topbar-label-hide-md">Gemini</span>
+              </button>
+
+              {/* Cloud Sync Icon */}
+              <button
+                type="button"
+                className="icon-btn sync-icon-btn"
+                title={t.topbarTooltipCloudSync}
+                onClick={() => setAuthModalOpen(true)}
+              >
+                <Cloud
+                  size={17}
+                  style={{
+                    color:
+                      syncState.status === 'SYNCED'
+                        ? 'var(--logbook-green)'
+                        : syncState.status === 'SYNCING'
+                          ? 'var(--things-blue)'
+                          : undefined
+                  }}
+                />
+                <span
+                  className={`sync-status-dot ${
+                    syncState.status === 'SYNCED'
+                      ? 'synced'
+                      : syncState.status === 'SYNCING'
+                        ? 'syncing'
+                        : ''
+                  }`}
+                />
+              </button>
+
+              {availableUpdate?.hasUpdate && (
+                <button
+                  type="button"
+                  className="chip-btn active"
+                  data-testid="topbar-update-available-btn"
+                  title={`${t.settingsApplyUpdateBtn} (v${availableUpdate.latestVersion})`}
+                  onClick={() => void applyPendingSwUpdate(availableUpdate)}
+                >
+                  <span>v{availableUpdate.latestVersion}</span>
+                </button>
+              )}
+
+              {/* Pinned Far-Right Settings Icon */}
+              <button
+                type="button"
+                className="icon-btn"
+                title={t.topbarTooltipSettings}
+                onClick={() => setSettingsModalOpen(true)}
+              >
+                <Settings size={17.5} />
+              </button>
+            </div>
+          </header>
+        )}
 
         {/* Horizontal SmartViewNavigationStrip when >= 700px and Sidebar Collapsed */}
-        {isWideScreen && !prefs.sidebarVisible && (
+        {!isAnyTimelineFullScreen && isWideScreen && !prefs.sidebarVisible && (
           <SmartViewNavigationStrip
             activeNav={activeNav}
             areas={snapshot.areas}
@@ -3067,11 +3012,12 @@ export const App: React.FC = () => {
             }
             onOpenWeeklyReview={() => setWeeklyReviewModal({ open: true, step: 1 })}
             onOpenManageAreas={() => setAreaManagerOpen(true)}
+            onOpenManageTags={() => setTagManagerOpen(true)}
           />
         )}
 
         {/* Inline Quick Find Section directly under Top Bar */}
-        {quickFindOpen && (
+        {!isAnyTimelineFullScreen && quickFindOpen && (
           <InlineQuickFind
             areas={snapshot.areas}
             projects={snapshot.projects}
@@ -3088,9 +3034,11 @@ export const App: React.FC = () => {
         {/* Main Scrollable View Content */}
         <div
           ref={workspaceScrollRef}
-          className="workspace-scroll"
+          className={`workspace-scroll ${
+            isAnyTimelineFullScreen ? 'timeline-fullscreen-scroll' : ''
+          }`}
           style={
-            isSoftKeyboardOpen
+            isSoftKeyboardOpen && !isAnyTimelineFullScreen
               ? { paddingBottom: `${softKeyboardInsetPx + 28}px` }
               : undefined
           }
@@ -3101,10 +3049,11 @@ export const App: React.FC = () => {
               (activeProjectViewMode === 'board' || activeProjectViewMode === 'roadmap')
                 ? 'wide-project-canvas'
                 : ''
-            }`}
+            } ${isAnyTimelineFullScreen ? 'timeline-fullscreen-container' : ''}`}
           >
             {/* Welcome Setup Banner (only when sample tasks exist & not dismissed & not signed in) */}
-            {snapshot.hasSampleTasks &&
+            {!isAnyTimelineFullScreen &&
+              snapshot.hasSampleTasks &&
               !prefs.setupBannerDismissed &&
               !syncState.userId && (
                 <div className="setup-banner" onClick={(e) => e.stopPropagation()}>
@@ -3183,33 +3132,16 @@ export const App: React.FC = () => {
             {/* ==================== SMART VIEWS ==================== */}
             {activeNav.kind === 'smart' && (
               <>
-                <div className="view-header" onClick={(e) => e.stopPropagation()}>
-                  <div className="view-title-row">
-                    <div className="view-title-left" style={{ flexWrap: 'wrap' }}>
-                      {activeNav.view === 'INBOX' && (
-                        <Inbox size={26} style={{ color: 'var(--things-blue)' }} />
-                      )}
-                      {activeNav.view === 'TODAY' && (
-                        <Sun size={26} style={{ color: 'var(--things-blue)' }} />
-                      )}
-                      {activeNav.view === 'UPCOMING' && (
-                        <CalendarDays size={26} style={{ color: 'var(--things-blue)' }} />
-                      )}
-                      {activeNav.view === 'ANYTIME' && (
-                        <Compass size={26} style={{ color: 'var(--things-blue)' }} />
-                      )}
-                      {activeNav.view === 'SOMEDAY' && (
-                        <Cloud size={26} style={{ color: 'var(--things-blue)' }} />
-                      )}
-                      {activeNav.view === 'LOGBOOK' && (
-                        <History size={26} style={{ color: 'var(--things-blue)' }} />
-                      )}
-                      {activeNav.view === 'TRASH' && (
-                        <Trash2 size={26} style={{ color: 'var(--things-blue)' }} />
-                      )}
-                      <h1 className="view-title">{currentViewTitle}</h1>
-
-                      {activeNav.view === 'TODAY' && todayCapacity.plannedMinutes > 0 && (
+                {isTodayTimelineFullScreen ? (
+                  <div
+                    className="timeline-fullscreen-bar"
+                    data-testid="today-timeline-fullscreen-bar"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="timeline-fullscreen-bar-left">
+                      <Sun size={18} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
+                      <span className="timeline-fullscreen-title">{t.viewToday}</span>
+                      {todayCapacity.plannedMinutes > 0 && (
                         <span
                           className="today-capacity-pill"
                           data-testid="today-capacity-pill"
@@ -3222,62 +3154,181 @@ export const App: React.FC = () => {
                       )}
                     </div>
 
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        flexWrap: 'wrap'
-                      }}
-                    >
-                      {activeNav.view !== 'LOGBOOK' &&
-                        activeNav.view !== 'TRASH' &&
-                        renderViewSortDropdown()}
+                    <div className="timeline-fullscreen-bar-right">
+                      <div className="v2-segmented-toggle" data-testid="today-mode-toggle">
+                        <button
+                          type="button"
+                          className="v2-segmented-btn"
+                          data-testid="today-mode-list-btn"
+                          title={t.todayModeList}
+                          onClick={() => {
+                            setIsTimelineFullScreen(false);
+                            setTodayViewMode('list');
+                          }}
+                        >
+                          <List size={13.5} />
+                          <span>{t.todayModeList}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="v2-segmented-btn active"
+                          data-testid="today-mode-timeline-btn"
+                          title={t.todayModeTimeline}
+                          onClick={() => setTodayViewMode('timeline')}
+                        >
+                          <CalendarDays size={13.5} />
+                          <span>{t.todayModeTimeline}</span>
+                        </button>
+                      </div>
 
-                      {activeNav.view === 'TODAY' && (
-                        <div className="v2-segmented-toggle" data-testid="today-mode-toggle">
-                          <button
-                            type="button"
-                            className={`v2-segmented-btn ${todayViewMode === 'list' ? 'active' : ''}`}
-                            data-testid="today-mode-list-btn"
-                            title={t.todayModeList}
-                            onClick={() => setTodayViewMode('list')}
-                          >
-                            <List size={13.5} />
-                            <span>{t.todayModeList}</span>
-                          </button>
-                          <button
-                            type="button"
-                            className={`v2-segmented-btn ${todayViewMode === 'timeline' ? 'active' : ''}`}
-                            data-testid="today-mode-timeline-btn"
-                            title={t.todayModeTimeline}
-                            onClick={() => setTodayViewMode('timeline')}
-                          >
-                            <CalendarDays size={13.5} />
-                            <span>{t.todayModeTimeline}</span>
-                          </button>
-                        </div>
-                      )}
-
-                      {activeNav.view === 'TRASH' &&
-                        deletedProjects.length + deletedTasks.length > 0 && (
-                          <button
-                            type="button"
-                            className="chip-btn urgent"
-                            data-testid="empty-trash-btn"
-                            title={t.trashEmptyBtn}
-                            onClick={() => setEmptyTrashConfirmOpen(true)}
-                          >
-                            <Trash2 size={13} />
-                            <span>{t.trashEmptyBtn}</span>
-                          </button>
-                        )}
+                      <button
+                        type="button"
+                        className="chip-btn active"
+                        data-testid="today-timeline-fullscreen-btn"
+                        title={t.timelineExitFullscreen}
+                        onClick={() => setIsTimelineFullScreen(false)}
+                      >
+                        <Minimize2 size={13} />
+                        <span>{t.timelineExitFullscreen}</span>
+                      </button>
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="view-header" onClick={(e) => e.stopPropagation()}>
+                    <div className="view-title-row smart-view-title-row">
+                      <div className="view-title-left smart-view-title-left">
+                        {activeNav.view === 'INBOX' && (
+                          <Inbox
+                            size={26}
+                            style={{ color: 'var(--things-blue)', flexShrink: 0 }}
+                          />
+                        )}
+                        {activeNav.view === 'TODAY' && (
+                          <Sun
+                            size={26}
+                            style={{ color: 'var(--things-blue)', flexShrink: 0 }}
+                          />
+                        )}
+                        {activeNav.view === 'UPCOMING' && (
+                          <CalendarDays
+                            size={26}
+                            style={{ color: 'var(--things-blue)', flexShrink: 0 }}
+                          />
+                        )}
+                        {activeNav.view === 'ANYTIME' && (
+                          <Compass
+                            size={26}
+                            style={{ color: 'var(--things-blue)', flexShrink: 0 }}
+                          />
+                        )}
+                        {activeNav.view === 'SOMEDAY' && (
+                          <Cloud
+                            size={26}
+                            style={{ color: 'var(--things-blue)', flexShrink: 0 }}
+                          />
+                        )}
+                        {activeNav.view === 'LOGBOOK' && (
+                          <History
+                            size={26}
+                            style={{ color: 'var(--things-blue)', flexShrink: 0 }}
+                          />
+                        )}
+                        {activeNav.view === 'TRASH' && (
+                          <Trash2
+                            size={26}
+                            style={{ color: 'var(--things-blue)', flexShrink: 0 }}
+                          />
+                        )}
+                        <h1 className="view-title smart-view-title">{currentViewTitle}</h1>
 
-                {/* View-Scoped Tag Filter Strip (Auto-hidden when empty) */}
-                {usedTagsInCurrentView.length > 0 && (
+                        {activeNav.view === 'TODAY' && todayCapacity.plannedMinutes > 0 && (
+                          <span
+                            className="today-capacity-pill"
+                            data-testid="today-capacity-pill"
+                          >
+                            {t.todayCapacitySummary(
+                              formatStandaloneDuration(todayCapacity.plannedMinutes),
+                              formatStandaloneDuration(todayCapacity.freeMinutes)
+                            )}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="smart-view-header-controls">
+                        {activeNav.view !== 'LOGBOOK' &&
+                          activeNav.view !== 'TRASH' &&
+                          renderViewSortDropdown()}
+
+                        {activeNav.view === 'TODAY' && (
+                          <>
+                            <div
+                              className="v2-segmented-toggle"
+                              data-testid="today-mode-toggle"
+                            >
+                              <button
+                                type="button"
+                                className={`v2-segmented-btn ${
+                                  todayViewMode === 'list' ? 'active' : ''
+                                }`}
+                                data-testid="today-mode-list-btn"
+                                title={t.todayModeList}
+                                onClick={() => {
+                                  setIsTimelineFullScreen(false);
+                                  setTodayViewMode('list');
+                                }}
+                              >
+                                <List size={13.5} />
+                                <span>{t.todayModeList}</span>
+                              </button>
+                              <button
+                                type="button"
+                                className={`v2-segmented-btn ${
+                                  todayViewMode === 'timeline' ? 'active' : ''
+                                }`}
+                                data-testid="today-mode-timeline-btn"
+                                title={t.todayModeTimeline}
+                                onClick={() => setTodayViewMode('timeline')}
+                              >
+                                <CalendarDays size={13.5} />
+                                <span>{t.todayModeTimeline}</span>
+                              </button>
+                            </div>
+
+                            {todayViewMode === 'timeline' && (
+                              <button
+                                type="button"
+                                className="chip-btn"
+                                data-testid="today-timeline-fullscreen-btn"
+                                title={t.timelineFullscreen}
+                                onClick={() => setIsTimelineFullScreen(true)}
+                              >
+                                <Maximize2 size={13} />
+                                <span>{t.timelineFullscreen}</span>
+                              </button>
+                            )}
+                          </>
+                        )}
+
+                        {activeNav.view === 'TRASH' &&
+                          deletedProjects.length + deletedTasks.length > 0 && (
+                            <button
+                              type="button"
+                              className="chip-btn urgent"
+                              data-testid="empty-trash-btn"
+                              title={t.trashEmptyBtn}
+                              onClick={() => setEmptyTrashConfirmOpen(true)}
+                            >
+                              <Trash2 size={13} />
+                              <span>{t.trashEmptyBtn}</span>
+                            </button>
+                          )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* View-Scoped Tag Filter Strip (Auto-hidden when empty or in Full Screen) */}
+                {!isTodayTimelineFullScreen && usedTagsInCurrentView.length > 0 && (
                   <div className="tag-filter-bar" onClick={(e) => e.stopPropagation()}>
                     <button
                       type="button"
@@ -3411,18 +3462,26 @@ export const App: React.FC = () => {
 
                   if (todayViewMode === 'timeline') {
                     return (
-                      <TodayTimelineView
-                        todayTasks={[...dayFiltered, ...eveFiltered]}
-                        calendarEvents={activeTodayCalendarEvents}
-                        areasMap={areasMap}
-                        projectsMap={allNonDeletedProjectsMap}
-                        t={t}
-                        onExpandTask={(taskId) => {
-                          setSelectedTaskIds([]);
-                          setExpandedTaskId(taskId);
-                        }}
-                        onStartFocusTimer={handleStartFocusTimer}
-                      />
+                      <div
+                        className={
+                          isTodayTimelineFullScreen
+                            ? 'today-timeline-fullscreen-body'
+                            : undefined
+                        }
+                      >
+                        <TodayTimelineView
+                          todayTasks={[...dayFiltered, ...eveFiltered]}
+                          calendarEvents={activeTodayCalendarEvents}
+                          areasMap={areasMap}
+                          projectsMap={allNonDeletedProjectsMap}
+                          t={t}
+                          onExpandTask={(taskId) => {
+                            setSelectedTaskIds([]);
+                            setExpandedTaskId(taskId);
+                          }}
+                          onStartFocusTimer={handleStartFocusTimer}
+                        />
+                      </div>
                     );
                   }
 
@@ -3774,11 +3833,13 @@ export const App: React.FC = () => {
                             }}
                           />
                         ) : (
-                          <h1 className="view-title">{area.title}</h1>
+                          <h1 className="view-title area-view-title" title={area.title}>
+                            {area.title}
+                          </h1>
                         )}
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
                         {renderViewSortDropdown()}
                         <button
                           type="button"
@@ -3904,7 +3965,15 @@ export const App: React.FC = () => {
                                   size={20}
                                 />
                                 <div style={{ minWidth: 0 }}>
-                                  <div style={{ fontWeight: 650, fontSize: 14.3 }}>
+                                  <div
+                                    style={{
+                                      fontWeight: 650,
+                                      fontSize: 14.3,
+                                      wordBreak: 'normal',
+                                      overflowWrap: 'break-word'
+                                    }}
+                                    title={proj.title}
+                                  >
                                     {proj.title}
                                   </div>
                                   <div style={{ fontSize: 11.8, color: 'var(--text-muted)' }}>
@@ -4035,48 +4104,186 @@ export const App: React.FC = () => {
 
               return (
                 <>
-                  {/* Project Header */}
-                  <div className="view-header" onClick={(e) => e.stopPropagation()}>
-                    {/* Row 1: ProgressRing(26) + Title + Attention/Review Badge + 3-Mode Switcher + Sort + Up/Down + Edit + Complete + Delete */}
-                    <div className="view-title-row">
-                      <div className="view-title-left" style={{ flexWrap: 'wrap' }}>
-                        <ProjectProgressRing
-                          completed={doneProjTasks}
-                          total={allProjTasks.length}
-                          size={26}
-                          isProjectCompleted={project.status === 'COMPLETED'}
-                        />
-                        <h1 className="view-title">{project.title}</h1>
-                        {stalledStatus.isStalled && (
+                  {/* Project Header (Hidden when Roadmap Full Screen is active) */}
+                  {!isRoadmapFullScreen && (
+                    <div className="view-header" onClick={(e) => e.stopPropagation()}>
+                      {/* Row 1: Generous Full-Width Project Title + Compact [✏️ Edit] & [⋯ Project Menu] */}
+                      <div className="view-title-row project-header-title-row">
+                        <div className="view-title-left project-title-left">
+                          <ProjectProgressRing
+                            completed={doneProjTasks}
+                            total={allProjTasks.length}
+                            size={26}
+                            isProjectCompleted={project.status === 'COMPLETED'}
+                          />
+                          <h1
+                            className="view-title project-view-title"
+                            title={project.title}
+                          >
+                            {project.title}
+                          </h1>
+                          {stalledStatus.isStalled && (
+                            <button
+                              type="button"
+                              className="v2-stalled-pill"
+                              data-testid="project-stalled-badge"
+                              title={
+                                stalledStatus.reason === 'no_next_action'
+                                  ? t.projectStalledNoActionHint
+                                  : t.projectStalledInactiveHint(stalledStatus.daysSinceActivity)
+                              }
+                              onClick={() => setWeeklyReviewModal({ open: true, step: 3 })}
+                            >
+                              <span>
+                                {stalledStatus.reason === 'no_next_action'
+                                  ? t.projectStalledBadge
+                                  : t.projectRequiresReviewBadge}
+                              </span>
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="project-header-primary-actions">
                           <button
                             type="button"
-                            className="v2-stalled-pill"
-                            data-testid="project-stalled-badge"
-                            title={
-                              stalledStatus.reason === 'no_next_action'
-                                ? t.projectStalledNoActionHint
-                                : t.projectStalledInactiveHint(stalledStatus.daysSinceActivity)
-                            }
-                            onClick={() => setWeeklyReviewModal({ open: true, step: 3 })}
+                            className="chip-btn"
+                            data-testid="project-edit-btn"
+                            title={t.actionEdit}
+                            onClick={() => setProjectModalState({ open: true, project })}
                           >
-                            <span>
-                              {stalledStatus.reason === 'no_next_action'
-                                ? t.projectStalledBadge
-                                : t.projectRequiresReviewBadge}
-                            </span>
+                            <Edit3 size={13.5} />
+                            <span>{t.actionEdit}</span>
                           </button>
-                        )}
+
+                          <div className="dropdown-anchor">
+                            <button
+                              type="button"
+                              className={`icon-btn ${projectHeaderMenuOpen ? 'active' : ''}`}
+                              data-testid="project-header-more-btn"
+                              title={t.actionMoreOptions}
+                              aria-label={t.actionMoreOptions}
+                              onClick={() => setProjectHeaderMenuOpen((v) => !v)}
+                            >
+                              <MoreHorizontal size={17} />
+                            </button>
+
+                            {projectHeaderMenuOpen && (
+                              <>
+                                <div
+                                  style={{ position: 'fixed', inset: 0, zIndex: 70 }}
+                                  onClick={() => setProjectHeaderMenuOpen(false)}
+                                />
+                                <div
+                                  className="dropdown-popover"
+                                  data-testid="project-header-more-menu"
+                                  style={{ minWidth: 215 }}
+                                >
+                                  <button
+                                    type="button"
+                                    className="dropdown-item"
+                                    disabled={projIdx <= 0}
+                                    onClick={() => {
+                                      setProjectHeaderMenuOpen(false);
+                                      void localDb.moveProjectOrder(
+                                        project.id,
+                                        'up',
+                                        project.areaId
+                                      );
+                                    }}
+                                  >
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                                      <ArrowUp size={14} />
+                                      <span>{t.actionMove} ↑</span>
+                                    </span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    className="dropdown-item"
+                                    disabled={
+                                      projIdx < 0 || projIdx >= siblingProjects.length - 1
+                                    }
+                                    onClick={() => {
+                                      setProjectHeaderMenuOpen(false);
+                                      void localDb.moveProjectOrder(
+                                        project.id,
+                                        'down',
+                                        project.areaId
+                                      );
+                                    }}
+                                  >
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                                      <ArrowDown size={14} />
+                                      <span>{t.actionMove} ↓</span>
+                                    </span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    className="dropdown-item"
+                                    data-testid="project-duplicate-btn"
+                                    onClick={() => {
+                                      setProjectHeaderMenuOpen(false);
+                                      void handleDuplicateProject(project.id);
+                                    }}
+                                  >
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                                      <Copy size={14} style={{ color: 'var(--things-blue)' }} />
+                                      <span>{t.actionDuplicateProject}</span>
+                                    </span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    className="dropdown-item"
+                                    data-testid="project-complete-btn"
+                                    onClick={async () => {
+                                      setProjectHeaderMenuOpen(false);
+                                      await localDb.upsertProject({
+                                        id: project.id,
+                                        status: 'COMPLETED'
+                                      });
+                                      handleSelectNav({ kind: 'smart', view: 'LOGBOOK' });
+                                    }}
+                                  >
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                                      <CheckCircle2
+                                        size={14}
+                                        style={{ color: 'var(--logbook-green)' }}
+                                      />
+                                      <span>{t.actionComplete}</span>
+                                    </span>
+                                  </button>
+
+                                  <div className="dropdown-divider" />
+
+                                  <button
+                                    type="button"
+                                    className="dropdown-item"
+                                    data-testid="project-delete-btn"
+                                    style={{ color: 'var(--deadline-red)' }}
+                                    onClick={() => {
+                                      setProjectHeaderMenuOpen(false);
+                                      void requestDeleteProject(project);
+                                    }}
+                                  >
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                                      <Trash2
+                                        size={14}
+                                        style={{ color: 'var(--deadline-red)' }}
+                                      />
+                                      <span>{t.actionDelete}</span>
+                                    </span>
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
                       </div>
 
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          flexWrap: 'wrap'
-                        }}
-                      >
-                        {/* 3-Mode Soft Bento Segmented Control: List | Board | Roadmap */}
+                      {/* Row 2: [List | Board | Roadmap] View Switcher + [Sort] */}
+                      <div className="project-controls-bar">
                         <div
                           className="v2-segmented-toggle project-mode-switcher"
                           data-testid="project-view-mode-switcher"
@@ -4088,12 +4295,13 @@ export const App: React.FC = () => {
                             }`}
                             data-testid="project-view-mode-list"
                             title={t.projectViewList}
-                            onClick={() =>
+                            onClick={() => {
+                              setIsTimelineFullScreen(false);
                               void localDb.upsertProject({
                                 id: project.id,
                                 viewMode: 'list'
-                              })
-                            }
+                              });
+                            }}
                           >
                             <List size={13.5} />
                             <span>{t.projectViewList}</span>
@@ -4105,12 +4313,13 @@ export const App: React.FC = () => {
                             }`}
                             data-testid="project-view-mode-board"
                             title={t.projectViewBoard}
-                            onClick={() =>
+                            onClick={() => {
+                              setIsTimelineFullScreen(false);
                               void localDb.upsertProject({
                                 id: project.id,
                                 viewMode: 'board'
-                              })
-                            }
+                              });
+                            }}
                           >
                             <LayoutGrid size={13.5} />
                             <span>{t.projectViewBoard}</span>
@@ -4135,246 +4344,177 @@ export const App: React.FC = () => {
                         </div>
 
                         {currentProjectMode !== 'roadmap' && renderViewSortDropdown()}
-
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          disabled={projIdx <= 0}
-                          title={t.actionMove}
-                          onClick={() =>
-                            localDb.moveProjectOrder(project.id, 'up', project.areaId)
-                          }
-                        >
-                          <ArrowUp size={15.5} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          disabled={
-                            projIdx < 0 || projIdx >= siblingProjects.length - 1
-                          }
-                          title={t.actionMove}
-                          onClick={() =>
-                            localDb.moveProjectOrder(project.id, 'down', project.areaId)
-                          }
-                        >
-                          <ArrowDown size={15.5} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          data-testid="project-duplicate-btn"
-                          title={`${t.actionDuplicateProject} (Ctrl+D)`}
-                          onClick={() => void handleDuplicateProject(project.id)}
-                        >
-                          <Copy size={15.5} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          title={t.actionEdit}
-                          onClick={() =>
-                            setProjectModalState({ open: true, project })
-                          }
-                        >
-                          <Edit3 size={15.5} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          style={{ color: 'var(--logbook-green)' }}
-                          title={t.actionComplete}
-                          onClick={async () => {
-                            await localDb.upsertProject({
-                              id: project.id,
-                              status: 'COMPLETED'
-                            });
-                            handleSelectNav({ kind: 'smart', view: 'LOGBOOK' });
-                          }}
-                        >
-                          <CheckCircle2 size={16.5} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          data-testid="project-delete-btn"
-                          style={{ color: 'var(--deadline-red)' }}
-                          title={t.actionDelete}
-                          onClick={() => void requestDeleteProject(project)}
-                        >
-                          <Trash2 size={15.5} />
-                        </button>
                       </div>
-                    </div>
 
-                    {/* Row 2: Project Notes (Rich Markdown + Detected Links — Android v1.7.0) */}
-                    {project.notes.trim() && (
-                      <div className="project-notes-display">
-                        <FormattedMarkdownText text={project.notes.trim()} />
-                        <DetectedNotesLinksRow
-                          links={extractDetectedLinksFromNotes(project.notes)}
-                        />
-                      </div>
-                    )}
+                      {/* Row 3: Project Notes (Rich Markdown + Detected Links — Android v1.7.0) */}
+                      {project.notes.trim() && (
+                        <div className="project-notes-display">
+                          <FormattedMarkdownText text={project.notes.trim()} />
+                          <DetectedNotesLinksRow
+                            links={extractDetectedLinksFromNotes(project.notes)}
+                          />
+                        </div>
+                      )}
 
-                    {/* Row 2b: Project Attachments Strip (v1.8.0) */}
-                    <AttachmentsStrip
-                      projectId={project.id}
-                      attachments={snapshot.attachments
-                        .filter((a) => !a.isDeleted && a.projectId === project.id)
-                        .sort((a, b) => a.createdAt - b.createdAt)}
-                      t={t}
-                      onToast={showToast}
-                    />
+                      {/* Row 3b: Project Attachments Strip (v1.8.0) */}
+                      <AttachmentsStrip
+                        projectId={project.id}
+                        attachments={snapshot.attachments
+                          .filter((a) => !a.isDeleted && a.projectId === project.id)
+                          .sort((a, b) => a.createdAt - b.createdAt)}
+                        t={t}
+                        onToast={showToast}
+                      />
 
-                    {/* Row 3: Action Pills (Target Date, Assign Area Dropdown, + To-Do, + Heading) */}
-                    <div className="project-action-pills">
-                      <button
-                        type="button"
-                        className={`chip-btn ${
-                          dlDiff != null && dlDiff <= 2
-                            ? 'urgent'
-                            : project.deadline != null
-                              ? 'active'
-                              : ''
-                        }`}
-                        title={t.targetDate}
-                        onClick={() =>
-                          setDeadlineModalTarget({ kind: 'project', projectId: project.id })
-                        }
-                      >
-                        <Flag size={12.5} />
-                        <span>
-                          {project.deadline != null && dlDiff != null
-                            ? `${t.targetDate}: ${
-                                dlDiff === 0
-                                  ? t.deadlineToday
-                                  : dlDiff > 0
-                                    ? t.deadlineDaysLeft(dlDiff)
-                                    : t.deadlineDaysOverdue(Math.abs(dlDiff))
-                              }`
-                            : `🏁 ${t.setTargetDate}`}
-                        </span>
-                      </button>
-
-                      {/* Area Assignment Dropdown */}
-                      <div className="dropdown-anchor">
+                      {/* Row 4: Action Pills (Target Date, Assign Area Dropdown, + To-Do, + Heading, Templates, External) */}
+                      <div className="project-action-pills">
                         <button
                           type="button"
-                          className={`chip-btn ${projArea ? 'active' : ''}`}
-                          title={t.assignArea}
-                          onClick={() => setProjectAreaDropdownOpen((v) => !v)}
+                          className={`chip-btn ${
+                            dlDiff != null && dlDiff <= 2
+                              ? 'urgent'
+                              : project.deadline != null
+                                ? 'active'
+                                : ''
+                          }`}
+                          title={t.targetDate}
+                          onClick={() =>
+                            setDeadlineModalTarget({ kind: 'project', projectId: project.id })
+                          }
                         >
-                          <Folder size={12.5} />
+                          <Flag size={12.5} />
                           <span>
-                            {projArea
-                              ? `${t.entityArea}: ${projArea.title}`
-                              : t.assignArea}
+                            {project.deadline != null && dlDiff != null
+                              ? `${t.targetDate}: ${
+                                  dlDiff === 0
+                                    ? t.deadlineToday
+                                    : dlDiff > 0
+                                      ? t.deadlineDaysLeft(dlDiff)
+                                      : t.deadlineDaysOverdue(Math.abs(dlDiff))
+                                }`
+                              : `🏁 ${t.setTargetDate}`}
                           </span>
                         </button>
 
-                        {projectAreaDropdownOpen && (
-                          <>
-                            <div
-                              style={{ position: 'fixed', inset: 0, zIndex: 70 }}
-                              onClick={() => setProjectAreaDropdownOpen(false)}
-                            />
-                            <div className="dropdown-popover" style={{ left: 0, right: 'auto' }}>
-                              <button
-                                type="button"
-                                className="dropdown-item"
-                                onClick={async () => {
-                                  await localDb.upsertProject({
-                                    id: project.id,
-                                    areaId: null
-                                  });
-                                  setProjectAreaDropdownOpen(false);
-                                }}
-                              >
-                                <span>— {t.noProjectNoArea} —</span>
-                                {!project.areaId && <Check size={14} />}
-                              </button>
-                              {activeAreas.map((a) => (
+                        {/* Area Assignment Dropdown */}
+                        <div className="dropdown-anchor">
+                          <button
+                            type="button"
+                            className={`chip-btn ${projArea ? 'active' : ''}`}
+                            title={t.assignArea}
+                            onClick={() => setProjectAreaDropdownOpen((v) => !v)}
+                          >
+                            <Folder size={12.5} />
+                            <span>
+                              {projArea
+                                ? `${t.entityArea}: ${projArea.title}`
+                                : t.assignArea}
+                            </span>
+                          </button>
+
+                          {projectAreaDropdownOpen && (
+                            <>
+                              <div
+                                style={{ position: 'fixed', inset: 0, zIndex: 70 }}
+                                onClick={() => setProjectAreaDropdownOpen(false)}
+                              />
+                              <div className="dropdown-popover" style={{ left: 0, right: 'auto' }}>
                                 <button
-                                  key={a.id}
                                   type="button"
                                   className="dropdown-item"
                                   onClick={async () => {
                                     await localDb.upsertProject({
                                       id: project.id,
-                                      areaId: a.id
+                                      areaId: null
                                     });
                                     setProjectAreaDropdownOpen(false);
                                   }}
                                 >
-                                  <span>📦 {a.title}</span>
-                                  {project.areaId === a.id && <Check size={14} />}
+                                  <span>— {t.noProjectNoArea} —</span>
+                                  {!project.areaId && <Check size={14} />}
                                 </button>
-                              ))}
-                            </div>
-                          </>
-                        )}
-                      </div>
+                                {activeAreas.map((a) => (
+                                  <button
+                                    key={a.id}
+                                    type="button"
+                                    className="dropdown-item"
+                                    onClick={async () => {
+                                      await localDb.upsertProject({
+                                        id: project.id,
+                                        areaId: a.id
+                                      });
+                                      setProjectAreaDropdownOpen(false);
+                                    }}
+                                  >
+                                    <span>📦 {a.title}</span>
+                                    {project.areaId === a.id && <Check size={14} />}
+                                  </button>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
 
-                      <button
-                        type="button"
-                        className="chip-btn"
-                        title={`${t.entityNewTodo} (Ctrl+N)`}
-                        onClick={() => void createNewTodoInCurrentContext(null)}
-                      >
-                        <Plus size={12.5} />
-                        <span>{t.entityTodo}</span>
-                      </button>
+                        <button
+                          type="button"
+                          className="chip-btn"
+                          title={`${t.entityNewTodo} (Ctrl+N)`}
+                          onClick={() => void createNewTodoInCurrentContext(null)}
+                        >
+                          <Plus size={12.5} />
+                          <span>{t.entityTodo}</span>
+                        </button>
 
-                      <button
-                        type="button"
-                        className="chip-btn"
-                        title={t.entityNewHeading}
-                        onClick={() => void createNewHeadingInActiveProject()}
-                      >
-                        <HeadingIcon size={12.5} />
-                        <span>+ {t.entityHeading}</span>
-                      </button>
+                        <button
+                          type="button"
+                          className="chip-btn"
+                          title={t.entityNewHeading}
+                          onClick={() => void createNewHeadingInActiveProject()}
+                        >
+                          <HeadingIcon size={12.5} />
+                          <span>+ {t.entityHeading}</span>
+                        </button>
 
-                      <button
-                        type="button"
-                        className="chip-btn"
-                        data-testid="project-save-template-btn"
-                        style={{ whiteSpace: 'normal', height: 'auto' }}
-                        title={t.projectSaveAsTemplateBtn}
-                        onClick={async () => {
-                          const tpl = await localDb.saveProjectAsTemplate(project.id);
-                          if (tpl) {
-                            showToast(`📋 ${t.projectSavedAsTemplateToast(tpl.title)}`);
+                        <button
+                          type="button"
+                          className="chip-btn"
+                          data-testid="project-save-template-btn"
+                          style={{ whiteSpace: 'normal', height: 'auto' }}
+                          title={t.projectSaveAsTemplateBtn}
+                          onClick={async () => {
+                            const tpl = await localDb.saveProjectAsTemplate(project.id);
+                            if (tpl) {
+                              showToast(`📋 ${t.projectSavedAsTemplateToast(tpl.title)}`);
+                            }
+                          }}
+                        >
+                          <ClipboardList size={12.5} style={{ flexShrink: 0 }} />
+                          <span>{t.projectSaveAsTemplateBtn}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          className="chip-btn"
+                          data-testid="project-external-import-export-btn"
+                          style={{ whiteSpace: 'normal', height: 'auto' }}
+                          title={t.importAsanaPlannerLabel}
+                          onClick={() =>
+                            setTemplatesModal({
+                              open: true,
+                              tab: 'external',
+                              areaId: project.areaId
+                            })
                           }
-                        }}
-                      >
-                        <ClipboardList size={12.5} style={{ flexShrink: 0 }} />
-                        <span>{t.projectSaveAsTemplateBtn}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        className="chip-btn"
-                        data-testid="project-external-import-export-btn"
-                        style={{ whiteSpace: 'normal', height: 'auto' }}
-                        title={t.importAsanaPlannerLabel}
-                        onClick={() =>
-                          setTemplatesModal({
-                            open: true,
-                            tab: 'external',
-                            areaId: project.areaId
-                          })
-                        }
-                      >
-                        <FolderInput size={12.5} style={{ flexShrink: 0 }} />
-                        <span>{t.externalImportExportTab}</span>
-                      </button>
+                        >
+                          <FolderInput size={12.5} style={{ flexShrink: 0 }} />
+                          <span>{t.externalImportExportTab}</span>
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
-                  {/* View Tag Strip */}
-                  {usedTagsInCurrentView.length > 0 && (
+                  {/* View Tag Strip (Hidden in Roadmap Full Screen) */}
+                  {!isRoadmapFullScreen && usedTagsInCurrentView.length > 0 && (
                     <div className="tag-filter-bar" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
@@ -4450,6 +4590,9 @@ export const App: React.FC = () => {
                   {currentProjectMode === 'roadmap' && activeProjectRoadmapLayout && (
                     <ProjectRoadmapWorkspace
                       project={project}
+                      projectTitle={project.title}
+                      isFullScreen={isRoadmapFullScreen}
+                      onToggleFullScreen={() => setIsTimelineFullScreen((v) => !v)}
                       layout={activeProjectRoadmapLayout}
                       selectedTaskIds={selectedTaskIds}
                       orderedVisibleTaskIds={orderedVisibleTaskIds}

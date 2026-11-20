@@ -614,6 +614,7 @@ class ThingsbookViewModel @Inject constructor(
 
     fun selectSmartView(viewType: SmartViewType) {
         _expandedTaskId.value = null
+        _isTimelineFullScreen.value = false
         clearTaskSelection()
         _navigationTarget.value = ActiveNavigationTarget.SmartView(viewType)
     }
@@ -622,6 +623,7 @@ class ThingsbookViewModel @Inject constructor(
         if (isLockedByBiometric()) {
             return
         }
+        _isTimelineFullScreen.value = false
         clearTaskSelection()
         if (viewName?.equals("VOICE_CAPTURE", ignoreCase = true) == true) {
             _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.INBOX)
@@ -673,12 +675,14 @@ class ThingsbookViewModel @Inject constructor(
 
     fun selectProject(projectId: String) {
         _expandedTaskId.value = null
+        _isTimelineFullScreen.value = false
         clearTaskSelection()
         _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(projectId)
     }
 
     fun selectArea(areaId: String) {
         _expandedTaskId.value = null
+        _isTimelineFullScreen.value = false
         clearTaskSelection()
         _navigationTarget.value = ActiveNavigationTarget.AreaDetail(areaId)
     }
@@ -686,6 +690,7 @@ class ThingsbookViewModel @Inject constructor(
     fun selectPerspective(perspectiveId: String) {
         if (perspectiveId.isBlank()) return
         _expandedTaskId.value = null
+        _isTimelineFullScreen.value = false
         clearTaskSelection()
         _navigationTarget.value = ActiveNavigationTarget.PerspectiveDetail(perspectiveId)
     }
@@ -713,6 +718,7 @@ class ThingsbookViewModel @Inject constructor(
         val updated = existingList.filterNot { it.id == resolvedId } + cleanPerspective
         persistSavedPerspectives(updated)
         _expandedTaskId.value = null
+        _isTimelineFullScreen.value = false
         clearTaskSelection()
         _navigationTarget.value = ActiveNavigationTarget.PerspectiveDetail(resolvedId)
     }
@@ -725,6 +731,7 @@ class ThingsbookViewModel @Inject constructor(
         val currentTarget = _navigationTarget.value
         if (currentTarget is ActiveNavigationTarget.PerspectiveDetail && currentTarget.perspectiveId == cleanId) {
             _expandedTaskId.value = null
+            _isTimelineFullScreen.value = false
             clearTaskSelection()
             _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
         }
@@ -1409,6 +1416,9 @@ class ThingsbookViewModel @Inject constructor(
 
     fun updateProjectViewMode(projectId: String, mode: ProjectWorkspaceMode) {
         if (projectId.isBlank()) return
+        if (mode != ProjectWorkspaceMode.ROADMAP) {
+            _isTimelineFullScreen.value = false
+        }
         safeVmScope.launch {
             repository.updateProjectViewMode(projectId, mode.storageKey)
         }
@@ -3190,6 +3200,10 @@ class ThingsbookViewModel @Inject constructor(
                 _selectedTaskIds.value = emptySet()
                 true
             }
+            _expandedTaskId.value == null && _isTimelineFullScreen.value -> {
+                _isTimelineFullScreen.value = false
+                true
+            }
             else -> false
         }
     }
@@ -4448,14 +4462,28 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
-    // Pillar 3: Interactive Timeblocking & Daily Timeline in Today
+    // Pillar 3: Interactive Timeblocking & Daily Timeline in Today + v3.0 Full Screen Timeline
     private val _isTodayTimelineMode = MutableStateFlow(
         coreSettingsPrefs.getBoolean(PREF_TODAY_TIMELINE_MODE, false)
     )
     val isTodayTimelineMode: StateFlow<Boolean> = _isTodayTimelineMode.asStateFlow()
 
+    private val _isTimelineFullScreen = MutableStateFlow(false)
+    val isTimelineFullScreen: StateFlow<Boolean> = _isTimelineFullScreen.asStateFlow()
+
+    fun setTimelineFullScreen(enabled: Boolean) {
+        _isTimelineFullScreen.value = enabled
+    }
+
+    fun toggleTimelineFullScreen() {
+        _isTimelineFullScreen.value = !_isTimelineFullScreen.value
+    }
+
     fun setTodayTimelineMode(timelineMode: Boolean) {
         _isTodayTimelineMode.value = timelineMode
+        if (!timelineMode) {
+            _isTimelineFullScreen.value = false
+        }
         runCatching {
             coreSettingsPrefs.edit().putBoolean(PREF_TODAY_TIMELINE_MODE, timelineMode).apply()
         }

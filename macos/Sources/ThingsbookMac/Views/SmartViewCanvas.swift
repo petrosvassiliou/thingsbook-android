@@ -24,17 +24,38 @@ public struct SmartViewCanvas: View {
         return mode == .board || mode == .roadmap
     }
 
+    private var isTodayTimelineFullScreen: Bool {
+        store.isTimelineFullScreen
+            && store.selectedDestination == .smartView(.today)
+            && store.todayViewMode == .timeline
+    }
+
+    private var isProjectRoadmapFullScreen: Bool {
+        guard store.isTimelineFullScreen,
+              case .project(let projId) = store.selectedDestination,
+              let project = store.project(byId: projId) else {
+            return false
+        }
+        return ProjectViewMode.normalized(project.viewMode) == .roadmap
+    }
+
+    private var isAnyTimelineFullScreen: Bool {
+        isTodayTimelineFullScreen || isProjectRoadmapFullScreen
+    }
+
     public var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                // App Update Banner
-                if let update = store.availableUpdate {
-                    updateAvailableBanner(update)
-                }
+            VStack(alignment: .leading, spacing: isAnyTimelineFullScreen ? 14 : 18) {
+                if !isAnyTimelineFullScreen {
+                    // App Update Banner
+                    if let update = store.availableUpdate {
+                        updateAvailableBanner(update)
+                    }
 
-                // Initial Sample Data Setup Banner
-                if store.hasSampleTasks && !store.preferences.hideSampleSetupBanner && store.syncSnapshot.userId == nil {
-                    initialSampleSetupBanner
+                    // Initial Sample Data Setup Banner
+                    if store.hasSampleTasks && !store.preferences.hideSampleSetupBanner && store.syncSnapshot.userId == nil {
+                        initialSampleSetupBanner
+                    }
                 }
 
                 switch store.selectedDestination {
@@ -60,10 +81,10 @@ public struct SmartViewCanvas: View {
                     }
                 }
             }
-            .padding(.horizontal, 40)
-            .padding(.top, 26)
+            .padding(.horizontal, isAnyTimelineFullScreen ? 22 : 40)
+            .padding(.top, isAnyTimelineFullScreen ? 14 : 26)
             .padding(.bottom, 96)
-            .frame(maxWidth: isWideProjectWorkspace ? .infinity : 880, alignment: .leading)
+            .frame(maxWidth: (isWideProjectWorkspace || isAnyTimelineFullScreen) ? .infinity : 880, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
         .background(ThingsMacPalette.canvasBackground)
@@ -88,7 +109,72 @@ public struct SmartViewCanvas: View {
 
     @ViewBuilder
     private func smartViewContent(_ view: SmartView) -> some View {
-        // Header
+        if view == .today && store.todayViewMode == .timeline && store.isTimelineFullScreen {
+            todayFullScreenHeaderBar
+            todayCanvas
+        } else {
+            // Responsive Header (never wraps view title mid-word)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 12) {
+                    smartViewTitleCluster(view)
+                    Spacer(minLength: 12)
+                    smartViewTrailingControls(view)
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    smartViewTitleCluster(view)
+                    HStack(alignment: .center, spacing: 8) {
+                        smartViewTrailingControls(view)
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+
+            // Tag Filter Strip
+            let baseTasks = rawTasksForSmartView(view)
+            tagFilterBar(for: baseTasks)
+
+            switch view {
+            case .inbox:
+                let list = store.filterTasksByActiveTag(store.inboxTasks)
+                if list.isEmpty {
+                    emptyPlaceholder(icon: "tray", text: store.tr("empty_inbox"))
+                } else {
+                    reorderableTaskStack(list)
+                }
+
+            case .today:
+                todayCanvas
+
+            case .upcoming:
+                upcomingCanvas
+
+            case .anytime:
+                let list = store.filterTasksByActiveTag(store.anytimeTasks)
+                if list.isEmpty {
+                    emptyPlaceholder(icon: "safari", text: store.tr("empty_view"))
+                } else {
+                    groupedByContainerStack(list)
+                }
+
+            case .someday:
+                let list = store.filterTasksByActiveTag(store.somedayTasks)
+                if list.isEmpty {
+                    emptyPlaceholder(icon: "cloud", text: store.tr("empty_view"))
+                } else {
+                    reorderableTaskStack(list)
+                }
+
+            case .logbook:
+                logbookCanvas
+
+            case .trash:
+                trashCanvas
+            }
+        }
+    }
+
+    private func smartViewTitleCluster(_ view: SmartView) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: view.sfSymbol)
                 .font(.system(size: 25, weight: .bold))
@@ -96,45 +182,24 @@ public struct SmartViewCanvas: View {
 
             Text(store.tr(view.titleKey))
                 .font(.system(size: 28, weight: .bold))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
 
             if view == .today, let cap = store.todayCapacitySummary() {
-                HStack(spacing: 5) {
-                    Image(systemName: "gauge.with.dots.needle.33percent")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text(cap.pillText)
-                        .font(.system(size: 11.5, weight: .semibold, design: .rounded))
-                        .lineLimit(1)
-                }
-                .fixedSize(horizontal: true, vertical: false)
-                .foregroundStyle(ThingsMacPalette.accentBlue)
-                .padding(.horizontal, 10.5)
-                .padding(.vertical, 5)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(ThingsMacPalette.accentBlue.opacity(0.12))
-                        .overlay(
-                            Capsule(style: .continuous)
-                                .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.24), lineWidth: 0.8)
-                        )
-                )
-                .thingsTooltip(cap.pillText)
+                todayCapacityBadge(cap.pillText)
             }
+        }
+    }
 
-            Spacer()
-
+    @ViewBuilder
+    private func smartViewTrailingControls(_ view: SmartView) -> some View {
+        HStack(alignment: .center, spacing: 8) {
             if view != .logbook && view != .trash {
                 viewSortMenu
             }
 
             if view == .today {
-                Picker("", selection: $store.todayViewMode) {
-                    Text(store.tr("v2_list_view")).tag(TodayViewMode.list)
-                    Text(store.tr("v2_timeline_view")).tag(TodayViewMode.timeline)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-                .thingsTooltip("\(store.tr("v2_list_view")) / \(store.tr("v2_timeline_view"))")
+                todayModePicker
 
                 if store.todayViewMode == .list {
                     let grouped = store.preferences.groupTodayByProjectOrArea
@@ -162,6 +227,8 @@ public struct SmartViewCanvas: View {
                     .buttonStyle(.plain)
                     .fixedSize(horizontal: true, vertical: false)
                     .thingsTooltip(store.tr("settings_group_today_title"))
+                } else {
+                    timelineFullScreenButton
                 }
             }
 
@@ -201,48 +268,110 @@ public struct SmartViewCanvas: View {
                 .thingsTooltip(store.tr("trash_empty_btn"))
             }
         }
+    }
 
-        // Tag Filter Strip
-        let baseTasks = rawTasksForSmartView(view)
-        tagFilterBar(for: baseTasks)
+    private var todayFullScreenHeaderBar: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: SmartView.today.sfSymbol)
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(ThingsMacPalette.color(for: .today, isSelected: true))
 
-        switch view {
-        case .inbox:
-            let list = store.filterTasksByActiveTag(store.inboxTasks)
-            if list.isEmpty {
-                emptyPlaceholder(icon: "tray", text: store.tr("empty_inbox"))
-            } else {
-                reorderableTaskStack(list)
+            Text(store.tr(SmartView.today.titleKey))
+                .font(.system(size: 18, weight: .bold))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+
+            if let cap = store.todayCapacitySummary() {
+                todayCapacityBadge(cap.pillText)
             }
 
-        case .today:
-            todayCanvas
+            Spacer(minLength: 12)
 
-        case .upcoming:
-            upcomingCanvas
+            todayModePicker
 
-        case .anytime:
-            let list = store.filterTasksByActiveTag(store.anytimeTasks)
-            if list.isEmpty {
-                emptyPlaceholder(icon: "safari", text: store.tr("empty_view"))
-            } else {
-                groupedByContainerStack(list)
-            }
-
-        case .someday:
-            let list = store.filterTasksByActiveTag(store.somedayTasks)
-            if list.isEmpty {
-                emptyPlaceholder(icon: "cloud", text: store.tr("empty_view"))
-            } else {
-                reorderableTaskStack(list)
-            }
-
-        case .logbook:
-            logbookCanvas
-
-        case .trash:
-            trashCanvas
+            timelineFullScreenButton
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(ThingsMacPalette.subtleContainer)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.85)
+                )
+        )
+    }
+
+    private func todayCapacityBadge(_ pillText: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "gauge.with.dots.needle.33percent")
+                .font(.system(size: 11, weight: .semibold))
+            Text(pillText)
+                .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                .lineLimit(1)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .foregroundStyle(ThingsMacPalette.accentBlue)
+        .padding(.horizontal, 10.5)
+        .padding(.vertical, 5)
+        .background(
+            Capsule(style: .continuous)
+                .fill(ThingsMacPalette.accentBlue.opacity(0.12))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.24), lineWidth: 0.8)
+                )
+        )
+        .thingsTooltip(pillText)
+    }
+
+    private var todayModePicker: some View {
+        Picker("", selection: $store.todayViewMode) {
+            Text(store.tr("v2_list_view")).tag(TodayViewMode.list)
+            Text(store.tr("v2_timeline_view")).tag(TodayViewMode.timeline)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+        .thingsTooltip("\(store.tr("v2_list_view")) / \(store.tr("v2_timeline_view"))")
+    }
+
+    private var timelineFullScreenButton: some View {
+        let isFull = store.isTimelineFullScreen
+        let label = isFull ? store.tr("v30_timeline_exit_fullscreen") : store.tr("v30_timeline_fullscreen")
+        let icon = isFull ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right"
+
+        return Button {
+            store.toggleTimelineFullScreen()
+        } label: {
+            HStack(spacing: 5.5) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(label)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .foregroundStyle(isFull ? ThingsMacPalette.accentBlue : Color.primary.opacity(0.88))
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5.5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(isFull ? ThingsMacPalette.accentBlue.opacity(0.14) : Color.primary.opacity(0.055))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(
+                                isFull ? ThingsMacPalette.accentBlue.opacity(0.32) : Color.primary.opacity(0.09),
+                                lineWidth: 0.8
+                            )
+                    )
+            )
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: false)
+        .thingsTooltip(isFull ? "\(label) (Esc)" : label)
     }
 
     // MARK: - Today View (Daytime + Calendar Events + Optional Grouping + This Evening + v2.0 Timeline)
@@ -517,374 +646,381 @@ public struct SmartViewCanvas: View {
 
     @ViewBuilder
     private func projectCanvas(_ project: Project) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            // Top Header
-            HStack(alignment: .center, spacing: 12) {
-                ProjectProgressRing(
-                    progress: project.progress,
-                    size: 22,
-                    tint: ThingsMacPalette.accentBlue,
-                    isCompleted: project.status == .completed,
-                    showFraction: project.totalTaskCount > 0,
-                    completedCount: project.completedTaskCount,
-                    totalCount: project.totalTaskCount
-                )
+        let openTasks = store.tasksForProject(project.id)
+        let headings = store.headingsByProject[project.id] ?? []
+        let validHeadingIds = Set(headings.map(\.id))
+        let unheaded = openTasks.filter { task in
+            guard let hid = task.headingId else { return true }
+            return !validHeadingIds.contains(hid)
+        }
+        let logged = store.completedTasksForProject(project.id)
+        let projectMode = ProjectViewMode.normalized(project.viewMode)
 
-                Text(project.title)
-                    .font(.system(size: 27, weight: .bold))
-
-                let stalledInfo = store.projectStalledInfo(project)
-                if stalledInfo.isStalled {
-                    let badgeIcon = stalledInfo.hasNoNextAction ? "exclamationmark.circle" : "clock.arrow.circlepath"
-                    let badgeLabel = stalledInfo.hasNoNextAction
-                        ? store.tr("v2_stalled_project_badge")
-                        : store.tr("v2_requires_review_badge")
-                    Menu {
-                        Button(store.tr("v2_mark_reviewed")) {
-                            store.markProjectReviewed(project.id)
-                        }
-                        Button(store.tr("v2_weekly_review_title")) {
-                            store.isWeeklyReviewPresented = true
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: badgeIcon)
-                                .font(.system(size: 10.5, weight: .semibold))
-                            Text(badgeLabel)
-                                .font(.system(size: 11, weight: .semibold))
-                        }
-                        .foregroundStyle(ThingsMacPalette.somedayAmber)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 3.5)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(ThingsMacPalette.somedayAmber.opacity(0.14))
-                        )
-                    }
-                    .menuStyle(.borderlessButton)
+        if projectMode == .roadmap && store.isTimelineFullScreen {
+            ProjectRoadmapWorkspaceView(
+                store: store,
+                project: project,
+                openTasks: openTasks,
+                completedTasks: logged,
+                headings: headings
+            )
+        } else {
+            VStack(alignment: .leading, spacing: 14) {
+                // Row 1: Generous Full-Width Project Title Row (never breaks mid-word)
+                HStack(alignment: .center, spacing: 12) {
+                    ProjectProgressRing(
+                        progress: project.progress,
+                        size: 22,
+                        tint: ThingsMacPalette.accentBlue,
+                        isCompleted: project.status == .completed,
+                        showFraction: project.totalTaskCount > 0,
+                        completedCount: project.completedTaskCount,
+                        totalCount: project.totalTaskCount
+                    )
                     .fixedSize()
-                    .thingsTooltip(badgeLabel)
+
+                    Text(project.title)
+                        .font(.system(size: 27, weight: .bold))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .layoutPriority(1)
+                        .thingsTooltip(project.title)
+
+                    Spacer(minLength: 8)
+
+                    HStack(spacing: 6) {
+                        Button {
+                            store.editingProject = project
+                        } label: {
+                            Image(systemName: "pencil")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 28, height: 28)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                                        .fill(Color.primary.opacity(0.055))
+                                )
+                                .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .thingsTooltip(store.tr("project_edit_title"))
+
+                        Menu {
+                            Button(store.tr("project_edit_title")) {
+                                store.editingProject = project
+                            }
+                            Button(store.tr("macos_complete_project")) {
+                                let next: ProjectStatus = project.status == .completed ? .active : .completed
+                                try? store.database.setProjectStatus(projectId: project.id, status: next)
+                            }
+                            Button(store.tr("v2_mark_reviewed")) {
+                                store.markProjectReviewed(project.id)
+                            }
+                            Button(store.tr("action_duplicate_project")) {
+                                if let copy = try? store.database.duplicateProject(project.id, copySuffix: store.tr("v25_copy_suffix")) {
+                                    store.selectedDestination = .project(copy.id)
+                                }
+                            }
+                            Button(store.tr("v2_save_as_template")) {
+                                store.saveProjectAsTemplate(project.id)
+                            }
+                            Divider()
+                            Button(store.tr("project_move_up")) {
+                                store.moveProjectOrder(project, direction: -1)
+                            }
+                            Button(store.tr("project_move_down")) {
+                                store.moveProjectOrder(project, direction: 1)
+                            }
+                            Menu(store.tr("v30_external_export_section")) {
+                                Button(store.tr("v30_export_asana_csv")) {
+                                    store.exportProjectExternalInteractively(projectId: project.id, format: .asanaCsv)
+                                }
+                                Button(store.tr("v30_export_asana_json")) {
+                                    store.exportProjectExternalInteractively(projectId: project.id, format: .asanaJson)
+                                }
+                                Divider()
+                                Button(store.tr("v30_export_planner_xlsx")) {
+                                    store.exportProjectExternalInteractively(projectId: project.id, format: .plannerXlsx)
+                                }
+                                Button(store.tr("v30_export_planner_csv")) {
+                                    store.exportProjectExternalInteractively(projectId: project.id, format: .plannerCsv)
+                                }
+                                Divider()
+                                Button(store.tr("v30_external_import_export_tab")) {
+                                    store.templatesInitialTab = .externalImportExport
+                                    store.isTemplatesSheetPresented = true
+                                }
+                            }
+                            Divider()
+                            Button(role: .destructive) {
+                                store.deleteProjectWithUndo(project)
+                            } label: {
+                                Text(store.tr("macos_delete_project"))
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 28, height: 28)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                                        .fill(Color.primary.opacity(0.055))
+                                )
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .thingsTooltip(store.tr("macos_tooltip_project_options"))
+                    }
+                    .fixedSize()
                 }
 
-                Spacer()
-
-                HStack(spacing: 6) {
+                // Row 2: Mode Switcher + Sort + Stalled Status Badge
+                HStack(alignment: .center, spacing: 10) {
                     ProjectModeSegmentedSwitcher(store: store, project: project)
 
                     viewSortMenu
 
-                    Button {
-                        store.moveProjectOrder(project, direction: -1)
-                    } label: {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 12.5, weight: .medium))
-                    }
-                    .buttonStyle(.borderless)
-                    .thingsTooltip(store.tr("project_move_up"))
-
-                    Button {
-                        store.moveProjectOrder(project, direction: 1)
-                    } label: {
-                        Image(systemName: "arrow.down")
-                            .font(.system(size: 12.5, weight: .medium))
-                    }
-                    .buttonStyle(.borderless)
-                    .thingsTooltip(store.tr("project_move_down"))
-
-                    Button {
-                        store.editingProject = project
-                    } label: {
-                        Image(systemName: "pencil")
-                            .font(.system(size: 13))
-                    }
-                    .buttonStyle(.borderless)
-                    .thingsTooltip(store.tr("project_edit_title"))
-
-                    Button {
-                        let next: ProjectStatus = project.status == .completed ? .active : .completed
-                        try? store.database.setProjectStatus(projectId: project.id, status: next)
-                    } label: {
-                        Image(systemName: "checkmark.circle")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(ThingsMacPalette.logbookGreen)
-                    }
-                    .buttonStyle(.borderless)
-                    .thingsTooltip(store.tr("macos_complete_project"))
-
-                    Button(role: .destructive) {
-                        store.deleteProjectWithUndo(project)
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 13))
-                            .foregroundStyle(ThingsMacPalette.deadlineCrimson)
-                    }
-                    .buttonStyle(.borderless)
-                    .thingsTooltip(store.tr("macos_delete_project"))
-
-                    Menu {
-                        Button(store.tr("project_edit_title")) {
-                            store.editingProject = project
-                        }
-                        Button(store.tr("v2_save_as_template")) {
-                            store.saveProjectAsTemplate(project.id)
-                        }
-                        Menu(store.tr("v30_external_export_section")) {
-                            Button(store.tr("v30_export_asana_csv")) {
-                                store.exportProjectExternalInteractively(projectId: project.id, format: .asanaCsv)
+                    let stalledInfo = store.projectStalledInfo(project)
+                    if stalledInfo.isStalled {
+                        let badgeIcon = stalledInfo.hasNoNextAction ? "exclamationmark.circle" : "clock.arrow.circlepath"
+                        let badgeLabel = stalledInfo.hasNoNextAction
+                            ? store.tr("v2_stalled_project_badge")
+                            : store.tr("v2_requires_review_badge")
+                        Menu {
+                            Button(store.tr("v2_mark_reviewed")) {
+                                store.markProjectReviewed(project.id)
                             }
-                            Button(store.tr("v30_export_asana_json")) {
-                                store.exportProjectExternalInteractively(projectId: project.id, format: .asanaJson)
+                            Button(store.tr("v2_weekly_review_title")) {
+                                store.isWeeklyReviewPresented = true
                             }
-                            Divider()
-                            Button(store.tr("v30_export_planner_xlsx")) {
-                                store.exportProjectExternalInteractively(projectId: project.id, format: .plannerXlsx)
-                            }
-                            Button(store.tr("v30_export_planner_csv")) {
-                                store.exportProjectExternalInteractively(projectId: project.id, format: .plannerCsv)
-                            }
-                            Divider()
-                            Button(store.tr("v30_external_import_export_tab")) {
-                                store.templatesInitialTab = .externalImportExport
-                                store.isTemplatesSheetPresented = true
-                            }
-                        }
-                        Button(store.tr("v2_mark_reviewed")) {
-                            store.markProjectReviewed(project.id)
-                        }
-                        Button(store.tr("action_duplicate_project")) {
-                            if let copy = try? store.database.duplicateProject(project.id, copySuffix: store.tr("v25_copy_suffix")) {
-                                store.selectedDestination = .project(copy.id)
-                            }
-                        }
-                        Button(store.tr("macos_complete_project")) {
-                            try? store.database.setProjectStatus(projectId: project.id, status: .completed)
-                        }
-                        Divider()
-                        Button(role: .destructive) {
-                            store.deleteProjectWithUndo(project)
                         } label: {
-                            Text(store.tr("macos_delete_project"))
+                            HStack(spacing: 4) {
+                                Image(systemName: badgeIcon)
+                                    .font(.system(size: 10.5, weight: .semibold))
+                                Text(badgeLabel)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .lineLimit(1)
+                            }
+                            .fixedSize(horizontal: true, vertical: false)
+                            .foregroundStyle(ThingsMacPalette.somedayAmber)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4.5)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(ThingsMacPalette.somedayAmber.opacity(0.14))
+                            )
                         }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .font(.system(size: 15))
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                        .thingsTooltip(badgeLabel)
                     }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .thingsTooltip(store.tr("macos_tooltip_project_options"))
+
+                    Spacer(minLength: 0)
                 }
-            }
 
-            if !project.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(MarkdownNotesParser.renderAttributed(project.notes))
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-            }
+                if !project.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(MarkdownNotesParser.renderAttributed(project.notes))
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                }
 
-            // Metadata & Quick Action Pills Row (matching Thingsbook Project Header)
-            ThingsFlowLayout(horizontalSpacing: 8, verticalSpacing: 8) {
-                if let dl = project.deadline {
-                    let todayDay = DateEpochConverter.epochDay(for: Date())
-                    let dlDay = DateEpochConverter.epochDay(forMillis: dl)
-                    let diff = dlDay - todayDay
-                    let dlText: String = {
-                        if diff == 0 { return store.tr("deadline_today") }
-                        if diff < 0 { return store.trf("deadline_days_overdue", abs(diff)) }
-                        return store.trf("deadline_days_left", diff)
-                    }()
+                // Metadata & Quick Action Pills Row (matching Thingsbook Project Header)
+                ThingsFlowLayout(horizontalSpacing: 8, verticalSpacing: 8) {
+                    if let dl = project.deadline {
+                        let todayDay = DateEpochConverter.epochDay(for: Date())
+                        let dlDay = DateEpochConverter.epochDay(forMillis: dl)
+                        let diff = dlDay - todayDay
+                        let dlText: String = {
+                            if diff == 0 { return store.tr("deadline_today") }
+                            if diff < 0 { return store.trf("deadline_days_overdue", abs(diff)) }
+                            return store.trf("deadline_days_left", diff)
+                        }()
 
-                    Button {
-                        store.editingProject = project
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "flag")
-                                .font(.system(size: 11, weight: .semibold))
-                            Text("\(store.tr("project_target_date_label")): \(dlText)")
-                                .font(.system(size: 12, weight: .semibold))
-                                .lineLimit(1)
+                        Button {
+                            store.editingProject = project
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "flag")
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text("\(store.tr("project_target_date_label")): \(dlText)")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .lineLimit(1)
+                            }
+                            .fixedSize(horizontal: true, vertical: false)
+                            .foregroundStyle(diff <= 0 ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.accentBlue)
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 5)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill((diff <= 0 ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.accentBlue).opacity(0.12))
+                            )
                         }
+                        .buttonStyle(.plain)
                         .fixedSize(horizontal: true, vertical: false)
-                        .foregroundStyle(diff <= 0 ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.accentBlue)
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 5)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill((diff <= 0 ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.accentBlue).opacity(0.12))
-                        )
+                        .thingsTooltip(store.tr("project_set_target_date"))
                     }
-                    .buttonStyle(.plain)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .thingsTooltip(store.tr("project_set_target_date"))
-                }
 
-                if let aid = project.areaId, let area = store.area(byId: aid) {
-                    Button {
-                        store.selectedDestination = .area(area.id)
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "folder")
-                                .font(.system(size: 11, weight: .semibold))
-                            Text("\(store.tr("entity_area")): \(area.title)")
-                                .font(.system(size: 12, weight: .semibold))
-                                .lineLimit(1)
+                    if let aid = project.areaId, let area = store.area(byId: aid) {
+                        Button {
+                            store.selectedDestination = .area(area.id)
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "folder")
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text("\(store.tr("entity_area")): \(area.title)")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .lineLimit(1)
+                            }
+                            .fixedSize(horizontal: true, vertical: false)
+                            .foregroundStyle(ThingsMacPalette.accentBlue)
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 5)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(ThingsMacPalette.accentBlue.opacity(0.12))
+                            )
                         }
+                        .buttonStyle(.plain)
                         .fixedSize(horizontal: true, vertical: false)
-                        .foregroundStyle(ThingsMacPalette.accentBlue)
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 5)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(ThingsMacPalette.accentBlue.opacity(0.12))
-                        )
+                        .thingsTooltip("\(store.tr("entity_area")): \(area.title)")
                     }
-                    .buttonStyle(.plain)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .thingsTooltip("\(store.tr("entity_area")): \(area.title)")
+
+                    ThingsActionChipButton(
+                        title: store.tr("entity_todo"),
+                        systemImage: "plus",
+                        helpText: "\(store.tr("entity_new_todo")) (⌘N)"
+                    ) {
+                        store.createNewTaskInCurrentContext()
+                    }
+
+                    ThingsActionChipButton(
+                        title: store.tr("entity_heading"),
+                        systemImage: "flag.checkered",
+                        helpText: store.tr("entity_new_heading")
+                    ) {
+                        isAddingHeading = true
+                    }
+
+                    ThingsActionChipButton(
+                        title: store.tr("action_attach_file"),
+                        systemImage: "paperclip",
+                        helpText: store.tr("action_attach_file")
+                    ) {
+                        store.pickAndAttachFiles(projectId: project.id)
+                    }
                 }
 
-                ThingsActionChipButton(
-                    title: store.tr("entity_todo"),
-                    systemImage: "plus",
-                    helpText: "\(store.tr("entity_new_todo")) (⌘N)"
-                ) {
-                    store.createNewTaskInCurrentContext()
+                let projAttachments = store.projectAttachments[project.id] ?? []
+                if !projAttachments.isEmpty {
+                    AttachmentsStripView(store: store, attachments: projAttachments) {
+                        store.pickAndAttachFiles(projectId: project.id)
+                    }
+                    .padding(.top, 4)
                 }
 
-                ThingsActionChipButton(
-                    title: store.tr("entity_heading"),
-                    systemImage: "flag.checkered",
-                    helpText: store.tr("entity_new_heading")
-                ) {
-                    isAddingHeading = true
-                }
-
-                ThingsActionChipButton(
-                    title: store.tr("action_attach_file"),
-                    systemImage: "paperclip",
-                    helpText: store.tr("action_attach_file")
-                ) {
-                    store.pickAndAttachFiles(projectId: project.id)
-                }
-            }
-
-            let projAttachments = store.projectAttachments[project.id] ?? []
-            if !projAttachments.isEmpty {
-                AttachmentsStripView(store: store, attachments: projAttachments) {
-                    store.pickAndAttachFiles(projectId: project.id)
-                }
-                .padding(.top, 4)
-            }
-
-            if isAddingHeading {
-                HStack(spacing: 8) {
-                    TextField(store.tr("entity_new_heading"), text: $newHeadingTitle)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit {
+                if isAddingHeading {
+                    HStack(spacing: 8) {
+                        TextField(store.tr("entity_new_heading"), text: $newHeadingTitle)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit {
+                                submitNewHeading(projectId: project.id)
+                            }
+                        Button(store.tr("macos_action_add")) {
                             submitNewHeading(projectId: project.id)
                         }
-                    Button(store.tr("macos_action_add")) {
-                        submitNewHeading(projectId: project.id)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    Button(store.tr("action_cancel")) {
-                        isAddingHeading = false
-                        newHeadingTitle = ""
-                    }
-                    .controlSize(.small)
-                }
-            }
-
-            let openTasks = store.tasksForProject(project.id)
-            let headings = store.headingsByProject[project.id] ?? []
-            let validHeadingIds = Set(headings.map(\.id))
-            let unheaded = openTasks.filter { task in
-                guard let hid = task.headingId else { return true }
-                return !validHeadingIds.contains(hid)
-            }
-            let logged = store.completedTasksForProject(project.id)
-            let projectMode = ProjectViewMode.normalized(project.viewMode)
-
-            tagFilterBar(for: openTasks)
-
-            switch projectMode {
-            case .list:
-                if openTasks.isEmpty && headings.isEmpty {
-                    emptyPlaceholder(icon: "checkmark.circle", text: store.tr("empty_view"))
-                } else {
-                    if !headings.isEmpty {
-                        projectGeneralDropSection(project: project, unheadedTasks: unheaded)
-                    } else if !unheaded.isEmpty {
-                        reorderableTaskStack(
-                            unheaded,
-                            showSubtitle: false,
-                            projectId: project.id,
-                            targetHeadingId: .some(nil)
-                        )
-                    }
-
-                    ForEach(Array(headings.enumerated()), id: \.element.id) { hIdx, heading in
-                        let sectionTasks = openTasks.filter { $0.headingId == heading.id }
-                        let prevHeadingOrder = hIdx > 0 ? headings[hIdx - 1].sortOrder : nil
-                        let prevSectionId: String? = hIdx > 0 ? headings[hIdx - 1].id : nil
-                        let prevSectionLastTaskOrder: Double? = hIdx > 0
-                            ? openTasks.filter { $0.headingId == headings[hIdx - 1].id }.last?.sortOrder
-                            : unheaded.last?.sortOrder
-
-                        projectHeadingSection(
-                            project: project,
-                            heading: heading,
-                            tasks: sectionTasks,
-                            prevHeadingOrder: prevHeadingOrder,
-                            prevSectionId: prevSectionId,
-                            prevSectionLastTaskOrder: prevSectionLastTaskOrder
-                        )
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        Button(store.tr("action_cancel")) {
+                            isAddingHeading = false
+                            newHeadingTitle = ""
+                        }
+                        .controlSize(.small)
                     }
                 }
 
-            case .board:
-                ProjectBoardWorkspaceView(
-                    store: store,
-                    project: project,
-                    openTasks: openTasks,
-                    headings: headings
-                )
+                tagFilterBar(for: openTasks)
 
-            case .roadmap:
-                ProjectRoadmapWorkspaceView(
-                    store: store,
-                    project: project,
-                    openTasks: openTasks,
-                    completedTasks: logged,
-                    headings: headings
-                )
-            }
+                switch projectMode {
+                case .list:
+                    if openTasks.isEmpty && headings.isEmpty {
+                        emptyPlaceholder(icon: "checkmark.circle", text: store.tr("empty_view"))
+                    } else {
+                        if !headings.isEmpty {
+                            projectGeneralDropSection(project: project, unheadedTasks: unheaded)
+                        } else if !unheaded.isEmpty {
+                            reorderableTaskStack(
+                                unheaded,
+                                showSubtitle: false,
+                                projectId: project.id,
+                                targetHeadingId: .some(nil)
+                            )
+                        }
 
-            // Logged Items toggle
-            if !logged.isEmpty {
-                Divider().padding(.top, 8)
-                Button {
-                    withAnimation { showProjectLoggedItems.toggle() }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: showProjectLoggedItems ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 11, weight: .semibold))
-                        Text(
-                            showProjectLoggedItems
-                                ? store.tr("macos_logged_hide")
-                                : store.trf("macos_logged_show_count", logged.count)
-                        )
-                        .font(.system(size: 12.5, weight: .medium))
+                        ForEach(Array(headings.enumerated()), id: \.element.id) { hIdx, heading in
+                            let sectionTasks = openTasks.filter { $0.headingId == heading.id }
+                            let prevHeadingOrder = hIdx > 0 ? headings[hIdx - 1].sortOrder : nil
+                            let prevSectionId: String? = hIdx > 0 ? headings[hIdx - 1].id : nil
+                            let prevSectionLastTaskOrder: Double? = hIdx > 0
+                                ? openTasks.filter { $0.headingId == headings[hIdx - 1].id }.last?.sortOrder
+                                : unheaded.last?.sortOrder
+
+                            projectHeadingSection(
+                                project: project,
+                                heading: heading,
+                                tasks: sectionTasks,
+                                prevHeadingOrder: prevHeadingOrder,
+                                prevSectionId: prevSectionId,
+                                prevSectionLastTaskOrder: prevSectionLastTaskOrder
+                            )
+                        }
                     }
-                    .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
 
-                if showProjectLoggedItems {
-                    VStack(spacing: 3) {
-                        ForEach(logged) { t in
-                            TaskRowCardView(store: store, task: t, showContextSubtitle: false)
-                                .thingsTaskDraggable(store: store, task: t)
+                case .board:
+                    ProjectBoardWorkspaceView(
+                        store: store,
+                        project: project,
+                        openTasks: openTasks,
+                        headings: headings
+                    )
+
+                case .roadmap:
+                    ProjectRoadmapWorkspaceView(
+                        store: store,
+                        project: project,
+                        openTasks: openTasks,
+                        completedTasks: logged,
+                        headings: headings
+                    )
+                }
+
+                // Logged Items toggle
+                if !logged.isEmpty {
+                    Divider().padding(.top, 8)
+                    Button {
+                        withAnimation { showProjectLoggedItems.toggle() }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: showProjectLoggedItems ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text(
+                                showProjectLoggedItems
+                                    ? store.tr("macos_logged_hide")
+                                    : store.trf("macos_logged_show_count", logged.count)
+                            )
+                            .font(.system(size: 12.5, weight: .medium))
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+
+                    if showProjectLoggedItems {
+                        VStack(spacing: 3) {
+                            ForEach(logged) { t in
+                                TaskRowCardView(store: store, task: t, showContextSubtitle: false)
+                                    .thingsTaskDraggable(store: store, task: t)
+                            }
                         }
                     }
                 }

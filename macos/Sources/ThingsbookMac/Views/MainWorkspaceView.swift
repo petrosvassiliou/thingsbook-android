@@ -21,7 +21,7 @@ public struct MainWorkspaceView: View {
     @State private var magicPlusDragOffset: CGSize = .zero
     @GestureState private var isMagicPlusGestureActive = false
     @State private var isQuickFindHovered = false
-    @State private var isLanguagePopoverOpen = false
+    @State private var columnVisibilityBeforeTimelineFullScreen: NavigationSplitViewVisibility? = nil
     @State private var isBatchTagPopoverOpen = false
     @State private var decryptPasswordInput = ""
     @State private var decryptError: String?
@@ -161,17 +161,25 @@ public struct MainWorkspaceView: View {
             // Unified Soft Bento Task Modal Overlay (List | Board | Roadmap | Timeline | Logbook)
             if let expandedId = store.expandedTaskId,
                let modalTask = store.task(byId: expandedId) {
-                ZStack {
-                    Color.black.opacity(0.28)
-                        .ignoresSafeArea()
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            NotificationCenter.default.post(name: .thingsbookDismissTaskModal, object: nil)
-                        }
+                GeometryReader { modalGeo in
+                    ZStack {
+                        Color.black.opacity(0.28)
+                            .ignoresSafeArea()
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                NotificationCenter.default.post(name: .thingsbookDismissTaskModal, object: nil)
+                            }
 
-                    TaskBentoModalView(store: store, task: modalTask)
+                        TaskBentoModalView(
+                            store: store,
+                            task: modalTask,
+                            availableHeight: modalGeo.size.height
+                        )
+                        .padding(.vertical, 18)
                         .id(modalTask.id)
                         .transition(.scale(scale: 0.96).combined(with: .opacity))
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .zIndex(40)
             }
@@ -186,6 +194,19 @@ public struct MainWorkspaceView: View {
         }
         .onDisappear {
             removeTaskKeyboardMonitor()
+        }
+        .onChange(of: store.isTimelineFullScreen) { _, fullScreen in
+            withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+                if fullScreen {
+                    columnVisibilityBeforeTimelineFullScreen = columnVisibility
+                    columnVisibility = .detailOnly
+                } else if let previous = columnVisibilityBeforeTimelineFullScreen {
+                    columnVisibility = previous
+                    columnVisibilityBeforeTimelineFullScreen = nil
+                } else {
+                    columnVisibility = .all
+                }
+            }
         }
         .onChange(of: store.preferences.language) { _, newLang in
             NotificationReminderService.shared.configureCategories(lang: newLang)
@@ -289,6 +310,22 @@ public struct MainWorkspaceView: View {
                     return nil
                 }
                 return event
+            }
+
+            // Exit Timeline Full Screen on Escape when modal and sheets are closed (and not editing inline text):
+            if store.expandedTaskId == nil,
+               store.activeSheet == nil,
+               store.isTimelineFullScreen {
+                if let responder = NSApp.keyWindow?.firstResponder, responder is NSText {
+                    return event
+                }
+                let cleanMods = event.modifierFlags.intersection([.command, .option, .control, .shift])
+                if event.keyCode == 53 && cleanMods.isEmpty {
+                    withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+                        store.isTimelineFullScreen = false
+                    }
+                    return nil
+                }
             }
 
             // When modal is closed, no sheet is presented, 1 task is selected, and user is not editing text:
@@ -938,62 +975,6 @@ public struct MainWorkspaceView: View {
         }
     }
 
-    private var languageSelectorPopover: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(AppLanguage.orderedMenuCases) { lang in
-                let isSelected = store.preferences.language == lang
-                Button {
-                    store.preferences.language = lang
-                    isLanguagePopoverOpen = false
-                } label: {
-                    HStack(spacing: 10) {
-                        Text(lang.flagEmoji)
-                            .font(.system(size: 16))
-                            .frame(width: 22, alignment: .center)
-
-                        Text(toolbarLanguageTitle(for: lang))
-                            .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
-                            .foregroundStyle(.primary)
-
-                        Spacer(minLength: 14)
-
-                        if isSelected {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 11.5, weight: .bold))
-                                .foregroundStyle(ThingsMacPalette.accentBlue)
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6.5)
-                    .frame(minWidth: 186, alignment: .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(isSelected ? ThingsMacPalette.accentBlue.opacity(0.12) : Color.clear)
-                    )
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                if lang == .system {
-                    Divider()
-                        .padding(.vertical, 3)
-                }
-            }
-        }
-        .padding(8)
-    }
-
-    private func toolbarLanguageTitle(for lang: AppLanguage) -> String {
-        switch lang {
-        case .system: return store.tr("settings_system_default")
-        case .en: return store.tr("lang_en")
-        case .de: return store.tr("lang_de")
-        case .it: return store.tr("lang_it")
-        case .fr: return store.tr("lang_fr")
-        case .es: return store.tr("lang_es")
-        }
-    }
-
     private var syncDotColor: Color {
         if store.preferences.localOnlyDbMode { return .secondary.opacity(0.6) }
         if store.syncSnapshot.errorMessage != nil { return ThingsMacPalette.deadlineCrimson }
@@ -1009,7 +990,7 @@ public struct MainWorkspaceView: View {
     private func unifiedDetailToolbar(metrics: MacToolbarLayoutMetrics) -> some View {
         HStack(spacing: 0) {
             quickFindToolbarButton(metrics: metrics)
-            Spacer(minLength: 8)
+            Spacer(minLength: CGFloat(metrics.centerGap))
             detailToolbarActionsBar(metrics: metrics)
         }
         .frame(width: CGFloat(metrics.totalBarWidth), height: CGFloat(metrics.buttonHeight))
@@ -1085,61 +1066,10 @@ public struct MainWorkspaceView: View {
         let spacing = CGFloat(metrics.itemSpacing)
 
         return HStack(spacing: 0) {
-            // Group 1: Intelligence & Review Planning
-            HStack(spacing: spacing) {
-                MacToolbarGeminiButton(
-                    minWidth: CGFloat(metrics.geminiPillMinWidth),
-                    height: btnH,
-                    showLabel: metrics.showGeminiLabel,
-                    isDisabled: store.isLocked,
-                    helpText: store.tr("gemini_hub_title")
-                ) {
-                    guard !store.isLocked else { return }
-                    store.geminiInitialTab = .brainDump
-                    store.isGeminiSheetPresented = true
-                }
-
-                MacToolbarIconButton(
-                    width: btnW,
-                    height: btnH,
-                    isDisabled: store.isLocked,
-                    helpText: store.tr("topbar_tooltip_weekly_review"),
-                    action: {
-                        guard !store.isLocked else { return }
-                        store.isWeeklyReviewPresented = true
-                    }
-                ) {
-                    ZStack(alignment: .topTrailing) {
-                        Image(systemName: "checklist.checked")
-                            .font(.system(size: 14, weight: .medium))
-                        if !store.stalledProjects.isEmpty {
-                            Circle()
-                                .fill(ThingsMacPalette.accentBlue)
-                                .frame(width: 6, height: 6)
-                                .offset(x: 3.5, y: -2.5)
-                        }
-                    }
-                }
-
-                MacToolbarIconButton(
-                    systemImage: "square.on.square",
-                    width: btnW,
-                    height: btnH,
-                    isDisabled: store.isLocked,
-                    helpText: store.tr("topbar_tooltip_templates")
-                ) {
-                    guard !store.isLocked else { return }
-                    store.templatesInitialTab = .gallery
-                    store.isTemplatesSheetPresented = true
-                }
-            }
-
-            toolbarGroupDivider(metrics: metrics)
-
-            // Group 2: Quick Capture & Organization
+            // Quick Entry + Voice Capture
             HStack(spacing: spacing) {
                 MacToolbarIconButton(
-                    systemImage: "tray.and.arrow.down",
+                    systemImage: "plus.bubble",
                     width: btnW,
                     height: btnH,
                     isDisabled: store.isLocked,
@@ -1165,70 +1095,27 @@ public struct MainWorkspaceView: View {
                     store.quickEntryAutoStartVoice = true
                     store.isQuickEntryPresented = true
                 }
-
-                MacToolbarIconButton(
-                    systemImage: "folder",
-                    width: btnW,
-                    height: btnH,
-                    isDisabled: store.isLocked,
-                    helpText: store.tr("topbar_tooltip_areas")
-                ) {
-                    guard !store.isLocked else { return }
-                    store.isAreaManagerPresented = true
-                }
-
-                MacToolbarIconButton(
-                    systemImage: "square.grid.2x2",
-                    width: btnW,
-                    height: btnH,
-                    isDisabled: store.isLocked,
-                    helpText: store.tr("topbar_tooltip_tags")
-                ) {
-                    guard !store.isLocked else { return }
-                    store.isTagManagerPresented = true
-                }
             }
 
             toolbarGroupDivider(metrics: metrics)
 
-            // Group 3: Workspace Status & Preferences
+            // Gemini Assistant
+            MacToolbarGeminiButton(
+                minWidth: CGFloat(metrics.geminiPillMinWidth),
+                height: btnH,
+                showLabel: metrics.showGeminiLabel,
+                isDisabled: store.isLocked,
+                helpText: store.tr("gemini_hub_title")
+            ) {
+                guard !store.isLocked else { return }
+                store.geminiInitialTab = .brainDump
+                store.isGeminiSheetPresented = true
+            }
+
+            toolbarGroupDivider(metrics: metrics)
+
+            // Cloud Sync Status + Settings
             HStack(spacing: spacing) {
-                MacToolbarIconButton(
-                    systemImage: store.preferences.dailyDigestEnabled ? "bell.badge.fill" : "bell",
-                    width: btnW,
-                    height: btnH,
-                    isActive: store.preferences.dailyDigestEnabled,
-                    isDisabled: store.isLocked,
-                    helpText: store.tr("topbar_tooltip_notifications")
-                ) {
-                    guard !store.isLocked else { return }
-                    store.settingsTab = .notifications
-                    store.isSettingsPresented = true
-                }
-
-                MacToolbarIconButton(
-                    width: btnW,
-                    height: btnH,
-                    isActive: isLanguagePopoverOpen,
-                    isDisabled: store.isLocked,
-                    helpText: store.tr("topbar_tooltip_language"),
-                    action: {
-                        guard !store.isLocked else { return }
-                        isLanguagePopoverOpen.toggle()
-                    }
-                ) {
-                    if store.preferences.language == .system {
-                        Image(systemName: "globe")
-                            .font(.system(size: 14, weight: .medium))
-                    } else {
-                        Text(store.preferences.language.flagEmoji)
-                            .font(.system(size: 15))
-                    }
-                }
-                .popover(isPresented: $isLanguagePopoverOpen, arrowEdge: .bottom) {
-                    languageSelectorPopover
-                }
-
                 MacToolbarIconButton(
                     width: CGFloat(metrics.syncButtonWidth),
                     height: btnH,
@@ -1265,7 +1152,7 @@ public struct MainWorkspaceView: View {
                 }
             }
         }
-        .padding(.trailing, 4)
+        .padding(.trailing, CGFloat(metrics.trailingActionsPadding))
         .fixedSize(horizontal: true, vertical: false)
     }
 

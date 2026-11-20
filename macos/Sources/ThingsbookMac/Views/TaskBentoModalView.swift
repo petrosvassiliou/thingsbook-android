@@ -10,6 +10,7 @@ public extension Notification.Name {
 public struct TaskBentoModalView: View {
     @ObservedObject var store: ThingsbookStore
     public let task: TaskItem
+    public var availableHeight: CGFloat? = nil
 
     @StateObject private var voiceController = MacVoiceDictationController()
     @State private var draftTitle: String = ""
@@ -38,9 +39,22 @@ public struct TaskBentoModalView: View {
     @FocusState private var isTitleFocused: Bool
     @FocusState private var isNotesFocused: Bool
 
-    public init(store: ThingsbookStore, task: TaskItem) {
+    public init(store: ThingsbookStore, task: TaskItem, availableHeight: CGFloat? = nil) {
         self.store = store
         self.task = task
+        self.availableHeight = availableHeight
+    }
+
+    private var resolvedMaxModalHeight: CGFloat {
+        max(320, min(620, (availableHeight ?? 660) - 36))
+    }
+
+    private var resolvedMinModalHeight: CGFloat {
+        min(420, resolvedMaxModalHeight)
+    }
+
+    private var resolvedIdealModalHeight: CGFloat {
+        min(560, resolvedMaxModalHeight)
     }
 
     private var latestTask: TaskItem {
@@ -50,6 +64,7 @@ public struct TaskBentoModalView: View {
     public var body: some View {
         VStack(spacing: 0) {
             modalHeaderBar
+                .fixedSize(horizontal: false, vertical: true)
 
             Divider()
                 .opacity(0.65)
@@ -70,9 +85,14 @@ public struct TaskBentoModalView: View {
                 .opacity(0.65)
 
             modalFooterBar
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(width: 740)
-        .frame(minHeight: 460, idealHeight: 560, maxHeight: 620)
+        .frame(
+            minHeight: resolvedMinModalHeight,
+            idealHeight: resolvedIdealModalHeight,
+            maxHeight: resolvedMaxModalHeight
+        )
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(ThingsMacPalette.cardSurface)

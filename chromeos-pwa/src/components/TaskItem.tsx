@@ -19,9 +19,11 @@ import {
   Flag,
   FolderInput,
   GripVertical,
+  Hash,
   Hourglass,
   LayoutGrid,
   Link2,
+  Maximize2,
   Mic,
   Moon,
   MoreHorizontal,
@@ -235,9 +237,12 @@ interface TaskItemProps {
   geminiApiKey: string;
   t: TranslationStrings;
   dragTaskIds?: string[];
+  quickEditRequestNonce?: number;
   onSelect: (multiToggle: boolean, shiftRange?: boolean) => void;
   onExpand: () => void;
   onCollapse: () => void;
+  onUpdateTitleNotes?: (title: string, notes: string) => void;
+  onUpdateEffortLevel?: (effortLevel: EffortLevel | null) => void;
   onRequestEnsureVisible?: (preferBottomVisible: boolean) => void;
   onOpenWhenModal: (taskId: string) => void;
   onOpenDeadlineModal: (taskId: string) => void;
@@ -259,6 +264,13 @@ interface TaskItemProps {
 const EMPTY_OPEN_ID_SET: ReadonlySet<string> = new Set();
 const EMPTY_TASKS_MAP: ReadonlyMap<string, TaskRecord> = new Map();
 
+function nextCycledEffortLevel(cur: EffortLevel | null | undefined): EffortLevel | null {
+  if (!cur) return 'QUICK_WIN';
+  if (cur === 'QUICK_WIN') return 'MEDIUM';
+  if (cur === 'MEDIUM') return 'DEEP_FOCUS';
+  return null;
+}
+
 export const TaskItem: React.FC<TaskItemProps> = ({
   task,
   isExpanded,
@@ -279,9 +291,12 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   geminiApiKey,
   t,
   dragTaskIds,
+  quickEditRequestNonce = 0,
   onSelect,
   onExpand,
   onCollapse,
+  onUpdateTitleNotes,
+  onUpdateEffortLevel,
   onRequestEnsureVisible,
   onOpenWhenModal,
   onOpenDeadlineModal,
@@ -309,6 +324,12 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const [timeblockOpen, setTimeblockOpen] = useState(false);
   const [effortDurationOpen, setEffortDurationOpen] = useState(false);
   const [inlineMoreMenuOpen, setInlineMoreMenuOpen] = useState(false);
+  const [isInlineQuickEditing, setIsInlineQuickEditing] = useState(false);
+  const [inlineTitleDraft, setInlineTitleDraft] = useState(task.title);
+  const [prevQuickEditNonce, setPrevQuickEditNonce] = useState(quickEditRequestNonce);
+  const [collapsedBadgePopover, setCollapsedBadgePopover] = useState<
+    'timeblock' | 'duration' | 'effort' | null
+  >(null);
   const [ctxMenu, setCtxMenu] = useState<{
     anchorX: number;
     anchorY: number;
@@ -323,6 +344,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const strikeTimerRef = useRef<number | null>(null);
   const glideTimerRef = useRef<number | null>(null);
   const lastPointerTypeRef = useRef<string>('mouse');
+  const collapsedRowRef = useRef<HTMLDivElement | null>(null);
+  const inlineTitleInputRef = useRef<HTMLInputElement | null>(null);
   const ctxMenuRef = useRef<HTMLDivElement | null>(null);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const subtaskRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -347,6 +370,9 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     setPrevServerNotes(task.notes);
     setTitleDraft(task.title);
     setNotesDraft(task.notes);
+    setInlineTitleDraft(task.title);
+    setIsInlineQuickEditing(false);
+    setCollapsedBadgePopover(null);
     setTimeblockOpen(false);
     setEffortDurationOpen(false);
     setInlineMoreMenuOpen(false);
@@ -356,12 +382,24 @@ export const TaskItem: React.FC<TaskItemProps> = ({
       if (!isTitleFocused) {
         setTitleDraft(task.title);
       }
+      if (!isInlineQuickEditing) {
+        setInlineTitleDraft(task.title);
+      }
     }
     if (prevServerNotes !== task.notes) {
       setPrevServerNotes(task.notes);
       if (!isNotesFocused && notesDraft !== task.notes) {
         setNotesDraft(task.notes);
       }
+    }
+  }
+
+  if (quickEditRequestNonce !== prevQuickEditNonce) {
+    setPrevQuickEditNonce(quickEditRequestNonce);
+    if (quickEditRequestNonce > 0 && !isExpanded) {
+      setInlineTitleDraft(task.title);
+      setCollapsedBadgePopover(null);
+      setIsInlineQuickEditing(true);
     }
   }
 
@@ -605,6 +643,68 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     }
     onCollapse();
   };
+
+  const persistTitleNotes = (nextTitle: string, nextNotes: string) => {
+    if (onUpdateTitleNotes) {
+      onUpdateTitleNotes(nextTitle, nextNotes);
+    } else {
+      void localDb.upsertTask({ id: task.id, title: nextTitle, notes: nextNotes });
+    }
+  };
+
+  const persistEffortLevel = (nextEffort: EffortLevel | null) => {
+    if (onUpdateEffortLevel) {
+      onUpdateEffortLevel(nextEffort);
+    } else {
+      void localDb.upsertTask({ id: task.id, effortLevel: nextEffort });
+    }
+  };
+
+  const startInlineQuickEdit = () => {
+    setInlineTitleDraft(task.title);
+    setCollapsedBadgePopover(null);
+    setIsInlineQuickEditing(true);
+  };
+
+  const commitInlineQuickTitle = (exitAfterCommit: boolean) => {
+    const clean = inlineTitleDraft.trim();
+    if (clean !== task.title) {
+      persistTitleNotes(clean, task.notes);
+    }
+    if (exitAfterCommit) {
+      setIsInlineQuickEditing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isInlineQuickEditing || isExpanded) return;
+    if (inlineTitleInputRef.current) {
+      inlineTitleInputRef.current.focus();
+      const len = inlineTitleInputRef.current.value.length;
+      inlineTitleInputRef.current.setSelectionRange(len, len);
+    }
+    const handleOutsidePointerDown = (ev: PointerEvent) => {
+      const target = ev.target as HTMLElement | null;
+      if (!target) return;
+      if (collapsedRowRef.current?.contains(target)) return;
+      if (target.closest('.modal-backdrop, .context-menu')) return;
+      const clean = inlineTitleInputRef.current?.value.trim() ?? taskLatestRef.current.title;
+      if (clean !== taskLatestRef.current.title) {
+        if (onUpdateTitleNotes) {
+          onUpdateTitleNotes(clean, taskLatestRef.current.notes);
+        } else {
+          void localDb.upsertTask({
+            id: taskLatestRef.current.id,
+            title: clean,
+            notes: taskLatestRef.current.notes
+          });
+        }
+      }
+      setIsInlineQuickEditing(false);
+    };
+    window.addEventListener('pointerdown', handleOutsidePointerDown);
+    return () => window.removeEventListener('pointerdown', handleOutsidePointerDown);
+  }, [isInlineQuickEditing, isExpanded, onUpdateTitleNotes]);
 
   const runMagicBreakdown = async () => {
     if (loadingAi) return;
@@ -923,26 +1023,6 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             >
               {task.isPinned ? <PinOff size={15.5} /> : <Pin size={15.5} />}
             </button>
-
-            {task.status === 'OPEN' && (
-              <button
-                type="button"
-                className="icon-btn"
-                title={t.actionFocusTimerMinutes(focusDurationMins)}
-                aria-label={t.actionFocusTimerMinutes(focusDurationMins)}
-                data-testid="task-start-focus-btn"
-                onClick={() => {
-                  flushDraftsIfNeeded();
-                  onStartFocusTimer(
-                    task.id,
-                    titleDraft || task.title,
-                    task.durationMinutes ?? 25
-                  );
-                }}
-              >
-                <Timer size={15.5} />
-              </button>
-            )}
 
             <button
               type="button"
@@ -1563,154 +1643,179 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           </div>
         </div>
 
-        {/* Unified Footer: ⋯ More Actions Menu (opening upward cleanly) + Primary Done Button */}
+        {/* Unified Sticky Footer: Focus Timer + ⋯ More Actions Menu + Primary Done Button */}
         <div className="task-card-unified-footer" data-testid="task-unified-footer">
-          <div style={{ position: 'relative', display: 'inline-flex' }}>
-            <button
-              type="button"
-              className="chip-btn task-more-menu-trigger"
-              title={t.actionMoreOptions}
-              data-testid="task-more-menu-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                setInlineMoreMenuOpen((v) => !v);
-              }}
-            >
-              <MoreHorizontal size={15.5} />
-              <span>{t.actionMoreOptions}</span>
-            </button>
+          <div className="task-footer-left-actions">
+            {task.status === 'OPEN' && (
+              <button
+                type="button"
+                className="chip-btn task-more-menu-trigger"
+                title={t.actionFocusTimerMinutes(focusDurationMins)}
+                aria-label={t.actionFocusTimerMinutes(focusDurationMins)}
+                data-testid="task-start-focus-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  flushDraftsIfNeeded();
+                  onStartFocusTimer(
+                    task.id,
+                    titleDraft || task.title,
+                    task.durationMinutes ?? 25
+                  );
+                }}
+              >
+                <Timer size={14.5} style={{ color: 'var(--things-blue)' }} />
+                <span>{t.actionFocusTimerMinutes(focusDurationMins)}</span>
+              </button>
+            )}
 
-            {inlineMoreMenuOpen && (
-              <>
-                <div
-                  style={{ position: 'fixed', inset: 0, zIndex: 85 }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setInlineMoreMenuOpen(false);
-                  }}
-                />
-                <div
-                  className="dropdown-popover"
-                  style={{
-                    left: 0,
-                    right: 'auto',
-                    top: 'auto',
-                    bottom: 'calc(100% + 8px)',
-                    minWidth: 224,
-                    zIndex: 90
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <button
-                    type="button"
-                    className="dropdown-item"
-                    onClick={() => {
+            <div style={{ position: 'relative', display: 'inline-flex' }}>
+              <button
+                type="button"
+                className="chip-btn task-more-menu-trigger"
+                title={t.actionMoreOptions}
+                data-testid="task-more-menu-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setInlineMoreMenuOpen((v) => !v);
+                }}
+              >
+                <MoreHorizontal size={15.5} />
+                <span>{t.actionMoreOptions}</span>
+              </button>
+
+              {inlineMoreMenuOpen && (
+                <>
+                  <div
+                    style={{ position: 'fixed', inset: 0, zIndex: 85 }}
+                    onClick={(e) => {
+                      e.stopPropagation();
                       setInlineMoreMenuOpen(false);
-                      attachmentFileInputRef.current?.click();
                     }}
-                  >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                      <Paperclip size={14} style={{ color: 'var(--things-blue)' }} />
-                      <span>{t.attachmentsAddPhotoBtn}</span>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="dropdown-item"
-                    onClick={() => {
-                      setInlineMoreMenuOpen(false);
-                      cameraCaptureInputRef.current?.click();
+                  />
+                  <div
+                    className="dropdown-popover"
+                    style={{
+                      left: 0,
+                      right: 'auto',
+                      top: 'auto',
+                      bottom: 'calc(100% + 8px)',
+                      minWidth: 224,
+                      maxHeight: 'min(290px, calc(100dvh - 120px))',
+                      zIndex: 90
                     }}
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                      <Camera size={14} style={{ color: 'var(--things-blue)' }} />
-                      <span>{t.actionTakePhoto}</span>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="dropdown-item"
-                    onClick={() => {
-                      setInlineMoreMenuOpen(false);
-                      triggerInlineVoiceDictation();
-                    }}
-                  >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                      <Mic size={14} style={{ color: 'var(--things-blue)' }} />
-                      <span>{t.voiceDictationLabel}</span>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="dropdown-item"
-                    data-testid="task-more-pin-btn"
-                    onClick={() => {
-                      setInlineMoreMenuOpen(false);
-                      flushDraftsIfNeeded();
-                      void localDb.upsertTask({ id: task.id, isPinned: !task.isPinned });
-                    }}
-                  >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                      {task.isPinned ? (
-                        <PinOff size={14} style={{ color: 'var(--things-blue)' }} />
-                      ) : (
-                        <Pin size={14} style={{ color: 'var(--things-blue)' }} />
-                      )}
-                      <span>{task.isPinned ? t.unpinTask : t.pinTask}</span>
-                    </span>
-                  </button>
-                  {onOpenDependenciesModal && (
                     <button
                       type="button"
                       className="dropdown-item"
-                      data-testid="task-more-waiting-on-btn"
                       onClick={() => {
                         setInlineMoreMenuOpen(false);
-                        flushDraftsIfNeeded();
-                        onOpenDependenciesModal(task.id);
+                        attachmentFileInputRef.current?.click();
                       }}
                     >
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                        <Link2 size={14} style={{ color: 'var(--things-blue)' }} />
-                        <span>{t.waitingOnLabel}</span>
+                        <Paperclip size={14} style={{ color: 'var(--things-blue)' }} />
+                        <span>{t.attachmentsAddPhotoBtn}</span>
                       </span>
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    className="dropdown-item"
-                    data-testid="task-duplicate-btn"
-                    onClick={() => {
-                      setInlineMoreMenuOpen(false);
-                      flushDraftsIfNeeded();
-                      onDuplicateTask(task.id);
-                    }}
-                  >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                      <Copy size={14} style={{ color: 'var(--things-blue)' }} />
-                      <span>{t.actionDuplicateTodo}</span>
-                    </span>
-                  </button>
-                  <div className="dropdown-divider" />
-                  <button
-                    type="button"
-                    className="dropdown-item"
-                    data-testid="task-delete-btn"
-                    style={{ color: 'var(--deadline-red)' }}
-                    onClick={() => {
-                      setInlineMoreMenuOpen(false);
-                      void localDb.softDeleteTasks([task.id]);
-                      onCollapse();
-                    }}
-                  >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                      <Trash2 size={14} style={{ color: 'var(--deadline-red)' }} />
-                      <span>{t.actionDelete}</span>
-                    </span>
-                  </button>
-                </div>
-              </>
-            )}
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      onClick={() => {
+                        setInlineMoreMenuOpen(false);
+                        cameraCaptureInputRef.current?.click();
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <Camera size={14} style={{ color: 'var(--things-blue)' }} />
+                        <span>{t.actionTakePhoto}</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      onClick={() => {
+                        setInlineMoreMenuOpen(false);
+                        triggerInlineVoiceDictation();
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <Mic size={14} style={{ color: 'var(--things-blue)' }} />
+                        <span>{t.voiceDictationLabel}</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      data-testid="task-more-pin-btn"
+                      onClick={() => {
+                        setInlineMoreMenuOpen(false);
+                        flushDraftsIfNeeded();
+                        void localDb.upsertTask({ id: task.id, isPinned: !task.isPinned });
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        {task.isPinned ? (
+                          <PinOff size={14} style={{ color: 'var(--things-blue)' }} />
+                        ) : (
+                          <Pin size={14} style={{ color: 'var(--things-blue)' }} />
+                        )}
+                        <span>{task.isPinned ? t.unpinTask : t.pinTask}</span>
+                      </span>
+                    </button>
+                    {onOpenDependenciesModal && (
+                      <button
+                        type="button"
+                        className="dropdown-item"
+                        data-testid="task-more-waiting-on-btn"
+                        onClick={() => {
+                          setInlineMoreMenuOpen(false);
+                          flushDraftsIfNeeded();
+                          onOpenDependenciesModal(task.id);
+                        }}
+                      >
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                          <Link2 size={14} style={{ color: 'var(--things-blue)' }} />
+                          <span>{t.waitingOnLabel}</span>
+                        </span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      data-testid="task-duplicate-btn"
+                      onClick={() => {
+                        setInlineMoreMenuOpen(false);
+                        flushDraftsIfNeeded();
+                        onDuplicateTask(task.id);
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <Copy size={14} style={{ color: 'var(--things-blue)' }} />
+                        <span>{t.actionDuplicateTodo}</span>
+                      </span>
+                    </button>
+                    <div className="dropdown-divider" />
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      data-testid="task-delete-btn"
+                      style={{ color: 'var(--deadline-red)' }}
+                      onClick={() => {
+                        setInlineMoreMenuOpen(false);
+                        void localDb.softDeleteTasks([task.id]);
+                        onCollapse();
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <Trash2 size={14} style={{ color: 'var(--deadline-red)' }} />
+                        <span>{t.actionDelete}</span>
+                      </span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
           <div className="task-card-actions">
@@ -1753,15 +1858,26 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     taskTags.length > 0 ||
     task.deadline != null;
 
+  const stopRowPropagation = (e: React.SyntheticEvent) => {
+    e.stopPropagation();
+  };
+
   return (
     <>
       <div
+        ref={collapsedRowRef}
         className={`task-row ${isSelected ? 'selected' : ''} ${
-          isActivelyBlocked ? 'blocked' : ''
-        } ${animStage === 'glide' ? 'stage-glide' : ''} ${dragOver ? 'drag-over-row' : ''}`}
+          isInlineQuickEditing ? 'quick-editing' : ''
+        } ${isActivelyBlocked ? 'blocked' : ''} ${
+          animStage === 'glide' ? 'stage-glide' : ''
+        } ${dragOver ? 'drag-over-row' : ''}`}
         data-task-id={task.id}
-        draggable
+        draggable={!isInlineQuickEditing}
         onDragStart={(e) => {
+          if (isInlineQuickEditing) {
+            e.preventDefault();
+            return;
+          }
           const payloadIds =
             isSelected && dragTaskIds && dragTaskIds.length > 1 && dragTaskIds.includes(task.id)
               ? dragTaskIds
@@ -1797,6 +1913,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
         }}
         onClick={(e) => {
           e.stopPropagation();
+          if (isInlineQuickEditing) return;
           if (e.shiftKey) {
             onSelect(true, true);
           } else if (e.ctrlKey || e.metaKey || isMultiSelectMode) {
@@ -1809,6 +1926,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
         }}
         onDoubleClick={(e) => {
           e.stopPropagation();
+          if (isInlineQuickEditing) return;
           onExpand();
         }}
         onContextMenu={(e) => {
@@ -1819,7 +1937,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             e.clientX,
             e.clientY,
             264,
-            620,
+            640,
             window.innerWidth,
             window.innerHeight,
             12
@@ -1835,32 +1953,168 @@ export const TaskItem: React.FC<TaskItemProps> = ({
         {renderCheckboxWithStatusMenu()}
 
         <div className="task-row-body">
-          <div className="task-row-title-line">
-            {task.isPinned && (
-              <span
-                className="task-pin-indicator"
-                title={t.pinnedBadge}
-                data-testid="task-pin-indicator"
-              >
-                <Pin size={12.5} />
-              </span>
-            )}
-            <span
-              className={`task-row-title ${
-                animStage === 'strike' || animStage === 'glide'
-                  ? 'strike-sweep'
-                  : task.status !== 'OPEN'
-                    ? 'done'
-                    : ''
-              }`}
+          {isInlineQuickEditing ? (
+            <div
+              className="task-row-inline-editor"
+              onClick={stopRowPropagation}
+              onDoubleClick={stopRowPropagation}
+              onPointerDown={stopRowPropagation}
             >
-              {task.title || t.placeholderTodoTitle}
-            </span>
+              <div className="task-row-inline-edit-wrap">
+                {task.isPinned && (
+                  <span
+                    className="task-pin-indicator"
+                    title={t.pinnedBadge}
+                    data-testid="task-pin-indicator"
+                  >
+                    <Pin size={12.5} />
+                  </span>
+                )}
+                <input
+                  ref={inlineTitleInputRef}
+                  type="text"
+                  className="task-row-inline-title-input"
+                  data-testid="task-row-inline-title-input"
+                  value={inlineTitleDraft}
+                  placeholder={t.placeholderTodoTitle}
+                  onChange={(e) => setInlineTitleDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      commitInlineQuickTitle(true);
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setInlineTitleDraft(task.title);
+                      setIsInlineQuickEditing(false);
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="task-row-inline-save-btn"
+                  data-testid="task-row-inline-save-btn"
+                  title={t.actionSave}
+                  aria-label={t.actionSave}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    commitInlineQuickTitle(true);
+                  }}
+                >
+                  <Check size={13} strokeWidth={2.6} />
+                </button>
+              </div>
 
-            {showContextSubtitle && containerLabel && (
-              <span className="task-row-subtitle">{containerLabel}</span>
-            )}
-          </div>
+              <div
+                className="task-row-quick-strip"
+                data-testid="task-row-quick-strip"
+                onClick={stopRowPropagation}
+                onDoubleClick={stopRowPropagation}
+              >
+                <button
+                  type="button"
+                  className="chip-btn task-quick-strip-chip"
+                  data-testid="task-quick-strip-when"
+                  title={t.actionWhen}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    commitInlineQuickTitle(false);
+                    onOpenWhenModal(task.id);
+                  }}
+                >
+                  <Calendar size={11.5} />
+                  <span>{t.actionWhen}</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="chip-btn task-quick-strip-chip"
+                  data-testid="task-quick-strip-deadline"
+                  title={t.actionDeadline}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    commitInlineQuickTitle(false);
+                    onOpenDeadlineModal(task.id);
+                  }}
+                >
+                  <Flag size={11.5} />
+                  <span>{t.actionDeadline}</span>
+                </button>
+
+                <button
+                  type="button"
+                  className={`chip-btn task-quick-strip-chip ${task.effortLevel ? 'active' : ''}`}
+                  data-testid="task-quick-strip-effort"
+                  title={t.effortLabel}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    persistEffortLevel(nextCycledEffortLevel(task.effortLevel));
+                  }}
+                >
+                  <Zap size={11.5} />
+                  <span>{effortDisplayLabel || t.effortLabel}</span>
+                </button>
+
+                <button
+                  type="button"
+                  className={`chip-btn task-quick-strip-chip ${taskTags.length > 0 ? 'active' : ''}`}
+                  data-testid="task-quick-strip-tags"
+                  title={t.actionTags}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    commitInlineQuickTitle(false);
+                    onOpenTagsModal(task.id);
+                  }}
+                >
+                  <Hash size={11.5} />
+                  <span>{t.actionTags}</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="chip-btn task-quick-strip-chip active"
+                  data-testid="task-quick-strip-open-details"
+                  title={t.openDetailsAction}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    commitInlineQuickTitle(true);
+                    onExpand();
+                  }}
+                >
+                  <Maximize2 size={11.5} />
+                  <span>{t.openDetailsAction}</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="task-row-title-line">
+              {task.isPinned && (
+                <span
+                  className="task-pin-indicator"
+                  title={t.pinnedBadge}
+                  data-testid="task-pin-indicator"
+                >
+                  <Pin size={12.5} />
+                </span>
+              )}
+              <span
+                className={`task-row-title ${
+                  animStage === 'strike' || animStage === 'glide'
+                    ? 'strike-sweep'
+                    : task.status !== 'OPEN'
+                      ? 'done'
+                      : ''
+                }`}
+              >
+                {task.title || t.placeholderTodoTitle}
+              </span>
+
+              {showContextSubtitle && containerLabel && (
+                <span className="task-row-subtitle">{containerLabel}</span>
+              )}
+            </div>
+          )}
 
           {task.notes.trim() && (
             <>
@@ -1872,97 +2126,396 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             </>
           )}
 
-          {/* Ordered Second-Row Badges */}
+          {/* Ordered Second-Row Interactive Badges */}
           {hasSecondRowBadges && (
             <div className="task-row-badges-second">
               {/* 0. Active Blocker ("Waiting on…") Badge */}
               {isActivelyBlocked && (
-                <span
-                  className="meta-badge blocked-badge"
+                <button
+                  type="button"
+                  className="meta-badge interactive-badge blocked-badge"
                   data-testid="task-row-waiting-badge"
                   title={blockedSummaryLabel}
+                  onPointerDown={stopRowPropagation}
+                  onDoubleClick={stopRowPropagation}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenDependenciesModal?.(task.id);
+                  }}
                 >
                   <Link2 size={10.5} />
                   <span>{blockedSummaryLabel}</span>
-                </span>
+                </button>
               )}
 
               {/* 1. Schedule State Badge (This Evening everywhere; Today / Upcoming / Someday in Project & Area views) */}
               {task.scheduleState === 'THIS_EVENING' ? (
-                <span className="meta-badge evening" title={t.viewThisEvening}>
+                <button
+                  type="button"
+                  className="meta-badge interactive-badge evening"
+                  data-testid="task-row-when-badge"
+                  title={t.viewThisEvening}
+                  onPointerDown={stopRowPropagation}
+                  onDoubleClick={stopRowPropagation}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenWhenModal(task.id);
+                  }}
+                >
                   <Moon size={10.5} />
                   <span>{t.viewThisEvening}</span>
-                </span>
+                </button>
               ) : showCollapsedSchedulePill ? (
                 task.scheduleState === 'TODAY' ? (
-                  <span className="meta-badge today" title={t.viewToday}>
+                  <button
+                    type="button"
+                    className="meta-badge interactive-badge today"
+                    data-testid="task-row-when-badge"
+                    title={t.viewToday}
+                    onPointerDown={stopRowPropagation}
+                    onDoubleClick={stopRowPropagation}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenWhenModal(task.id);
+                    }}
+                  >
                     <Sun size={10.5} style={{ color: 'var(--today-star)' }} />
                     <span>{t.viewToday}</span>
-                  </span>
+                  </button>
                 ) : task.scheduleState === 'SOMEDAY' ? (
-                  <span className="meta-badge" title={t.viewSomeday}>
+                  <button
+                    type="button"
+                    className="meta-badge interactive-badge"
+                    data-testid="task-row-when-badge"
+                    title={t.viewSomeday}
+                    onPointerDown={stopRowPropagation}
+                    onDoubleClick={stopRowPropagation}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenWhenModal(task.id);
+                    }}
+                  >
                     <Cloud size={10.5} />
                     <span>{t.viewSomeday}</span>
-                  </span>
+                  </button>
                 ) : task.whenDate != null ? (
-                  <span className="meta-badge" title={`${t.actionWhen}: ${formatShortDate(task.whenDate)}`}>
+                  <button
+                    type="button"
+                    className="meta-badge interactive-badge"
+                    data-testid="task-row-when-badge"
+                    title={`${t.actionWhen}: ${formatShortDate(task.whenDate)}`}
+                    onPointerDown={stopRowPropagation}
+                    onDoubleClick={stopRowPropagation}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenWhenModal(task.id);
+                    }}
+                  >
                     <Calendar size={10.5} />
                     <span>{formatShortDate(task.whenDate)}</span>
-                  </span>
+                  </button>
                 ) : null
               ) : null}
 
               {/* 1b. v2.0 Timeblock Range Pill OR v3.0 Standalone Duration Pill */}
               {timeblockRangeLabel ? (
-                <span
-                  className="meta-badge v2-timeblock-pill"
-                  data-testid="task-row-timeblock-pill"
-                  title={`${t.actionTimeblock}: ${timeblockRangeLabel}`}
+                <div
+                  className="dropdown-anchor"
+                  onPointerDown={stopRowPropagation}
+                  onDoubleClick={stopRowPropagation}
+                  onClick={stopRowPropagation}
                 >
-                  <span>🕐 {timeblockRangeLabel}</span>
-                </span>
+                  <button
+                    type="button"
+                    className="meta-badge interactive-badge v2-timeblock-pill"
+                    data-testid="task-row-timeblock-pill"
+                    title={`${t.actionTimeblock}: ${timeblockRangeLabel}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCollapsedBadgePopover((cur) =>
+                        cur === 'timeblock' ? null : 'timeblock'
+                      );
+                    }}
+                  >
+                    <span>🕐 {timeblockRangeLabel}</span>
+                  </button>
+                  {collapsedBadgePopover === 'timeblock' && (
+                    <>
+                      <div
+                        style={{ position: 'fixed', inset: 0, zIndex: 82 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCollapsedBadgePopover(null);
+                        }}
+                      />
+                      <div
+                        className="dropdown-popover task-row-badge-popover"
+                        data-testid="task-row-timeblock-popover"
+                        style={{ left: 0, right: 'auto', minWidth: 256, zIndex: 88 }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="v2-timeblock-row">
+                          <input
+                            type="time"
+                            className="v2-inline-time-input"
+                            aria-label={t.timeblockStartTime}
+                            value={
+                              task.scheduledStartMinutes != null
+                                ? formatMinutesAsClock(task.scheduledStartMinutes)
+                                : ''
+                            }
+                            onChange={(e) => {
+                              const mins = parseClockToMinutes(e.target.value);
+                              if (mins != null) {
+                                void localDb.upsertTask({
+                                  id: task.id,
+                                  scheduledStartMinutes: mins,
+                                  durationMinutes:
+                                    task.durationMinutes ?? DEFAULT_TIMEBLOCK_DURATION_MINUTES
+                                });
+                              }
+                            }}
+                          />
+                          <div className="v2-timeblock-slots">
+                            {TIMEBLOCK_QUICK_START_MINUTES.map((mins) => (
+                              <button
+                                key={mins}
+                                type="button"
+                                className={`chip-btn ${
+                                  task.scheduledStartMinutes === mins ? 'active' : ''
+                                }`}
+                                onClick={() => {
+                                  void localDb.upsertTask({
+                                    id: task.id,
+                                    scheduledStartMinutes: mins,
+                                    durationMinutes:
+                                      task.durationMinutes ?? DEFAULT_TIMEBLOCK_DURATION_MINUTES
+                                  });
+                                }}
+                              >
+                                {formatMinutesAsClock(mins)}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="v2-timeblock-row" style={{ marginTop: 6 }}>
+                          <div className="v2-timeblock-slots">
+                            {TIMEBLOCK_DURATION_PRESETS.map((dur) => (
+                              <button
+                                key={dur}
+                                type="button"
+                                className={`chip-btn ${
+                                  (task.durationMinutes ?? DEFAULT_TIMEBLOCK_DURATION_MINUTES) ===
+                                  dur
+                                    ? 'active'
+                                    : ''
+                                }`}
+                                onClick={() => {
+                                  void localDb.upsertTask({
+                                    id: task.id,
+                                    scheduledStartMinutes:
+                                      task.scheduledStartMinutes ?? 9 * 60,
+                                    durationMinutes: dur
+                                  });
+                                }}
+                              >
+                                {dur}m
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              className="chip-btn urgent"
+                              title={t.timeblockClear}
+                              onClick={() => {
+                                setCollapsedBadgePopover(null);
+                                void localDb.upsertTask({
+                                  id: task.id,
+                                  scheduledStartMinutes: null,
+                                  durationMinutes: null
+                                });
+                              }}
+                            >
+                              <X size={11} />
+                              <span>{t.actionClear}</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
               ) : standaloneDurationLabel ? (
-                <span
-                  className="meta-badge duration-badge"
-                  data-testid="task-row-duration-pill"
-                  title={`${t.durationLabel}: ${standaloneDurationLabel}`}
+                <div
+                  className="dropdown-anchor"
+                  onPointerDown={stopRowPropagation}
+                  onDoubleClick={stopRowPropagation}
+                  onClick={stopRowPropagation}
                 >
-                  <Hourglass size={10} />
-                  <span>{standaloneDurationLabel}</span>
-                </span>
+                  <button
+                    type="button"
+                    className="meta-badge interactive-badge duration-badge"
+                    data-testid="task-row-duration-pill"
+                    title={`${t.durationLabel}: ${standaloneDurationLabel}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCollapsedBadgePopover((cur) =>
+                        cur === 'duration' ? null : 'duration'
+                      );
+                    }}
+                  >
+                    <Hourglass size={10} />
+                    <span>{standaloneDurationLabel}</span>
+                  </button>
+                  {collapsedBadgePopover === 'duration' && (
+                    <>
+                      <div
+                        style={{ position: 'fixed', inset: 0, zIndex: 82 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCollapsedBadgePopover(null);
+                        }}
+                      />
+                      <div
+                        className="dropdown-popover task-row-badge-popover"
+                        data-testid="task-row-duration-popover"
+                        style={{ left: 0, right: 'auto', minWidth: 220, zIndex: 88 }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="v2-timeblock-slots">
+                          {STANDALONE_DURATION_PRESETS.map((dur) => (
+                            <button
+                              key={dur}
+                              type="button"
+                              className={`chip-btn ${task.durationMinutes === dur ? 'active' : ''}`}
+                              onClick={() => {
+                                setCollapsedBadgePopover(null);
+                                void localDb.upsertTask({
+                                  id: task.id,
+                                  durationMinutes: task.durationMinutes === dur ? null : dur
+                                });
+                              }}
+                            >
+                              {formatStandaloneDuration(dur)}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            className="chip-btn urgent"
+                            title={t.durationClear}
+                            onClick={() => {
+                              setCollapsedBadgePopover(null);
+                              void localDb.upsertTask({ id: task.id, durationMinutes: null });
+                            }}
+                          >
+                            <X size={11} />
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
               ) : null}
 
               {/* 1c. v3.0 Effort Pill */}
               {effortDisplayLabel && (
-                <span
-                  className={`meta-badge effort-badge effort-${(task.effortLevel || '').toLowerCase()}`}
-                  data-testid="task-row-effort-pill"
-                  title={`${t.effortLabel}: ${effortDisplayLabel}`}
+                <div
+                  className="dropdown-anchor"
+                  onPointerDown={stopRowPropagation}
+                  onDoubleClick={stopRowPropagation}
+                  onClick={stopRowPropagation}
                 >
-                  <span>{effortDisplayLabel}</span>
-                </span>
+                  <button
+                    type="button"
+                    className={`meta-badge interactive-badge effort-badge effort-${(
+                      task.effortLevel || ''
+                    ).toLowerCase()}`}
+                    data-testid="task-row-effort-pill"
+                    title={`${t.effortLabel}: ${effortDisplayLabel}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCollapsedBadgePopover((cur) => (cur === 'effort' ? null : 'effort'));
+                    }}
+                  >
+                    <span>{effortDisplayLabel}</span>
+                  </button>
+                  {collapsedBadgePopover === 'effort' && (
+                    <>
+                      <div
+                        style={{ position: 'fixed', inset: 0, zIndex: 82 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCollapsedBadgePopover(null);
+                        }}
+                      />
+                      <div
+                        className="dropdown-popover task-row-badge-popover"
+                        data-testid="task-row-effort-popover"
+                        style={{ left: 0, right: 'auto', minWidth: 180, zIndex: 88 }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {(
+                          [
+                            ['QUICK_WIN', `⚡ ${t.effortQuickWin}`],
+                            ['MEDIUM', t.effortMedium],
+                            ['DEEP_FOCUS', `🧠 ${t.effortDeepFocus}`],
+                            [null, t.effortNone]
+                          ] as Array<[EffortLevel | null, string]>
+                        ).map(([lvl, label]) => (
+                          <button
+                            key={lvl ?? 'none'}
+                            type="button"
+                            className="dropdown-item"
+                            onClick={() => {
+                              setCollapsedBadgePopover(null);
+                              persistEffortLevel(lvl);
+                            }}
+                          >
+                            <span>{label}</span>
+                            {(task.effortLevel ?? null) === lvl && <Check size={13.5} />}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
 
               {/* 2. Repeat */}
               {task.recurrenceRule != null && (
-                <span
-                  className="meta-badge"
+                <button
+                  type="button"
+                  className="meta-badge interactive-badge"
+                  data-testid="task-row-repeat-badge"
                   title={`${t.actionRepeat}: ${formatRecurrenceShort(task.recurrenceRule, lang)}`}
+                  onPointerDown={stopRowPropagation}
+                  onDoubleClick={stopRowPropagation}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenRepeatModal(task.id);
+                  }}
                 >
                   <Repeat size={10.5} />
                   <span>{formatRecurrenceShort(task.recurrenceRule, lang)}</span>
-                </span>
+                </button>
               )}
 
               {/* 3. Reminder */}
               {task.reminderTime != null && (
-                <span
-                  className="meta-badge"
+                <button
+                  type="button"
+                  className="meta-badge interactive-badge"
+                  data-testid="task-row-reminder-badge"
                   title={`${t.actionReminder}: ${formatReminderClock(task.reminderTime)}`}
+                  onPointerDown={stopRowPropagation}
+                  onDoubleClick={stopRowPropagation}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenWhenModal(task.id);
+                  }}
                 >
                   <Bell size={10.5} />
                   <span>{formatReminderClock(task.reminderTime)}</span>
-                </span>
+                </button>
               )}
 
               {/* 4. Checklist */}
@@ -1988,43 +2541,89 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 
               {/* 5. Tag Pills */}
               {taskTags.map((tg) => (
-                <span key={tg.id} className="meta-badge" title={`${t.entityTag}: ${tg.title}`}>
+                <button
+                  key={tg.id}
+                  type="button"
+                  className="meta-badge interactive-badge"
+                  data-testid={`task-row-tag-badge-${tg.id}`}
+                  title={`${t.entityTag}: ${tg.title}`}
+                  onPointerDown={stopRowPropagation}
+                  onDoubleClick={stopRowPropagation}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenTagsModal(task.id);
+                  }}
+                >
                   <LayoutGrid size={9.5} />
                   <span>{tg.title}</span>
-                </span>
+                </button>
               ))}
 
               {/* 6. Deadline */}
               {task.deadline != null && (() => {
                 const dl = renderDeadlineMeta(task.deadline);
                 return (
-                  <span
-                    className={`meta-badge ${dl.urgent ? 'urgent' : ''}`}
+                  <button
+                    type="button"
+                    className={`meta-badge interactive-badge ${dl.urgent ? 'urgent' : ''}`}
+                    data-testid="task-row-deadline-badge"
                     title={`${t.actionDeadline}: ${dl.label}`}
+                    onPointerDown={stopRowPropagation}
+                    onDoubleClick={stopRowPropagation}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenDeadlineModal(task.id);
+                    }}
                   >
                     <Flag size={10.5} />
                     <span>{dl.label}</span>
-                  </span>
+                  </button>
                 );
               })()}
             </div>
           )}
         </div>
 
-        <button
-          type="button"
-          className="task-row-open-btn"
-          title={t.actionEdit}
-          aria-label={t.actionEdit}
-          data-testid={`task-row-open-modal-${task.id}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onExpand();
-          }}
-          onDoubleClick={(e) => e.stopPropagation()}
-        >
-          <Edit3 size={13.5} />
-        </button>
+        <div className="task-row-trailing-actions">
+          <button
+            type="button"
+            className={`task-row-quick-edit-btn ${isInlineQuickEditing ? 'active' : ''}`}
+            title={t.quickEditAction}
+            aria-label={t.quickEditAction}
+            data-testid="task-row-quick-edit-btn"
+            onPointerDown={stopRowPropagation}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (isInlineQuickEditing) {
+                commitInlineQuickTitle(true);
+              } else {
+                startInlineQuickEdit();
+              }
+            }}
+            onDoubleClick={stopRowPropagation}
+          >
+            <Edit3 size={13} />
+          </button>
+
+          <button
+            type="button"
+            className="task-row-open-btn"
+            title={t.openDetailsAction}
+            aria-label={t.openDetailsAction}
+            data-testid={`task-row-open-modal-${task.id}`}
+            onPointerDown={stopRowPropagation}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (isInlineQuickEditing) {
+                commitInlineQuickTitle(true);
+              }
+              onExpand();
+            }}
+            onDoubleClick={stopRowPropagation}
+          >
+            <Maximize2 size={12.5} />
+          </button>
+        </div>
 
         <span className="drag-grip" title={t.actionMove}>
           <GripVertical size={15} />
@@ -2060,7 +2659,21 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               </div>
               <div className="context-menu-divider" />
 
-              {/* 0. Open / Edit To-Do Modal */}
+              {/* 0a. Inline Quick Edit (Rename + Quick Strip) */}
+              <button
+                type="button"
+                className="context-menu-item"
+                data-testid="task-ctx-quick-edit-btn"
+                onClick={() => {
+                  setCtxMenu(null);
+                  startInlineQuickEdit();
+                }}
+              >
+                <Edit3 size={14} />
+                <span>{t.quickEditAction}</span>
+              </button>
+
+              {/* 0b. Open Details (Full Two-Zone Soft Bento Modal) */}
               <button
                 type="button"
                 className="context-menu-item"
@@ -2070,8 +2683,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                   onExpand();
                 }}
               >
-                <Edit3 size={14} />
-                <span>{t.actionEdit}</span>
+                <Maximize2 size={14} />
+                <span>{t.openDetailsAction}</span>
               </button>
 
               {/* 1. Select / Deselect */}

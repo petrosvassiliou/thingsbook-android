@@ -58,6 +58,9 @@ public final class ThingsbookStore: ObservableObject {
             selectedTaskIds.removeAll()
             lastSelectedTaskId = nil
             expandedTaskId = nil
+            if isTimelineFullScreen {
+                isTimelineFullScreen = false
+            }
         }
     }
     @Published public var areas: [Area] = []
@@ -66,7 +69,14 @@ public final class ThingsbookStore: ObservableObject {
     @Published public var headingsByProject: [String: [Heading]] = [:]
     @Published public var projectAttachments: [String: [TaskAttachment]] = [:]
     @Published public var tags: [Tag] = []
-    @Published public var todayViewMode: TodayViewMode = .list
+    @Published public var todayViewMode: TodayViewMode = .list {
+        didSet {
+            if todayViewMode != .timeline, selectedDestination == .smartView(.today), isTimelineFullScreen {
+                isTimelineFullScreen = false
+            }
+        }
+    }
+    @Published public var isTimelineFullScreen: Bool = false
 
     @Published public var inboxTasks: [TaskItem] = []
     @Published public var todayDaytimeTasks: [TaskItem] = []
@@ -993,7 +1003,16 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func setProjectViewMode(_ projectId: String, mode: ProjectViewMode) {
+        if mode != .roadmap, isTimelineFullScreen {
+            isTimelineFullScreen = false
+        }
         try? database.setProjectViewMode(projectId: projectId, viewMode: mode.rawValue)
+    }
+
+    public func toggleTimelineFullScreen() {
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+            isTimelineFullScreen.toggle()
+        }
     }
 
     public func updateHeadingStartDate(_ headingId: String, startDate: Int64?) {

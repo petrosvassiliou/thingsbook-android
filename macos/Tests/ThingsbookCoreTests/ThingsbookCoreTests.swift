@@ -409,15 +409,15 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-beta.4")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-beta.4")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 95)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-beta.5")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-beta.5")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 96)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.4", current: "2.5.0", includeBeta: false))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.4", current: "2.5.0", includeBeta: true))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.4", current: "3.0.0-beta.3"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-rc.1", current: "3.0.0-beta.4"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-beta.4"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.5", current: "2.5.0", includeBeta: false))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.5", current: "2.5.0", includeBeta: true))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.5", current: "3.0.0-beta.4"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-rc.1", current: "3.0.0-beta.5"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-beta.5"))
         let ultraCompact = MacToolbarLayoutMetrics.compute(detailWidth: 506.0, isSidebarCollapsed: false)
         XCTAssertEqual(ultraCompact.usableWidth, 450.0)
         XCTAssertFalse(ultraCompact.showGeminiLabel)
@@ -4954,6 +4954,23 @@ final class ThingsbookCoreTests: XCTestCase {
             XCTAssertTrue(importMsg.contains("Roadmap") && importMsg.contains("12"))
             let exportMsg = ThingsStrings.shared.format("v30_external_export_success", lang: lang, "Roadmap")
             XCTAssertTrue(exportMsg.contains("Roadmap"))
+        }
+    }
+
+    func testV300Beta5UxRefinementKeysAndParity() {
+        let beta5Keys = [
+            "v30_timeline_fullscreen",
+            "v30_timeline_exit_fullscreen",
+            "v30_quick_edit_action",
+            "v30_open_details_action"
+        ]
+        for lang in [AppLanguage.en, .de, .fr, .it, .es] {
+            for key in beta5Keys {
+                let resolved = ThingsStrings.shared.text(key, lang: lang)
+                XCTAssertFalse(resolved.isEmpty, "Empty \(key) in \(lang.rawValue)")
+                XCTAssertNotEqual(resolved, key, "Unresolved \(key) in \(lang.rawValue)")
+                XCTAssertFalse(resolved.contains("%"), "Expected 0 format placeholders for \(key) in \(lang.rawValue)")
+            }
         }
     }
 }

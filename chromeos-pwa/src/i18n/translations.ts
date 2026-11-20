@@ -732,7 +732,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     voiceListeningHint: 'Listening… Speak your To-Do or brain dump',
     voiceSmartParseBtn: '✨ Smart Parse with Gemini',
     notesActionMap: 'Map',
-    betaChannelBadge: '3.0 ALPHA',
+    betaChannelBadge: '3.0 BETA',
     settingsIncludeBetaTitle: 'Receive Beta Updates',
     settingsIncludeBetaDesc:
       'Include beta pre-releases when checking for app updates.',
@@ -1200,7 +1200,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     voiceListeningHint: 'Höre zu… Sprich deine Aufgabe oder deinen Brain Dump',
     voiceSmartParseBtn: '✨ Mit Gemini aufteilen',
     notesActionMap: 'Karte',
-    betaChannelBadge: '3.0 ALPHA',
+    betaChannelBadge: '3.0 BETA',
     settingsIncludeBetaTitle: 'Beta-Updates erhalten',
     settingsIncludeBetaDesc:
       'Beta-Vorabversionen bei der Suche nach App-Updates einbeziehen.',
@@ -1666,7 +1666,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     voiceListeningHint: 'Écoute en cours… Dictez votre tâche ou vos idées',
     voiceSmartParseBtn: '✨ Analyser avec Gemini',
     notesActionMap: 'Carte',
-    betaChannelBadge: 'ALPHA 3.0',
+    betaChannelBadge: 'BETA 3.0',
     settingsIncludeBetaTitle: 'Recevoir les mises à jour bêta',
     settingsIncludeBetaDesc:
       'Inclure les préversions bêta lors de la recherche de mises à jour.',
@@ -2133,7 +2133,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     voiceListeningHint: 'In ascolto… Detta la tua attività o le tue idee',
     voiceSmartParseBtn: '✨ Analizza con Gemini',
     notesActionMap: 'Mappa',
-    betaChannelBadge: '3.0 ALPHA',
+    betaChannelBadge: '3.0 BETA',
     settingsIncludeBetaTitle: 'Ricevi aggiornamenti beta',
     settingsIncludeBetaDesc:
       'Includi le versioni preliminari beta durante la verifica degli aggiornamenti.',
@@ -2600,7 +2600,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     voiceListeningHint: 'Escuchando… Dicta tu tarea o lluvia de ideas',
     voiceSmartParseBtn: '✨ Analizar con Gemini',
     notesActionMap: 'Mapa',
-    betaChannelBadge: '3.0 ALPHA',
+    betaChannelBadge: '3.0 BETA',
     settingsIncludeBetaTitle: 'Recibir actualizaciones beta',
     settingsIncludeBetaDesc:
       'Incluir versiones preliminares beta al buscar actualizaciones.',

@@ -3677,6 +3677,8 @@ private fun ThingsModalsOverlay(
 
     // v2 Pillar 2 + v3 Milestone 4: Reusable Project Templates, Markdown Outline & Asana / Planner Import-Export Modal
     if (isTemplatesModalOpen) {
+        val modalNavTarget by viewModel.navigationTarget.collectAsState()
+        val activeModalProjectId = (modalNavTarget as? ActiveNavigationTarget.ProjectDetail)?.projectId
         val fallbackProjectTitle = stringResource(R.string.entity_new_project)
         ThingsTemplatesAndImportModal(
             initialTab = templatesModalInitialTab,
@@ -3684,7 +3686,7 @@ private fun ThingsModalsOverlay(
             areas = areas,
             userTemplates = userProjectTemplates,
             projects = activeProjects,
-            currentProjectId = currentProject?.id,
+            currentProjectId = activeModalProjectId,
             locale = activeLocale,
             onCreateFromTemplate = { template, areaOverride ->
                 viewModel.createProjectFromTemplate(template, areaOverride)

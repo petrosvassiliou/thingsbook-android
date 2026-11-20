@@ -4806,7 +4806,7 @@ final class ThingsbookCoreTests: XCTestCase {
 
         let db = try ThingsSQLiteDatabase(path: ":memory:")
         let workArea = try db.createArea(title: "Engineering")
-        let existingDesignTag = try db.createTag(title: "Design")
+        let existingDesignTag = try db.createOrUpdateTag(title: "Design")
 
         let externalSpec = ExternalImportedProject(
             title: "Enterprise Portal 3.0",

@@ -3,6 +3,7 @@ package com.pv.thingsbook
 import com.pv.thingsbook.domain.model.Heading
 import com.pv.thingsbook.domain.model.Project
 import com.pv.thingsbook.domain.model.ProjectRoadmapEngine
+import com.pv.thingsbook.domain.model.ProjectStatus
 import com.pv.thingsbook.domain.model.ProjectWorkspaceMode
 import com.pv.thingsbook.domain.model.ScheduleState
 import com.pv.thingsbook.domain.model.TaskItem
@@ -24,14 +25,40 @@ class V3Milestone3RoadmapTest {
     private val berlinZone: ZoneId = ZoneId.of("Europe/Berlin")
     private val sampleProject = Project(
         id = "proj-m3",
+        areaId = "area-work",
         title = "Thingsbook 3.0 Launch",
         notes = "",
-        areaId = "area-work",
-        viewMode = "roadmap"
+        status = ProjectStatus.ACTIVE,
+        scheduleState = ScheduleState.ANYTIME,
+        whenDate = null,
+        deadline = null,
+        completedAt = null,
+        sortOrder = 1.0,
+        tagIds = emptyList(),
+        viewMode = "roadmap",
+        createdAt = 1000L,
+        updatedAt = 1000L
     )
 
     private fun dayMillis(date: LocalDate, zone: ZoneId = berlinZone): Long =
         date.atStartOfDay(zone).toInstant().toEpochMilli()
+
+    private fun makeHeading(
+        id: String,
+        title: String,
+        sortOrder: Double = 1.0,
+        startDate: Long? = null,
+        endDate: Long? = null
+    ) = Heading(
+        id = id,
+        projectId = sampleProject.id,
+        title = title,
+        startDate = startDate,
+        endDate = endDate,
+        sortOrder = sortOrder,
+        createdAt = 1000L,
+        updatedAt = 1000L
+    )
 
     private fun makeTask(
         id: String,
@@ -52,11 +79,17 @@ class V3Milestone3RoadmapTest {
         scheduleState = scheduleState,
         whenDate = whenDate,
         deadline = deadline,
+        reminderTime = null,
+        durationMinutes = durationMinutes,
+        completedAt = if (status == TaskStatus.COMPLETED) 2000L else null,
         projectId = sampleProject.id,
         headingId = headingId,
-        durationMinutes = durationMinutes,
+        areaId = null,
+        recurrenceRule = null,
+        sortOrder = sortOrder,
         blockedByTaskIds = blockedByTaskIds,
-        sortOrder = sortOrder
+        createdAt = 1000L,
+        updatedAt = 1000L
     )
 
     @Test
@@ -114,33 +147,29 @@ class V3Milestone3RoadmapTest {
         val today = LocalDate.of(2026, 7, 10)
         val todayEpoch = today.toEpochDay()
 
-        val hExplicitClamped = Heading(
+        val hExplicitClamped = makeHeading(
             id = "h-clamped",
-            projectId = sampleProject.id,
             title = "Inverted Bounds Phase",
             sortOrder = 1.0,
             startDate = dayMillis(today.plusDays(5)),
             endDate = dayMillis(today.plusDays(2)) // Inverted -> clamped to startDay
         )
-        val hSingleStart = Heading(
+        val hSingleStart = makeHeading(
             id = "h-single",
-            projectId = sampleProject.id,
             title = "Single Start Phase",
             sortOrder = 2.0,
             startDate = dayMillis(today.plusDays(1)),
             endDate = null
         )
-        val hInferred = Heading(
+        val hInferred = makeHeading(
             id = "h-inferred",
-            projectId = sampleProject.id,
             title = "Inferred From Children",
             sortOrder = 3.0,
             startDate = null,
             endDate = null
         )
-        val hUnscheduled = Heading(
+        val hUnscheduled = makeHeading(
             id = "h-unscheduled",
-            projectId = sampleProject.id,
             title = "Backlog Phase",
             sortOrder = 4.0,
             startDate = null,
@@ -246,17 +275,17 @@ class V3Milestone3RoadmapTest {
         val barBoth = barsById.getValue("t-both")
         assertEquals(todayEpoch, barBoth.startEpochDay)
         assertEquals(todayEpoch + 4L, barBoth.endEpochDay)
-        assertEquals(5, barBoth.durationDays)
+        assertEquals(5, barBoth.spanDays)
 
         val barWhen = barsById.getValue("t-when")
         assertEquals(todayEpoch + 5L, barWhen.startEpochDay)
         assertEquals(todayEpoch + 6L, barWhen.endEpochDay)
-        assertEquals(2, barWhen.durationDays)
+        assertEquals(2, barWhen.spanDays)
 
         val barDeadline = barsById.getValue("t-deadline")
         assertEquals(todayEpoch + 8L, barDeadline.startEpochDay)
         assertEquals(todayEpoch + 10L, barDeadline.endEpochDay)
-        assertEquals(3, barDeadline.durationDays)
+        assertEquals(3, barDeadline.spanDays)
 
         assertEquals(listOf("t-unscheduled"), layout.unscheduledTasks.map { it.id })
 
@@ -276,9 +305,8 @@ class V3Milestone3RoadmapTest {
         val beforeDst = LocalDate.of(2026, 3, 28)
         val afterDst = LocalDate.of(2026, 3, 30)
 
-        val heading = Heading(
+        val heading = makeHeading(
             id = "h-dst",
-            projectId = sampleProject.id,
             title = "DST Phase",
             sortOrder = 1.0,
             startDate = dayMillis(beforeDst),

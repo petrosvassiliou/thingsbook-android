@@ -2417,7 +2417,7 @@ fun ThingsTodayTimelineSection(
                                     },
                                     shape = RoundedCornerShape(13.dp)
                                 )
-                                .clickable { editingTimeblockTask = task }
+                                .clickable { onOpenTask(task.id) }
                         ) {
                             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                                 Row(
@@ -2540,7 +2540,9 @@ fun ThingsTodayTimelineSection(
                     tonalElevation = 1.dp,
                     modifier = Modifier
                         .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
                         .border(1.dp, colors.hairlineDivider, RoundedCornerShape(12.dp))
+                        .clickable { onOpenTask(task.id) }
                 ) {
                     Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                         Row(

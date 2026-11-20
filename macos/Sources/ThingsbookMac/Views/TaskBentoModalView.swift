@@ -1,0 +1,1558 @@
+import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
+import ThingsbookCore
+
+public extension Notification.Name {
+    static let thingsbookDismissTaskModal = Notification.Name("thingsbookDismissTaskModal")
+}
+
+public struct TaskBentoModalView: View {
+    @ObservedObject var store: ThingsbookStore
+    public let task: TaskItem
+
+    @StateObject private var voiceController = MacVoiceDictationController()
+    @State private var draftTitle: String = ""
+    @State private var draftNotes: String = ""
+    @State private var newChecklistTitle: String = ""
+    @State private var dictationTargetsTitle: Bool = false
+    @State private var dictationBaseNotes: String = ""
+
+    @State private var isHeaderMovePopoverOpen = false
+    @State private var isWhenPopoverOpen = false
+    @State private var isTimeblockPopoverOpen = false
+    @State private var isDeadlinePopoverOpen = false
+    @State private var isRepeatPopoverOpen = false
+    @State private var isDependenciesPopoverOpen = false
+    @State private var isTagPopoverOpen = false
+    @State private var isMovePopoverOpen = false
+
+    @State private var isGeneratingChecklist = false
+    @State private var isEditingNotes = false
+    @State private var isFileDropTargeted = false
+    @State private var isHoveringDone = false
+    @State private var isHoveringClose = false
+    @State private var didCommitAndDismiss = false
+    @State private var draftSaveTask: Task<Void, Never>?
+
+    @FocusState private var isTitleFocused: Bool
+    @FocusState private var isNotesFocused: Bool
+
+    public init(store: ThingsbookStore, task: TaskItem) {
+        self.store = store
+        self.task = task
+    }
+
+    private var latestTask: TaskItem {
+        store.task(byId: task.id) ?? task
+    }
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            modalHeaderBar
+
+            Divider()
+                .opacity(0.65)
+
+            ScrollView(.vertical, showsIndicators: true) {
+                HStack(alignment: .top, spacing: 14) {
+                    leftPrimaryContentColumn
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                    rightPropertiesColumn
+                        .frame(width: 265, alignment: .topLeading)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 16)
+            }
+
+            Divider()
+                .opacity(0.65)
+
+            modalFooterBar
+        }
+        .frame(width: 740)
+        .frame(minHeight: 460, idealHeight: 560, maxHeight: 620)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(ThingsMacPalette.cardSurface)
+                .shadow(color: Color.black.opacity(0.24), radius: 34, x: 0, y: 14)
+                .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 2)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(
+                    isFileDropTargeted
+                        ? ThingsMacPalette.accentBlue
+                        : Color.primary.opacity(0.10),
+                    lineWidth: isFileDropTargeted ? 1.8 : 0.9
+                )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .onDrop(of: [UTType.fileURL], isTargeted: $isFileDropTargeted) { providers in
+            commitDraftEditsIfNeeded()
+            return store.handleFileDropProviders(providers, taskId: latestTask.id)
+        }
+        .onAppear {
+            didCommitAndDismiss = false
+            syncDrafts()
+            applyInitialFocusRules()
+        }
+        .onDisappear {
+            draftSaveTask?.cancel()
+            voiceController.stopRecording()
+            if !didCommitAndDismiss {
+                commitDraftEditsIfNeeded(commitPendingChecklist: true)
+            }
+        }
+        .onChange(of: task.id) { _, _ in
+            draftSaveTask?.cancel()
+            voiceController.stopRecording()
+            didCommitAndDismiss = false
+            syncDrafts()
+            applyInitialFocusRules()
+        }
+        .onChange(of: draftTitle) { _, _ in
+            scheduleDraftAutoSave()
+        }
+        .onChange(of: draftNotes) { _, _ in
+            scheduleDraftAutoSave()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .thingsbookDismissTaskModal)) { _ in
+            closeModal()
+        }
+    }
+
+    // MARK: - Zone A: Top Header Bar
+
+    private var modalHeaderBar: some View {
+        let current = latestTask
+
+        return HStack(alignment: .center, spacing: 12) {
+            ThingsCheckboxButton(
+                status: current.status,
+                isSomeday: current.scheduleState == .someday,
+                helpText: store.tr("macos_checkbox_help"),
+                onToggleComplete: {
+                    commitDraftEditsIfNeeded(commitPendingChecklist: true)
+                    store.toggleTaskCompletion(current)
+                },
+                onCancelTask: {
+                    commitDraftEditsIfNeeded(commitPendingChecklist: true)
+                    store.cancelTask(current)
+                }
+            )
+
+            TextField(store.tr("placeholder_todo_title"), text: $draftTitle)
+                .textFieldStyle(.plain)
+                .font(.system(size: 18.5, weight: .bold))
+                .foregroundStyle(current.status == .open ? .primary : .secondary)
+                .strikethrough(current.status == .canceled, color: .secondary)
+                .focused($isTitleFocused)
+                .layoutPriority(1)
+                .onSubmit {
+                    closeModal()
+                }
+
+            Spacer(minLength: 8)
+
+            // Clickable Context Breadcrumb Pill (Area › Project / Project / Area / Inbox)
+            Button {
+                commitDraftEditsIfNeeded()
+                isHeaderMovePopoverOpen = true
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: headerContextIcon(for: current))
+                        .font(.system(size: 10.5, weight: .semibold))
+                    Text(headerContextTitle(for: current))
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .foregroundStyle(
+                    (current.projectId != nil || current.areaId != nil)
+                        ? ThingsMacPalette.accentBlue
+                        : Color.secondary
+                )
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .frame(maxWidth: 200)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(
+                            (current.projectId != nil || current.areaId != nil)
+                                ? ThingsMacPalette.accentBlue.opacity(0.11)
+                                : ThingsMacPalette.subtleContainer
+                        )
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .strokeBorder(
+                                    (current.projectId != nil || current.areaId != nil)
+                                        ? ThingsMacPalette.accentBlue.opacity(0.26)
+                                        : Color.primary.opacity(0.09),
+                                    lineWidth: 0.8
+                                )
+                        )
+                )
+                .contentShape(Capsule(style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .thingsTooltip(moveButtonTooltip)
+            .popover(isPresented: $isHeaderMovePopoverOpen) {
+                movePopoverContent
+            }
+
+            // Pin Button
+            Button {
+                commitDraftEditsIfNeeded()
+                store.setTasksPinned([current.id], isPinned: !current.isPinned)
+            } label: {
+                Image(systemName: current.isPinned ? "pin.fill" : "pin")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(current.isPinned ? ThingsMacPalette.todayYellow : .secondary)
+                    .frame(width: 28, height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                            .fill(current.isPinned ? ThingsMacPalette.todayYellow.opacity(0.14) : ThingsMacPalette.subtleContainer)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                            .strokeBorder(
+                                current.isPinned ? ThingsMacPalette.todayYellow.opacity(0.32) : Color.primary.opacity(0.08),
+                                lineWidth: 0.8
+                            )
+                    )
+            }
+            .buttonStyle(.plain)
+            .thingsTooltip(store.tr(current.isPinned ? "v25_unpin_task" : "v25_pin_task"))
+
+            // Live Voice Dictation Button
+            Button {
+                toggleVoiceDictation()
+            } label: {
+                Image(systemName: voiceController.isRecording ? "waveform.circle.fill" : "mic.fill")
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(voiceController.isRecording ? .white : .secondary)
+                    .frame(width: 28, height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                            .fill(voiceController.isRecording ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.subtleContainer)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                            .strokeBorder(
+                                voiceController.isRecording ? ThingsMacPalette.deadlineCrimson : Color.primary.opacity(0.08),
+                                lineWidth: 0.8
+                            )
+                    )
+            }
+            .buttonStyle(.plain)
+            .thingsTooltip(store.tr(voiceController.isRecording ? "macos_voice_stop" : "voice_capture_btn"))
+
+            // Close Button
+            Button {
+                closeModal()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(isHoveringClose ? Color.primary.opacity(0.75) : Color.secondary.opacity(0.65))
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering in
+                isHoveringClose = hovering
+            }
+            .thingsTooltip(store.tr("backup_close_dialog_tooltip"))
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+    }
+
+    // MARK: - Zone B1: Left Primary Content Column (~430 pt)
+
+    private var leftPrimaryContentColumn: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if voiceController.isRecording {
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(ThingsMacPalette.deadlineCrimson)
+                        .frame(width: 7, height: 7)
+                    Text(store.tr("macos_voice_listening"))
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(ThingsMacPalette.deadlineCrimson)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(ThingsMacPalette.deadlineCrimson.opacity(0.09))
+                )
+            }
+
+            notesBentoTile
+            checklistBentoTile
+            attachmentsBentoTile
+        }
+    }
+
+    private var notesBentoTile: some View {
+        let hasNotes = !draftNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let links = MarkdownNotesParser.extractDetectedLinks(from: draftNotes)
+        let toggleLabel = isEditingNotes ? store.tr("macos_preview_markdown") : store.tr("macos_edit_markdown")
+
+        return VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 6) {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text(store.tr("placeholder_notes"))
+                    .font(.system(size: 11.5, weight: .bold))
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                if hasNotes || isEditingNotes {
+                    Button {
+                        isEditingNotes.toggle()
+                        if isEditingNotes {
+                            DispatchQueue.main.async {
+                                isNotesFocused = true
+                            }
+                        }
+                    } label: {
+                        Text(toggleLabel)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(ThingsMacPalette.accentBlue)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                    .buttonStyle(.plain)
+                    .thingsTooltip(toggleLabel)
+                }
+            }
+
+            if !isEditingNotes {
+                Group {
+                    if hasNotes {
+                        Text(MarkdownNotesParser.renderAttributed(draftNotes))
+                            .font(.system(size: 13.5))
+                            .frame(maxWidth: .infinity, minHeight: 84, alignment: .topLeading)
+                    } else {
+                        Text(store.tr("placeholder_notes"))
+                            .font(.system(size: 13.5))
+                            .foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity, minHeight: 84, alignment: .topLeading)
+                    }
+                }
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(ThingsMacPalette.cardSurface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.8)
+                        )
+                )
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    isEditingNotes = true
+                    DispatchQueue.main.async {
+                        isNotesFocused = true
+                    }
+                }
+            } else {
+                ZStack(alignment: .topLeading) {
+                    if draftNotes.isEmpty {
+                        Text(store.tr("placeholder_notes"))
+                            .font(.system(size: 13.5))
+                            .foregroundStyle(.tertiary)
+                            .padding(.top, 9)
+                            .padding(.leading, 11)
+                            .allowsHitTesting(false)
+                    }
+                    TextEditor(text: $draftNotes)
+                        .font(.system(size: 13.5))
+                        .scrollContentBackground(.hidden)
+                        .focused($isNotesFocused)
+                        .padding(6)
+                        .frame(minHeight: 96, maxHeight: 196)
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(ThingsMacPalette.cardSurface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.32), lineWidth: 1.0)
+                        )
+                )
+            }
+
+            if !links.isEmpty {
+                ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
+                    ForEach(links) { link in
+                        Button {
+                            if let url = URL(string: link.targetUri) {
+                                NSWorkspace.shared.open(url)
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: link.type.sfSymbol)
+                                    .font(.system(size: 10.5, weight: .semibold))
+                                Text("\(link.displayLabel) ↗")
+                                    .font(.system(size: 11.5, weight: .semibold))
+                                    .lineLimit(1)
+                            }
+                            .fixedSize(horizontal: true, vertical: false)
+                            .foregroundStyle(ThingsMacPalette.accentBlue)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(ThingsMacPalette.accentBlue.opacity(0.10))
+                                    .overlay(
+                                        Capsule(style: .continuous)
+                                            .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.24), lineWidth: 0.8)
+                                    )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .thingsTooltip(link.targetUri)
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(softBentoTileBackground())
+    }
+
+    private var checklistBentoTile: some View {
+        let current = latestTask
+        let items = current.checklistItems
+        let doneCount = items.filter(\.isCompleted).count
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "checklist")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text(store.tr("action_checklist"))
+                    .font(.system(size: 11.5, weight: .bold))
+                    .foregroundStyle(.secondary)
+
+                if !items.isEmpty {
+                    Text("\(doneCount)/\(items.count)")
+                        .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                        .foregroundStyle(doneCount == items.count ? ThingsMacPalette.logbookGreen : ThingsMacPalette.accentBlue)
+                        .padding(.horizontal, 6.5)
+                        .padding(.vertical, 1.5)
+                        .background(
+                            Capsule().fill(
+                                (doneCount == items.count ? ThingsMacPalette.logbookGreen : ThingsMacPalette.accentBlue)
+                                    .opacity(0.13)
+                            )
+                        )
+                }
+
+                Spacer()
+
+                Button {
+                    runMagicBreakdown()
+                } label: {
+                    HStack(spacing: 4.5) {
+                        if isGeneratingChecklist {
+                            ProgressView().controlSize(.mini)
+                        } else {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 10.5, weight: .semibold))
+                        }
+                        Text(store.tr("gemini_magic_breakdown"))
+                            .font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1)
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 3.5)
+                    .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+                .fixedSize(horizontal: true, vertical: false)
+                .disabled(isGeneratingChecklist)
+                .thingsTooltip(store.tr("gemini_magic_breakdown_desc"))
+            }
+
+            if !items.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(items) { item in
+                        ChecklistItemRowView(store: store, item: item, allItems: items)
+                    }
+                }
+                .padding(.horizontal, 4)
+            }
+
+            HStack(spacing: 7) {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                    .frame(width: 15)
+
+                TextField(store.tr("placeholder_checklist"), text: $newChecklistTitle)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .onSubmit {
+                        addPendingChecklistItem()
+                    }
+
+                if !newChecklistTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button(store.tr("macos_action_add")) {
+                        addPendingChecklistItem()
+                    }
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                    .buttonStyle(.plain)
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(ThingsMacPalette.cardSurface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.8)
+                    )
+            )
+        }
+        .padding(12)
+        .background(softBentoTileBackground())
+    }
+
+    private var attachmentsBentoTile: some View {
+        let current = latestTask
+
+        return VStack(alignment: .leading, spacing: 8) {
+            if !current.attachments.isEmpty {
+                AttachmentsStripView(store: store, attachments: current.attachments) {
+                    commitDraftEditsIfNeeded()
+                    store.pickAndAttachFiles(taskId: current.id)
+                }
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "paperclip")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text(store.tr("attachments_section_title"))
+                        .font(.system(size: 11.5, weight: .bold))
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Button {
+                        commitDraftEditsIfNeeded()
+                        store.pickAndAttachFiles(taskId: current.id)
+                    } label: {
+                        HStack(spacing: 3.5) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 10, weight: .bold))
+                            Text(store.tr("action_attach_file"))
+                                .font(.system(size: 11, weight: .semibold))
+                                .lineLimit(1)
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .foregroundStyle(ThingsMacPalette.accentBlue)
+                    }
+                    .buttonStyle(.plain)
+                    .thingsTooltip(store.tr("action_attach_file"))
+                }
+
+                HStack(spacing: 6) {
+                    Image(systemName: isFileDropTargeted ? "arrow.down.doc.fill" : "photo.on.rectangle.angled")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(isFileDropTargeted ? ThingsMacPalette.accentBlue : .secondary)
+                    Text(store.tr("macos_attachment_drop_hint"))
+                        .font(.system(size: 11.5, weight: isFileDropTargeted ? .semibold : .regular))
+                        .foregroundStyle(isFileDropTargeted ? ThingsMacPalette.accentBlue : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(isFileDropTargeted ? ThingsMacPalette.accentBlue.opacity(0.07) : ThingsMacPalette.cardSurface.opacity(0.75))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(
+                                    isFileDropTargeted ? ThingsMacPalette.accentBlue : Color.primary.opacity(0.08),
+                                    style: StrokeStyle(lineWidth: isFileDropTargeted ? 1.4 : 0.8, dash: [5, 4])
+                                )
+                        )
+                )
+            }
+        }
+        .padding(12)
+        .background(softBentoTileBackground())
+    }
+
+    // MARK: - Zone B2: Right Properties & Scheduling Column (~265 pt)
+
+    private var rightPropertiesColumn: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            whenAndTimeblockTile
+            deadlineAndRepeatTile
+            effortAndDurationTile
+            dependenciesTile
+            categoriesTile
+            projectAndAreaTile
+        }
+    }
+
+    private var whenAndTimeblockTile: some View {
+        let current = latestTask
+        let whenLabel = whenSummaryLabel(for: current)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            bentoSectionHeader(icon: "calendar", title: store.tr("action_when"))
+
+            ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
+                ThingsActionChipButton(
+                    title: whenLabel ?? store.tr("action_when"),
+                    systemImage: current.scheduleState == .thisEvening
+                        ? "moon.stars.fill"
+                        : (current.scheduleState == .today ? "sun.max.fill" : "calendar"),
+                    isActive: whenLabel != nil || current.reminderTime != nil,
+                    activeTint: current.scheduleState == .thisEvening ? ThingsMacPalette.eveningPurple : ThingsMacPalette.accentBlue,
+                    helpText: whenButtonTooltip(for: current)
+                ) {
+                    commitDraftEditsIfNeeded()
+                    isWhenPopoverOpen = true
+                }
+                .popover(isPresented: $isWhenPopoverOpen) {
+                    WhenPopoverView(
+                        store: store,
+                        currentSchedule: current.scheduleState,
+                        currentWhenMillis: current.whenDate,
+                        currentReminderMillis: current.reminderTime
+                    ) { resolved in
+                        var copy = latestTask
+                        copy.title = draftTitle
+                        copy.notes = draftNotes
+                        copy.scheduleState = resolved.scheduleState
+                        copy.whenDate = resolved.whenDateEpochMillis
+                        copy.reminderTime = resolved.reminderEpochMillis
+                        store.updateTask(copy)
+                    }
+                }
+
+                if showQuickThisEveningPill {
+                    ThingsActionChipButton(
+                        title: store.tr("view_this_evening"),
+                        systemImage: "moon.stars.fill",
+                        isActive: true,
+                        activeTint: ThingsMacPalette.eveningPurple,
+                        helpText: store.tr("view_this_evening")
+                    ) {
+                        quickMoveToThisEveningAndClose()
+                    }
+                }
+
+                if let rem = current.reminderTime {
+                    ThingsActionChipButton(
+                        title: shortTimeString(rem),
+                        systemImage: "bell.fill",
+                        isActive: true,
+                        helpText: store.trf("when_task_reminder_set", shortTimeString(rem))
+                    ) {
+                        commitDraftEditsIfNeeded()
+                        isWhenPopoverOpen = true
+                    }
+                }
+
+                ThingsActionChipButton(
+                    title: current.scheduledStartMinutes != nil
+                        ? (current.formattedTimeblockPill ?? store.tr("v2_timeblock_title"))
+                        : store.tr("v2_timeblock_title"),
+                    systemImage: "clock.badge.checkmark",
+                    isActive: current.scheduledStartMinutes != nil,
+                    activeTint: ThingsMacPalette.anytimeTeal,
+                    helpText: timeblockButtonTooltip(for: current)
+                ) {
+                    commitDraftEditsIfNeeded()
+                    isTimeblockPopoverOpen = true
+                }
+                .popover(isPresented: $isTimeblockPopoverOpen) {
+                    TimeblockPopoverView(
+                        store: store,
+                        currentStartMinutes: current.scheduledStartMinutes,
+                        currentDurationMinutes: current.durationMinutes
+                    ) { startMins, durMins in
+                        var copy = latestTask
+                        copy.title = draftTitle
+                        copy.notes = draftNotes
+                        copy.scheduledStartMinutes = startMins
+                        copy.durationMinutes = durMins
+                        store.updateTask(copy)
+                    }
+                }
+            }
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(softBentoTileBackground())
+    }
+
+    private var deadlineAndRepeatTile: some View {
+        let current = latestTask
+        let dlInfo = current.deadline.map { deadlineSummaryInfo(for: $0) }
+
+        return VStack(alignment: .leading, spacing: 8) {
+            bentoSectionHeader(icon: "flag", title: "\(store.tr("action_deadline")) · \(store.tr("action_repeat"))")
+
+            ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
+                ThingsActionChipButton(
+                    title: dlInfo?.label ?? store.tr("action_deadline"),
+                    systemImage: "flag",
+                    isActive: dlInfo != nil,
+                    activeTint: (dlInfo?.isUrgent == true) ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.accentBlue,
+                    helpText: store.tr("context_adjust_deadline")
+                ) {
+                    commitDraftEditsIfNeeded()
+                    isDeadlinePopoverOpen = true
+                }
+                .popover(isPresented: $isDeadlinePopoverOpen) {
+                    DeadlinePopoverView(store: store, currentDeadlineMillis: current.deadline) { dl in
+                        var copy = latestTask
+                        copy.title = draftTitle
+                        copy.notes = draftNotes
+                        copy.deadline = dl
+                        store.updateTask(copy)
+                    }
+                }
+
+                ThingsActionChipButton(
+                    title: current.recurrenceRule?.formatShortLabel(locale: store.preferences.language.locale) ?? store.tr("action_repeat"),
+                    systemImage: "repeat",
+                    isActive: current.recurrenceRule != nil,
+                    helpText: repeatButtonTooltip(for: current)
+                ) {
+                    commitDraftEditsIfNeeded()
+                    isRepeatPopoverOpen = true
+                }
+                .popover(isPresented: $isRepeatPopoverOpen) {
+                    RepeatEditorPopoverView(store: store, currentRule: current.recurrenceRule) { newRule in
+                        var copy = latestTask
+                        copy.title = draftTitle
+                        copy.notes = draftNotes
+                        copy.recurrenceRule = newRule
+                        if newRule != nil && copy.whenDate == nil {
+                            copy.scheduleState = .today
+                            copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
+                        }
+                        store.updateTask(copy)
+                    }
+                }
+            }
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(softBentoTileBackground())
+    }
+
+    private var effortAndDurationTile: some View {
+        let current = latestTask
+        let currentEffort = current.resolvedEffort
+        let currentDuration = (current.durationMinutes ?? 0) > 0 ? current.durationMinutes : nil
+
+        return VStack(alignment: .leading, spacing: 8) {
+            bentoSectionHeader(icon: "bolt", title: "\(store.tr("v30_effort_label")) · \(store.tr("v30_duration_label"))")
+
+            ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
+                Menu {
+                    ForEach(TaskEffortLevel.allCases, id: \.rawValue) { level in
+                        let isSelected = currentEffort == level
+                        Button {
+                            commitDraftEditsIfNeeded()
+                            store.setTaskEffort(current.id, effortLevel: level.rawValue)
+                        } label: {
+                            Label(
+                                effortLocalizedTitle(for: level),
+                                systemImage: isSelected ? "checkmark" : level.sfSymbol
+                            )
+                        }
+                    }
+                    if currentEffort != nil {
+                        Divider()
+                        Button(store.tr("v30_effort_none")) {
+                            commitDraftEditsIfNeeded()
+                            store.setTaskEffort(current.id, effortLevel: nil)
+                        }
+                    }
+                } label: {
+                    bentoMenuChipLabel(
+                        title: currentEffort.map { effortLocalizedTitle(for: $0) } ?? store.tr("v30_effort_label"),
+                        systemImage: currentEffort?.sfSymbol ?? "bolt",
+                        isActive: currentEffort != nil,
+                        activeTint: currentEffort.map { effortTint(for: $0) } ?? ThingsMacPalette.accentBlue
+                    )
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .thingsTooltip(
+                    currentEffort.map { "\(store.tr("v30_effort_label")): \(effortLocalizedTitle(for: $0))" }
+                        ?? store.tr("v30_effort_label")
+                )
+
+                Menu {
+                    ForEach([5, 15, 30, 60, 120, 240], id: \.self) { mins in
+                        let isSelected = current.durationMinutes == mins
+                        Button {
+                            commitDraftEditsIfNeeded()
+                            store.setTaskStandaloneDuration(current.id, durationMinutes: mins)
+                        } label: {
+                            if isSelected {
+                                Label(TaskItem.formatCompactDuration(mins), systemImage: "checkmark")
+                            } else {
+                                Text(TaskItem.formatCompactDuration(mins))
+                            }
+                        }
+                    }
+                    if currentDuration != nil {
+                        Divider()
+                        Button(store.tr("v30_duration_clear"), role: .destructive) {
+                            commitDraftEditsIfNeeded()
+                            store.setTaskStandaloneDuration(current.id, durationMinutes: nil)
+                        }
+                    }
+                } label: {
+                    bentoMenuChipLabel(
+                        title: currentDuration.map { TaskItem.formatCompactDuration($0) } ?? store.tr("v30_duration_label"),
+                        systemImage: "timer",
+                        isActive: currentDuration != nil,
+                        activeTint: ThingsMacPalette.anytimeTeal
+                    )
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .thingsTooltip(
+                    currentDuration.map { "\(store.tr("v30_duration_label")): \(TaskItem.formatCompactDuration($0))" }
+                        ?? store.tr("v30_duration_label")
+                )
+            }
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(softBentoTileBackground())
+    }
+
+    private var dependenciesTile: some View {
+        let current = latestTask
+        let blockedLabel = store.blockedByBadgeText(for: current)
+        let isBlockedActive = blockedLabel != nil || !current.blockedByTaskIds.isEmpty
+
+        return VStack(alignment: .leading, spacing: 8) {
+            bentoSectionHeader(icon: "hourglass", title: store.tr("v30_blocked_by_label"))
+
+            bentoWrappingChipButton(
+                title: blockedLabel ?? store.tr("v30_blocked_by_label"),
+                systemImage: "hourglass",
+                isActive: isBlockedActive,
+                activeTint: ThingsMacPalette.somedayAmber,
+                helpText: blockedLabel ?? store.tr("v30_blocked_by_label")
+            ) {
+                commitDraftEditsIfNeeded()
+                isDependenciesPopoverOpen = true
+            }
+            .popover(isPresented: $isDependenciesPopoverOpen) {
+                DependenciesPopoverView(store: store, task: current)
+            }
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(softBentoTileBackground())
+    }
+
+    private var categoriesTile: some View {
+        let current = latestTask
+
+        return VStack(alignment: .leading, spacing: 8) {
+            bentoSectionHeader(icon: "square.grid.2x2", title: store.tr("action_tags"))
+
+            ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
+                ForEach(current.tags) { tag in
+                    TagPillBadge(
+                        title: tag.title,
+                        isSelected: true,
+                        showIcon: true,
+                        helpText: "#\(tag.title)"
+                    ) {
+                        commitDraftEditsIfNeeded()
+                        isTagPopoverOpen = true
+                    }
+                }
+
+                ThingsActionChipButton(
+                    title: "+ \(store.tr("action_tags"))",
+                    systemImage: "square.grid.2x2",
+                    isActive: false,
+                    helpText: tagsButtonTooltip(for: current)
+                ) {
+                    commitDraftEditsIfNeeded()
+                    isTagPopoverOpen = true
+                }
+                .popover(isPresented: $isTagPopoverOpen) {
+                    TagPickerPopoverView(
+                        store: store,
+                        selectedTagIds: Set(current.tagIds),
+                        onToggleTag: { tagId in
+                            let base = latestTask
+                            var tids = Set(base.tagIds)
+                            if tids.contains(tagId) {
+                                tids.remove(tagId)
+                            } else {
+                                tids.insert(tagId)
+                            }
+                            var copy = base
+                            copy.title = draftTitle
+                            copy.notes = draftNotes
+                            store.updateTask(copy, tagIds: Array(tids))
+                        }
+                    )
+                }
+            }
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(softBentoTileBackground())
+    }
+
+    private var projectAndAreaTile: some View {
+        let current = latestTask
+        let breadcrumb = contextBreadcrumb(for: current)
+        let projectHeadings: [Heading] = {
+            guard let pid = current.projectId else { return [] }
+            return (store.headingsByProject[pid] ?? [])
+                .filter { !$0.isDeleted && !$0.isArchived }
+                .sorted {
+                    if $0.sortOrder != $1.sortOrder { return $0.sortOrder < $1.sortOrder }
+                    return $0.id < $1.id
+                }
+        }()
+        let activeHeading = projectHeadings.first { $0.id == current.headingId }
+
+        return VStack(alignment: .leading, spacing: 8) {
+            bentoSectionHeader(
+                icon: "folder",
+                title: "\(store.tr("entity_project")) / \(store.tr("entity_area"))"
+            )
+
+            VStack(alignment: .leading, spacing: 6) {
+                bentoWrappingChipButton(
+                    title: breadcrumb ?? store.tr("action_move"),
+                    systemImage: "folder",
+                    isActive: current.projectId != nil || current.areaId != nil,
+                    activeTint: ThingsMacPalette.accentBlue,
+                    helpText: moveButtonTooltip
+                ) {
+                    commitDraftEditsIfNeeded()
+                    isMovePopoverOpen = true
+                }
+                .popover(isPresented: $isMovePopoverOpen) {
+                    movePopoverContent
+                }
+
+                if !projectHeadings.isEmpty {
+                    Menu {
+                        Button {
+                            commitDraftEditsIfNeeded()
+                            var copy = latestTask
+                            copy.title = draftTitle
+                            copy.notes = draftNotes
+                            copy.headingId = nil
+                            store.updateTask(copy)
+                        } label: {
+                            if activeHeading == nil {
+                                Label(store.tr("v30_board_ungrouped_column"), systemImage: "checkmark")
+                            } else {
+                                Text(store.tr("v30_board_ungrouped_column"))
+                            }
+                        }
+                        Divider()
+                        ForEach(projectHeadings) { heading in
+                            Button {
+                                commitDraftEditsIfNeeded()
+                                var copy = latestTask
+                                copy.title = draftTitle
+                                copy.notes = draftNotes
+                                copy.headingId = heading.id
+                                store.updateTask(copy)
+                            } label: {
+                                if activeHeading?.id == heading.id {
+                                    Label(heading.title, systemImage: "checkmark")
+                                } else {
+                                    Text(heading.title)
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(alignment: .top, spacing: 5.5) {
+                            Image(systemName: "flag.checkered")
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .padding(.top, 1)
+                            Text(activeHeading?.title ?? store.tr("entity_heading"))
+                                .font(.system(size: 12, weight: activeHeading != nil ? .semibold : .medium))
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .foregroundStyle(activeHeading != nil ? ThingsMacPalette.accentBlue : Color.primary.opacity(0.88))
+                        .padding(.horizontal, 10.5)
+                        .padding(.vertical, 5.5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                                .fill(activeHeading != nil ? ThingsMacPalette.accentBlue.opacity(0.11) : ThingsMacPalette.cardSurface)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                                        .strokeBorder(
+                                            activeHeading != nil ? ThingsMacPalette.accentBlue.opacity(0.32) : Color.primary.opacity(0.11),
+                                            lineWidth: 0.85
+                                        )
+                                )
+                        )
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .thingsTooltip(store.tr("entity_heading"))
+                }
+            }
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(softBentoTileBackground())
+    }
+
+    private var movePopoverContent: some View {
+        MoveDestinationPopoverView(store: store, task: latestTask) { projId, headId, areaId, schedOverride in
+            var copy = latestTask
+            copy.title = draftTitle
+            copy.notes = draftNotes
+            copy.projectId = projId
+            copy.headingId = headId
+            copy.areaId = areaId
+            if let schedOverride {
+                copy.scheduleState = schedOverride
+            }
+            store.updateTask(copy)
+        }
+    }
+
+    // MARK: - Zone C: Bottom Footer Bar
+
+    private var modalFooterBar: some View {
+        let current = latestTask
+
+        return HStack(alignment: .center, spacing: 10) {
+            ThingsFlowLayout(horizontalSpacing: 7, verticalSpacing: 6) {
+                if current.status == .open {
+                    ThingsActionChipButton(
+                        title: store.tr("action_focus_timer"),
+                        systemImage: "timer",
+                        helpText: store.tr("action_focus_timer")
+                    ) {
+                        commitDraftEditsIfNeeded(commitPendingChecklist: true)
+                        store.startFocusTimer(for: latestTask)
+                    }
+                }
+
+                ThingsActionChipButton(
+                    title: store.tr("action_attach_file"),
+                    systemImage: "paperclip",
+                    helpText: store.tr("action_attach_file")
+                ) {
+                    commitDraftEditsIfNeeded()
+                    store.pickAndAttachFiles(taskId: current.id)
+                }
+
+                ThingsActionChipButton(
+                    title: store.tr("action_duplicate_todo"),
+                    systemImage: "plus.square.on.square",
+                    helpText: store.tr("action_duplicate_todo")
+                ) {
+                    commitDraftEditsIfNeeded(commitPendingChecklist: true)
+                    if let copy = try? store.database.duplicateTask(current.id, copySuffix: store.tr("v25_copy_suffix")) {
+                        store.selectedTaskIds = [copy.id]
+                        store.lastSelectedTaskId = copy.id
+                        store.expandedTaskId = copy.id
+                    }
+                }
+
+                Button(role: .destructive) {
+                    deleteAndCloseModal()
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(store.tr("action_delete"))
+                            .font(.system(size: 12, weight: .semibold))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                    .foregroundStyle(ThingsMacPalette.deadlineCrimson)
+                    .padding(.horizontal, 10.5)
+                    .padding(.vertical, 5.5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                            .fill(ThingsMacPalette.deadlineCrimson.opacity(0.10))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                                    .strokeBorder(ThingsMacPalette.deadlineCrimson.opacity(0.26), lineWidth: 0.85)
+                            )
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .fixedSize(horizontal: true, vertical: false)
+                .thingsTooltip(store.tr("action_delete"))
+            }
+
+            Spacer(minLength: 8)
+
+            // Hidden Escape responder button so SwiftUI doesn't overwrite .keyboardShortcut(.return, modifiers: [.command])
+            Button("") {
+                closeModal()
+            }
+            .keyboardShortcut(.escape, modifiers: [])
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+
+            Button {
+                closeModal()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11.5, weight: .bold))
+                    Text(store.tr("action_done"))
+                        .font(.system(size: 12.5, weight: .bold))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 15)
+                .padding(.vertical, 7)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [ThingsMacPalette.inboxBlue, ThingsMacPalette.accentBlue],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .brightness(isHoveringDone ? 0.06 : 0.0)
+                        .shadow(color: ThingsMacPalette.accentBlue.opacity(0.28), radius: 6, y: 2)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .fixedSize(horizontal: true, vertical: false)
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.12)) {
+                    isHoveringDone = hovering
+                }
+            }
+            .thingsTooltip("\(store.tr("action_done")) (Esc / ⌘↩)")
+            .keyboardShortcut(.return, modifiers: [.command])
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(ThingsMacPalette.subtleContainer.opacity(0.55))
+    }
+
+    // MARK: - Soft Bento Styling Helpers
+
+    private func softBentoTileBackground() -> some View {
+        RoundedRectangle(cornerRadius: 13, style: .continuous)
+            .fill(ThingsMacPalette.subtleContainer)
+            .overlay(
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.065), lineWidth: 0.85)
+            )
+    }
+
+    private func bentoSectionHeader(icon: String, title: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func bentoMenuChipLabel(
+        title: String,
+        systemImage: String,
+        isActive: Bool,
+        activeTint: Color
+    ) -> some View {
+        HStack(spacing: 5.5) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11.5, weight: .semibold))
+            Text(title)
+                .font(.system(size: 12, weight: isActive ? .semibold : .medium))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .foregroundStyle(isActive ? activeTint : Color.primary.opacity(0.88))
+        .padding(.horizontal, 10.5)
+        .padding(.vertical, 5.5)
+        .background(
+            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                .fill(isActive ? activeTint.opacity(0.11) : ThingsMacPalette.cardSurface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .strokeBorder(
+                            isActive ? activeTint.opacity(0.32) : Color.primary.opacity(0.11),
+                            lineWidth: 0.85
+                        )
+                )
+        )
+    }
+
+    private func bentoWrappingChipButton(
+        title: String,
+        systemImage: String,
+        isActive: Bool,
+        activeTint: Color,
+        helpText: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 5.5) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .padding(.top, 1)
+                Text(title)
+                    .font(.system(size: 12, weight: isActive ? .semibold : .medium))
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(isActive ? activeTint : Color.primary.opacity(0.88))
+            .padding(.horizontal, 10.5)
+            .padding(.vertical, 5.5)
+            .background(
+                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                    .fill(isActive ? activeTint.opacity(0.11) : ThingsMacPalette.cardSurface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                            .strokeBorder(
+                                isActive ? activeTint.opacity(0.32) : Color.primary.opacity(0.11),
+                                lineWidth: 0.85
+                            )
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .thingsTooltip(helpText)
+    }
+
+    // MARK: - State, Persistence & Actions
+
+    private func syncDrafts() {
+        let current = latestTask
+        draftTitle = current.title
+        draftNotes = current.notes
+    }
+
+    private func applyInitialFocusRules() {
+        let current = latestTask
+        isEditingNotes = TaskCardInteractionRules.shouldAutoEditNotesOnExpand(notes: current.notes)
+        if TaskCardInteractionRules.shouldAutoFocusTitleOnExpand(title: current.title) {
+            DispatchQueue.main.async {
+                isTitleFocused = true
+            }
+        } else {
+            isTitleFocused = false
+            isNotesFocused = false
+            DispatchQueue.main.async {
+                isTitleFocused = false
+                isNotesFocused = false
+                if let window = NSApp.keyWindow, window.firstResponder is NSText {
+                    window.makeFirstResponder(nil)
+                }
+            }
+        }
+    }
+
+    private func scheduleDraftAutoSave() {
+        draftSaveTask?.cancel()
+        draftSaveTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard !Task.isCancelled else { return }
+            commitDraftEditsIfNeeded()
+        }
+    }
+
+    private func commitDraftEditsIfNeeded(commitPendingChecklist: Bool = false) {
+        let base = latestTask
+        if draftTitle != base.title || draftNotes != base.notes {
+            var copy = base
+            copy.title = draftTitle
+            copy.notes = draftNotes
+            store.updateTask(copy)
+        }
+        if commitPendingChecklist {
+            addPendingChecklistItem(commitDraftsFirst: false)
+        }
+    }
+
+    private func addPendingChecklistItem(commitDraftsFirst: Bool = true) {
+        let clean = newChecklistTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        if commitDraftsFirst {
+            commitDraftEditsIfNeeded(commitPendingChecklist: false)
+        }
+        _ = try? store.database.addChecklistItem(taskId: latestTask.id, title: clean)
+        newChecklistTitle = ""
+    }
+
+    private func closeModal() {
+        guard !didCommitAndDismiss else { return }
+        didCommitAndDismiss = true
+        draftSaveTask?.cancel()
+        voiceController.stopRecording()
+        commitDraftEditsIfNeeded(commitPendingChecklist: true)
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+            store.expandedTaskId = nil
+        }
+    }
+
+    private func deleteAndCloseModal() {
+        didCommitAndDismiss = true
+        draftSaveTask?.cancel()
+        voiceController.stopRecording()
+        let target = latestTask
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+            store.expandedTaskId = nil
+        }
+        store.deleteTask(target)
+    }
+
+    private func quickMoveToThisEveningAndClose() {
+        didCommitAndDismiss = true
+        draftSaveTask?.cancel()
+        voiceController.stopRecording()
+        addPendingChecklistItem(commitDraftsFirst: false)
+        var copy = latestTask
+        copy.title = draftTitle
+        copy.notes = draftNotes
+        copy.scheduleState = .thisEvening
+        copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
+        store.updateTask(copy)
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+            store.expandedTaskId = nil
+        }
+    }
+
+    private func toggleVoiceDictation() {
+        if !voiceController.isRecording {
+            dictationTargetsTitle = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            dictationBaseNotes = draftNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        voiceController.toggleRecording(
+            locale: store.preferences.language.locale,
+            onTranscript: { spoken in
+                if dictationTargetsTitle {
+                    let lines = spoken.components(separatedBy: .newlines)
+                    draftTitle = String((lines.first ?? spoken).prefix(240))
+                    if lines.count > 1 {
+                        let extra = lines.dropFirst().joined(separator: "\n")
+                        draftNotes = dictationBaseNotes.isEmpty ? extra : "\(dictationBaseNotes)\n\(extra)"
+                    }
+                } else {
+                    draftNotes = dictationBaseNotes.isEmpty ? spoken : "\(dictationBaseNotes)\n\(spoken)"
+                }
+            },
+            onUnavailable: {
+                store.showToast(store.tr("voice_not_available"))
+            }
+        )
+    }
+
+    private func runMagicBreakdown() {
+        commitDraftEditsIfNeeded()
+        isGeneratingChecklist = true
+        let base = latestTask
+        let titleToBreak = draftTitle.isEmpty ? base.title : draftTitle
+        let notesToBreak = draftNotes
+        let targetId = base.id
+        Task {
+            do {
+                let steps = try await ThingsbookGeminiService.generateMagicChecklist(
+                    taskTitle: titleToBreak,
+                    taskNotes: notesToBreak,
+                    lang: store.preferences.language
+                )
+                await MainActor.run {
+                    for step in steps {
+                        _ = try? store.database.addChecklistItem(taskId: targetId, title: step)
+                    }
+                    isGeneratingChecklist = false
+                }
+            } catch {
+                await MainActor.run {
+                    isGeneratingChecklist = false
+                    store.showToast(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    // MARK: - Formatting & Display Helpers
+
+    private var showQuickThisEveningPill: Bool {
+        let current = latestTask
+        return TaskCardInteractionRules.shouldShowQuickThisEveningPill(
+            isTodayView: store.selectedDestination == .smartView(.today),
+            status: current.status,
+            scheduleState: current.scheduleState
+        )
+    }
+
+    private func contextBreadcrumb(for target: TaskItem) -> String? {
+        if let pid = target.projectId, let proj = store.project(byId: pid) {
+            if let aid = proj.areaId, let area = store.area(byId: aid) {
+                return "\(area.title) › \(proj.title)"
+            }
+            return proj.title
+        }
+        if let aid = target.areaId, let area = store.area(byId: aid) {
+            return area.title
+        }
+        return nil
+    }
+
+    private func headerContextTitle(for target: TaskItem) -> String {
+        contextBreadcrumb(for: target) ?? store.tr("view_inbox")
+    }
+
+    private func headerContextIcon(for target: TaskItem) -> String {
+        if target.projectId != nil {
+            return "circle.inset.filled"
+        }
+        if target.areaId != nil {
+            return "folder.fill"
+        }
+        return "tray.fill"
+    }
+
+    private func whenSummaryLabel(for target: TaskItem) -> String? {
+        switch target.scheduleState {
+        case .today:
+            return store.tr("view_today")
+        case .thisEvening:
+            return store.tr("view_this_evening")
+        case .someday:
+            return store.tr("view_someday")
+        case .upcoming:
+            if let w = target.whenDate {
+                let df = DateFormatter()
+                df.locale = store.preferences.language.locale
+                df.dateStyle = .medium
+                return df.string(from: DateEpochConverter.date(fromMillis: w))
+            }
+            return store.tr("view_upcoming")
+        default:
+            return nil
+        }
+    }
+
+    private func whenButtonTooltip(for target: TaskItem) -> String {
+        let base = store.tr("context_when_date_reminder")
+        if let label = whenSummaryLabel(for: target) {
+            return "\(base) — \(label)"
+        }
+        return base
+    }
+
+    private func repeatButtonTooltip(for target: TaskItem) -> String {
+        let base = store.tr("context_configure_repeat")
+        if let rule = target.recurrenceRule {
+            return "\(base) — \(rule.formatShortLabel(locale: store.preferences.language.locale))"
+        }
+        return base
+    }
+
+    private var moveButtonTooltip: String {
+        let base = store.tr("move_dialog_title")
+        if let crumb = contextBreadcrumb(for: latestTask) {
+            return "\(base) — \(crumb)"
+        }
+        return base
+    }
+
+    private func tagsButtonTooltip(for target: TaskItem) -> String {
+        let base = store.tr("context_assign_tags")
+        if !target.tags.isEmpty {
+            let names = target.tags.map { "#\($0.title)" }.joined(separator: ", ")
+            return "\(base) — \(names)"
+        }
+        return base
+    }
+
+    private func timeblockButtonTooltip(for target: TaskItem) -> String {
+        let base = store.tr("macos_tooltip_timeblock")
+        if let pill = target.formattedTimeblockPill {
+            return "\(base) — \(pill)"
+        }
+        return base
+    }
+
+    private func effortLocalizedTitle(for effort: TaskEffortLevel) -> String {
+        switch effort {
+        case .quickWin:
+            return store.tr("v30_effort_quick_win")
+        case .medium:
+            return store.tr("v30_effort_medium")
+        case .deepFocus:
+            return store.tr("v30_effort_deep_focus")
+        }
+    }
+
+    private func effortTint(for effort: TaskEffortLevel) -> Color {
+        switch effort {
+        case .quickWin:
+            return ThingsMacPalette.anytimeTeal
+        case .medium:
+            return ThingsMacPalette.accentBlue
+        case .deepFocus:
+            return ThingsMacPalette.eveningPurple
+        }
+    }
+
+    private func deadlineSummaryInfo(for millis: Int64) -> (label: String, isUrgent: Bool) {
+        let todayDay = DateEpochConverter.epochDay(for: Date())
+        let dlDay = DateEpochConverter.epochDay(forMillis: millis)
+        let diff = dlDay - todayDay
+        let isUrgent = diff <= 1
+        let label: String = {
+            if diff == 0 { return store.tr("deadline_today") }
+            if diff < 0 { return store.trf("deadline_days_overdue", abs(diff)) }
+            return store.trf("deadline_days_left", diff)
+        }()
+        return (label, isUrgent)
+    }
+
+    private func shortTimeString(_ millis: Int64) -> String {
+        let df = DateFormatter()
+        df.timeStyle = .short
+        return df.string(from: DateEpochConverter.date(fromMillis: millis))
+    }
+}

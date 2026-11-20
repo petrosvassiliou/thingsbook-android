@@ -18,6 +18,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -27,6 +28,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -34,6 +36,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -387,15 +390,20 @@ fun ExpandableTaskCard(
     val handleStatusRequest: (TaskStatus) -> Unit = { requestedStatus ->
         if (task.status == TaskStatus.OPEN && requestedStatus == TaskStatus.COMPLETED && !isCompletingAnim && !isCompletedPendingCommit) {
             if (isExpanded) {
+                onStatusChange(TaskStatus.COMPLETED)
                 onExpandToggle()
+            } else {
+                isCompletingAnim = true
             }
-            isCompletingAnim = true
         } else if (isCompletingAnim && requestedStatus == TaskStatus.OPEN) {
             // Allow instant undo if user clicks checkbox again before glide-out finishes
             isCompletingAnim = false
             isCompletedPendingCommit = false
         } else {
             onStatusChange(requestedStatus)
+            if (isExpanded && requestedStatus == TaskStatus.CANCELED) {
+                onExpandToggle()
+            }
         }
     }
 
@@ -446,24 +454,27 @@ fun ExpandableTaskCard(
         val targetAreaId = assignedProject?.areaId ?: task.areaId
         allAreas.find { it.id == targetAreaId }
     }
+    val assignedHeading = remember(task.headingId, allHeadings) {
+        allHeadings.firstOrNull { it.id == task.headingId }
+    }
 
     val horizontalPadding by animateDpAsState(
-        targetValue = if (isExpanded) 12.dp else 16.dp,
+        targetValue = if (isExpanded) 0.dp else 16.dp,
         animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
         label = "cardHorizontalMargin"
     )
     val verticalPadding by animateDpAsState(
-        targetValue = if (isExpanded) 8.dp else 1.dp,
+        targetValue = if (isExpanded) 0.dp else 1.dp,
         animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
         label = "cardVerticalMargin"
     )
     val cornerRadius by animateDpAsState(
-        targetValue = if (isExpanded) 18.dp else 12.dp,
+        targetValue = if (isExpanded) 22.dp else 12.dp,
         animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
         label = "cardCornerRadius"
     )
     val shadowElevation by animateDpAsState(
-        targetValue = if (isExpanded) 10.dp else 0.dp,
+        targetValue = 0.dp,
         animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
         label = "cardShadowElevation"
     )
@@ -484,7 +495,7 @@ fun ExpandableTaskCard(
 
     val surfaceColor by animateColorAsState(
         targetValue = when {
-            isExpanded -> colors.cardElevatedSurface
+            isExpanded -> colors.cardSurface
             isContextMenuTargeted -> colors.thingsBlue.copy(alpha = 0.16f)
             isSelected -> colors.thingsBlueSoft
             else -> Color.Transparent
@@ -532,12 +543,7 @@ fun ExpandableTaskCard(
                 .clip(RoundedCornerShape(cornerRadius))
                 .then(
                     when {
-                        isExpanded -> Modifier.border(
-                            width = 1.25.dp,
-                            color = colors.thingsBlue.copy(alpha = 0.36f),
-                            shape = RoundedCornerShape(cornerRadius)
-                        )
-                        isSelected || isContextMenuTargeted -> Modifier.border(
+                        !isExpanded && (isSelected || isContextMenuTargeted) -> Modifier.border(
                             width = if (isContextMenuTargeted) 1.25.dp else 1.dp,
                             color = colors.thingsBlue.copy(alpha = if (isContextMenuTargeted) 0.72f else 0.42f),
                             shape = RoundedCornerShape(cornerRadius)
@@ -653,73 +659,135 @@ fun ExpandableTaskCard(
             color = surfaceColor,
             shape = RoundedCornerShape(cornerRadius)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .alpha(if (!isExpanded && isActivelyBlocked) 0.62f else 1f)
-                    .padding(
-                        horizontal = if (isExpanded) 16.dp else 8.dp,
-                        vertical = if (isExpanded) 14.dp else 10.dp
-                    )
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = if (isExpanded) Alignment.CenterVertically else Alignment.Top
+            if (isExpanded) {
+                ExpandedTaskCardBody(
+                    task = task,
+                    effectiveVisualStatus = effectiveVisualStatus,
+                    openTaskIds = openTaskIds,
+                    assignedProject = assignedProject,
+                    assignedArea = assignedArea,
+                    assignedHeading = assignedHeading,
+                    showQuickThisEveningPill = TaskCardInteractionRules.shouldShowQuickThisEveningPill(
+                        isTodayView = isTodayView,
+                        status = task.status,
+                        scheduleState = task.scheduleState
+                    ),
+                    titleFocusRequester = titleFocusRequester,
+                    editedTitleField = editedTitleField,
+                    onTitleFieldChange = { newVal ->
+                        val sanitizedText = newVal.text.replace("\r", "").replace("\n", " ")
+                        val sanitizedVal = if (sanitizedText == newVal.text) {
+                            newVal
+                        } else {
+                            newVal.copy(
+                                text = sanitizedText,
+                                selection = TextRange(newVal.selection.start.coerceIn(0, sanitizedText.length))
+                            )
+                        }
+                        val textChanged = sanitizedVal.text != editedTitleField.text
+                        editedTitleField = sanitizedVal
+                        if (textChanged) {
+                            onTitleNotesChange(sanitizedVal.text, editedNotesField.text)
+                        }
+                    },
+                    onTitleFocusChanged = { focused ->
+                        isTitleFocused = focused
+                        if (focused) onRequestEnsureVisible?.invoke(false)
+                    },
+                    editedNotesField = editedNotesField,
+                    onNotesFieldChange = { newVal ->
+                        val textChanged = newVal.text != editedNotesField.text
+                        editedNotesField = newVal
+                        if (textChanged) {
+                            onTitleNotesChange(editedTitleField.text, newVal.text)
+                        }
+                    },
+                    onNotesFocusChanged = { focused ->
+                        isNotesFocused = focused
+                        if (focused) onRequestEnsureVisible?.invoke(false)
+                    },
+                    onNewChecklistFocusChanged = { focused ->
+                        isNewChecklistFocused = focused
+                        if (focused) onRequestEnsureVisible?.invoke(true)
+                    },
+                    onSubtaskFocusDelta = { delta ->
+                        focusedSubtaskCount = (focusedSubtaskCount + delta).coerceAtLeast(0)
+                        if (delta > 0) onRequestEnsureVisible?.invoke(true)
+                    },
+                    onRequestEnsureVisible = onRequestEnsureVisible,
+                    isGeneratingMagicBreakdown = isGeneratingMagicBreakdown,
+                    locale = locale,
+                    onStatusChange = handleStatusRequest,
+                    onAddChecklistItem = onAddChecklistItem,
+                    onInsertChecklistItemAfter = onInsertChecklistItemAfter,
+                    onToggleChecklistItem = onToggleChecklistItem,
+                    onRenameChecklistItem = onRenameChecklistItem,
+                    onMoveChecklistItem = onMoveChecklistItem,
+                    onDeleteChecklistItem = onDeleteChecklistItem,
+                    onAddTaskAttachment = onAddTaskAttachment,
+                    onDeleteTaskAttachment = onDeleteTaskAttachment,
+                    onShowMessage = onShowMessage,
+                    onDictateTitleOrNotes = { spokenText ->
+                        val clean = spokenText.trim()
+                        if (clean.isNotEmpty()) {
+                            if (editedTitleField.text.isBlank()) {
+                                editedTitleField = TextFieldValue(text = clean, selection = TextRange(clean.length))
+                                onTitleNotesChange(clean, editedNotesField.text)
+                            } else {
+                                val newNotes = if (editedNotesField.text.isBlank()) clean else "${editedNotesField.text.trimEnd()}\n$clean"
+                                editedNotesField = TextFieldValue(text = newNotes, selection = TextRange(newNotes.length))
+                                onTitleNotesChange(editedTitleField.text, newNotes)
+                            }
+                        }
+                    },
+                    onTriggerGeminiMagicBreakdown = onTriggerGeminiMagicBreakdown,
+                    onOpenWhenDialog = { showWhenDialog = true },
+                    onQuickThisEveningAndClose = if (onQuickThisEveningAndClose != null) {
+                        { onQuickThisEveningAndClose(editedTitleField.text, editedNotesField.text) }
+                    } else null,
+                    onOpenDeadlineDialog = { showDeadlineDialog = true },
+                    onOpenRepeatDialog = { showRepeatDialog = true },
+                    onOpenTimeblockDialog = if (onUpdateTimeblock != null) ({ showTimeblockDialog = true }) else null,
+                    onUpdateEffortLevel = onUpdateEffortLevel,
+                    onUpdateStandaloneDuration = onUpdateStandaloneDuration,
+                    onOpenDependenciesDialog = if (onUpdateBlockedBy != null) ({ showDependenciesDialog = true }) else null,
+                    onOpenMoveDialog = { showMoveDialog = true },
+                    onOpenTagPickerDialog = { showTagPickerDialog = true },
+                    onTogglePin = onTogglePin,
+                    onDuplicateTask = onDuplicateTask,
+                    onStartFocusTimer = onStartFocusTimer,
+                    onDeleteTask = onDeleteTask,
+                    onDoneCollapse = onExpandToggle
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .alpha(if (isActivelyBlocked) 0.62f else 1f)
+                        .padding(horizontal = 8.dp, vertical = 10.dp)
                 ) {
-                    val checkboxTooltip = if (effectiveVisualStatus == TaskStatus.OPEN) {
-                        stringResource(R.string.action_complete)
-                    } else {
-                        stringResource(R.string.action_reopen_todo)
-                    }
-                    ThingsHoverTooltip(
-                        text = checkboxTooltip,
-                        enableTouchLongPress = false
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Top
                     ) {
-                        ThingsCheckbox(
-                            status = effectiveVisualStatus,
-                            onStatusChange = handleStatusRequest,
-                            isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY
-                        )
-                    }
+                        val checkboxTooltip = if (effectiveVisualStatus == TaskStatus.OPEN) {
+                            stringResource(R.string.action_complete)
+                        } else {
+                            stringResource(R.string.action_reopen_todo)
+                        }
+                        ThingsHoverTooltip(
+                            text = checkboxTooltip,
+                            enableTouchLongPress = false
+                        ) {
+                            ThingsCheckbox(
+                                status = effectiveVisualStatus,
+                                onStatusChange = handleStatusRequest,
+                                isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY
+                            )
+                        }
 
-                    Spacer(modifier = Modifier.width(10.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
 
-                    if (isExpanded) {
-                        BasicTextField(
-                            value = editedTitleField,
-                            onValueChange = { newVal ->
-                                val textChanged = newVal.text != editedTitleField.text
-                                editedTitleField = newVal
-                                if (textChanged) {
-                                    onTitleNotesChange(newVal.text, editedNotesField.text)
-                                }
-                            },
-                            textStyle = MaterialTheme.typography.titleMedium.copy(
-                                color = colors.primaryText
-                            ),
-                            singleLine = true,
-                            cursorBrush = SolidColor(colors.thingsBlue),
-                            modifier = Modifier
-                                .weight(1f)
-                                .focusRequester(titleFocusRequester)
-                                .pointerInput(task.id) {
-                                    awaitPointerEventScope {
-                                        while (true) {
-                                            val ev = awaitPointerEvent(PointerEventPass.Initial)
-                                            if (ev.type == PointerEventType.Press) {
-                                                onRequestEnsureVisible?.invoke(false)
-                                            }
-                                        }
-                                    }
-                                }
-                                .onFocusChanged { focusState ->
-                                    isTitleFocused = focusState.isFocused
-                                    if (focusState.isFocused) {
-                                        onRequestEnsureVisible?.invoke(false)
-                                    }
-                                }
-                        )
-                    } else {
                         CollapsedTaskTitleWithStrike(
                             task = task,
                             assignedProject = assignedProject,
@@ -730,155 +798,69 @@ fun ExpandableTaskCard(
                                 .weight(1f)
                                 .padding(top = 3.dp)
                         )
-                    }
 
-                    if (!isExpanded && task.isPinned && !isCompletingAnim) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        val pinnedTooltip = if (onTogglePin != null) {
-                            stringResource(R.string.v25_unpin_task)
-                        } else {
-                            stringResource(R.string.v25_pinned_badge)
-                        }
-                        ThingsHoverTooltip(
-                            text = pinnedTooltip,
-                            enableTouchLongPress = false
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.PushPin,
-                                contentDescription = stringResource(R.string.v25_pinned_badge),
-                                tint = colors.thingsBlue.copy(alpha = 0.88f),
-                                modifier = Modifier
-                                    .padding(top = 4.dp)
-                                    .size(14.dp)
-                                    .let { base ->
-                                        if (onTogglePin != null) {
-                                            base
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .clickable {
-                                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                    onTogglePin()
-                                                }
-                                        } else {
-                                            base
+                        if (task.isPinned && !isCompletingAnim) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            val pinnedTooltip = if (onTogglePin != null) {
+                                stringResource(R.string.v25_unpin_task)
+                            } else {
+                                stringResource(R.string.v25_pinned_badge)
+                            }
+                            ThingsHoverTooltip(
+                                text = pinnedTooltip,
+                                enableTouchLongPress = false
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.PushPin,
+                                    contentDescription = stringResource(R.string.v25_pinned_badge),
+                                    tint = colors.thingsBlue.copy(alpha = 0.88f),
+                                    modifier = Modifier
+                                        .padding(top = 4.dp)
+                                        .size(14.dp)
+                                        .let { base ->
+                                            if (onTogglePin != null) {
+                                                base
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .clickable {
+                                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        onTogglePin()
+                                                    }
+                                            } else {
+                                                base
+                                            }
                                         }
-                                    }
-                            )
+                                )
+                            }
+                        }
+
+                        if (collapsedTrailingContent != null && !isCompletingAnim) {
+                            Spacer(modifier = Modifier.width(4.dp))
+                            collapsedTrailingContent()
                         }
                     }
 
-                    if (!isExpanded && collapsedTrailingContent != null && !isCompletingAnim) {
-                        Spacer(modifier = Modifier.width(4.dp))
-                        collapsedTrailingContent()
+                    if (task.notes.isNotBlank()) {
+                        Text(
+                            text = task.notes,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.secondaryText,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(start = 40.dp, top = 2.dp)
+                        )
                     }
-                }
 
-                if (!isExpanded && task.notes.isNotBlank()) {
-                    Text(
-                        text = task.notes,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.secondaryText,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(start = 40.dp, top = 2.dp)
-                    )
-                }
-
-                if (!isExpanded && hasCollapsedTaskBadges(task, isActivelyBlocked)) {
-                    CollapsedTaskInlineBadges(
-                        task = task,
-                        allOpenTasks = allOpenTasks,
-                        openTaskIds = openTaskIds,
-                        locale = locale,
-                        onOpenTimeblockDialog = if (onUpdateTimeblock != null) ({ showTimeblockDialog = true }) else null,
-                        onOpenDependenciesDialog = if (onUpdateBlockedBy != null) ({ showDependenciesDialog = true }) else null,
-                        modifier = Modifier.padding(start = 40.dp, top = 6.dp)
-                    )
-                }
-
-                AnimatedVisibility(
-                    visible = isExpanded,
-                    enter = expandVertically(
-                        animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f)
-                    ) + fadeIn(),
-                    exit = shrinkVertically(
-                        animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f)
-                    ) + fadeOut()
-                ) {
-                    ExpandedTaskCardBody(
-                        task = task,
-                        openTaskIds = openTaskIds,
-                        assignedProject = assignedProject,
-                        assignedArea = assignedArea,
-                        showQuickThisEveningPill = TaskCardInteractionRules.shouldShowQuickThisEveningPill(
-                            isTodayView = isTodayView,
-                            status = task.status,
-                            scheduleState = task.scheduleState
-                        ),
-                        editedTitle = editedTitleField.text,
-                        editedNotesField = editedNotesField,
-                        onNotesFieldChange = { newVal ->
-                            val textChanged = newVal.text != editedNotesField.text
-                            editedNotesField = newVal
-                            if (textChanged) {
-                                onTitleNotesChange(editedTitleField.text, newVal.text)
-                            }
-                        },
-                        onNotesFocusChanged = { focused ->
-                            isNotesFocused = focused
-                            if (focused) onRequestEnsureVisible?.invoke(false)
-                        },
-                        onNewChecklistFocusChanged = { focused ->
-                            isNewChecklistFocused = focused
-                            if (focused) onRequestEnsureVisible?.invoke(true)
-                        },
-                        onSubtaskFocusDelta = { delta ->
-                            focusedSubtaskCount = (focusedSubtaskCount + delta).coerceAtLeast(0)
-                            if (delta > 0) onRequestEnsureVisible?.invoke(true)
-                        },
-                        onRequestEnsureVisible = onRequestEnsureVisible,
-                        isGeneratingMagicBreakdown = isGeneratingMagicBreakdown,
-                        locale = locale,
-                        onAddChecklistItem = onAddChecklistItem,
-                        onInsertChecklistItemAfter = onInsertChecklistItemAfter,
-                        onToggleChecklistItem = onToggleChecklistItem,
-                        onRenameChecklistItem = onRenameChecklistItem,
-                        onMoveChecklistItem = onMoveChecklistItem,
-                        onDeleteChecklistItem = onDeleteChecklistItem,
-                        onAddTaskAttachment = onAddTaskAttachment,
-                        onDeleteTaskAttachment = onDeleteTaskAttachment,
-                        onShowMessage = onShowMessage,
-                        onDictateTitleOrNotes = { spokenText ->
-                            val clean = spokenText.trim()
-                            if (clean.isNotEmpty()) {
-                                if (editedTitleField.text.isBlank()) {
-                                    editedTitleField = TextFieldValue(text = clean, selection = TextRange(clean.length))
-                                    onTitleNotesChange(clean, editedNotesField.text)
-                                } else {
-                                    val newNotes = if (editedNotesField.text.isBlank()) clean else "${editedNotesField.text.trimEnd()}\n$clean"
-                                    editedNotesField = TextFieldValue(text = newNotes, selection = TextRange(newNotes.length))
-                                    onTitleNotesChange(editedTitleField.text, newNotes)
-                                }
-                            }
-                        },
-                        onTriggerGeminiMagicBreakdown = onTriggerGeminiMagicBreakdown,
-                        onOpenWhenDialog = { showWhenDialog = true },
-                        onQuickThisEveningAndClose = if (onQuickThisEveningAndClose != null) {
-                            { onQuickThisEveningAndClose(editedTitleField.text, editedNotesField.text) }
-                        } else null,
-                        onOpenDeadlineDialog = { showDeadlineDialog = true },
-                        onOpenRepeatDialog = { showRepeatDialog = true },
-                        onOpenTimeblockDialog = if (onUpdateTimeblock != null) ({ showTimeblockDialog = true }) else null,
-                        onUpdateEffortLevel = onUpdateEffortLevel,
-                        onUpdateStandaloneDuration = onUpdateStandaloneDuration,
-                        onOpenDependenciesDialog = if (onUpdateBlockedBy != null) ({ showDependenciesDialog = true }) else null,
-                        onOpenMoveDialog = { showMoveDialog = true },
-                        onOpenTagPickerDialog = { showTagPickerDialog = true },
-                        onTogglePin = onTogglePin,
-                        onDuplicateTask = onDuplicateTask,
-                        onStartFocusTimer = onStartFocusTimer,
-                        onDeleteTask = onDeleteTask,
-                        onDoneCollapse = onExpandToggle
-                    )
+                    if (hasCollapsedTaskBadges(task, isActivelyBlocked)) {
+                        CollapsedTaskInlineBadges(
+                            task = task,
+                            allOpenTasks = allOpenTasks,
+                            openTaskIds = openTaskIds,
+                            locale = locale,
+                            onOpenTimeblockDialog = if (onUpdateTimeblock != null) ({ showTimeblockDialog = true }) else null,
+                            onOpenDependenciesDialog = if (onUpdateBlockedBy != null) ({ showDependenciesDialog = true }) else null,
+                            modifier = Modifier.padding(start = 40.dp, top = 6.dp)
+                        )
+                    }
                 }
             }
         }
@@ -1305,15 +1287,55 @@ private fun SwipeActionBackgroundLayer(
     }
 }
 
+internal const val SOFT_BENTO_MODAL_WIDE_BREAKPOINT_DP = 600
+
+internal fun isWideSoftBentoTaskModal(maxWidthDp: Float): Boolean =
+    maxWidthDp >= SOFT_BENTO_MODAL_WIDE_BREAKPOINT_DP
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SoftBentoPropertyGroup(
+    label: String,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    val colors = ThingsTheme.colors
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 11.sp
+            ),
+            color = colors.secondaryText
+        )
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            content()
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ExpandedTaskCardBody(
     task: TaskItem,
+    effectiveVisualStatus: TaskStatus,
     openTaskIds: Set<String> = emptySet(),
     assignedProject: Project?,
     assignedArea: Area?,
+    assignedHeading: Heading? = null,
     showQuickThisEveningPill: Boolean = false,
-    editedTitle: String,
+    titleFocusRequester: FocusRequester,
+    editedTitleField: TextFieldValue,
+    onTitleFieldChange: (TextFieldValue) -> Unit,
+    onTitleFocusChanged: (Boolean) -> Unit,
     editedNotesField: TextFieldValue,
     onNotesFieldChange: (TextFieldValue) -> Unit,
     onNotesFocusChanged: (Boolean) -> Unit,
@@ -1322,6 +1344,7 @@ private fun ExpandedTaskCardBody(
     onRequestEnsureVisible: ((Boolean) -> Unit)? = null,
     isGeneratingMagicBreakdown: Boolean,
     locale: Locale,
+    onStatusChange: (TaskStatus) -> Unit,
     onAddChecklistItem: (String) -> Unit,
     onInsertChecklistItemAfter: ((afterItemId: String?, newItemId: String, title: String) -> Unit)?,
     onToggleChecklistItem: (String, Boolean) -> Unit,
@@ -1418,827 +1441,1166 @@ private fun ExpandedTaskCardBody(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 40.dp, top = 8.dp)
-    ) {
-        // Markdown Notes Editor
-        BasicTextField(
-            value = editedNotesField,
-            onValueChange = onNotesFieldChange,
-            textStyle = MaterialTheme.typography.bodyMedium.copy(
-                color = colors.secondaryText
-            ),
-            visualTransformation = rememberThingsMarkdownVisualTransformation(),
-            cursorBrush = SolidColor(colors.thingsBlue),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp)
-                .pointerInput(task.id) {
-                    awaitPointerEventScope {
-                        while (true) {
-                            val ev = awaitPointerEvent(PointerEventPass.Initial)
-                            if (ev.type == PointerEventType.Press) {
-                                onRequestEnsureVisible?.invoke(false)
-                            }
-                        }
-                    }
-                }
-                .onFocusChanged { focusState ->
-                    onNotesFocusChanged(focusState.isFocused)
-                },
-            decorationBox = { innerTextField ->
-                Box {
-                    if (editedNotesField.text.isEmpty()) {
-                        Text(
-                            text = stringResource(R.string.placeholder_notes),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.tertiaryText
-                        )
-                    }
-                    innerTextField()
-                }
+    val launchVoiceDictation = {
+        val launched = runCatching {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(RecognizerIntent.EXTRA_PROMPT, voicePromptMsg)
             }
-        )
-
-        DetectedNotesLinksRow(notes = editedNotesField.text)
-
-        if (task.attachments.isNotEmpty()) {
-            TaskAttachmentsStrip(
-                attachments = task.attachments,
-                onDeleteAttachment = { attId -> onDeleteTaskAttachment?.invoke(attId) },
-                onAttachFileClick = if (onAddTaskAttachment != null) {
-                    { filePickerLauncher.launch(arrayOf("image/*", "application/pdf")) }
-                } else null,
-                onTakePhotoClick = if (onAddTaskAttachment != null) {
-                    { cameraLauncher.launch(null) }
-                } else null,
-                modifier = Modifier.padding(top = 6.dp)
-            )
+            speechLauncher.launch(intent)
+            true
+        }.getOrDefault(false)
+        if (!launched) {
+            onShowMessage?.invoke(voiceUnavailableMsg)
         }
+    }
 
-        Spacer(modifier = Modifier.height(8.dp))
+    val bentoZoneFill = if (colors.isDark) {
+        colors.cardElevatedSurface
+    } else {
+        colors.sidebarBackground.copy(alpha = 0.72f)
+    }
+    val bentoZoneBorder = BorderStroke(width = 0.75.dp, color = colors.hairlineDivider)
 
-        // Subtasks (Unteraufgaben / Checklist) Section
-        if (task.checklistItems.isNotEmpty()) {
-            val doneCount = task.checklistItems.count { it.isCompleted }
-            Text(
-                text = "${stringResource(R.string.placeholder_checklist)} ($doneCount/${task.checklistItems.size})",
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 11.sp
-                ),
-                color = colors.thingsBlue
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                task.checklistItems.forEachIndexed { idx, item ->
-                    key(item.id) {
-                        InlineChecklistRow(
-                            item = item,
-                            canMoveUp = idx > 0,
-                            canMoveDown = idx < task.checklistItems.lastIndex,
-                            shouldAutoFocus = pendingAutoFocusSubtaskId == item.id,
-                            onAutoFocusConsumed = {
-                                if (pendingAutoFocusSubtaskId == item.id) {
-                                    pendingAutoFocusSubtaskId = null
-                                }
-                            },
-                            onFocusDelta = onSubtaskFocusDelta,
-                            onToggle = { checked ->
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onToggleChecklistItem(item.id, checked)
-                            },
-                            onRename = { newSubtaskTitle ->
-                                onRenameChecklistItem?.invoke(item.id, newSubtaskTitle)
-                            },
-                            onReturnCreateSubtask = { remainingCurrentTitle, nextInitialTitle ->
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                if (remainingCurrentTitle != item.title) {
-                                    onRenameChecklistItem?.invoke(item.id, remainingCurrentTitle)
-                                }
-                                val nextSubtaskId = UUID.randomUUID().toString()
-                                pendingAutoFocusSubtaskId = nextSubtaskId
-                                if (onInsertChecklistItemAfter != null) {
-                                    onInsertChecklistItemAfter(item.id, nextSubtaskId, nextInitialTitle)
-                                } else {
-                                    onAddChecklistItem(nextInitialTitle)
-                                }
-                            },
-                            onReturnOnEmptySubtask = {
-                                onDeleteChecklistItem?.invoke(item.id)
-                                runCatching { newChecklistFocusRequester.requestFocus() }
-                            },
-                            onMoveUp = {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onMoveChecklistItem?.invoke(item.id, true)
-                            },
-                            onDelete = {
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onDeleteChecklistItem?.invoke(item.id)
-                            },
-                            onMoveDown = {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onMoveChecklistItem?.invoke(item.id, false)
-                            }
-                        )
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(6.dp))
-        }
-
-        // Add new subtask inline field + explicit '+' Button
-        key("new_checklist_input_row_${task.id}") {
-            val submitNewChecklistEntry = {
-                val cleaned = newChecklistField.text.replace("\r", "").replace("\n", " ").trim()
-                if (cleaned.isNotEmpty()) {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onAddChecklistItem(cleaned)
-                    newChecklistField = TextFieldValue(text = "", selection = TextRange(0))
-                    runCatching { newChecklistFocusRequester.requestFocus() }
-                }
-            }
+    val renderContentZone: @Composable (Modifier) -> Unit = { zoneModifier ->
+        Column(
+            modifier = zoneModifier,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Header Row: Checkbox + Large Title BasicTextField + Pin + Close ✕
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(colors.tagPillBg.copy(alpha = 0.65f))
-                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Outlined.Checklist,
-                    contentDescription = null,
-                    tint = colors.thingsBlue,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
+                val checkboxTooltip = if (effectiveVisualStatus == TaskStatus.OPEN) {
+                    stringResource(R.string.action_complete)
+                } else {
+                    stringResource(R.string.action_reopen_todo)
+                }
+                ThingsHoverTooltip(
+                    text = checkboxTooltip,
+                    enableTouchLongPress = false
+                ) {
+                    ThingsCheckbox(
+                        status = effectiveVisualStatus,
+                        onStatusChange = onStatusChange,
+                        isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY,
+                        size = 22.dp
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
                 BasicTextField(
-                    value = newChecklistField,
-                    onValueChange = { incoming ->
-                        if ('\n' in incoming.text || '\r' in incoming.text) {
-                            val parts = incoming.text.replace("\r\n", "\n").replace('\r', '\n').split('\n')
-                            var addedAny = false
-                            for (i in 0 until parts.lastIndex) {
-                                val line = parts[i].trim()
-                                if (line.isNotEmpty()) {
-                                    onAddChecklistItem(line)
-                                    addedAny = true
-                                }
-                            }
-                            if (addedAny) {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            }
-                            val trailing = parts.last()
-                            newChecklistField = TextFieldValue(
-                                text = trailing,
-                                selection = TextRange(trailing.length)
-                            )
-                        } else {
-                            newChecklistField = incoming
-                        }
-                    },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.primaryText),
-                    cursorBrush = SolidColor(colors.thingsBlue),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                    keyboardActions = KeyboardActions(
-                        onNext = { submitNewChecklistEntry() },
-                        onDone = { submitNewChecklistEntry() }
+                    value = editedTitleField,
+                    onValueChange = onTitleFieldChange,
+                    textStyle = MaterialTheme.typography.headlineMedium.copy(
+                        fontSize = 19.sp,
+                        lineHeight = 25.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.primaryText
                     ),
+                    maxLines = 4,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    cursorBrush = SolidColor(colors.thingsBlue),
                     modifier = Modifier
                         .weight(1f)
-                        .focusRequester(newChecklistFocusRequester)
+                        .focusRequester(titleFocusRequester)
                         .pointerInput(task.id) {
                             awaitPointerEventScope {
                                 while (true) {
                                     val ev = awaitPointerEvent(PointerEventPass.Initial)
                                     if (ev.type == PointerEventType.Press) {
-                                        onRequestEnsureVisible?.invoke(true)
+                                        onRequestEnsureVisible?.invoke(false)
                                     }
                                 }
-                            }
-                        }
-                        .onPreviewKeyEvent { keyEvent ->
-                            if (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) {
-                                if (keyEvent.type == KeyEventType.KeyDown) {
-                                    submitNewChecklistEntry()
-                                }
-                                true
-                            } else {
-                                false
                             }
                         }
                         .onFocusChanged { focusState ->
-                            onNewChecklistFocusChanged(focusState.isFocused)
+                            onTitleFocusChanged(focusState.isFocused)
                         },
-                    decorationBox = { inner ->
-                        Box {
-                            if (newChecklistField.text.isEmpty()) {
+                    decorationBox = { innerTitleField ->
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            if (editedTitleField.text.isEmpty()) {
                                 Text(
-                                    text = stringResource(R.string.placeholder_add_checklist_item),
-                                    style = MaterialTheme.typography.bodyMedium,
+                                    text = stringResource(R.string.placeholder_todo_title),
+                                    style = MaterialTheme.typography.headlineMedium.copy(
+                                        fontSize = 19.sp,
+                                        lineHeight = 25.sp,
+                                        fontWeight = FontWeight.Medium
+                                    ),
                                     color = colors.tertiaryText
                                 )
                             }
-                            inner()
+                            innerTitleField()
                         }
                     }
                 )
-                if (newChecklistField.text.isNotBlank()) {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    ThingsHoverTooltip(text = stringResource(R.string.placeholder_add_checklist_item)) {
+
+                if (onTogglePin != null) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    val pinLabel = stringResource(
+                        if (task.isPinned) R.string.v25_unpin_task else R.string.v25_pin_task
+                    )
+                    ThingsHoverTooltip(text = pinLabel) {
                         Box(
                             modifier = Modifier
-                                .size(24.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(colors.thingsBlue)
-                                .clickable { submitNewChecklistEntry() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Add,
-                                contentDescription = stringResource(R.string.placeholder_add_checklist_item),
-                                tint = Color.White,
-                                modifier = Modifier.size(15.dp)
-                            )
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.width(6.dp))
-                ThingsHoverTooltip(text = stringResource(R.string.gemini_magic_breakdown_desc)) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(colors.thingsBlueSoft)
-                            .clickable(enabled = !isGeneratingMagicBreakdown) {
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onTriggerGeminiMagicBreakdown()
-                            }
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        if (isGeneratingMagicBreakdown) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(13.dp),
-                                strokeWidth = 1.8.dp,
-                                color = colors.thingsBlue
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Outlined.AutoAwesome,
-                                contentDescription = stringResource(R.string.gemini_magic_breakdown),
-                                tint = colors.thingsBlue,
-                                modifier = Modifier.size(13.dp)
-                            )
-                        }
-                        Text(
-                            text = stringResource(R.string.gemini_magic_breakdown),
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = colors.thingsBlue,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        var showInlineMoreMenu by remember(task.id) { mutableStateOf(false) }
-
-        // v2.1 Unified Single Footer Row: Labeled Metadata Pills on Left + [Focus, ⋯ Menu, ✓ Done] on Right
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            FlowRow(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                ThingsWhenBadge(
-                    scheduleState = task.scheduleState,
-                    whenDateEpochMillis = task.whenDate,
-                    locale = locale,
-                    onClick = onOpenWhenDialog
-                )
-
-                if (showQuickThisEveningPill && onQuickThisEveningAndClose != null) {
-                    val eveningLabel = stringResource(R.string.view_this_evening)
-                    ThingsHoverTooltip(text = eveningLabel) {
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(colors.eveningMoonIndigo.copy(alpha = 0.14f))
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(
+                                    if (task.isPinned) colors.thingsBlueSoft else colors.tagPillBg.copy(alpha = 0.65f)
+                                )
                                 .border(
                                     width = 0.75.dp,
-                                    color = colors.eveningMoonIndigo.copy(alpha = 0.30f),
-                                    shape = RoundedCornerShape(8.dp)
+                                    color = if (task.isPinned) colors.thingsBlue.copy(alpha = 0.45f) else colors.hairlineDivider,
+                                    shape = RoundedCornerShape(9.dp)
                                 )
                                 .clickable {
                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    flushPendingChecklistIfNeeded()
-                                    onQuickThisEveningAndClose()
-                                }
-                                .padding(horizontal = 9.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    onTogglePin()
+                                },
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.Bedtime,
-                                contentDescription = eveningLabel,
-                                tint = colors.eveningMoonIndigo,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = eveningLabel,
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = colors.eveningMoonIndigo
-                            )
-                        }
-                    }
-                }
-
-                task.reminderTime?.let { rt ->
-                    ThingsReminderBadge(
-                        reminderEpochMillis = rt,
-                        onClick = onOpenWhenDialog
-                    )
-                }
-
-                if (task.scheduledStartMinutes != null) {
-                    ThingsTagPill(
-                        title = TimeblockScheduleUtils.formatTimeblockBadge(
-                            task.scheduledStartMinutes,
-                            task.durationMinutes
-                        ),
-                        onClick = onOpenTimeblockDialog
-                    )
-                } else if (onOpenTimeblockDialog != null) {
-                    ThingsTagPill(
-                        title = "⏱️ ${stringResource(R.string.v2_timeblock_title)}",
-                        onClick = onOpenTimeblockDialog
-                    )
-                }
-
-                // v3.0 Standalone Duration Picker Pill (no clock time required)
-                if (onUpdateStandaloneDuration != null) {
-                    var showDurationPickerMenu by remember(task.id) { mutableStateOf(false) }
-                    val durText = formatDurationCompact(task.durationMinutes)
-                    Box {
-                        ThingsTagPill(
-                            title = if (durText != null) {
-                                "⏱ $durText"
-                            } else {
-                                "⏱ ${stringResource(R.string.v30_duration_label)}"
-                            },
-                            onClick = {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                showDurationPickerMenu = true
-                            }
-                        )
-                        DropdownMenu(
-                            expanded = showDurationPickerMenu,
-                            onDismissRequest = { showDurationPickerMenu = false },
-                            modifier = Modifier.background(colors.cardElevatedSurface)
-                        ) {
-                            listOf(
-                                5 to "5m",
-                                15 to "15m",
-                                30 to "30m",
-                                60 to "1h",
-                                120 to "2h",
-                                240 to "4h"
-                            ).forEach { (mins, label) ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            text = label,
-                                            style = MaterialTheme.typography.bodyMedium.copy(
-                                                fontWeight = if (task.durationMinutes == mins) FontWeight.Bold else FontWeight.Normal
-                                            ),
-                                            color = if (task.durationMinutes == mins) colors.thingsBlue else colors.primaryText
-                                        )
-                                    },
-                                    onClick = {
-                                        showDurationPickerMenu = false
-                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        onUpdateStandaloneDuration(mins)
-                                    }
-                                )
-                            }
-                            if (task.durationMinutes != null) {
-                                HorizontalDivider(color = colors.hairlineDivider)
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            text = stringResource(R.string.v30_duration_clear),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = colors.secondaryText
-                                        )
-                                    },
-                                    onClick = {
-                                        showDurationPickerMenu = false
-                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        onUpdateStandaloneDuration(null)
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // v3.0 Effort Level Picker Pill
-                if (onUpdateEffortLevel != null) {
-                    var showEffortPickerMenu by remember(task.id) { mutableStateOf(false) }
-                    val normalizedEffort = EffortLevel.normalize(task.effortLevel)
-                    val effortPillTitle = when (normalizedEffort) {
-                        EffortLevel.QUICK_WIN -> "⚡ ${stringResource(R.string.v30_effort_quick_win)}"
-                        EffortLevel.MEDIUM -> "◐ ${stringResource(R.string.v30_effort_medium)}"
-                        EffortLevel.DEEP_FOCUS -> "🧠 ${stringResource(R.string.v30_effort_deep_focus)}"
-                        else -> "⚡ ${stringResource(R.string.v30_effort_label)}"
-                    }
-                    Box {
-                        ThingsTagPill(
-                            title = effortPillTitle,
-                            onClick = {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                showEffortPickerMenu = true
-                            }
-                        )
-                        DropdownMenu(
-                            expanded = showEffortPickerMenu,
-                            onDismissRequest = { showEffortPickerMenu = false },
-                            modifier = Modifier.background(colors.cardElevatedSurface)
-                        ) {
-                            val effortOptions: List<Pair<String?, String>> = listOf(
-                                null to stringResource(R.string.v30_effort_none),
-                                EffortLevel.QUICK_WIN to "⚡ ${stringResource(R.string.v30_effort_quick_win)}",
-                                EffortLevel.MEDIUM to "◐ ${stringResource(R.string.v30_effort_medium)}",
-                                EffortLevel.DEEP_FOCUS to "🧠 ${stringResource(R.string.v30_effort_deep_focus)}"
-                            )
-                            effortOptions.forEach { (key, label) ->
-                                val selected = normalizedEffort == key
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            text = label,
-                                            style = MaterialTheme.typography.bodyMedium.copy(
-                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
-                                            ),
-                                            color = if (selected) colors.thingsBlue else colors.primaryText
-                                        )
-                                    },
-                                    onClick = {
-                                        showEffortPickerMenu = false
-                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        onUpdateEffortLevel(key)
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // v3.0 Waiting On (Dependencies) Pill
-                if (onOpenDependenciesDialog != null) {
-                    val activeBlockerCount = remember(task.blockedByTaskIds, openTaskIds) {
-                        task.blockedByTaskIds.count { it in openTaskIds }
-                    }
-                    val depLabel = if (activeBlockerCount > 0) {
-                        "⏳ " + stringResource(R.string.v30_blocked_by_count_badge, activeBlockerCount)
-                    } else {
-                        "⏳ " + stringResource(R.string.v30_blocked_by_action)
-                    }
-                    ThingsTagPill(
-                        title = depLabel,
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onOpenDependenciesDialog()
-                        }
-                    )
-                }
-
-                if (task.recurrenceRule != null) {
-                    ThingsRepeatBadge(
-                        rule = task.recurrenceRule,
-                        onClick = onOpenRepeatDialog
-                    )
-                } else {
-                    ThingsTagPill(
-                        title = "🔁 ${stringResource(R.string.action_repeat)}",
-                        onClick = onOpenRepeatDialog
-                    )
-                }
-
-                if (task.deadline != null) {
-                    ThingsDeadlineBadge(
-                        deadlineEpochMillis = task.deadline,
-                        locale = locale,
-                        onClick = onOpenDeadlineDialog
-                    )
-                } else {
-                    ThingsTagPill(
-                        title = "🏁 ${stringResource(R.string.action_deadline)}",
-                        onClick = onOpenDeadlineDialog
-                    )
-                }
-
-                val containerLabel = when {
-                    assignedProject != null -> "📁 ${assignedProject.title}"
-                    assignedArea != null -> "📦 ${assignedArea.title}"
-                    else -> "📁 ${stringResource(R.string.entity_project)} / ${stringResource(R.string.entity_area)}"
-                }
-                ThingsTagPill(
-                    title = containerLabel,
-                    onClick = onOpenMoveDialog
-                )
-
-                task.tags.forEach { tag ->
-                    ThingsTagPill(
-                        title = tag.title,
-                        onClick = onOpenTagPickerDialog
-                    )
-                }
-
-                ThingsTagPill(
-                    title = "+ " + stringResource(R.string.action_tags),
-                    onClick = onOpenTagPickerDialog
-                )
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
-            ) {
-                if (onStartFocusTimer != null) {
-                    ThingsHoverTooltip(text = stringResource(R.string.action_focus_timer)) {
-                        IconButton(
-                            onClick = {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onStartFocusTimer()
-                            },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Timer,
-                                contentDescription = stringResource(R.string.action_focus_timer),
-                                tint = colors.secondaryText,
+                                imageVector = Icons.Outlined.PushPin,
+                                contentDescription = pinLabel,
+                                tint = if (task.isPinned) colors.thingsBlue else colors.secondaryText,
                                 modifier = Modifier.size(16.dp)
                             )
                         }
                     }
                 }
 
-                Box {
-                    ThingsHoverTooltip(text = stringResource(R.string.action_more_options)) {
-                        Box(
-                            modifier = Modifier
-                                .height(28.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(colors.tagPillBg)
-                                .border(
-                                    width = 0.75.dp,
-                                    color = colors.hairlineDivider,
-                                    shape = RoundedCornerShape(8.dp)
-                                )
-                                .clickable {
-                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    showInlineMoreMenu = true
+                Spacer(modifier = Modifier.width(6.dp))
+
+                ThingsHoverTooltip(text = stringResource(R.string.action_done)) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(colors.tagPillBg.copy(alpha = 0.65f))
+                            .border(
+                                width = 0.75.dp,
+                                color = colors.hairlineDivider,
+                                shape = RoundedCornerShape(9.dp)
+                            )
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                flushPendingChecklistIfNeeded()
+                                onDoneCollapse()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Close,
+                            contentDescription = stringResource(R.string.action_done),
+                            tint = colors.secondaryText,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+
+            // Soft Bento Notes Container (Markdown notes + detected URL / Email / Phone / Map chips)
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = bentoZoneFill,
+                border = bentoZoneBorder
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 11.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    BasicTextField(
+                        value = editedNotesField,
+                        onValueChange = onNotesFieldChange,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                            color = colors.primaryText,
+                            lineHeight = 21.sp
+                        ),
+                        visualTransformation = rememberThingsMarkdownVisualTransformation(),
+                        cursorBrush = SolidColor(colors.thingsBlue),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 68.dp)
+                            .pointerInput(task.id) {
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                        if (ev.type == PointerEventType.Press) {
+                                            onRequestEnsureVisible?.invoke(false)
+                                        }
+                                    }
                                 }
-                                .padding(horizontal = 8.dp),
-                            contentAlignment = Alignment.Center
+                            }
+                            .onFocusChanged { focusState ->
+                                onNotesFocusChanged(focusState.isFocused)
+                            },
+                        decorationBox = { innerTextField ->
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                if (editedNotesField.text.isEmpty()) {
+                                    Text(
+                                        text = stringResource(R.string.placeholder_notes),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colors.tertiaryText
+                                    )
+                                }
+                                innerTextField()
+                            }
+                        }
+                    )
+
+                    DetectedNotesLinksRow(notes = editedNotesField.text)
+                }
+            }
+
+            // Soft Bento Checklist Container (progress count + ✨ Gemini Magic Breakdown + rows + add item field)
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = bentoZoneFill,
+                border = bentoZoneBorder
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 11.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val doneCount = task.checklistItems.count { it.isCompleted }
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.padding(top = 2.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.MoreHoriz,
-                                contentDescription = stringResource(R.string.action_more_options),
-                                tint = colors.primaryText,
-                                modifier = Modifier.size(17.dp)
+                                imageVector = Icons.Outlined.Checklist,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(15.dp)
                             )
+                            Text(
+                                text = if (task.checklistItems.isNotEmpty()) {
+                                    "${stringResource(R.string.placeholder_checklist)} ($doneCount/${task.checklistItems.size})"
+                                } else {
+                                    stringResource(R.string.placeholder_checklist)
+                                },
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = if (task.checklistItems.isNotEmpty()) colors.thingsBlue else colors.secondaryText
+                            )
+                        }
+
+                        ThingsHoverTooltip(text = stringResource(R.string.gemini_magic_breakdown_desc)) {
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(colors.thingsBlueSoft)
+                                    .clickable(enabled = !isGeneratingMagicBreakdown) {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onTriggerGeminiMagicBreakdown()
+                                    }
+                                    .padding(horizontal = 9.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                if (isGeneratingMagicBreakdown) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(13.dp),
+                                        strokeWidth = 1.8.dp,
+                                        color = colors.thingsBlue
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Outlined.AutoAwesome,
+                                        contentDescription = stringResource(R.string.gemini_magic_breakdown),
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                }
+                                Text(
+                                    text = stringResource(R.string.gemini_magic_breakdown),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = colors.thingsBlue
+                                )
+                            }
                         }
                     }
 
-                    DropdownMenu(
-                        expanded = showInlineMoreMenu,
-                        onDismissRequest = { showInlineMoreMenu = false },
-                        modifier = Modifier.background(colors.cardElevatedSurface)
-                    ) {
-                        if (onTogglePin != null) {
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = stringResource(
-                                            if (task.isPinned) R.string.v25_unpin_task else R.string.v25_pin_task
-                                        ),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = colors.primaryText
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Outlined.PushPin,
-                                        contentDescription = null,
-                                        tint = colors.thingsBlue,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                },
-                                onClick = {
-                                    showInlineMoreMenu = false
-                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    onTogglePin()
-                                }
-                            )
-                        }
-
-                        if (onOpenDependenciesDialog != null) {
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = stringResource(R.string.v30_blocked_by_action),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = colors.primaryText
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Outlined.HourglassTop,
-                                        contentDescription = null,
-                                        tint = colors.thingsBlue,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                },
-                                onClick = {
-                                    showInlineMoreMenu = false
-                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    onOpenDependenciesDialog()
-                                }
-                            )
-                        }
-
-                        if (onAddTaskAttachment != null) {
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = stringResource(R.string.action_attach_file),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = colors.primaryText
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Outlined.AttachFile,
-                                        contentDescription = null,
-                                        tint = colors.thingsBlue,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                },
-                                onClick = {
-                                    showInlineMoreMenu = false
-                                    filePickerLauncher.launch(arrayOf("image/*", "application/pdf"))
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = stringResource(R.string.action_take_photo),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = colors.primaryText
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Outlined.CameraAlt,
-                                        contentDescription = null,
-                                        tint = colors.thingsBlue,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                },
-                                onClick = {
-                                    showInlineMoreMenu = false
-                                    cameraLauncher.launch(null)
-                                }
-                            )
-                        }
-
-                        if (onDictateTitleOrNotes != null) {
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = stringResource(R.string.voice_capture_btn),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = colors.primaryText
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Outlined.Mic,
-                                        contentDescription = null,
-                                        tint = colors.thingsBlue,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                },
-                                onClick = {
-                                    showInlineMoreMenu = false
-                                    val launched = runCatching {
-                                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                            putExtra(
-                                                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                                                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                                            )
-                                            putExtra(RecognizerIntent.EXTRA_PROMPT, voicePromptMsg)
+                    if (task.checklistItems.isNotEmpty()) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            task.checklistItems.forEachIndexed { idx, item ->
+                                key(item.id) {
+                                    InlineChecklistRow(
+                                        item = item,
+                                        canMoveUp = idx > 0,
+                                        canMoveDown = idx < task.checklistItems.lastIndex,
+                                        shouldAutoFocus = pendingAutoFocusSubtaskId == item.id,
+                                        onAutoFocusConsumed = {
+                                            if (pendingAutoFocusSubtaskId == item.id) {
+                                                pendingAutoFocusSubtaskId = null
+                                            }
+                                        },
+                                        onFocusDelta = onSubtaskFocusDelta,
+                                        onToggle = { checked ->
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            onToggleChecklistItem(item.id, checked)
+                                        },
+                                        onRename = { newSubtaskTitle ->
+                                            onRenameChecklistItem?.invoke(item.id, newSubtaskTitle)
+                                        },
+                                        onReturnCreateSubtask = { remainingCurrentTitle, nextInitialTitle ->
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            if (remainingCurrentTitle != item.title) {
+                                                onRenameChecklistItem?.invoke(item.id, remainingCurrentTitle)
+                                            }
+                                            val nextSubtaskId = UUID.randomUUID().toString()
+                                            pendingAutoFocusSubtaskId = nextSubtaskId
+                                            if (onInsertChecklistItemAfter != null) {
+                                                onInsertChecklistItemAfter(item.id, nextSubtaskId, nextInitialTitle)
+                                            } else {
+                                                onAddChecklistItem(nextInitialTitle)
+                                            }
+                                        },
+                                        onReturnOnEmptySubtask = {
+                                            onDeleteChecklistItem?.invoke(item.id)
+                                            runCatching { newChecklistFocusRequester.requestFocus() }
+                                        },
+                                        onMoveUp = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            onMoveChecklistItem?.invoke(item.id, true)
+                                        },
+                                        onDelete = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            onDeleteChecklistItem?.invoke(item.id)
+                                        },
+                                        onMoveDown = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            onMoveChecklistItem?.invoke(item.id, false)
                                         }
-                                        speechLauncher.launch(intent)
-                                        true
-                                    }.getOrDefault(false)
-                                    if (!launched) {
-                                        onShowMessage?.invoke(voiceUnavailableMsg)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Add new subtask inline field + explicit '+' Button
+                    key("new_checklist_input_row_${task.id}") {
+                        val submitNewChecklistEntry = {
+                            val cleaned = newChecklistField.text.replace("\r", "").replace("\n", " ").trim()
+                            if (cleaned.isNotEmpty()) {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onAddChecklistItem(cleaned)
+                                newChecklistField = TextFieldValue(text = "", selection = TextRange(0))
+                                runCatching { newChecklistFocusRequester.requestFocus() }
+                            }
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(colors.cardSurface)
+                                .border(
+                                    width = 0.75.dp,
+                                    color = colors.hairlineDivider,
+                                    shape = RoundedCornerShape(9.dp)
+                                )
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Add,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            BasicTextField(
+                                value = newChecklistField,
+                                onValueChange = { incoming ->
+                                    if ('\n' in incoming.text || '\r' in incoming.text) {
+                                        val parts = incoming.text.replace("\r\n", "\n").replace('\r', '\n').split('\n')
+                                        var addedAny = false
+                                        for (i in 0 until parts.lastIndex) {
+                                            val line = parts[i].trim()
+                                            if (line.isNotEmpty()) {
+                                                onAddChecklistItem(line)
+                                                addedAny = true
+                                            }
+                                        }
+                                        if (addedAny) {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        }
+                                        val trailing = parts.last()
+                                        newChecklistField = TextFieldValue(
+                                            text = trailing,
+                                            selection = TextRange(trailing.length)
+                                        )
+                                    } else {
+                                        newChecklistField = incoming
+                                    }
+                                },
+                                singleLine = true,
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.primaryText),
+                                cursorBrush = SolidColor(colors.thingsBlue),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                                keyboardActions = KeyboardActions(
+                                    onNext = { submitNewChecklistEntry() },
+                                    onDone = { submitNewChecklistEntry() }
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .focusRequester(newChecklistFocusRequester)
+                                    .pointerInput(task.id) {
+                                        awaitPointerEventScope {
+                                            while (true) {
+                                                val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                                if (ev.type == PointerEventType.Press) {
+                                                    onRequestEnsureVisible?.invoke(true)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    .onPreviewKeyEvent { keyEvent ->
+                                        if (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) {
+                                            if (keyEvent.type == KeyEventType.KeyDown) {
+                                                submitNewChecklistEntry()
+                                            }
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    }
+                                    .onFocusChanged { focusState ->
+                                        onNewChecklistFocusChanged(focusState.isFocused)
+                                    },
+                                decorationBox = { inner ->
+                                    Box {
+                                        if (newChecklistField.text.isEmpty()) {
+                                            Text(
+                                                text = stringResource(R.string.placeholder_add_checklist_item),
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = colors.tertiaryText
+                                            )
+                                        }
+                                        inner()
                                     }
                                 }
                             )
-                        }
-
-                        if (onDuplicateTask != null) {
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = stringResource(R.string.action_duplicate_todo),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = colors.primaryText
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Outlined.ContentCopy,
-                                        contentDescription = null,
-                                        tint = colors.thingsBlue,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                },
-                                onClick = {
-                                    showInlineMoreMenu = false
-                                    onDuplicateTask()
+                            if (newChecklistField.text.isNotBlank()) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                ThingsHoverTooltip(text = stringResource(R.string.placeholder_add_checklist_item)) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(colors.thingsBlue)
+                                            .clickable { submitNewChecklistEntry() },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Add,
+                                            contentDescription = stringResource(R.string.placeholder_add_checklist_item),
+                                            tint = Color.White,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    }
                                 }
-                            )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Soft Bento Attachments Strip
+            if (task.attachments.isNotEmpty()) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = bentoZoneFill,
+                    border = bentoZoneBorder
+                ) {
+                    TaskAttachmentsStrip(
+                        attachments = task.attachments,
+                        onDeleteAttachment = { attId -> onDeleteTaskAttachment?.invoke(attId) },
+                        onAttachFileClick = if (onAddTaskAttachment != null) {
+                            { filePickerLauncher.launch(arrayOf("image/*", "application/pdf")) }
+                        } else null,
+                        onTakePhotoClick = if (onAddTaskAttachment != null) {
+                            { cameraLauncher.launch(null) }
+                        } else null,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                    )
+                }
+            }
+        }
+    }
+
+    val renderPropertiesZone: @Composable (Modifier) -> Unit = { zoneModifier ->
+        Surface(
+            modifier = zoneModifier,
+            shape = RoundedCornerShape(16.dp),
+            color = bentoZoneFill,
+            border = bentoZoneBorder
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 13.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // 1. When + Today This Evening + Reminder + Timeblock
+                SoftBentoPropertyGroup(label = stringResource(R.string.action_when)) {
+                    ThingsWhenBadge(
+                        scheduleState = task.scheduleState,
+                        whenDateEpochMillis = task.whenDate,
+                        locale = locale,
+                        onClick = onOpenWhenDialog
+                    )
+
+                    if (showQuickThisEveningPill && onQuickThisEveningAndClose != null) {
+                        val eveningLabel = stringResource(R.string.view_this_evening)
+                        ThingsHoverTooltip(text = eveningLabel) {
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(colors.eveningMoonIndigo.copy(alpha = 0.14f))
+                                    .border(
+                                        width = 0.75.dp,
+                                        color = colors.eveningMoonIndigo.copy(alpha = 0.30f),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        flushPendingChecklistIfNeeded()
+                                        onQuickThisEveningAndClose()
+                                    }
+                                    .padding(horizontal = 9.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Bedtime,
+                                    contentDescription = eveningLabel,
+                                    tint = colors.eveningMoonIndigo,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = eveningLabel,
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = colors.eveningMoonIndigo
+                                )
+                            }
+                        }
+                    }
+
+                    task.reminderTime?.let { rt ->
+                        ThingsReminderBadge(
+                            reminderEpochMillis = rt,
+                            onClick = onOpenWhenDialog
+                        )
+                    }
+
+                    if (task.scheduledStartMinutes != null) {
+                        ThingsTagPill(
+                            title = TimeblockScheduleUtils.formatTimeblockBadge(
+                                task.scheduledStartMinutes,
+                                task.durationMinutes
+                            ),
+                            onClick = onOpenTimeblockDialog
+                        )
+                    } else if (onOpenTimeblockDialog != null) {
+                        ThingsTagPill(
+                            title = "⏱️ ${stringResource(R.string.v2_timeblock_title)}",
+                            onClick = onOpenTimeblockDialog
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = colors.hairlineDivider.copy(alpha = 0.7f), thickness = 0.65.dp)
+
+                // 2. Deadline
+                SoftBentoPropertyGroup(label = stringResource(R.string.action_deadline)) {
+                    if (task.deadline != null) {
+                        ThingsDeadlineBadge(
+                            deadlineEpochMillis = task.deadline,
+                            locale = locale,
+                            onClick = onOpenDeadlineDialog
+                        )
+                    } else {
+                        ThingsTagPill(
+                            title = "🏁 ${stringResource(R.string.action_deadline)}",
+                            onClick = onOpenDeadlineDialog
+                        )
+                    }
+                }
+
+                // 3. Duration & Effort
+                if (onUpdateStandaloneDuration != null || onUpdateEffortLevel != null) {
+                    HorizontalDivider(color = colors.hairlineDivider.copy(alpha = 0.7f), thickness = 0.65.dp)
+                    SoftBentoPropertyGroup(
+                        label = "${stringResource(R.string.v30_duration_label)} · ${stringResource(R.string.v30_effort_label)}"
+                    ) {
+                        if (onUpdateStandaloneDuration != null) {
+                            var showDurationPickerMenu by remember(task.id) { mutableStateOf(false) }
+                            val durText = formatDurationCompact(task.durationMinutes)
+                            Box {
+                                ThingsTagPill(
+                                    title = if (durText != null) {
+                                        "⏱ $durText"
+                                    } else {
+                                        "⏱ ${stringResource(R.string.v30_duration_label)}"
+                                    },
+                                    onClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        showDurationPickerMenu = true
+                                    }
+                                )
+                                DropdownMenu(
+                                    expanded = showDurationPickerMenu,
+                                    onDismissRequest = { showDurationPickerMenu = false },
+                                    modifier = Modifier.background(colors.cardElevatedSurface)
+                                ) {
+                                    listOf(
+                                        5 to "5m",
+                                        15 to "15m",
+                                        30 to "30m",
+                                        60 to "1h",
+                                        120 to "2h",
+                                        240 to "4h"
+                                    ).forEach { (mins, label) ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    text = label,
+                                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                                        fontWeight = if (task.durationMinutes == mins) FontWeight.Bold else FontWeight.Normal
+                                                    ),
+                                                    color = if (task.durationMinutes == mins) colors.thingsBlue else colors.primaryText
+                                                )
+                                            },
+                                            onClick = {
+                                                showDurationPickerMenu = false
+                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                onUpdateStandaloneDuration(mins)
+                                            }
+                                        )
+                                    }
+                                    if (task.durationMinutes != null) {
+                                        HorizontalDivider(color = colors.hairlineDivider)
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    text = stringResource(R.string.v30_duration_clear),
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = colors.secondaryText
+                                                )
+                                            },
+                                            onClick = {
+                                                showDurationPickerMenu = false
+                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                onUpdateStandaloneDuration(null)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
                         }
 
-                        HorizontalDivider(color = colors.hairlineDivider)
+                        if (onUpdateEffortLevel != null) {
+                            var showEffortPickerMenu by remember(task.id) { mutableStateOf(false) }
+                            val normalizedEffort = EffortLevel.normalize(task.effortLevel)
+                            val effortPillTitle = when (normalizedEffort) {
+                                EffortLevel.QUICK_WIN -> "⚡ ${stringResource(R.string.v30_effort_quick_win)}"
+                                EffortLevel.MEDIUM -> "◐ ${stringResource(R.string.v30_effort_medium)}"
+                                EffortLevel.DEEP_FOCUS -> "🧠 ${stringResource(R.string.v30_effort_deep_focus)}"
+                                else -> "⚡ ${stringResource(R.string.v30_effort_label)}"
+                            }
+                            Box {
+                                ThingsTagPill(
+                                    title = effortPillTitle,
+                                    onClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        showEffortPickerMenu = true
+                                    }
+                                )
+                                DropdownMenu(
+                                    expanded = showEffortPickerMenu,
+                                    onDismissRequest = { showEffortPickerMenu = false },
+                                    modifier = Modifier.background(colors.cardElevatedSurface)
+                                ) {
+                                    val effortOptions: List<Pair<String?, String>> = listOf(
+                                        null to stringResource(R.string.v30_effort_none),
+                                        EffortLevel.QUICK_WIN to "⚡ ${stringResource(R.string.v30_effort_quick_win)}",
+                                        EffortLevel.MEDIUM to "◐ ${stringResource(R.string.v30_effort_medium)}",
+                                        EffortLevel.DEEP_FOCUS to "🧠 ${stringResource(R.string.v30_effort_deep_focus)}"
+                                    )
+                                    effortOptions.forEach { (key, label) ->
+                                        val selected = normalizedEffort == key
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    text = label,
+                                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                                    ),
+                                                    color = if (selected) colors.thingsBlue else colors.primaryText
+                                                )
+                                            },
+                                            onClick = {
+                                                showEffortPickerMenu = false
+                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                onUpdateEffortLevel(key)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = stringResource(R.string.action_delete),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = colors.deadlineUrgentRed
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Outlined.DeleteOutline,
-                                    contentDescription = null,
-                                    tint = colors.deadlineUrgentRed,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            },
+                // 4. Waiting On (Dependencies)
+                if (onOpenDependenciesDialog != null) {
+                    HorizontalDivider(color = colors.hairlineDivider.copy(alpha = 0.7f), thickness = 0.65.dp)
+                    SoftBentoPropertyGroup(label = stringResource(R.string.v30_blocked_by_label)) {
+                        val activeBlockerCount = remember(task.blockedByTaskIds, openTaskIds) {
+                            task.blockedByTaskIds.count { it in openTaskIds }
+                        }
+                        val depLabel = if (activeBlockerCount > 0) {
+                            "⏳ " + stringResource(R.string.v30_blocked_by_count_badge, activeBlockerCount)
+                        } else {
+                            "⏳ " + stringResource(R.string.v30_blocked_by_action)
+                        }
+                        ThingsTagPill(
+                            title = depLabel,
                             onClick = {
-                                showInlineMoreMenu = false
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onDeleteTask()
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onOpenDependenciesDialog()
                             }
                         )
                     }
                 }
 
-                ThingsHoverTooltip(text = stringResource(R.string.action_done)) {
-                    Box(
-                        modifier = Modifier
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(colors.thingsBlue)
-                            .clickable {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                flushPendingChecklistIfNeeded()
-                                onDoneCollapse()
-                            }
-                            .padding(horizontal = 9.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Check,
-                            contentDescription = stringResource(R.string.action_done),
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
+                HorizontalDivider(color = colors.hairlineDivider.copy(alpha = 0.7f), thickness = 0.65.dp)
+
+                // 5. Categories
+                SoftBentoPropertyGroup(label = stringResource(R.string.action_tags)) {
+                    task.tags.forEach { tag ->
+                        ThingsTagPill(
+                            title = tag.title,
+                            onClick = onOpenTagPickerDialog
                         )
+                    }
+                    ThingsTagPill(
+                        title = "+ " + stringResource(R.string.action_tags),
+                        onClick = onOpenTagPickerDialog
+                    )
+                }
+
+                HorizontalDivider(color = colors.hairlineDivider.copy(alpha = 0.7f), thickness = 0.65.dp)
+
+                // 6. Project / Area
+                SoftBentoPropertyGroup(
+                    label = "${stringResource(R.string.entity_project)} / ${stringResource(R.string.entity_area)}"
+                ) {
+                    val containerLabel = when {
+                        assignedProject != null && assignedHeading != null && assignedHeading.title.isNotBlank() ->
+                            "📁 ${assignedProject.title} › ${assignedHeading.title}"
+                        assignedProject != null -> "📁 ${assignedProject.title}"
+                        assignedArea != null -> "📦 ${assignedArea.title}"
+                        else -> "📁 ${stringResource(R.string.entity_project)} / ${stringResource(R.string.entity_area)}"
+                    }
+                    ThingsTagPill(
+                        title = containerLabel,
+                        onClick = onOpenMoveDialog
+                    )
+                }
+
+                HorizontalDivider(color = colors.hairlineDivider.copy(alpha = 0.7f), thickness = 0.65.dp)
+
+                // 7. Repeat
+                SoftBentoPropertyGroup(label = stringResource(R.string.action_repeat)) {
+                    if (task.recurrenceRule != null) {
+                        ThingsRepeatBadge(
+                            rule = task.recurrenceRule,
+                            onClick = onOpenRepeatDialog
+                        )
+                    } else {
+                        ThingsTagPill(
+                            title = "🔁 ${stringResource(R.string.action_repeat)}",
+                            onClick = onOpenRepeatDialog
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    var showInlineMoreMenu by remember(task.id) { mutableStateOf(false) }
+
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val isWideModal = maxWidth >= 600.dp && isWideSoftBentoTaskModal(maxWidth.value)
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    horizontal = if (isWideModal) 22.dp else 16.dp,
+                    vertical = if (isWideModal) 20.dp else 16.dp
+                ),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            if (isWideModal) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    renderContentZone(Modifier.weight(1.35f))
+                    renderPropertiesZone(Modifier.weight(1f))
+                }
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    renderContentZone(Modifier.fillMaxWidth())
+                    renderPropertiesZone(Modifier.fillMaxWidth())
+                }
+            }
+
+            HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
+
+            // v2.1 Unified Single Footer Row: Quick Utility Pills on Left + [Focus, ⋯ Menu, ✓ Done] on Right
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(top = 3.dp)
+                ) {
+                    if (onDictateTitleOrNotes != null) {
+                        ThingsTagPill(
+                            title = "🎙 ${stringResource(R.string.voice_capture_btn)}",
+                            onClick = { launchVoiceDictation() }
+                        )
+                    }
+                    if (onAddTaskAttachment != null) {
+                        ThingsTagPill(
+                            title = "📎 ${stringResource(R.string.action_attach_file)}",
+                            onClick = { filePickerLauncher.launch(arrayOf("image/*", "application/pdf")) }
+                        )
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (onStartFocusTimer != null) {
+                        ThingsHoverTooltip(text = stringResource(R.string.action_focus_timer)) {
+                            Box(
+                                modifier = Modifier
+                                    .heightIn(min = 34.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(colors.tagPillBg)
+                                    .border(
+                                        width = 0.75.dp,
+                                        color = colors.hairlineDivider,
+                                        shape = RoundedCornerShape(10.dp)
+                                    )
+                                    .clickable {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onStartFocusTimer()
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Timer,
+                                    contentDescription = stringResource(R.string.action_focus_timer),
+                                    tint = colors.primaryText,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Box {
+                        ThingsHoverTooltip(text = stringResource(R.string.action_more_options)) {
+                            Box(
+                                modifier = Modifier
+                                    .heightIn(min = 34.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(colors.tagPillBg)
+                                    .border(
+                                        width = 0.75.dp,
+                                        color = colors.hairlineDivider,
+                                        shape = RoundedCornerShape(10.dp)
+                                    )
+                                    .clickable {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        showInlineMoreMenu = true
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.MoreHoriz,
+                                    contentDescription = stringResource(R.string.action_more_options),
+                                    tint = colors.primaryText,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = showInlineMoreMenu,
+                            onDismissRequest = { showInlineMoreMenu = false },
+                            modifier = Modifier.background(colors.cardElevatedSurface)
+                        ) {
+                            if (onDictateTitleOrNotes != null) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = stringResource(R.string.voice_capture_btn),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = colors.primaryText
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Mic,
+                                            contentDescription = null,
+                                            tint = colors.thingsBlue,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        showInlineMoreMenu = false
+                                        launchVoiceDictation()
+                                    }
+                                )
+                            }
+
+                            if (onAddTaskAttachment != null) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = stringResource(R.string.action_attach_file),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = colors.primaryText
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Outlined.AttachFile,
+                                            contentDescription = null,
+                                            tint = colors.thingsBlue,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        showInlineMoreMenu = false
+                                        filePickerLauncher.launch(arrayOf("image/*", "application/pdf"))
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = stringResource(R.string.action_take_photo),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = colors.primaryText
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Outlined.CameraAlt,
+                                            contentDescription = null,
+                                            tint = colors.thingsBlue,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        showInlineMoreMenu = false
+                                        cameraLauncher.launch(null)
+                                    }
+                                )
+                            }
+
+                            if (onTogglePin != null) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = stringResource(
+                                                if (task.isPinned) R.string.v25_unpin_task else R.string.v25_pin_task
+                                            ),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = colors.primaryText
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Outlined.PushPin,
+                                            contentDescription = null,
+                                            tint = colors.thingsBlue,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        showInlineMoreMenu = false
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onTogglePin()
+                                    }
+                                )
+                            }
+
+                            if (onOpenDependenciesDialog != null) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = stringResource(R.string.v30_blocked_by_action),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = colors.primaryText
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Outlined.HourglassTop,
+                                            contentDescription = null,
+                                            tint = colors.thingsBlue,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        showInlineMoreMenu = false
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onOpenDependenciesDialog()
+                                    }
+                                )
+                            }
+
+                            if (onDuplicateTask != null) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = stringResource(R.string.action_duplicate_todo),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = colors.primaryText
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Outlined.ContentCopy,
+                                            contentDescription = null,
+                                            tint = colors.thingsBlue,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        showInlineMoreMenu = false
+                                        onDuplicateTask()
+                                    }
+                                )
+                            }
+
+                            HorizontalDivider(color = colors.hairlineDivider)
+
+                            val isAlreadyCanceled = task.status == TaskStatus.CANCELED
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = stringResource(
+                                            if (isAlreadyCanceled) R.string.action_reopen_todo else R.string.action_cancel_todo
+                                        ),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colors.secondaryText
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = if (isAlreadyCanceled) Icons.Outlined.Check else Icons.Outlined.Close,
+                                        contentDescription = null,
+                                        tint = colors.secondaryText,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showInlineMoreMenu = false
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onStatusChange(if (isAlreadyCanceled) TaskStatus.OPEN else TaskStatus.CANCELED)
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = stringResource(R.string.action_delete),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colors.deadlineUrgentRed
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.DeleteOutline,
+                                        contentDescription = null,
+                                        tint = colors.deadlineUrgentRed,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showInlineMoreMenu = false
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onDeleteTask()
+                                }
+                            )
+                        }
+                    }
+
+                    ThingsHoverTooltip(text = stringResource(R.string.action_done)) {
+                        Row(
+                            modifier = Modifier
+                                .heightIn(min = 34.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(colors.thingsBlue)
+                                .clickable {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    flushPendingChecklistIfNeeded()
+                                    onDoneCollapse()
+                                }
+                                .padding(horizontal = 14.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Check,
+                                contentDescription = stringResource(R.string.action_done),
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.action_done),
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                color = Color.White
+                            )
+                        }
                     }
                 }
             }

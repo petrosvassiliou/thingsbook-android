@@ -25,6 +25,7 @@ public struct MainWorkspaceView: View {
     @State private var isBatchTagPopoverOpen = false
     @State private var decryptPasswordInput = ""
     @State private var decryptError: String?
+    @State private var keyDownMonitor: Any? = nil
 
     public init(store: ThingsbookStore) {
         self.store = store
@@ -157,10 +158,34 @@ public struct MainWorkspaceView: View {
                 }
             }
 
+            // Unified Soft Bento Task Modal Overlay (List | Board | Roadmap | Timeline | Logbook)
+            if let expandedId = store.expandedTaskId,
+               let modalTask = store.task(byId: expandedId) {
+                ZStack {
+                    Color.black.opacity(0.28)
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            NotificationCenter.default.post(name: .thingsbookDismissTaskModal, object: nil)
+                        }
+
+                    TaskBentoModalView(store: store, task: modalTask)
+                        .id(modalTask.id)
+                        .transition(.scale(scale: 0.96).combined(with: .opacity))
+                }
+                .zIndex(40)
+            }
+
             // Touch ID Biometric App Lock Overlay
             if store.isLocked {
                 biometricLockOverlay
             }
+        }
+        .onAppear {
+            installTaskKeyboardMonitorIfNeeded()
+        }
+        .onDisappear {
+            removeTaskKeyboardMonitor()
         }
         .onChange(of: store.preferences.language) { _, newLang in
             NotificationReminderService.shared.configureCategories(lang: newLang)
@@ -231,6 +256,66 @@ public struct MainWorkspaceView: View {
             }
         } message: { prompt in
             Text(store.trf("project_delete_prompt_tasks_body", prompt.taskCount))
+        }
+    }
+
+    // MARK: - Keyboard Monitor (Return / Space Open Modal & Escape / Cmd+Return Commit+Dismiss)
+
+    private func installTaskKeyboardMonitorIfNeeded() {
+        guard keyDownMonitor == nil else { return }
+        keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard !store.isLocked else { return event }
+
+            // Let active popovers (_NSPopoverWindow) or system panels handle their own Escape / Return keys first
+            if let keyWin = NSApp.keyWindow {
+                let winClass = NSStringFromClass(type(of: keyWin))
+                if winClass.contains("Popover") || keyWin is NSPanel {
+                    return event
+                }
+            }
+
+            // When Soft Bento Task Modal is open and unobstructed by sheets/attachment previews:
+            if store.expandedTaskId != nil,
+               store.activeSheet == nil,
+               store.previewingAttachment == nil {
+                let cleanMods = event.modifierFlags.intersection([.command, .option, .control, .shift])
+                if event.keyCode == 53 && cleanMods.isEmpty {
+                    NotificationCenter.default.post(name: .thingsbookDismissTaskModal, object: nil)
+                    return nil
+                }
+                let cmdMods = event.modifierFlags.intersection([.command, .option, .control])
+                if (event.keyCode == 36 || event.keyCode == 76) && cmdMods == [.command] {
+                    NotificationCenter.default.post(name: .thingsbookDismissTaskModal, object: nil)
+                    return nil
+                }
+                return event
+            }
+
+            // When modal is closed, no sheet is presented, 1 task is selected, and user is not editing text:
+            if store.activeSheet == nil,
+               store.expandedTaskId == nil,
+               store.selectedTaskIds.count == 1 {
+                if let responder = NSApp.keyWindow?.firstResponder, responder is NSText {
+                    return event
+                }
+                let blockingMods = event.modifierFlags.intersection([.command, .option, .control])
+                if blockingMods.isEmpty && (event.keyCode == 36 || event.keyCode == 76 || event.keyCode == 49) {
+                    if let selectedId = store.selectedTaskIds.first,
+                       store.task(byId: selectedId) != nil {
+                        store.openTaskModal(selectedId)
+                        return nil
+                    }
+                }
+            }
+
+            return event
+        }
+    }
+
+    private func removeTaskKeyboardMonitor() {
+        if let monitor = keyDownMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyDownMonitor = nil
         }
     }
 

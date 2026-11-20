@@ -2237,6 +2237,14 @@ private struct TodayDailyTimelineView: View {
                 .fixedSize(horizontal: true, vertical: false)
                 .thingsTooltip(store.tr("action_focus_timer"))
 
+                ThingsUtilityIconButton(
+                    systemImage: "slider.horizontal.3",
+                    tint: .secondary,
+                    helpText: store.tr("action_more_options")
+                ) {
+                    store.openTaskModal(task.id)
+                }
+
                 Button {
                     store.setTaskTimeblock(task.id, startMinutes: nil, durationMinutes: nil)
                 } label: {
@@ -2255,8 +2263,31 @@ private struct TodayDailyTimelineView: View {
             RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .strokeBorder(hasConflict ? ThingsMacPalette.somedayAmber.opacity(0.65) : Color.clear, lineWidth: 1.2)
         )
+        .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded {
+                store.openTaskModal(task.id)
+            }
+        )
         .onTapGesture {
             store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
+        }
+        .contextMenu {
+            Button {
+                store.openTaskModal(task.id)
+            } label: {
+                Label("\(store.tr("action_more_options"))…", systemImage: "slider.horizontal.3")
+            }
+            Divider()
+            Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
+                store.toggleTaskCompletion(task)
+            }
+            Divider()
+            Button(role: .destructive) {
+                store.deleteTask(task)
+            } label: {
+                Text(store.tr("action_delete"))
+            }
         }
         .thingsTaskDraggable(store: store, task: task)
     }
@@ -2315,12 +2346,43 @@ private struct TodayDailyTimelineView: View {
                     store.setTaskTimeblock(task.id, startMinutes: sMins, durationMinutes: dMins)
                 }
             }
+
+            ThingsUtilityIconButton(
+                systemImage: "slider.horizontal.3",
+                tint: .secondary,
+                helpText: store.tr("action_more_options")
+            ) {
+                store.openTaskModal(task.id)
+            }
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 9)
         .thingsCardSurface(cornerRadius: 10, isSelected: store.selectedTaskIds.contains(task.id))
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded {
+                store.openTaskModal(task.id)
+            }
+        )
         .onTapGesture {
             store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
+        }
+        .contextMenu {
+            Button {
+                store.openTaskModal(task.id)
+            } label: {
+                Label("\(store.tr("action_more_options"))…", systemImage: "slider.horizontal.3")
+            }
+            Divider()
+            Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
+                store.toggleTaskCompletion(task)
+            }
+            Divider()
+            Button(role: .destructive) {
+                store.deleteTask(task)
+            } label: {
+                Text(store.tr("action_delete"))
+            }
         }
         .thingsTaskDraggable(store: store, task: task)
     }

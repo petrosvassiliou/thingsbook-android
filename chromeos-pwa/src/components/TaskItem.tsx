@@ -14,6 +14,8 @@ import {
   Cloud,
   Compass,
   Copy,
+  Edit3,
+  FileText,
   Flag,
   FolderInput,
   GripVertical,
@@ -320,6 +322,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 
   const strikeTimerRef = useRef<number | null>(null);
   const glideTimerRef = useRef<number | null>(null);
+  const lastPointerTypeRef = useRef<string>('mouse');
   const ctxMenuRef = useRef<HTMLDivElement | null>(null);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const subtaskRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -329,6 +332,14 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const newSubtaskRef = useRef(newSubtask);
   newSubtaskRef.current = newSubtask;
   const wasExpandedRef = useRef(isExpanded);
+  const isExpandedLatestRef = useRef(isExpanded);
+  isExpandedLatestRef.current = isExpanded;
+  const titleDraftLatestRef = useRef(titleDraft);
+  titleDraftLatestRef.current = titleDraft;
+  const notesDraftLatestRef = useRef(notesDraft);
+  notesDraftLatestRef.current = notesDraft;
+  const taskLatestRef = useRef(task);
+  taskLatestRef.current = task;
 
   if (prevTaskId !== task.id) {
     setPrevTaskId(task.id);
@@ -359,7 +370,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     if (!pending) return;
     newSubtaskRef.current = '';
     setNewSubtask('');
-    void localDb.addChecklistItems(task.id, [pending]);
+    void localDb.addChecklistItems(taskLatestRef.current.id, [pending]);
   };
 
   const triggerInlineVoiceDictation = () => {
@@ -416,6 +427,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
       setIsNotesFocused(false);
       setIsTitleFocused(false);
       setTimeblockOpen(false);
+      setEffortDurationOpen(false);
       setInlineMoreMenuOpen(false);
     }
     wasExpandedRef.current = isExpanded;
@@ -443,6 +455,23 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     return () => {
       if (strikeTimerRef.current) window.clearTimeout(strikeTimerRef.current);
       if (glideTimerRef.current) window.clearTimeout(glideTimerRef.current);
+      if (isExpandedLatestRef.current) {
+        const pendingSub = newSubtaskRef.current.trim();
+        if (pendingSub) {
+          newSubtaskRef.current = '';
+          void localDb.addChecklistItems(taskLatestRef.current.id, [pendingSub]);
+        }
+        const curTask = taskLatestRef.current;
+        const cleanTitle = titleDraftLatestRef.current.trim();
+        const curNotes = notesDraftLatestRef.current;
+        if (cleanTitle !== curTask.title || curNotes !== curTask.notes) {
+          void localDb.upsertTask({
+            id: curTask.id,
+            title: cleanTitle,
+            notes: curNotes
+          });
+        }
+      }
     };
   }, []);
 
@@ -689,13 +718,14 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const isSomedayDashed = task.status === 'OPEN' && task.scheduleState === 'SOMEDAY' && animStage === 'idle';
 
   const renderCheckboxWithStatusMenu = () => (
-    <div className="checkbox-anchor">
+    <div className="checkbox-anchor" onDoubleClick={(e) => e.stopPropagation()}>
       <button
         type="button"
         className={`things-checkbox ${isSomedayDashed ? 'someday-dashed' : ''} ${
           animStage !== 'idle' ? 'pop' : ''
         } ${isVisualCompleted ? 'completed' : ''} ${isCanceled ? 'canceled' : ''}`}
         onClick={handlePrimaryCheckboxClick}
+        onDoubleClick={(e) => e.stopPropagation()}
         onContextMenu={handleCheckboxContextMenu}
         title={t.shortcutCancelHint}
       >
@@ -721,6 +751,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               left: 0,
               right: 'auto',
               minWidth: 185,
+              zIndex: 90,
               ...(statusMenuFlipUp ? { top: 'auto', bottom: 'calc(100% + 6px)' } : {})
             }}
             onClick={(e) => e.stopPropagation()}
@@ -776,7 +807,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     </div>
   );
 
-  // ==================== Expanded Card View ====================
+  // ==================== Unified Soft Bento Task Modal View ====================
   if (isExpanded) {
     const whenChipText =
       task.scheduleState === 'TODAY'
@@ -796,7 +827,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 
     return (
       <div
-        className="task-card-expanded"
+        className="task-card-expanded task-bento-modal-card"
+        data-testid="soft-bento-task-modal"
         data-task-id={task.id}
         style={
           fileDropOver
@@ -824,15 +856,28 @@ export const TaskItem: React.FC<TaskItemProps> = ({
         onKeyDown={(e) => {
           if (e.key === 'Escape') {
             e.stopPropagation();
+            if (inlineMoreMenuOpen) {
+              setInlineMoreMenuOpen(false);
+              return;
+            }
+            if (statusMenuOpen) {
+              setStatusMenuOpen(false);
+              return;
+            }
             if (timeblockOpen) {
               setTimeblockOpen(false);
+              return;
+            }
+            if (effortDurationOpen) {
+              setEffortDurationOpen(false);
               return;
             }
             handleDoneCollapse();
           }
         }}
       >
-        <div className="task-card-top">
+        {/* Modal Header: Checkbox + Status Dropdown, Spacious Title Input, Pin, Focus Timer, Close ✕ */}
+        <div className="task-card-top task-bento-modal-header">
           {renderCheckboxWithStatusMenu()}
           <input
             ref={titleInputRef}
@@ -863,556 +908,28 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             }}
             placeholder={t.placeholderTodoTitle}
           />
-        </div>
 
-        <MarkdownNotesField
-          value={notesDraft}
-          onChange={(nextNotes) => {
-            setNotesDraft(nextNotes);
-            void localDb.upsertTask({ id: task.id, notes: nextNotes });
-          }}
-          onFocusChange={setIsNotesFocused}
-          placeholder={t.placeholderNotes}
-          className="task-card-notes"
-        />
-
-        {/* Attachments Strip (v1.8.0) */}
-        <AttachmentsStrip
-          taskId={task.id}
-          attachments={taskAttachments}
-          t={t}
-          onToast={onToast}
-          showAddButton={taskAttachments.length > 0}
-          fileInputRef={attachmentFileInputRef}
-        />
-
-        <input
-          ref={cameraCaptureInputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          style={{ display: 'none' }}
-          onChange={async (e) => {
-            const files = Array.from(e.target.files ?? []);
-            e.target.value = '';
-            for (const f of files) {
-              await processAndAddAttachmentFile(f, { taskId: task.id }, t, onToast);
-            }
-          }}
-        />
-
-        {/* Checklist with Enter Cursor Split / Insert Below + Multiline Paste + Inline Magic Breakdown */}
-        <div className="checklist-section">
-          {activeChecklists.length > 0 && (
-            <div className="checklist-header">
-              {t.actionChecklist} ({doneChecklistsCount}/{activeChecklists.length})
-            </div>
-          )}
-
-          {activeChecklists.map((item, idx) => (
-            <ChecklistSubtaskRow
-              key={item.id}
-              item={item}
-              idx={idx}
-              totalCount={activeChecklists.length}
-              taskId={task.id}
-              t={t}
-              registerRef={(el) => {
-                subtaskRefs.current[item.id] = el;
-              }}
-              onFocusAddBottom={() => addSubtaskInputRef.current?.focus()}
-              onFocusNewSubtask={(newId) => setFocusSubtaskId(newId)}
-              onRequestEnsureVisible={onRequestEnsureVisible}
-              onSwapWith={(dir) => {
-                const other = dir === 'up' ? activeChecklists[idx - 1] : activeChecklists[idx + 1];
-                if (other) {
-                  void localDb.swapChecklistOrder(item.id, other.id);
-                }
-              }}
-            />
-          ))}
-
-          <div className="checklist-add-row checklist-add-boxed">
-            <Circle size={13.5} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
-            <input
-              ref={addSubtaskInputRef}
-              type="text"
-              className="checklist-input"
-              value={newSubtask}
-              onPointerDown={() => onRequestEnsureVisible?.(true)}
-              onFocus={() => onRequestEnsureVisible?.(true)}
-              onChange={(e) => setNewSubtask(e.target.value)}
-              onPaste={(e) => {
-                const pasted = e.clipboardData.getData('text');
-                if (pasted && /\r?\n/.test(pasted)) {
-                  e.preventDefault();
-                  const lines = pasted
-                    .split(/\r?\n/)
-                    .map((line) => line.replace(/^[-*•[\]xX\s]+/, '').trim())
-                    .filter(Boolean);
-                  if (lines.length > 0) {
-                    setNewSubtask('');
-                    void localDb.addChecklistItems(task.id, lines);
-                  }
-                }
-              }}
-              placeholder={t.placeholderAddChecklist}
-              onKeyDown={async (e) => {
-                if (e.key === 'Enter' && newSubtask.trim()) {
-                  e.preventDefault();
-                  const txt = newSubtask.trim();
-                  setNewSubtask('');
-                  await localDb.addChecklistItems(task.id, [txt]);
-                }
-              }}
-            />
-            {newSubtask.trim() && (
-              <button
-                type="button"
-                className="chip-btn active"
-                title={t.actionChecklist}
-                onClick={async () => {
-                  const txt = newSubtask.trim();
-                  setNewSubtask('');
-                  await localDb.addChecklistItems(task.id, [txt]);
-                }}
-              >
-                <Plus size={12} />
-              </button>
-            )}
+          <div className="task-bento-header-actions">
             <button
               type="button"
-              className="chip-btn gemini checklist-magic-inline-btn"
-              disabled={loadingAi}
-              title={t.geminiMagicBreakdown}
-              onClick={() => void runMagicBreakdown()}
-            >
-              <Sparkles size={12.5} />
-              <span>{loadingAi ? t.geminiGenerating : t.geminiMagicBreakdown}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* v2.0 Inline Interactive Timeblock Panel (opens right above the unified footer when toggled) */}
-        {timeblockOpen && (
-          <div className="v2-timeblock-panel" data-testid="task-timeblock-panel" style={{ marginLeft: 31 }}>
-            <div className="v2-timeblock-row">
-              <span className="v2-timeblock-label">{t.timeblockStartTime}</span>
-              <input
-                type="time"
-                className="v2-inline-time-input"
-                aria-label={t.timeblockStartTime}
-                value={
-                  task.scheduledStartMinutes != null
-                    ? formatMinutesAsClock(task.scheduledStartMinutes)
-                    : ''
-                }
-                onChange={(e) => {
-                  const mins = parseClockToMinutes(e.target.value);
-                  if (mins != null) {
-                    void localDb.upsertTask({
-                      id: task.id,
-                      scheduledStartMinutes: mins,
-                      durationMinutes: task.durationMinutes ?? DEFAULT_TIMEBLOCK_DURATION_MINUTES
-                    });
-                  }
-                }}
-              />
-              <div className="v2-timeblock-slots">
-                {TIMEBLOCK_QUICK_START_MINUTES.map((mins) => (
-                  <button
-                    key={mins}
-                    type="button"
-                    className={`chip-btn ${task.scheduledStartMinutes === mins ? 'active' : ''}`}
-                    title={`${t.timeblockStartTime}: ${formatMinutesAsClock(mins)}`}
-                    onClick={() =>
-                      void localDb.upsertTask({
-                        id: task.id,
-                        scheduledStartMinutes: mins,
-                        durationMinutes:
-                          task.durationMinutes ?? DEFAULT_TIMEBLOCK_DURATION_MINUTES
-                      })
-                    }
-                  >
-                    {formatMinutesAsClock(mins)}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="v2-timeblock-row" style={{ marginTop: 8 }}>
-              <span className="v2-timeblock-label">{t.timeblockDuration}</span>
-              <div className="v2-timeblock-slots">
-                {TIMEBLOCK_DURATION_PRESETS.map((dur) => (
-                  <button
-                    key={dur}
-                    type="button"
-                    className={`chip-btn ${currentDuration === dur ? 'active' : ''}`}
-                    title={`${t.timeblockDuration}: ${dur}m`}
-                    onClick={() =>
-                      void localDb.upsertTask({
-                        id: task.id,
-                        scheduledStartMinutes: task.scheduledStartMinutes ?? 9 * 60,
-                        durationMinutes: dur
-                      })
-                    }
-                  >
-                    {dur}m
-                  </button>
-                ))}
-              </div>
-
-              {(task.scheduledStartMinutes != null || task.durationMinutes != null) && (
-                <button
-                  type="button"
-                  className="chip-btn urgent"
-                  style={{ marginLeft: 'auto' }}
-                  title={t.timeblockClear}
-                  onClick={() =>
-                    void localDb.upsertTask({
-                      id: task.id,
-                      scheduledStartMinutes: null,
-                      durationMinutes: null
-                    })
-                  }
-                >
-                  <X size={11.5} />
-                  <span>{t.timeblockClear}</span>
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* v3.0 Inline Standalone Duration & Effort Panel */}
-        {effortDurationOpen && (
-          <div
-            className="v2-timeblock-panel"
-            data-testid="task-effort-duration-panel"
-            style={{ marginLeft: 31 }}
-          >
-            <div className="v2-timeblock-row">
-              <span className="v2-timeblock-label">{t.durationLabel}</span>
-              <div className="v2-timeblock-slots">
-                {STANDALONE_DURATION_PRESETS.map((dur) => {
-                  const label = formatStandaloneDuration(dur);
-                  return (
-                    <button
-                      key={dur}
-                      type="button"
-                      className={`chip-btn ${task.durationMinutes === dur ? 'active' : ''}`}
-                      data-testid={`task-duration-chip-${dur}`}
-                      title={`${t.durationLabel}: ${label}`}
-                      onClick={() =>
-                        void localDb.upsertTask({
-                          id: task.id,
-                          durationMinutes: task.durationMinutes === dur ? null : dur
-                        })
-                      }
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-              {task.durationMinutes != null && (
-                <button
-                  type="button"
-                  className="chip-btn urgent"
-                  style={{ marginLeft: 'auto' }}
-                  title={t.durationClear}
-                  onClick={() =>
-                    void localDb.upsertTask({
-                      id: task.id,
-                      durationMinutes: null
-                    })
-                  }
-                >
-                  <X size={11.5} />
-                  <span>{t.actionClear}</span>
-                </button>
-              )}
-            </div>
-
-            <div className="v2-timeblock-row" style={{ marginTop: 8 }}>
-              <span className="v2-timeblock-label">{t.effortLabel}</span>
-              <div className="v2-timeblock-slots">
-                {(
-                  [
-                    [null, t.effortNone],
-                    ['QUICK_WIN', `⚡ ${t.effortQuickWin}`],
-                    ['MEDIUM', t.effortMedium],
-                    ['DEEP_FOCUS', `🧠 ${t.effortDeepFocus}`]
-                  ] as Array<[EffortLevel | null, string]>
-                ).map(([lvl, label]) => (
-                  <button
-                    key={lvl ?? 'none'}
-                    type="button"
-                    className={`chip-btn ${(task.effortLevel ?? null) === lvl ? 'active' : ''}`}
-                    data-testid={`task-effort-chip-${lvl ?? 'none'}`}
-                    onClick={() =>
-                      void localDb.upsertTask({
-                        id: task.id,
-                        effortLevel: lvl
-                      })
-                    }
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* v2.1 Unified Single Footer Row: Labeled Metadata Pills on Left + [Focus, ⋯ Menu, ✓ Done] on Right */}
-        <div className="task-card-unified-footer" data-testid="task-unified-footer">
-          <div className="task-card-chips-row">
-            {/* 1. When Pill */}
-            <button
-              type="button"
-              className={`chip-btn ${
-                task.scheduleState === 'TODAY' ||
-                task.scheduleState === 'THIS_EVENING' ||
-                task.whenDate != null
-                  ? 'active'
-                  : ''
-              }`}
-              title={t.ctxWhenReminder}
+              className={`icon-btn ${task.isPinned ? 'active' : ''}`}
+              data-testid="task-pin-btn"
+              title={task.isPinned ? t.unpinTask : t.pinTask}
+              aria-label={task.isPinned ? t.unpinTask : t.pinTask}
               onClick={() => {
                 flushDraftsIfNeeded();
-                onOpenWhenModal(task.id);
+                void localDb.upsertTask({ id: task.id, isPinned: !task.isPinned });
               }}
             >
-              {task.scheduleState === 'TODAY' ? (
-                <Sun size={12} style={{ color: 'var(--today-star)' }} />
-              ) : task.scheduleState === 'THIS_EVENING' ? (
-                <Moon size={12} />
-              ) : task.scheduleState === 'SOMEDAY' ? (
-                <Cloud size={12} />
-              ) : task.scheduleState === 'ANYTIME' && task.whenDate == null ? (
-                <Compass size={12} />
-              ) : (
-                <Calendar size={12} />
-              )}
-              <span>{whenChipText}</span>
+              {task.isPinned ? <PinOff size={15.5} /> : <Pin size={15.5} />}
             </button>
 
-            {/* 1a. Today-View Exclusive 1-Click "This Evening" + Immediate Close Pill */}
-            {shouldShowQuickThisEveningPill({
-              isTodayView,
-              status: task.status,
-              scheduleState: task.scheduleState
-            }) && (
-              <button
-                type="button"
-                data-testid="task-quick-this-evening-chip"
-                className="chip-btn evening-quick"
-                title={t.viewThisEvening}
-                onClick={() => {
-                  flushPendingSubtaskIfNeeded();
-                  const now = new Date();
-                  const todayMidnight = new Date(
-                    now.getFullYear(),
-                    now.getMonth(),
-                    now.getDate(),
-                    0,
-                    0,
-                    0,
-                    0
-                  ).getTime();
-                  void localDb.upsertTask({
-                    id: task.id,
-                    title: titleDraft,
-                    notes: notesDraft,
-                    scheduleState: 'THIS_EVENING',
-                    whenDate: todayMidnight
-                  });
-                  onCollapse();
-                }}
-              >
-                <Moon size={12} />
-                <span>{t.viewThisEvening}</span>
-              </button>
-            )}
-
-            {/* 1b. v2.0 Timeblock Chip */}
-            <button
-              type="button"
-              data-testid="task-timeblock-chip"
-              className={`chip-btn ${
-                task.scheduledStartMinutes != null || timeblockOpen ? 'active' : ''
-              }`}
-              title={t.actionTimeblock}
-              onClick={() => {
-                flushDraftsIfNeeded();
-                setTimeblockOpen((v) => !v);
-              }}
-            >
-              <Clock size={12} />
-              <span>
-                {timeblockRangeLabel ? `🕐 ${timeblockRangeLabel}` : `⏱️ ${t.actionTimeblock}`}
-              </span>
-            </button>
-
-            {/* 1c. v3.0 Standalone Duration & Effort Chip */}
-            <button
-              type="button"
-              data-testid="task-effort-duration-chip"
-              className={`chip-btn ${
-                Boolean(anyDurationLabel) || task.effortLevel != null || effortDurationOpen
-                  ? 'active'
-                  : ''
-              }`}
-              title={`${t.durationLabel} / ${t.effortLabel}`}
-              onClick={() => {
-                flushDraftsIfNeeded();
-                setEffortDurationOpen((v) => !v);
-              }}
-            >
-              {task.effortLevel != null ? <Zap size={12} /> : <Hourglass size={12} />}
-              <span>
-                {anyDurationLabel && effortDisplayLabel
-                  ? `${anyDurationLabel} · ${effortDisplayLabel}`
-                  : anyDurationLabel
-                    ? anyDurationLabel
-                    : effortDisplayLabel
-                      ? effortDisplayLabel
-                      : `${t.durationLabel} · ${t.effortLabel}`}
-              </span>
-            </button>
-
-            {/* 1d. v3.0 Waiting On / Dependencies Chip */}
-            {onOpenDependenciesModal && (
-              <button
-                type="button"
-                data-testid="task-waiting-on-chip"
-                className={`chip-btn ${
-                  isActivelyBlocked ? 'urgent' : totalBlockerCount > 0 ? 'active' : ''
-                }`}
-                title={t.waitingOnLabel}
-                onClick={() => {
-                  flushDraftsIfNeeded();
-                  onOpenDependenciesModal(task.id);
-                }}
-              >
-                <Link2 size={12} />
-                <span>
-                  {blockedSummaryLabel
-                    ? blockedSummaryLabel
-                    : totalBlockerCount > 0
-                      ? `${t.dependencyModalTitle} (${totalBlockerCount})`
-                      : t.waitingOnLabel}
-                </span>
-              </button>
-            )}
-
-            {/* 2. Reminder Pill (when set) */}
-            {task.reminderTime != null && (
-              <button
-                type="button"
-                className="chip-btn active"
-                title={`${t.actionReminder}: ${formatReminderClock(task.reminderTime)}`}
-                onClick={() => {
-                  flushDraftsIfNeeded();
-                  onOpenWhenModal(task.id);
-                }}
-              >
-                <Bell size={12} />
-                <span>{formatReminderClock(task.reminderTime)}</span>
-              </button>
-            )}
-
-            {/* 3. Repeat Pill */}
-            <button
-              type="button"
-              className={`chip-btn ${task.recurrenceRule != null ? 'active' : ''}`}
-              title={t.actionRepeat}
-              onClick={() => {
-                flushDraftsIfNeeded();
-                onOpenRepeatModal(task.id);
-              }}
-            >
-              <Repeat size={12} />
-              <span>
-                {task.recurrenceRule != null
-                  ? formatRecurrenceShort(task.recurrenceRule, lang)
-                  : t.actionRepeat}
-              </span>
-            </button>
-
-            {/* 4. Deadline / Due Date Pill */}
-            <button
-              type="button"
-              className={`chip-btn ${
-                dlMeta ? (dlMeta.urgent ? 'urgent' : 'active') : ''
-              }`}
-              title={dlMeta ? `${t.actionDeadline}: ${dlMeta.label}` : t.actionDeadline}
-              onClick={() => {
-                flushDraftsIfNeeded();
-                onOpenDeadlineModal(task.id);
-              }}
-            >
-              <Flag
-                size={12}
-                style={
-                  dlMeta == null ? { color: 'var(--deadline-red)', opacity: 0.85 } : undefined
-                }
-              />
-              <span>{dlMeta ? dlMeta.label : t.actionDeadline}</span>
-            </button>
-
-            {/* 5. Project / Area Container Pill */}
-            <button
-              type="button"
-              className={`chip-btn ${containerLabel ? 'active' : ''}`}
-              title={t.ctxMoveContainer}
-              onClick={() => {
-                flushDraftsIfNeeded();
-                onOpenMoveModal(task.id);
-              }}
-            >
-              <FolderInput size={12} />
-              <span>{containerLabel || `${t.entityProject} / ${t.entityArea}`}</span>
-            </button>
-
-            {/* 6. Assigned Tag Pills + "+ Tags" */}
-            {taskTags.map((tg) => (
-              <button
-                key={tg.id}
-                type="button"
-                className="chip-btn active"
-                title={`${t.entityTag}: ${tg.title}`}
-                onClick={() => {
-                  flushDraftsIfNeeded();
-                  onOpenTagsModal(task.id);
-                }}
-              >
-                <LayoutGrid size={11.5} />
-                <span>{tg.title}</span>
-              </button>
-            ))}
-
-            <button
-              type="button"
-              className="chip-btn"
-              title={t.ctxAssignTags}
-              onClick={() => {
-                flushDraftsIfNeeded();
-                onOpenTagsModal(task.id);
-              }}
-            >
-              <Plus size={11.5} />
-              <span>{t.entityTags}</span>
-            </button>
-          </div>
-
-          <div className="task-card-actions">
             {task.status === 'OPEN' && (
               <button
                 type="button"
                 className="icon-btn"
                 title={t.actionFocusTimerMinutes(focusDurationMins)}
+                aria-label={t.actionFocusTimerMinutes(focusDurationMins)}
                 data-testid="task-start-focus-btn"
                 onClick={() => {
                   flushDraftsIfNeeded();
@@ -1427,159 +944,785 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               </button>
             )}
 
-            <div style={{ position: 'relative', display: 'inline-flex' }}>
-              <button
-                type="button"
-                className="chip-btn task-more-menu-trigger"
-                title={t.actionMoreOptions}
-                data-testid="task-more-menu-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setInlineMoreMenuOpen((v) => !v);
-                }}
-              >
-                <MoreHorizontal size={15.5} />
-              </button>
+            <button
+              type="button"
+              className="icon-btn task-modal-close-btn"
+              title={t.actionDone}
+              aria-label={t.actionDone}
+              data-testid="task-modal-close-btn"
+              onClick={handleDoneCollapse}
+            >
+              <X size={17} />
+            </button>
+          </div>
+        </div>
 
-              {inlineMoreMenuOpen && (
-                <>
-                  <div
-                    style={{ position: 'fixed', inset: 0, zIndex: 85 }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setInlineMoreMenuOpen(false);
+        {/* Internal Scrollable 2-Column Soft Bento Body */}
+        <div className="task-bento-modal-body">
+          <div className="task-bento-modal-grid">
+            {/* Left Content Column: Notes, Checklist, Attachments */}
+            <div className="task-bento-main-col">
+              {/* 1. Notes Soft Bento Card */}
+              <section className="task-bento-card" data-testid="task-bento-notes-card">
+                <div className="task-bento-card-header">
+                  <FileText size={12.5} />
+                  <span>{t.placeholderNotes}</span>
+                </div>
+                <MarkdownNotesField
+                  value={notesDraft}
+                  rows={4}
+                  onChange={(nextNotes) => {
+                    setNotesDraft(nextNotes);
+                    void localDb.upsertTask({ id: task.id, notes: nextNotes });
+                  }}
+                  onFocusChange={setIsNotesFocused}
+                  placeholder={t.placeholderNotes}
+                  className="task-card-notes"
+                />
+              </section>
+
+              {/* 2. Checklist Soft Bento Card */}
+              <section
+                className="task-bento-card checklist-section"
+                data-testid="task-bento-checklist-card"
+              >
+                <div className="checklist-header task-bento-card-header">
+                  <CheckSquare size={12.5} />
+                  <span>
+                    {t.actionChecklist} ({doneChecklistsCount}/{activeChecklists.length})
+                  </span>
+                </div>
+
+                {activeChecklists.map((item, idx) => (
+                  <ChecklistSubtaskRow
+                    key={item.id}
+                    item={item}
+                    idx={idx}
+                    totalCount={activeChecklists.length}
+                    taskId={task.id}
+                    t={t}
+                    registerRef={(el) => {
+                      subtaskRefs.current[item.id] = el;
+                    }}
+                    onFocusAddBottom={() => addSubtaskInputRef.current?.focus()}
+                    onFocusNewSubtask={(newId) => setFocusSubtaskId(newId)}
+                    onRequestEnsureVisible={onRequestEnsureVisible}
+                    onSwapWith={(dir) => {
+                      const other =
+                        dir === 'up' ? activeChecklists[idx - 1] : activeChecklists[idx + 1];
+                      if (other) {
+                        void localDb.swapChecklistOrder(item.id, other.id);
+                      }
                     }}
                   />
-                  <div
-                    className="dropdown-popover"
-                    style={{
-                      right: 0,
-                      left: 'auto',
-                      top: 'auto',
-                      bottom: 'calc(100% + 6px)',
-                      minWidth: 220,
-                      zIndex: 90
+                ))}
+
+                <div className="checklist-add-row checklist-add-boxed">
+                  <Circle size={13.5} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
+                  <input
+                    ref={addSubtaskInputRef}
+                    type="text"
+                    className="checklist-input"
+                    value={newSubtask}
+                    onPointerDown={() => onRequestEnsureVisible?.(true)}
+                    onFocus={() => onRequestEnsureVisible?.(true)}
+                    onChange={(e) => setNewSubtask(e.target.value)}
+                    onPaste={(e) => {
+                      const pasted = e.clipboardData.getData('text');
+                      if (pasted && /\r?\n/.test(pasted)) {
+                        e.preventDefault();
+                        const lines = pasted
+                          .split(/\r?\n/)
+                          .map((line) => line.replace(/^[-*•[\]xX\s]+/, '').trim())
+                          .filter(Boolean);
+                        if (lines.length > 0) {
+                          setNewSubtask('');
+                          void localDb.addChecklistItems(task.id, lines);
+                        }
+                      }
                     }}
-                    onClick={(e) => e.stopPropagation()}
+                    placeholder={t.placeholderAddChecklist}
+                    onKeyDown={async (e) => {
+                      if (e.key === 'Enter' && newSubtask.trim()) {
+                        e.preventDefault();
+                        const txt = newSubtask.trim();
+                        setNewSubtask('');
+                        await localDb.addChecklistItems(task.id, [txt]);
+                      }
+                    }}
+                  />
+                  {newSubtask.trim() && (
+                    <button
+                      type="button"
+                      className="chip-btn active"
+                      title={t.actionChecklist}
+                      onClick={async () => {
+                        const txt = newSubtask.trim();
+                        setNewSubtask('');
+                        await localDb.addChecklistItems(task.id, [txt]);
+                      }}
+                    >
+                      <Plus size={12} />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="chip-btn gemini checklist-magic-inline-btn"
+                    disabled={loadingAi}
+                    title={t.geminiMagicBreakdown}
+                    onClick={() => void runMagicBreakdown()}
                   >
-                    <button
-                      type="button"
-                      className="dropdown-item"
-                      onClick={() => {
-                        setInlineMoreMenuOpen(false);
-                        attachmentFileInputRef.current?.click();
-                      }}
-                    >
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                        <Paperclip size={14} style={{ color: 'var(--things-blue)' }} />
-                        <span>{t.attachmentsAddPhotoBtn}</span>
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className="dropdown-item"
-                      onClick={() => {
-                        setInlineMoreMenuOpen(false);
-                        cameraCaptureInputRef.current?.click();
-                      }}
-                    >
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                        <Camera size={14} style={{ color: 'var(--things-blue)' }} />
-                        <span>{t.actionTakePhoto}</span>
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className="dropdown-item"
-                      onClick={() => {
-                        setInlineMoreMenuOpen(false);
-                        triggerInlineVoiceDictation();
-                      }}
-                    >
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                        <Mic size={14} style={{ color: 'var(--things-blue)' }} />
-                        <span>{t.voiceDictationLabel}</span>
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className="dropdown-item"
-                      data-testid="task-pin-btn"
-                      onClick={() => {
-                        setInlineMoreMenuOpen(false);
-                        flushDraftsIfNeeded();
-                        void localDb.upsertTask({ id: task.id, isPinned: !task.isPinned });
-                      }}
-                    >
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                        {task.isPinned ? (
-                          <PinOff size={14} style={{ color: 'var(--things-blue)' }} />
-                        ) : (
-                          <Pin size={14} style={{ color: 'var(--things-blue)' }} />
-                        )}
-                        <span>{task.isPinned ? t.unpinTask : t.pinTask}</span>
-                      </span>
-                    </button>
-                    {onOpenDependenciesModal && (
-                      <button
-                        type="button"
-                        className="dropdown-item"
-                        data-testid="task-more-waiting-on-btn"
-                        onClick={() => {
-                          setInlineMoreMenuOpen(false);
-                          flushDraftsIfNeeded();
-                          onOpenDependenciesModal(task.id);
-                        }}
-                      >
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                          <Link2 size={14} style={{ color: 'var(--things-blue)' }} />
-                          <span>{t.waitingOnLabel}</span>
-                        </span>
-                      </button>
+                    <Sparkles size={12.5} />
+                    <span>{loadingAi ? t.geminiGenerating : t.geminiMagicBreakdown}</span>
+                  </button>
+                </div>
+              </section>
+
+              {/* 3. Attachments Soft Bento Card */}
+              <section className="task-bento-card" data-testid="task-bento-attachments-card">
+                <div className="task-bento-card-header">
+                  <Paperclip size={12.5} />
+                  <span>
+                    {t.attachmentsTitle}
+                    {taskAttachments.length > 0 ? ` (${taskAttachments.length})` : ''}
+                  </span>
+                </div>
+
+                <AttachmentsStrip
+                  taskId={task.id}
+                  attachments={taskAttachments}
+                  t={t}
+                  onToast={onToast}
+                  showAddButton
+                  fileInputRef={attachmentFileInputRef}
+                />
+
+                <input
+                  ref={cameraCaptureInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  style={{ display: 'none' }}
+                  onChange={async (e) => {
+                    const files = Array.from(e.target.files ?? []);
+                    e.target.value = '';
+                    for (const f of files) {
+                      await processAndAddAttachmentFile(f, { taskId: task.id }, t, onToast);
+                    }
+                  }}
+                />
+              </section>
+            </div>
+
+            {/* Right Properties Column: 6 Soft Bento Property Tiles with Non-Truncating Pills */}
+            <div className="task-bento-props-col">
+              {/* 1. When & Timeblock Tile */}
+              <div className="task-bento-prop-tile" data-testid="task-bento-tile-when">
+                <span className="task-bento-prop-label">{t.actionWhen}</span>
+                <div className="task-bento-prop-pills">
+                  <button
+                    type="button"
+                    data-testid="task-when-chip"
+                    className={`chip-btn ${
+                      task.scheduleState === 'TODAY' ||
+                      task.scheduleState === 'THIS_EVENING' ||
+                      task.whenDate != null
+                        ? 'active'
+                        : ''
+                    }`}
+                    title={t.ctxWhenReminder}
+                    onClick={() => {
+                      flushDraftsIfNeeded();
+                      onOpenWhenModal(task.id);
+                    }}
+                  >
+                    {task.scheduleState === 'TODAY' ? (
+                      <Sun size={12} style={{ color: 'var(--today-star)' }} />
+                    ) : task.scheduleState === 'THIS_EVENING' ? (
+                      <Moon size={12} />
+                    ) : task.scheduleState === 'SOMEDAY' ? (
+                      <Cloud size={12} />
+                    ) : task.scheduleState === 'ANYTIME' && task.whenDate == null ? (
+                      <Compass size={12} />
+                    ) : (
+                      <Calendar size={12} />
                     )}
+                    <span>{whenChipText}</span>
+                  </button>
+
+                  {shouldShowQuickThisEveningPill({
+                    isTodayView,
+                    status: task.status,
+                    scheduleState: task.scheduleState
+                  }) && (
                     <button
                       type="button"
-                      className="dropdown-item"
-                      data-testid="task-duplicate-btn"
+                      data-testid="task-quick-this-evening-chip"
+                      className="chip-btn evening-quick"
+                      title={t.viewThisEvening}
                       onClick={() => {
-                        setInlineMoreMenuOpen(false);
-                        flushDraftsIfNeeded();
-                        onDuplicateTask(task.id);
+                        flushPendingSubtaskIfNeeded();
+                        const now = new Date();
+                        const todayMidnight = new Date(
+                          now.getFullYear(),
+                          now.getMonth(),
+                          now.getDate(),
+                          0,
+                          0,
+                          0,
+                          0
+                        ).getTime();
+                        void localDb.upsertTask({
+                          id: task.id,
+                          title: titleDraft,
+                          notes: notesDraft,
+                          scheduleState: 'THIS_EVENING',
+                          whenDate: todayMidnight
+                        });
+                        onCollapse();
                       }}
                     >
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                        <Copy size={14} style={{ color: 'var(--things-blue)' }} />
-                        <span>{t.actionDuplicateTodo}</span>
-                      </span>
+                      <Moon size={12} />
+                      <span>{t.viewThisEvening}</span>
                     </button>
-                    <div className="dropdown-divider" />
+                  )}
+
+                  {task.reminderTime != null && (
                     <button
                       type="button"
-                      className="dropdown-item"
-                      style={{ color: 'var(--deadline-red)' }}
+                      className="chip-btn active"
+                      title={`${t.actionReminder}: ${formatReminderClock(task.reminderTime)}`}
                       onClick={() => {
-                        setInlineMoreMenuOpen(false);
-                        void localDb.softDeleteTasks([task.id]);
+                        flushDraftsIfNeeded();
+                        onOpenWhenModal(task.id);
                       }}
                     >
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                        <Trash2 size={14} style={{ color: 'var(--deadline-red)' }} />
-                        <span>{t.actionDelete}</span>
+                      <Bell size={12} />
+                      <span>{formatReminderClock(task.reminderTime)}</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    data-testid="task-timeblock-chip"
+                    className={`chip-btn ${
+                      task.scheduledStartMinutes != null || timeblockOpen ? 'active' : ''
+                    }`}
+                    title={t.actionTimeblock}
+                    onClick={() => {
+                      flushDraftsIfNeeded();
+                      setTimeblockOpen((v) => !v);
+                    }}
+                  >
+                    <Clock size={12} />
+                    <span>
+                      {timeblockRangeLabel ? `🕐 ${timeblockRangeLabel}` : `⏱️ ${t.actionTimeblock}`}
+                    </span>
+                  </button>
+                </div>
+
+                {timeblockOpen && (
+                  <div className="v2-timeblock-panel" data-testid="task-timeblock-panel">
+                    <div className="v2-timeblock-row">
+                      <span className="v2-timeblock-label">{t.timeblockStartTime}</span>
+                      <input
+                        type="time"
+                        className="v2-inline-time-input"
+                        aria-label={t.timeblockStartTime}
+                        value={
+                          task.scheduledStartMinutes != null
+                            ? formatMinutesAsClock(task.scheduledStartMinutes)
+                            : ''
+                        }
+                        onChange={(e) => {
+                          const mins = parseClockToMinutes(e.target.value);
+                          if (mins != null) {
+                            void localDb.upsertTask({
+                              id: task.id,
+                              scheduledStartMinutes: mins,
+                              durationMinutes:
+                                task.durationMinutes ?? DEFAULT_TIMEBLOCK_DURATION_MINUTES
+                            });
+                          }
+                        }}
+                      />
+                      <div className="v2-timeblock-slots">
+                        {TIMEBLOCK_QUICK_START_MINUTES.map((mins) => (
+                          <button
+                            key={mins}
+                            type="button"
+                            className={`chip-btn ${task.scheduledStartMinutes === mins ? 'active' : ''}`}
+                            title={`${t.timeblockStartTime}: ${formatMinutesAsClock(mins)}`}
+                            onClick={() =>
+                              void localDb.upsertTask({
+                                id: task.id,
+                                scheduledStartMinutes: mins,
+                                durationMinutes:
+                                  task.durationMinutes ?? DEFAULT_TIMEBLOCK_DURATION_MINUTES
+                              })
+                            }
+                          >
+                            {formatMinutesAsClock(mins)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="v2-timeblock-row" style={{ marginTop: 8 }}>
+                      <span className="v2-timeblock-label">{t.timeblockDuration}</span>
+                      <div className="v2-timeblock-slots">
+                        {TIMEBLOCK_DURATION_PRESETS.map((dur) => (
+                          <button
+                            key={dur}
+                            type="button"
+                            className={`chip-btn ${currentDuration === dur ? 'active' : ''}`}
+                            title={`${t.timeblockDuration}: ${dur}m`}
+                            onClick={() =>
+                              void localDb.upsertTask({
+                                id: task.id,
+                                scheduledStartMinutes: task.scheduledStartMinutes ?? 9 * 60,
+                                durationMinutes: dur
+                              })
+                            }
+                          >
+                            {dur}m
+                          </button>
+                        ))}
+                      </div>
+
+                      {(task.scheduledStartMinutes != null || task.durationMinutes != null) && (
+                        <button
+                          type="button"
+                          className="chip-btn urgent"
+                          style={{ marginLeft: 'auto' }}
+                          title={t.timeblockClear}
+                          onClick={() =>
+                            void localDb.upsertTask({
+                              id: task.id,
+                              scheduledStartMinutes: null,
+                              durationMinutes: null
+                            })
+                          }
+                        >
+                          <X size={11.5} />
+                          <span>{t.timeblockClear}</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 2. Deadline & Repeat Tile */}
+              <div className="task-bento-prop-tile" data-testid="task-bento-tile-deadline-repeat">
+                <span className="task-bento-prop-label">
+                  {t.actionDeadline} · {t.actionRepeat}
+                </span>
+                <div className="task-bento-prop-pills">
+                  <button
+                    type="button"
+                    data-testid="task-deadline-chip"
+                    className={`chip-btn ${
+                      dlMeta ? (dlMeta.urgent ? 'urgent' : 'active') : ''
+                    }`}
+                    title={dlMeta ? `${t.actionDeadline}: ${dlMeta.label}` : t.actionDeadline}
+                    onClick={() => {
+                      flushDraftsIfNeeded();
+                      onOpenDeadlineModal(task.id);
+                    }}
+                  >
+                    <Flag
+                      size={12}
+                      style={
+                        dlMeta == null
+                          ? { color: 'var(--deadline-red)', opacity: 0.85 }
+                          : undefined
+                      }
+                    />
+                    <span>{dlMeta ? dlMeta.label : t.actionDeadline}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    data-testid="task-repeat-chip"
+                    className={`chip-btn ${task.recurrenceRule != null ? 'active' : ''}`}
+                    title={t.actionRepeat}
+                    onClick={() => {
+                      flushDraftsIfNeeded();
+                      onOpenRepeatModal(task.id);
+                    }}
+                  >
+                    <Repeat size={12} />
+                    <span>
+                      {task.recurrenceRule != null
+                        ? formatRecurrenceShort(task.recurrenceRule, lang)
+                        : t.actionRepeat}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 3. Duration & Effort Tile */}
+              <div className="task-bento-prop-tile" data-testid="task-bento-tile-duration-effort">
+                <span className="task-bento-prop-label">
+                  {t.durationLabel} · {t.effortLabel}
+                </span>
+                <div className="task-bento-prop-pills">
+                  <button
+                    type="button"
+                    data-testid="task-effort-duration-chip"
+                    className={`chip-btn ${
+                      Boolean(anyDurationLabel) || task.effortLevel != null || effortDurationOpen
+                        ? 'active'
+                        : ''
+                    }`}
+                    title={`${t.durationLabel} / ${t.effortLabel}`}
+                    onClick={() => {
+                      flushDraftsIfNeeded();
+                      setEffortDurationOpen((v) => !v);
+                    }}
+                  >
+                    {task.effortLevel != null ? <Zap size={12} /> : <Hourglass size={12} />}
+                    <span>
+                      {anyDurationLabel && effortDisplayLabel
+                        ? `${anyDurationLabel} · ${effortDisplayLabel}`
+                        : anyDurationLabel
+                          ? anyDurationLabel
+                          : effortDisplayLabel
+                            ? effortDisplayLabel
+                            : `${t.durationLabel} · ${t.effortLabel}`}
+                    </span>
+                  </button>
+                </div>
+
+                {effortDurationOpen && (
+                  <div className="v2-timeblock-panel" data-testid="task-effort-duration-panel">
+                    <div className="v2-timeblock-row">
+                      <span className="v2-timeblock-label">{t.durationLabel}</span>
+                      <div className="v2-timeblock-slots">
+                        {STANDALONE_DURATION_PRESETS.map((dur) => {
+                          const label = formatStandaloneDuration(dur);
+                          return (
+                            <button
+                              key={dur}
+                              type="button"
+                              className={`chip-btn ${task.durationMinutes === dur ? 'active' : ''}`}
+                              data-testid={`task-duration-chip-${dur}`}
+                              title={`${t.durationLabel}: ${label}`}
+                              onClick={() =>
+                                void localDb.upsertTask({
+                                  id: task.id,
+                                  durationMinutes: task.durationMinutes === dur ? null : dur
+                                })
+                              }
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {task.durationMinutes != null && (
+                        <button
+                          type="button"
+                          className="chip-btn urgent"
+                          style={{ marginLeft: 'auto' }}
+                          title={t.durationClear}
+                          onClick={() =>
+                            void localDb.upsertTask({
+                              id: task.id,
+                              durationMinutes: null
+                            })
+                          }
+                        >
+                          <X size={11.5} />
+                          <span>{t.actionClear}</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="v2-timeblock-row" style={{ marginTop: 8 }}>
+                      <span className="v2-timeblock-label">{t.effortLabel}</span>
+                      <div className="v2-timeblock-slots">
+                        {(
+                          [
+                            [null, t.effortNone],
+                            ['QUICK_WIN', `⚡ ${t.effortQuickWin}`],
+                            ['MEDIUM', t.effortMedium],
+                            ['DEEP_FOCUS', `🧠 ${t.effortDeepFocus}`]
+                          ] as Array<[EffortLevel | null, string]>
+                        ).map(([lvl, label]) => (
+                          <button
+                            key={lvl ?? 'none'}
+                            type="button"
+                            className={`chip-btn ${(task.effortLevel ?? null) === lvl ? 'active' : ''}`}
+                            data-testid={`task-effort-chip-${lvl ?? 'none'}`}
+                            onClick={() =>
+                              void localDb.upsertTask({
+                                id: task.id,
+                                effortLevel: lvl
+                              })
+                            }
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 4. Waiting On Tile */}
+              {onOpenDependenciesModal && (
+                <div className="task-bento-prop-tile" data-testid="task-bento-tile-waiting-on">
+                  <span className="task-bento-prop-label">{t.waitingOnLabel}</span>
+                  <div className="task-bento-prop-pills">
+                    <button
+                      type="button"
+                      data-testid="task-waiting-on-chip"
+                      className={`chip-btn ${
+                        isActivelyBlocked ? 'urgent' : totalBlockerCount > 0 ? 'active' : ''
+                      }`}
+                      title={t.waitingOnLabel}
+                      onClick={() => {
+                        flushDraftsIfNeeded();
+                        onOpenDependenciesModal(task.id);
+                      }}
+                    >
+                      <Link2 size={12} />
+                      <span>
+                        {blockedSummaryLabel
+                          ? blockedSummaryLabel
+                          : totalBlockerCount > 0
+                            ? `${t.dependencyModalTitle} (${totalBlockerCount})`
+                            : t.waitingOnLabel}
                       </span>
                     </button>
                   </div>
-                </>
+                </div>
               )}
-            </div>
 
+              {/* 5. Categories Tile */}
+              <div className="task-bento-prop-tile" data-testid="task-bento-tile-categories">
+                <span className="task-bento-prop-label">{t.entityTags}</span>
+                <div className="task-bento-prop-pills">
+                  {taskTags.map((tg) => (
+                    <button
+                      key={tg.id}
+                      type="button"
+                      className="chip-btn active"
+                      title={`${t.entityTag}: ${tg.title}`}
+                      onClick={() => {
+                        flushDraftsIfNeeded();
+                        onOpenTagsModal(task.id);
+                      }}
+                    >
+                      <LayoutGrid size={11.5} />
+                      <span>{tg.title}</span>
+                    </button>
+                  ))}
+
+                  <button
+                    type="button"
+                    data-testid="task-tags-chip"
+                    className="chip-btn"
+                    title={t.ctxAssignTags}
+                    onClick={() => {
+                      flushDraftsIfNeeded();
+                      onOpenTagsModal(task.id);
+                    }}
+                  >
+                    <Plus size={11.5} />
+                    <span>{t.actionTags}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 6. Project / Area Tile */}
+              <div className="task-bento-prop-tile" data-testid="task-bento-tile-container">
+                <span className="task-bento-prop-label">
+                  {t.entityProject} / {t.entityArea}
+                </span>
+                <div className="task-bento-prop-pills">
+                  <button
+                    type="button"
+                    data-testid="task-move-chip"
+                    className={`chip-btn ${containerLabel ? 'active' : ''}`}
+                    title={t.ctxMoveContainer}
+                    onClick={() => {
+                      flushDraftsIfNeeded();
+                      onOpenMoveModal(task.id);
+                    }}
+                  >
+                    <FolderInput size={12} />
+                    <span>{containerLabel || t.actionMove}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Unified Footer: ⋯ More Actions Menu (opening upward cleanly) + Primary Done Button */}
+        <div className="task-card-unified-footer" data-testid="task-unified-footer">
+          <div style={{ position: 'relative', display: 'inline-flex' }}>
             <button
               type="button"
-              className="btn-primary"
-              style={{ padding: '5px 10px', fontSize: 12.2 }}
+              className="chip-btn task-more-menu-trigger"
+              title={t.actionMoreOptions}
+              data-testid="task-more-menu-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                setInlineMoreMenuOpen((v) => !v);
+              }}
+            >
+              <MoreHorizontal size={15.5} />
+              <span>{t.actionMoreOptions}</span>
+            </button>
+
+            {inlineMoreMenuOpen && (
+              <>
+                <div
+                  style={{ position: 'fixed', inset: 0, zIndex: 85 }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setInlineMoreMenuOpen(false);
+                  }}
+                />
+                <div
+                  className="dropdown-popover"
+                  style={{
+                    left: 0,
+                    right: 'auto',
+                    top: 'auto',
+                    bottom: 'calc(100% + 8px)',
+                    minWidth: 224,
+                    zIndex: 90
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    className="dropdown-item"
+                    onClick={() => {
+                      setInlineMoreMenuOpen(false);
+                      attachmentFileInputRef.current?.click();
+                    }}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <Paperclip size={14} style={{ color: 'var(--things-blue)' }} />
+                      <span>{t.attachmentsAddPhotoBtn}</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="dropdown-item"
+                    onClick={() => {
+                      setInlineMoreMenuOpen(false);
+                      cameraCaptureInputRef.current?.click();
+                    }}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <Camera size={14} style={{ color: 'var(--things-blue)' }} />
+                      <span>{t.actionTakePhoto}</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="dropdown-item"
+                    onClick={() => {
+                      setInlineMoreMenuOpen(false);
+                      triggerInlineVoiceDictation();
+                    }}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <Mic size={14} style={{ color: 'var(--things-blue)' }} />
+                      <span>{t.voiceDictationLabel}</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="dropdown-item"
+                    data-testid="task-more-pin-btn"
+                    onClick={() => {
+                      setInlineMoreMenuOpen(false);
+                      flushDraftsIfNeeded();
+                      void localDb.upsertTask({ id: task.id, isPinned: !task.isPinned });
+                    }}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      {task.isPinned ? (
+                        <PinOff size={14} style={{ color: 'var(--things-blue)' }} />
+                      ) : (
+                        <Pin size={14} style={{ color: 'var(--things-blue)' }} />
+                      )}
+                      <span>{task.isPinned ? t.unpinTask : t.pinTask}</span>
+                    </span>
+                  </button>
+                  {onOpenDependenciesModal && (
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      data-testid="task-more-waiting-on-btn"
+                      onClick={() => {
+                        setInlineMoreMenuOpen(false);
+                        flushDraftsIfNeeded();
+                        onOpenDependenciesModal(task.id);
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <Link2 size={14} style={{ color: 'var(--things-blue)' }} />
+                        <span>{t.waitingOnLabel}</span>
+                      </span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="dropdown-item"
+                    data-testid="task-duplicate-btn"
+                    onClick={() => {
+                      setInlineMoreMenuOpen(false);
+                      flushDraftsIfNeeded();
+                      onDuplicateTask(task.id);
+                    }}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <Copy size={14} style={{ color: 'var(--things-blue)' }} />
+                      <span>{t.actionDuplicateTodo}</span>
+                    </span>
+                  </button>
+                  <div className="dropdown-divider" />
+                  <button
+                    type="button"
+                    className="dropdown-item"
+                    data-testid="task-delete-btn"
+                    style={{ color: 'var(--deadline-red)' }}
+                    onClick={() => {
+                      setInlineMoreMenuOpen(false);
+                      void localDb.softDeleteTasks([task.id]);
+                      onCollapse();
+                    }}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <Trash2 size={14} style={{ color: 'var(--deadline-red)' }} />
+                      <span>{t.actionDelete}</span>
+                    </span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="task-card-actions">
+            <button
+              type="button"
+              className="btn-primary task-modal-done-btn"
+              data-testid="task-modal-done-btn"
               title={t.actionDone}
               onClick={handleDoneCollapse}
             >
               <Check size={14} />
+              <span>{t.actionDone}</span>
             </button>
           </div>
         </div>
@@ -1649,15 +1792,24 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             onDropReorder(draggedIds[0], task.id);
           }
         }}
+        onPointerDown={(e) => {
+          lastPointerTypeRef.current = e.pointerType || 'mouse';
+        }}
         onClick={(e) => {
           e.stopPropagation();
           if (e.shiftKey) {
             onSelect(true, true);
           } else if (e.ctrlKey || e.metaKey || isMultiSelectMode) {
             onSelect(true, false);
-          } else {
+          } else if (lastPointerTypeRef.current === 'touch') {
             onExpand();
+          } else {
+            onSelect(false, false);
           }
+        }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          onExpand();
         }}
         onContextMenu={(e) => {
           if (quickFindOpen) return;
@@ -1859,6 +2011,21 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           )}
         </div>
 
+        <button
+          type="button"
+          className="task-row-open-btn"
+          title={t.actionEdit}
+          aria-label={t.actionEdit}
+          data-testid={`task-row-open-modal-${task.id}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onExpand();
+          }}
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
+          <Edit3 size={13.5} />
+        </button>
+
         <span className="drag-grip" title={t.actionMove}>
           <GripVertical size={15} />
         </span>
@@ -1892,6 +2059,20 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 </span>
               </div>
               <div className="context-menu-divider" />
+
+              {/* 0. Open / Edit To-Do Modal */}
+              <button
+                type="button"
+                className="context-menu-item"
+                data-testid="task-ctx-edit-btn"
+                onClick={() => {
+                  setCtxMenu(null);
+                  onExpand();
+                }}
+              >
+                <Edit3 size={14} />
+                <span>{t.actionEdit}</span>
+              </button>
 
               {/* 1. Select / Deselect */}
               <button

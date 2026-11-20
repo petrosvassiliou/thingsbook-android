@@ -48,6 +48,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -156,10 +157,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
@@ -633,6 +636,18 @@ fun ThingsSmartViewScreen(
                 viewModel.selectAllTasks(allVisibleTaskIds)
                 true
             }
+            !ctrlOrMeta && !nativeEvent.isShiftPressed && !nativeEvent.isAltPressed &&
+                (nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_ENTER ||
+                    nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER ||
+                    nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_SPACE) &&
+                expandedTaskId == null && selectedTaskIds.size == 1 &&
+                !showCreateProjectDialog && !showBatchMoveDialog && !showBatchTagPickerDialog &&
+                !showPerspectiveEditorDialog && !showEmptyTrashConfirmDialog && !isMobileDrawerOpen &&
+                !viewModel.hasOpenModalOrOverlay() &&
+                context.findHostActivity()?.currentFocus?.onCheckIsTextEditor() != true -> {
+                viewModel.expandTask(selectedTaskIds.first())
+                true
+            }
             nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_ESCAPE -> when {
                 showPerspectiveEditorDialog -> {
                     showPerspectiveEditorDialog = false
@@ -785,6 +800,25 @@ fun ThingsSmartViewScreen(
                         }
                         else -> false
                     }
+                } else {
+                    false
+                }
+            }
+            .onKeyEvent { event ->
+                if (biometricAppLockEnabled && !isAppUnlocked) return@onKeyEvent false
+                if (event.type == KeyEventType.KeyDown &&
+                    !event.isCtrlPressed &&
+                    !event.isMetaPressed &&
+                    !event.isAltPressed &&
+                    !event.isShiftPressed &&
+                    (event.key == Key.Enter || event.key == Key.NumPadEnter || event.key == Key.Spacebar) &&
+                    expandedTaskId == null && selectedTaskIds.size == 1 &&
+                    !showCreateProjectDialog && !showBatchMoveDialog && !showBatchTagPickerDialog &&
+                    !showPerspectiveEditorDialog && !showEmptyTrashConfirmDialog && !isMobileDrawerOpen &&
+                    !viewModel.hasOpenModalOrOverlay()
+                ) {
+                    viewModel.expandTask(selectedTaskIds.first())
+                    true
                 } else {
                     false
                 }
@@ -1365,36 +1399,105 @@ fun ThingsSmartViewScreen(
         // Full-window Soft Bento Floating Drag Ghost Card (with "%1$d To-Dos" multi-select badge)
         WorkspaceDragFloatingOverlay(controller = projectDragController)
 
-        // Expanded Task Editor Modal when opening a To-Do from Project Board or Roadmap mode
-        if (!(biometricAppLockEnabled && !isAppUnlocked) &&
-            isExpandedProjectWorkspace &&
-            expandedTaskId != null
-        ) {
-            val modalTask = remember(expandedTaskId, primaryTasks, allOpenTasks) {
-                primaryTasks.firstOrNull { it.id == expandedTaskId }
-                    ?: allOpenTasks.firstOrNull { it.id == expandedTaskId }
+        // Unified Soft Bento Task Modal across ALL views (v3.0.0-beta.4)
+        if (!(biometricAppLockEnabled && !isAppUnlocked) && expandedTaskId != null) {
+            val deletedTaskIdsSet = remember(deletedTasks) { deletedTasks.mapTo(HashSet()) { it.id } }
+            val modalTask = remember(
+                expandedTaskId,
+                primaryTasks,
+                allOpenTasks,
+                logbookTasks,
+                somedayTasks,
+                inboxTasks,
+                todayTasks,
+                eveningTasks,
+                upcomingTasks,
+                anytimeTasks,
+                projectTasks,
+                areaTasks,
+                deletedTaskIdsSet
+            ) {
+                resolveUnifiedModalTask(
+                    expandedTaskId = expandedTaskId,
+                    primaryTasks = primaryTasks,
+                    allOpenTasks = allOpenTasks,
+                    logbookTasks = logbookTasks,
+                    somedayTasks = somedayTasks,
+                    inboxTasks = inboxTasks,
+                    todayTasks = todayTasks,
+                    eveningTasks = eveningTasks,
+                    upcomingTasks = upcomingTasks,
+                    anytimeTasks = anytimeTasks,
+                    projectTasks = projectTasks,
+                    areaTasks = areaTasks,
+                    deletedTaskIds = deletedTaskIdsSet
+                )
             }
             if (modalTask != null) {
                 val magicBreakdownTaskIdTop by viewModel.magicBreakdownTaskId.collectAsState()
+                val modalScrollState = rememberScrollState()
                 Dialog(
                     onDismissRequest = { viewModel.collapseExpandedTask() },
                     properties = DialogProperties(usePlatformDefaultWidth = false)
                 ) {
                     Surface(
                         modifier = Modifier
-                            .widthIn(max = 640.dp)
-                            .fillMaxWidth(0.94f)
-                            .clip(RoundedCornerShape(20.dp)),
-                        shape = RoundedCornerShape(20.dp),
+                            .widthIn(max = 780.dp)
+                            .fillMaxWidth(0.95f)
+                            .heightIn(max = 680.dp)
+                            .imePadding()
+                            .clip(RoundedCornerShape(22.dp))
+                            .onPreviewKeyEvent { modalKeyEvent ->
+                                if (modalKeyEvent.type == KeyEventType.KeyDown) {
+                                    val ctrlOrMeta = modalKeyEvent.isCtrlPressed || modalKeyEvent.isMetaPressed
+                                    when {
+                                        modalKeyEvent.key == Key.Escape -> {
+                                            viewModel.collapseExpandedTask()
+                                            true
+                                        }
+                                        ctrlOrMeta && (modalKeyEvent.key == Key.Enter || modalKeyEvent.key == Key.NumPadEnter) -> {
+                                            viewModel.collapseExpandedTask()
+                                            true
+                                        }
+                                        ctrlOrMeta && !modalKeyEvent.isShiftPressed && modalKeyEvent.key == Key.S -> {
+                                            externalDialogTriggerType = "WHEN"
+                                            externalDialogTriggerToken++
+                                            true
+                                        }
+                                        ctrlOrMeta && modalKeyEvent.isShiftPressed && modalKeyEvent.key == Key.D -> {
+                                            externalDialogTriggerType = "DEADLINE"
+                                            externalDialogTriggerToken++
+                                            true
+                                        }
+                                        ctrlOrMeta && modalKeyEvent.isShiftPressed && modalKeyEvent.key == Key.M -> {
+                                            externalDialogTriggerType = "MOVE"
+                                            externalDialogTriggerToken++
+                                            true
+                                        }
+                                        ctrlOrMeta && !modalKeyEvent.isShiftPressed && modalKeyEvent.key == Key.D -> {
+                                            viewModel.duplicateTask(modalTask.id)
+                                            true
+                                        }
+                                        ctrlOrMeta && (modalKeyEvent.key == Key.Backspace || modalKeyEvent.key == Key.Delete) -> {
+                                            viewModel.deleteTask(modalTask.id)
+                                            true
+                                        }
+                                        else -> false
+                                    }
+                                } else {
+                                    false
+                                }
+                            },
+                        shape = RoundedCornerShape(22.dp),
                         color = colors.cardSurface,
+                        border = BorderStroke(width = 1.dp, color = colors.hairlineDivider),
                         tonalElevation = 8.dp,
-                        shadowElevation = 12.dp
+                        shadowElevation = 16.dp
                     ) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .verticalScroll(rememberScrollState())
-                                .padding(vertical = 6.dp)
+                                .verticalScroll(modalScrollState)
                         ) {
                             ThingsTaskRowItem(
                                 task = modalTask,
@@ -1462,6 +1565,43 @@ fun ThingsSmartViewScreen(
             )
         }
     }
+}
+
+internal fun resolveUnifiedModalTask(
+    expandedTaskId: String?,
+    primaryTasks: List<TaskItem>,
+    allOpenTasks: List<TaskItem>,
+    logbookTasks: List<TaskItem>,
+    somedayTasks: List<TaskItem>,
+    inboxTasks: List<TaskItem>,
+    todayTasks: List<TaskItem>,
+    eveningTasks: List<TaskItem>,
+    upcomingTasks: List<TaskItem>,
+    anytimeTasks: List<TaskItem>,
+    projectTasks: List<TaskItem> = emptyList(),
+    areaTasks: List<TaskItem> = emptyList(),
+    deletedTaskIds: Set<String> = emptySet()
+): TaskItem? {
+    val targetId = expandedTaskId?.takeIf { it.isNotBlank() } ?: return null
+    if (targetId in deletedTaskIds) return null
+    val pools = listOf(
+        primaryTasks,
+        allOpenTasks,
+        logbookTasks,
+        somedayTasks,
+        inboxTasks,
+        todayTasks,
+        eveningTasks,
+        upcomingTasks,
+        anytimeTasks,
+        projectTasks,
+        areaTasks
+    )
+    for (pool in pools) {
+        val match = pool.firstOrNull { it.id == targetId && !it.isDeleted }
+        if (match != null) return match
+    }
+    return null
 }
 
 @Composable
@@ -2012,7 +2152,7 @@ private fun ThingsTopHeaderAndQuickFindSection(
                     task.scheduleState == ScheduleState.SOMEDAY -> viewModel.selectSmartView(SmartViewType.SOMEDAY)
                     else -> viewModel.selectSmartView(SmartViewType.ANYTIME)
                 }
-                viewModel.toggleTaskExpansion(task.id)
+                viewModel.expandTask(task.id)
             },
             onClose = { viewModel.setQuickFindOpen(false) }
         )
@@ -2041,11 +2181,13 @@ private fun ThingsTaskRowItem(
 ) {
     val currentEpochDay by viewModel.currentEpochDay.collectAsState()
     val navTarget by viewModel.navigationTarget.collectAsState()
+    val activeModalTaskId by viewModel.expandedTaskId.collectAsState()
     val tagSortMode by viewModel.tagSortMode.collectAsState()
     val tagUsageCounts by viewModel.tagUsageCounts.collectAsState()
     val allOpenTasks by viewModel.allOpenTasks.collectAsState()
     val openTaskIds by viewModel.openTaskIds.collectAsState()
     val isTodayView = navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
+    val isModalExpanded = expandedTaskId == task.id
     androidx.compose.runtime.key(currentEpochDay) {
         ExpandableTaskCard(
             modifier = modifier,
@@ -2060,15 +2202,21 @@ private fun ThingsTaskRowItem(
             allHeadings = allHeadings,
             allOpenTasks = allOpenTasks,
             openTaskIds = openTaskIds,
-            isExpanded = expandedTaskId == task.id,
+            isExpanded = isModalExpanded,
             isTodayView = isTodayView,
             isSelected = task.id in selectedTaskIds,
             isSelectionModeActive = selectedTaskIds.isNotEmpty(),
-            suppressContextMenuExternal = expandedTaskId != null || isQuickFindOpen,
+            suppressContextMenuExternal = activeModalTaskId != null || isQuickFindOpen,
             onToggleSelection = { viewModel.toggleTaskSelection(task.id) },
             onRangeSelect = { viewModel.selectTaskRange(allVisibleTaskIds, task.id) },
             isGeneratingMagicBreakdown = magicBreakdownTaskId == task.id,
-            onExpandToggle = { viewModel.toggleTaskExpansion(task.id) },
+            onExpandToggle = {
+                if (isModalExpanded) {
+                    viewModel.collapseExpandedTask()
+                } else {
+                    viewModel.expandTask(task.id)
+                }
+            },
             onStatusChange = { viewModel.updateTaskStatus(task.id, it) },
             onTitleNotesChange = { t, n -> viewModel.updateTaskTitleAndNotes(task, t, n) },
             onScheduleChange = { s, w -> viewModel.updateTaskSchedule(task, s, w) },
@@ -2113,8 +2261,8 @@ private fun ThingsTaskRowItem(
             onShowMessage = { msg ->
                 viewModel.showUiMessage(msg)
             },
-            externalDialogTriggerToken = if (expandedTaskId == task.id) externalDialogTriggerToken else 0,
-            externalDialogTriggerType = if (expandedTaskId == task.id) externalDialogTriggerType else null,
+            externalDialogTriggerToken = if (isModalExpanded) externalDialogTriggerToken else 0,
+            externalDialogTriggerType = if (isModalExpanded) externalDialogTriggerType else null,
             onDeleteTask = { viewModel.deleteTask(task.id) },
             locale = activeLocale
         )
@@ -2247,8 +2395,7 @@ private fun ThingsMainTaskLazyList(
                 viewModel.startFocusTimer(targetTask.id, targetTask.title, targetTask.durationMinutes)
             },
             onOpenTask = { taskId ->
-                viewModel.setTodayTimelineMode(false)
-                viewModel.toggleTaskExpansion(taskId)
+                viewModel.expandTask(taskId)
             },
             modifier = modifier.imePadding()
         )
@@ -2298,7 +2445,7 @@ private fun ThingsMainTaskLazyList(
                     viewModel.toggleTaskPinned(taskId)
                 },
                 onOpenTaskEditor = { taskId ->
-                    viewModel.toggleTaskExpansion(taskId)
+                    viewModel.expandTask(taskId)
                 },
                 onToggleTaskSelection = { taskId ->
                     viewModel.toggleTaskSelection(taskId)
@@ -2344,7 +2491,7 @@ private fun ThingsMainTaskLazyList(
                     viewModel.updateTaskStatus(taskId, status)
                 },
                 onOpenTaskEditor = { taskId ->
-                    viewModel.toggleTaskExpansion(taskId)
+                    viewModel.expandTask(taskId)
                 },
                 onShowError = { msg ->
                     viewModel.showUiMessage(msg)
@@ -2854,7 +3001,7 @@ private fun ThingsMainTaskLazyList(
                     areas = areas,
                     activeProjects = activeProjects,
                     allHeadings = allHeadings,
-                    expandedTaskId = expandedTaskId,
+                    expandedTaskId = null,
                     isQuickFindOpen = isQuickFindOpen,
                     selectedTaskIds = selectedTaskIds,
                     allVisibleTaskIds = allVisibleTaskIds,
@@ -2910,7 +3057,7 @@ private fun ThingsMainTaskLazyList(
                             areas = areas,
                             activeProjects = activeProjects,
                             allHeadings = allHeadings,
-                            expandedTaskId = expandedTaskId,
+                            expandedTaskId = null,
                             isQuickFindOpen = isQuickFindOpen,
                             selectedTaskIds = selectedTaskIds,
                             allVisibleTaskIds = allVisibleTaskIds,
@@ -3014,7 +3161,7 @@ private fun ThingsMainTaskLazyList(
                         areas = areas,
                         activeProjects = activeProjects,
                         allHeadings = allHeadings,
-                        expandedTaskId = expandedTaskId,
+                        expandedTaskId = null,
                         isQuickFindOpen = isQuickFindOpen,
                         selectedTaskIds = selectedTaskIds,
                         allVisibleTaskIds = allVisibleTaskIds,
@@ -3059,7 +3206,7 @@ private fun ThingsMainTaskLazyList(
                     areas = areas,
                     activeProjects = activeProjects,
                     allHeadings = allHeadings,
-                    expandedTaskId = expandedTaskId,
+                    expandedTaskId = null,
                     isQuickFindOpen = isQuickFindOpen,
                     selectedTaskIds = selectedTaskIds,
                     allVisibleTaskIds = allVisibleTaskIds,
@@ -3108,7 +3255,7 @@ private fun ThingsMainTaskLazyList(
                             areas = areas,
                             activeProjects = activeProjects,
                             allHeadings = allHeadings,
-                            expandedTaskId = expandedTaskId,
+                            expandedTaskId = null,
                             isQuickFindOpen = isQuickFindOpen,
                             selectedTaskIds = selectedTaskIds,
                             allVisibleTaskIds = allVisibleTaskIds,
@@ -3166,7 +3313,7 @@ private fun ThingsMainTaskLazyList(
                             areas = areas,
                             activeProjects = activeProjects,
                             allHeadings = allHeadings,
-                            expandedTaskId = expandedTaskId,
+                            expandedTaskId = null,
                             isQuickFindOpen = isQuickFindOpen,
                             selectedTaskIds = selectedTaskIds,
                             allVisibleTaskIds = allVisibleTaskIds,
@@ -3205,7 +3352,7 @@ private fun ThingsMainTaskLazyList(
                     areas = areas,
                     activeProjects = activeProjects,
                     allHeadings = allHeadings,
-                    expandedTaskId = expandedTaskId,
+                    expandedTaskId = null,
                     isQuickFindOpen = isQuickFindOpen,
                     selectedTaskIds = selectedTaskIds,
                     allVisibleTaskIds = allVisibleTaskIds,
@@ -3259,7 +3406,7 @@ private fun ThingsMainTaskLazyList(
                     areas = areas,
                     activeProjects = activeProjects,
                     allHeadings = allHeadings,
-                    expandedTaskId = expandedTaskId,
+                    expandedTaskId = null,
                     isQuickFindOpen = isQuickFindOpen,
                     selectedTaskIds = selectedTaskIds,
                     allVisibleTaskIds = allVisibleTaskIds,

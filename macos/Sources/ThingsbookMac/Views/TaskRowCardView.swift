@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import UniformTypeIdentifiers
 import ThingsbookCore
 
 public struct TaskRowCardView: View {
@@ -8,30 +7,10 @@ public struct TaskRowCardView: View {
     public let task: TaskItem
     public var showContextSubtitle: Bool = true
 
-    @StateObject private var rowVoiceController = MacVoiceDictationController()
-    @State private var draftTitle: String = ""
-    @State private var draftNotes: String = ""
-    @State private var newChecklistTitle: String = ""
-    @State private var isWhenPopoverOpen = false
-    @State private var isDeadlinePopoverOpen = false
-    @State private var isRepeatPopoverOpen = false
-    @State private var isMovePopoverOpen = false
-    @State private var isTagPopoverOpen = false
-    @State private var isTimeblockPopoverOpen = false
     @State private var isCollapsedTimeblockPopoverOpen = false
-    @State private var isDependenciesPopoverOpen = false
     @State private var isCollapsedDependenciesPopoverOpen = false
-    @State private var isGeneratingChecklist = false
-    @State private var isEditingNotes = false
     @State private var isHoveringRow = false
-    @State private var isHoveringDone = false
-    @State private var isFileDropTargeted = false
-    @State private var draftSaveTask: Task<Void, Never>?
-    @FocusState private var isTitleFocused: Bool
-
-    private var isExpanded: Bool {
-        store.expandedTaskId == task.id
-    }
+    @State private var isHoveringOpenIcon = false
 
     private var isSelected: Bool {
         store.selectedTaskIds.contains(task.id)
@@ -48,59 +27,13 @@ public struct TaskRowCardView: View {
     }
 
     public var body: some View {
-        Group {
-            if isExpanded {
-                expandedCard
-            } else {
-                collapsedRow
+        collapsedRow
+            .contextMenu {
+                taskContextMenu
             }
-        }
-        .contextMenu {
-            taskContextMenu
-        }
-        .onAppear {
-            syncDrafts()
-            if isExpanded {
-                applyInitialExpandFocusState()
-            }
-        }
-        .onDisappear {
-            draftSaveTask?.cancel()
-            commitDraftEditsIfNeeded(commitPendingChecklist: true)
-        }
-        .onChange(of: task.title) { _, newValue in
-            if !isExpanded && draftTitle != newValue {
-                draftTitle = newValue
-            }
-        }
-        .onChange(of: task.notes) { _, newValue in
-            if !isExpanded && draftNotes != newValue {
-                draftNotes = newValue
-            }
-        }
-        .onChange(of: draftTitle) { _, _ in
-            if isExpanded {
-                scheduleDraftAutoSave()
-            }
-        }
-        .onChange(of: draftNotes) { _, _ in
-            if isExpanded {
-                scheduleDraftAutoSave()
-            }
-        }
-        .onChange(of: isExpanded) { _, expanded in
-            if expanded {
-                syncDrafts()
-                applyInitialExpandFocusState()
-            } else {
-                draftSaveTask?.cancel()
-                rowVoiceController.stopRecording()
-                commitDraftEditsIfNeeded(commitPendingChecklist: true)
-            }
-        }
     }
 
-    // MARK: - Collapsed Things-for-Mac Row
+    // MARK: - Always-Collapsed Calm Things-for-Mac Row
 
     private var collapsedRow: some View {
         let isActivelyBlocked = store.isTaskActivelyBlocked(task)
@@ -161,7 +94,7 @@ public struct TaskRowCardView: View {
 
             Spacer(minLength: 8)
 
-            // Trailing metadata badges
+            // Trailing metadata badges + subtle hover Open Modal button
             HStack(spacing: 6) {
                 if let blockedBadge = store.blockedByBadgeText(for: task) {
                     Button {
@@ -330,6 +263,31 @@ public struct TaskRowCardView: View {
                 if let dl = task.deadline {
                     deadlineChip(dl)
                 }
+
+                if isHoveringRow {
+                    Button {
+                        store.openTaskModal(task.id)
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(isHoveringOpenIcon ? ThingsMacPalette.accentBlue : .secondary)
+                            .frame(width: 24, height: 22)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(
+                                        isHoveringOpenIcon
+                                            ? ThingsMacPalette.accentBlue.opacity(0.13)
+                                            : Color.primary.opacity(0.055)
+                                    )
+                            )
+                            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { hovering in
+                        isHoveringOpenIcon = hovering
+                    }
+                    .thingsTooltip(store.tr("action_more_options"))
+                }
             }
         }
         .opacity(isActivelyBlocked ? 0.62 : 1.0)
@@ -346,7 +304,15 @@ public struct TaskRowCardView: View {
         .contentShape(Rectangle())
         .onHover { hovering in
             isHoveringRow = hovering
+            if !hovering {
+                isHoveringOpenIcon = false
+            }
         }
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded {
+                store.openTaskModal(task.id)
+            }
+        )
         .onTapGesture {
             store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
         }
@@ -354,636 +320,6 @@ public struct TaskRowCardView: View {
 
     private var showNotesPreviewInCollapsed: Bool {
         !showContextSubtitle && !task.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    // MARK: - Inline Spring-Expanded Things Card
-
-    private var expandedCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Top Title Row + Inline Dictation Mic
-            HStack(alignment: .center, spacing: 12) {
-                ThingsCheckboxButton(
-                    status: task.status,
-                    isSomeday: task.scheduleState == .someday,
-                    helpText: store.tr("macos_checkbox_help"),
-                    onToggleComplete: {
-                        commitDraftEditsIfNeeded(commitPendingChecklist: true)
-                        store.toggleTaskCompletion(latestTask)
-                    },
-                    onCancelTask: {
-                        commitDraftEditsIfNeeded(commitPendingChecklist: true)
-                        store.cancelTask(latestTask)
-                    }
-                )
-
-                TextField(store.tr("placeholder_todo_title"), text: $draftTitle)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 16, weight: .semibold))
-                    .focused($isTitleFocused)
-                    .onSubmit {
-                        commitDraftEditsIfNeeded(commitPendingChecklist: true)
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.86)) {
-                            store.expandedTaskId = nil
-                        }
-                    }
-
-                Spacer()
-
-                Button {
-                    commitDraftEditsIfNeeded()
-                    store.setTasksPinned([latestTask.id], isPinned: !latestTask.isPinned)
-                } label: {
-                    Image(systemName: latestTask.isPinned ? "pin.fill" : "pin")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(latestTask.isPinned ? ThingsMacPalette.todayYellow : .secondary)
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .thingsTooltip(store.tr(latestTask.isPinned ? "v25_unpin_task" : "v25_pin_task"))
-
-                if rowVoiceController.isRecording {
-                    Button {
-                        rowVoiceController.stopRecording()
-                    } label: {
-                        Image(systemName: "waveform.circle.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(ThingsMacPalette.deadlineCrimson)
-                    }
-                    .buttonStyle(.plain)
-                    .thingsTooltip(store.tr("macos_voice_stop"))
-                }
-            }
-
-            // Markdown Notes Box + Detected Smart Link Chips
-            VStack(alignment: .leading, spacing: 8) {
-                if !isEditingNotes {
-                    let hasNotes = !draftNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    Group {
-                        if hasNotes {
-                            Text(MarkdownNotesParser.renderAttributed(draftNotes))
-                                .font(.system(size: 13.5))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            Text(store.tr("placeholder_notes"))
-                                .font(.system(size: 13.5))
-                                .foregroundStyle(.tertiary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .padding(11)
-                    .background(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(ThingsMacPalette.subtleContainer)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.8)
-                            )
-                    )
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        isEditingNotes = true
-                    }
-                } else {
-                    ZStack(alignment: .topLeading) {
-                        if draftNotes.isEmpty {
-                            Text(store.tr("placeholder_notes"))
-                                .font(.system(size: 13.5))
-                                .foregroundStyle(.tertiary)
-                                .padding(.top, 9)
-                                .padding(.leading, 11)
-                                .allowsHitTesting(false)
-                        }
-                        TextEditor(text: $draftNotes)
-                            .font(.system(size: 13.5))
-                            .scrollContentBackground(.hidden)
-                            .padding(6)
-                            .frame(minHeight: 62, maxHeight: 170)
-                            .background(
-                                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                    .fill(ThingsMacPalette.subtleContainer)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                            .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.8)
-                                    )
-                            )
-                    }
-                }
-
-                let links = MarkdownNotesParser.extractDetectedLinks(from: draftNotes)
-                if !links.isEmpty || !draftNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    HStack(spacing: 6) {
-                        ForEach(links) { link in
-                            Button {
-                                if let url = URL(string: link.targetUri) {
-                                    NSWorkspace.shared.open(url)
-                                }
-                            } label: {
-                                HStack(spacing: 5) {
-                                    Image(systemName: link.type.sfSymbol)
-                                        .font(.system(size: 10.5, weight: .semibold))
-                                    Text("\(link.displayLabel) ↗")
-                                        .font(.system(size: 11.5, weight: .semibold))
-                                        .lineLimit(1)
-                                }
-                                .fixedSize(horizontal: true, vertical: false)
-                                .foregroundStyle(ThingsMacPalette.accentBlue)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 4)
-                                .background(
-                                    Capsule(style: .continuous)
-                                        .fill(ThingsMacPalette.accentBlue.opacity(0.10))
-                                        .overlay(
-                                            Capsule(style: .continuous)
-                                                .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.24), lineWidth: 0.8)
-                                        )
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .thingsTooltip(link.targetUri)
-                        }
-
-                        Spacer()
-
-                        if !draftNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            let toggleLabel = isEditingNotes ? store.tr("macos_preview_markdown") : store.tr("macos_edit_markdown")
-                            Button(toggleLabel) {
-                                isEditingNotes.toggle()
-                            }
-                            .font(.system(size: 11.5, weight: .medium))
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .thingsTooltip(toggleLabel)
-                        }
-                    }
-                }
-            }
-            .padding(.leading, 30)
-
-            // File & Image Attachments Strip (v1.8)
-            if !task.attachments.isEmpty || isFileDropTargeted {
-                VStack(alignment: .leading, spacing: 6) {
-                    if !task.attachments.isEmpty {
-                        AttachmentsStripView(store: store, attachments: task.attachments) {
-                            commitDraftEditsIfNeeded()
-                            store.pickAndAttachFiles(taskId: task.id)
-                        }
-                    }
-                    if isFileDropTargeted {
-                        HStack(spacing: 6) {
-                            Image(systemName: "arrow.down.doc.fill")
-                                .foregroundStyle(ThingsMacPalette.accentBlue)
-                            Text(store.tr("macos_attachment_drop_hint"))
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(ThingsMacPalette.accentBlue)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .strokeBorder(ThingsMacPalette.accentBlue, style: StrokeStyle(lineWidth: 1.4, dash: [5, 4]))
-                                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(ThingsMacPalette.accentBlue.opacity(0.06)))
-                        )
-                    }
-                }
-                .padding(.leading, 30)
-            }
-
-            // Checklist Section + Gemini Magic Breakdown
-            VStack(alignment: .leading, spacing: 6) {
-                if !task.checklistItems.isEmpty {
-                    let done = task.checklistItems.filter(\.isCompleted).count
-                    Text("\(store.tr("placeholder_checklist")) (\(done)/\(task.checklistItems.count))")
-                        .font(.system(size: 11.5, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 2)
-                }
-
-                ForEach(task.checklistItems) { item in
-                    ChecklistItemRowView(store: store, item: item, allItems: task.checklistItems)
-                }
-
-                HStack(spacing: 8) {
-                    Image(systemName: "checklist")
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(ThingsMacPalette.accentBlue)
-                        .frame(width: 16)
-
-                    TextField(store.tr("placeholder_add_checklist_item"), text: $newChecklistTitle)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13))
-                        .onSubmit {
-                            let clean = newChecklistTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-                            guard !clean.isEmpty else { return }
-                            commitDraftEditsIfNeeded()
-                            _ = try? store.database.addChecklistItem(taskId: task.id, title: clean)
-                            newChecklistTitle = ""
-                        }
-
-                    Spacer()
-
-                    Button {
-                        runMagicBreakdown()
-                    } label: {
-                        HStack(spacing: 5) {
-                            if isGeneratingChecklist {
-                                ProgressView().controlSize(.mini)
-                            } else {
-                                Image(systemName: "sparkles")
-                                    .font(.system(size: 11, weight: .semibold))
-                            }
-                            Text(store.tr("gemini_magic_breakdown"))
-                                .font(.system(size: 11.5, weight: .semibold))
-                                .lineLimit(1)
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
-                        .foregroundStyle(ThingsMacPalette.accentBlue)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.12)))
-                    }
-                    .buttonStyle(.plain)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .disabled(isGeneratingChecklist)
-                    .thingsTooltip(store.tr("gemini_magic_breakdown_desc"))
-                }
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(ThingsMacPalette.subtleContainer)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.8)
-                        )
-                )
-            }
-            .padding(.leading, 30)
-
-            // v2.1 Unified Single Footer Row: Labeled Metadata Pills on Left + [Focus, ⋯ Menu, ✓ Done] on Right
-            HStack(alignment: .center, spacing: 10) {
-                ThingsFlowLayout(horizontalSpacing: 7, verticalSpacing: 6) {
-                    ThingsActionChipButton(
-                        title: whenSummaryLabel ?? store.tr("action_when"),
-                        systemImage: latestTask.scheduleState == .thisEvening
-                            ? "moon.stars.fill"
-                            : (latestTask.scheduleState == .today ? "sun.max.fill" : "calendar"),
-                        isActive: whenSummaryLabel != nil || latestTask.reminderTime != nil,
-                        activeTint: latestTask.scheduleState == .thisEvening ? ThingsMacPalette.eveningPurple : ThingsMacPalette.accentBlue,
-                        helpText: whenButtonTooltip
-                    ) {
-                        commitDraftEditsIfNeeded()
-                        isWhenPopoverOpen = true
-                    }
-                    .popover(isPresented: $isWhenPopoverOpen) {
-                        WhenPopoverView(
-                            store: store,
-                            currentSchedule: latestTask.scheduleState,
-                            currentWhenMillis: latestTask.whenDate,
-                            currentReminderMillis: latestTask.reminderTime
-                        ) { resolved in
-                            var copy = latestTask
-                            copy.title = draftTitle
-                            copy.notes = draftNotes
-                            copy.scheduleState = resolved.scheduleState
-                            copy.whenDate = resolved.whenDateEpochMillis
-                            copy.reminderTime = resolved.reminderEpochMillis
-                            store.updateTask(copy)
-                        }
-                    }
-
-                    if showQuickThisEveningPill {
-                        ThingsActionChipButton(
-                            title: store.tr("view_this_evening"),
-                            systemImage: "moon.stars.fill",
-                            isActive: true,
-                            activeTint: ThingsMacPalette.eveningPurple,
-                            helpText: store.tr("view_this_evening")
-                        ) {
-                            quickMoveToThisEveningAndCollapse()
-                        }
-                    }
-
-                    if let rem = latestTask.reminderTime {
-                        ThingsActionChipButton(
-                            title: shortTimeString(rem),
-                            systemImage: "bell",
-                            isActive: true,
-                            helpText: store.trf("when_task_reminder_set", shortTimeString(rem))
-                        ) {
-                            commitDraftEditsIfNeeded()
-                            isWhenPopoverOpen = true
-                        }
-                    }
-
-                    ThingsActionChipButton(
-                        title: latestTask.scheduledStartMinutes != nil
-                            ? (latestTask.formattedTimeblockPill ?? store.tr("v2_timeblock_title"))
-                            : store.tr("v2_timeblock_title"),
-                        systemImage: "clock.badge.checkmark",
-                        isActive: latestTask.scheduledStartMinutes != nil,
-                        activeTint: ThingsMacPalette.anytimeTeal,
-                        helpText: timeblockButtonTooltip
-                    ) {
-                        commitDraftEditsIfNeeded()
-                        isTimeblockPopoverOpen = true
-                    }
-                    .popover(isPresented: $isTimeblockPopoverOpen) {
-                        TimeblockPopoverView(
-                            store: store,
-                            currentStartMinutes: latestTask.scheduledStartMinutes,
-                            currentDurationMinutes: latestTask.durationMinutes
-                        ) { startMins, durMins in
-                            var copy = latestTask
-                            copy.title = draftTitle
-                            copy.notes = draftNotes
-                            copy.scheduledStartMinutes = startMins
-                            copy.durationMinutes = durMins
-                            store.updateTask(copy)
-                        }
-                    }
-
-                    let currentDuration = (latestTask.durationMinutes ?? 0) > 0 ? latestTask.durationMinutes : nil
-                    Menu {
-                        durationMenuItems(for: latestTask, commitDraftsFirst: true)
-                    } label: {
-                        actionMenuChipLabel(
-                            title: currentDuration.map { TaskItem.formatCompactDuration($0) } ?? store.tr("v30_duration_label"),
-                            systemImage: "timer",
-                            isActive: currentDuration != nil,
-                            activeTint: ThingsMacPalette.anytimeTeal
-                        )
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .thingsTooltip(
-                        currentDuration.map { "\(store.tr("v30_duration_label")): \(TaskItem.formatCompactDuration($0))" }
-                            ?? store.tr("v30_duration_label")
-                    )
-
-                    let currentEffort = latestTask.resolvedEffort
-                    Menu {
-                        effortMenuItems(for: latestTask, commitDraftsFirst: true)
-                    } label: {
-                        actionMenuChipLabel(
-                            title: currentEffort.map { effortLocalizedTitle(for: $0) } ?? store.tr("v30_effort_label"),
-                            systemImage: currentEffort?.sfSymbol ?? "bolt",
-                            isActive: currentEffort != nil,
-                            activeTint: currentEffort.map { effortTint(for: $0) } ?? ThingsMacPalette.accentBlue
-                        )
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .thingsTooltip(
-                        currentEffort.map { "\(store.tr("v30_effort_label")): \(effortLocalizedTitle(for: $0))" }
-                            ?? store.tr("v30_effort_label")
-                    )
-
-                    let blockedChipLabel = store.blockedByBadgeText(for: latestTask)
-                    ThingsActionChipButton(
-                        title: blockedChipLabel ?? store.tr("v30_blocked_by_action"),
-                        systemImage: "hourglass",
-                        isActive: blockedChipLabel != nil || !latestTask.blockedByTaskIds.isEmpty,
-                        activeTint: ThingsMacPalette.somedayAmber,
-                        helpText: blockedChipLabel ?? store.tr("v30_blocked_by_label")
-                    ) {
-                        commitDraftEditsIfNeeded()
-                        isDependenciesPopoverOpen = true
-                    }
-                    .popover(isPresented: $isDependenciesPopoverOpen) {
-                        DependenciesPopoverView(store: store, task: latestTask)
-                    }
-
-                    ThingsActionChipButton(
-                        title: latestTask.recurrenceRule?.formatShortLabel(locale: store.preferences.language.locale) ?? store.tr("action_repeat"),
-                        systemImage: "repeat",
-                        isActive: latestTask.recurrenceRule != nil,
-                        helpText: repeatButtonTooltip
-                    ) {
-                        commitDraftEditsIfNeeded()
-                        isRepeatPopoverOpen = true
-                    }
-                    .popover(isPresented: $isRepeatPopoverOpen) {
-                        RepeatEditorPopoverView(store: store, currentRule: latestTask.recurrenceRule) { newRule in
-                            var copy = latestTask
-                            copy.title = draftTitle
-                            copy.notes = draftNotes
-                            copy.recurrenceRule = newRule
-                            if newRule != nil && copy.whenDate == nil {
-                                copy.scheduleState = .today
-                                copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
-                            }
-                            store.updateTask(copy)
-                        }
-                    }
-
-                    let dlInfo = latestTask.deadline.map { deadlineSummaryInfo(for: $0) }
-                    ThingsActionChipButton(
-                        title: dlInfo?.label ?? store.tr("action_deadline"),
-                        systemImage: "flag",
-                        isActive: dlInfo != nil,
-                        activeTint: (dlInfo?.isUrgent == true) ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.accentBlue,
-                        helpText: store.tr("context_adjust_deadline")
-                    ) {
-                        commitDraftEditsIfNeeded()
-                        isDeadlinePopoverOpen = true
-                    }
-                    .popover(isPresented: $isDeadlinePopoverOpen) {
-                        DeadlinePopoverView(store: store, currentDeadlineMillis: latestTask.deadline) { dl in
-                            var copy = latestTask
-                            copy.title = draftTitle
-                            copy.notes = draftNotes
-                            copy.deadline = dl
-                            store.updateTask(copy)
-                        }
-                    }
-
-                    ThingsActionChipButton(
-                        title: contextBreadcrumb ?? "\(store.tr("entity_project")) / \(store.tr("entity_area"))",
-                        systemImage: "folder",
-                        isActive: latestTask.projectId != nil || latestTask.areaId != nil,
-                        helpText: moveButtonTooltip
-                    ) {
-                        commitDraftEditsIfNeeded()
-                        isMovePopoverOpen = true
-                    }
-                    .popover(isPresented: $isMovePopoverOpen) {
-                        MoveDestinationPopoverView(store: store, task: latestTask) { projId, headId, areaId, schedOverride in
-                            var copy = latestTask
-                            copy.title = draftTitle
-                            copy.notes = draftNotes
-                            copy.projectId = projId
-                            copy.headingId = headId
-                            copy.areaId = areaId
-                            if let schedOverride { copy.scheduleState = schedOverride }
-                            store.updateTask(copy)
-                        }
-                    }
-
-                    ForEach(latestTask.tags) { tag in
-                        ThingsActionChipButton(
-                            title: tag.title,
-                            systemImage: "square.grid.2x2",
-                            isActive: true,
-                            helpText: "#\(tag.title)"
-                        ) {
-                            commitDraftEditsIfNeeded()
-                            isTagPopoverOpen = true
-                        }
-                    }
-
-                    ThingsActionChipButton(
-                        title: "+ \(store.tr("action_tags"))",
-                        systemImage: "square.grid.2x2",
-                        isActive: false,
-                        helpText: tagsButtonTooltip
-                    ) {
-                        commitDraftEditsIfNeeded()
-                        isTagPopoverOpen = true
-                    }
-                    .popover(isPresented: $isTagPopoverOpen) {
-                        TagPickerPopoverView(
-                            store: store,
-                            selectedTagIds: Set(latestTask.tagIds),
-                            onToggleTag: { tagId in
-                                let base = latestTask
-                                var tids = Set(base.tagIds)
-                                if tids.contains(tagId) { tids.remove(tagId) } else { tids.insert(tagId) }
-                                var copy = base
-                                copy.title = draftTitle
-                                copy.notes = draftNotes
-                                store.updateTask(copy, tagIds: Array(tids))
-                            }
-                        )
-                    }
-                }
-
-                HStack(spacing: 6) {
-                    ThingsUtilityIconButton(
-                        systemImage: "timer",
-                        tint: Color.secondary,
-                        helpText: store.tr("action_focus_timer")
-                    ) {
-                        commitDraftEditsIfNeeded()
-                        store.startFocusTimer(for: latestTask)
-                    }
-
-                    Menu {
-                        Button {
-                            commitDraftEditsIfNeeded()
-                            store.pickAndAttachFiles(taskId: task.id)
-                        } label: {
-                            Label(store.tr("action_attach_file"), systemImage: "paperclip")
-                        }
-
-                        Button {
-                            rowVoiceController.toggleRecording(
-                                locale: store.preferences.language.locale,
-                                onTranscript: { spoken in
-                                    if draftTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                        draftTitle = spoken
-                                    } else if draftNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                        draftNotes = spoken
-                                    } else {
-                                        draftNotes = "\(draftNotes)\n\(spoken)"
-                                    }
-                                },
-                                onUnavailable: {
-                                    store.showToast(store.tr("voice_not_available"))
-                                }
-                            )
-                        } label: {
-                            Label(
-                                rowVoiceController.isRecording ? store.tr("macos_voice_stop") : store.tr("voice_capture_btn"),
-                                systemImage: rowVoiceController.isRecording ? "waveform.circle.fill" : "mic"
-                            )
-                        }
-
-                        Button {
-                            commitDraftEditsIfNeeded()
-                            store.setTasksPinned([latestTask.id], isPinned: !latestTask.isPinned)
-                        } label: {
-                            Label(
-                                store.tr(latestTask.isPinned ? "v25_unpin_task" : "v25_pin_task"),
-                                systemImage: latestTask.isPinned ? "pin.slash" : "pin"
-                            )
-                        }
-
-                        Button {
-                            commitDraftEditsIfNeeded(commitPendingChecklist: true)
-                            _ = try? store.database.duplicateTask(task.id, copySuffix: store.tr("v25_copy_suffix"))
-                        } label: {
-                            Label(store.tr("action_duplicate_todo"), systemImage: "plus.square.on.square")
-                        }
-
-                        Divider()
-
-                        Button(role: .destructive) {
-                            draftSaveTask?.cancel()
-                            store.deleteTask(latestTask)
-                        } label: {
-                            Label(store.tr("action_delete"), systemImage: "trash")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Color.primary.opacity(0.86))
-                            .frame(width: 28, height: 28)
-                            .background(
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .fill(ThingsMacPalette.subtleContainer)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .strokeBorder(Color.primary.opacity(0.13), lineWidth: 0.8)
-                            )
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .thingsTooltip(store.tr("action_more_options"))
-
-                    Button {
-                        commitDraftEditsIfNeeded(commitPendingChecklist: true)
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.86)) {
-                            store.expandedTaskId = nil
-                        }
-                    } label: {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 11.5, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 30, height: 28)
-                            .background(
-                                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                                    .fill(ThingsMacPalette.accentBlue)
-                                    .brightness(isHoveringDone ? 0.06 : 0.0)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .fixedSize()
-                    .onHover { hovering in
-                        withAnimation(.easeOut(duration: 0.12)) {
-                            isHoveringDone = hovering
-                        }
-                    }
-                    .thingsTooltip("\(store.tr("action_done")) (Esc)")
-                    .keyboardShortcut(.escape, modifiers: [])
-                }
-                .fixedSize(horizontal: true, vertical: false)
-                .layoutPriority(1)
-            }
-            .padding(.leading, 30)
-        }
-        .padding(18)
-        .thingsCardSurface(cornerRadius: 14, isSelected: true)
-        .onDrop(of: [UTType.fileURL], isTargeted: $isFileDropTargeted) { providers in
-            commitDraftEditsIfNeeded()
-            return store.handleFileDropProviders(providers, taskId: task.id)
-        }
-        .padding(.vertical, 5)
     }
 
     // MARK: - Context Menu & Helpers
@@ -1015,6 +351,12 @@ public struct TaskRowCardView: View {
                 Text(store.tr("action_delete"))
             }
         } else {
+            Button {
+                store.openTaskModal(task.id)
+            } label: {
+                Label("\(store.tr("action_more_options"))…", systemImage: "slider.horizontal.3")
+            }
+            Divider()
             Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
                 store.toggleTaskCompletion(latestTask)
             }
@@ -1050,11 +392,7 @@ public struct TaskRowCardView: View {
                 effortMenuItems(for: latestTask)
             }
             Button(store.tr("v30_blocked_by_action")) {
-                if isExpanded {
-                    isDependenciesPopoverOpen = true
-                } else {
-                    isCollapsedDependenciesPopoverOpen = true
-                }
+                isCollapsedDependenciesPopoverOpen = true
             }
             Menu(store.tr("v2_timeblock_title")) {
                 Button("09:00 · 30m") { store.setTaskTimeblock(latestTask.id, startMinutes: 9 * 60, durationMinutes: 30) }
@@ -1091,43 +429,12 @@ public struct TaskRowCardView: View {
         }
     }
 
-    private func actionMenuChipLabel(
-        title: String,
-        systemImage: String,
-        isActive: Bool,
-        activeTint: Color
-    ) -> some View {
-        HStack(spacing: 5.5) {
-            Image(systemName: systemImage)
-                .font(.system(size: 11.5, weight: .semibold))
-            Text(title)
-                .font(.system(size: 12, weight: isActive ? .semibold : .medium))
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-        }
-        .foregroundStyle(isActive ? activeTint : Color.primary.opacity(0.88))
-        .padding(.horizontal, 10.5)
-        .padding(.vertical, 5.5)
-        .background(
-            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                .fill(isActive ? activeTint.opacity(0.11) : ThingsMacPalette.subtleContainer)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                        .strokeBorder(
-                            isActive ? activeTint.opacity(0.28) : Color.primary.opacity(0.10),
-                            lineWidth: 0.8
-                        )
-                )
-        )
-    }
-
     @ViewBuilder
-    private func durationMenuItems(for targetTask: TaskItem, commitDraftsFirst: Bool = false) -> some View {
+    private func durationMenuItems(for targetTask: TaskItem) -> some View {
         let presets = [5, 15, 30, 60, 120, 240]
         ForEach(presets, id: \.self) { mins in
             let isCurrent = targetTask.durationMinutes == mins
             Button {
-                if commitDraftsFirst { commitDraftEditsIfNeeded() }
                 store.setTaskStandaloneDuration(targetTask.id, durationMinutes: mins)
             } label: {
                 if isCurrent {
@@ -1140,18 +447,16 @@ public struct TaskRowCardView: View {
         if (targetTask.durationMinutes ?? 0) > 0 {
             Divider()
             Button(store.tr("v30_duration_clear"), role: .destructive) {
-                if commitDraftsFirst { commitDraftEditsIfNeeded() }
                 store.setTaskStandaloneDuration(targetTask.id, durationMinutes: nil)
             }
         }
     }
 
     @ViewBuilder
-    private func effortMenuItems(for targetTask: TaskItem, commitDraftsFirst: Bool = false) -> some View {
+    private func effortMenuItems(for targetTask: TaskItem) -> some View {
         ForEach(TaskEffortLevel.allCases, id: \.rawValue) { level in
             let isCurrent = targetTask.resolvedEffort == level
             Button {
-                if commitDraftsFirst { commitDraftEditsIfNeeded() }
                 store.setTaskEffort(targetTask.id, effortLevel: level.rawValue)
             } label: {
                 Label(
@@ -1163,7 +468,6 @@ public struct TaskRowCardView: View {
         if targetTask.resolvedEffort != nil {
             Divider()
             Button(store.tr("v30_effort_none")) {
-                if commitDraftsFirst { commitDraftEditsIfNeeded() }
                 store.setTaskEffort(targetTask.id, effortLevel: nil)
             }
         }
@@ -1191,110 +495,6 @@ public struct TaskRowCardView: View {
         }
     }
 
-    private var showQuickThisEveningPill: Bool {
-        TaskCardInteractionRules.shouldShowQuickThisEveningPill(
-            isTodayView: store.selectedDestination == .smartView(.today),
-            status: latestTask.status,
-            scheduleState: latestTask.scheduleState
-        )
-    }
-
-    private func applyInitialExpandFocusState() {
-        isEditingNotes = TaskCardInteractionRules.shouldAutoEditNotesOnExpand(notes: latestTask.notes)
-        if TaskCardInteractionRules.shouldAutoFocusTitleOnExpand(title: latestTask.title) {
-            DispatchQueue.main.async {
-                isTitleFocused = true
-            }
-        } else {
-            isTitleFocused = false
-            DispatchQueue.main.async {
-                isTitleFocused = false
-                if let window = NSApp.keyWindow, window.firstResponder is NSTextView {
-                    window.makeFirstResponder(nil)
-                }
-            }
-        }
-    }
-
-    private func quickMoveToThisEveningAndCollapse() {
-        draftSaveTask?.cancel()
-        rowVoiceController.stopRecording()
-        let pendingChecklist = newChecklistTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !pendingChecklist.isEmpty {
-            _ = try? store.database.addChecklistItem(taskId: task.id, title: pendingChecklist)
-            newChecklistTitle = ""
-        }
-        var copy = latestTask
-        copy.title = draftTitle
-        copy.notes = draftNotes
-        copy.scheduleState = .thisEvening
-        copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
-        store.updateTask(copy)
-        withAnimation(.spring(response: 0.25, dampingFraction: 0.86)) {
-            store.expandedTaskId = nil
-        }
-    }
-
-    private func syncDrafts() {
-        let base = latestTask
-        draftTitle = base.title
-        draftNotes = base.notes
-    }
-
-    private func scheduleDraftAutoSave() {
-        draftSaveTask?.cancel()
-        draftSaveTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 450_000_000)
-            guard !Task.isCancelled else { return }
-            commitDraftEditsIfNeeded()
-        }
-    }
-
-    private func commitDraftEditsIfNeeded(commitPendingChecklist: Bool = false) {
-        let base = latestTask
-        if draftTitle != base.title || draftNotes != base.notes {
-            var copy = base
-            copy.title = draftTitle
-            copy.notes = draftNotes
-            store.updateTask(copy)
-        }
-        if commitPendingChecklist {
-            let pending = newChecklistTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !pending.isEmpty {
-                _ = try? store.database.addChecklistItem(taskId: task.id, title: pending)
-                newChecklistTitle = ""
-            }
-        }
-    }
-
-    private func runMagicBreakdown() {
-        commitDraftEditsIfNeeded()
-        isGeneratingChecklist = true
-        let base = latestTask
-        let titleToBreak = draftTitle.isEmpty ? base.title : draftTitle
-        let notesToBreak = draftNotes
-        Task {
-            do {
-                let steps = try await ThingsbookGeminiService.generateMagicChecklist(
-                    taskTitle: titleToBreak,
-                    taskNotes: notesToBreak,
-                    lang: store.preferences.language
-                )
-                await MainActor.run {
-                    for step in steps {
-                        _ = try? store.database.addChecklistItem(taskId: task.id, title: step)
-                    }
-                    isGeneratingChecklist = false
-                }
-            } catch {
-                await MainActor.run {
-                    isGeneratingChecklist = false
-                    store.showToast(error.localizedDescription)
-                }
-            }
-        }
-    }
-
     private var contextBreadcrumb: String? {
         if let pid = task.projectId, let proj = store.project(byId: pid) {
             if let aid = proj.areaId, let area = store.area(byId: aid) {
@@ -1306,68 +506,6 @@ public struct TaskRowCardView: View {
             return area.title
         }
         return nil
-    }
-
-    private var whenSummaryLabel: String? {
-        switch task.scheduleState {
-        case .today:
-            return store.tr("view_today")
-        case .thisEvening:
-            return store.tr("view_this_evening")
-        case .someday:
-            return store.tr("view_someday")
-        case .upcoming:
-            if let w = task.whenDate {
-                let df = DateFormatter()
-                df.locale = store.preferences.language.locale
-                df.dateStyle = .medium
-                return df.string(from: DateEpochConverter.date(fromMillis: w))
-            }
-            return store.tr("view_upcoming")
-        default:
-            return nil
-        }
-    }
-
-    private var whenButtonTooltip: String {
-        let base = store.tr("context_when_date_reminder")
-        if let whenSummaryLabel {
-            return "\(base) — \(whenSummaryLabel)"
-        }
-        return base
-    }
-
-    private var repeatButtonTooltip: String {
-        let base = store.tr("context_configure_repeat")
-        if let rule = latestTask.recurrenceRule {
-            return "\(base) — \(rule.formatShortLabel(locale: store.preferences.language.locale))"
-        }
-        return base
-    }
-
-    private var moveButtonTooltip: String {
-        let base = store.tr("move_dialog_title")
-        if let contextBreadcrumb {
-            return "\(base) — \(contextBreadcrumb)"
-        }
-        return base
-    }
-
-    private var tagsButtonTooltip: String {
-        let base = store.tr("context_assign_tags")
-        if !latestTask.tags.isEmpty {
-            let names = latestTask.tags.map { "#\($0.title)" }.joined(separator: ", ")
-            return "\(base) — \(names)"
-        }
-        return base
-    }
-
-    private var timeblockButtonTooltip: String {
-        let base = store.tr("macos_tooltip_timeblock")
-        if let pill = latestTask.formattedTimeblockPill {
-            return "\(base) — \(pill)"
-        }
-        return base
     }
 
     private func deadlineSummaryInfo(for millis: Int64) -> (label: String, isUrgent: Bool) {
@@ -1411,7 +549,7 @@ public struct TaskRowCardView: View {
 
 // MARK: - Checklist Row with Up / Down / Delete Controls
 
-private struct ChecklistItemRowView: View {
+struct ChecklistItemRowView: View {
     @ObservedObject var store: ThingsbookStore
     let item: ChecklistItem
     let allItems: [ChecklistItem]

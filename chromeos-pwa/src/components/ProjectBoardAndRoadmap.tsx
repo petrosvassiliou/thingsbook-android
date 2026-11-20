@@ -166,6 +166,7 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
   } | null>(null);
   const [statusMenuTaskId, setStatusMenuTaskId] = useState<string | null>(null);
   const [cardCtxMenu, setCardCtxMenu] = useState<BoardCardContextMenuState | null>(null);
+  const lastBoardPointerTypeRef = useRef<string>('mouse');
 
   const validHeadingIdSet = useMemo(() => new Set(headings.map((h) => h.id)), [headings]);
 
@@ -384,12 +385,17 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
             e.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
           void handleCardDrop(e, tk, colHeadingId, colTasks, half);
         }}
+        onPointerDown={(e) => {
+          lastBoardPointerTypeRef.current = e.pointerType || 'mouse';
+        }}
         onClick={(e) => {
           e.stopPropagation();
           if (e.shiftKey) {
             onSelectTask(tk.id, true, true);
           } else if (e.ctrlKey || e.metaKey || selectedTaskIds.length > 0) {
             onSelectTask(tk.id, true, false);
+          } else if (lastBoardPointerTypeRef.current === 'touch') {
+            onOpenTaskEditor(tk.id);
           } else {
             onSelectTask(tk.id, false, false);
           }
@@ -414,7 +420,11 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
         }}
       >
         <div className="board-card-top">
-          <div className="checkbox-anchor" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="checkbox-anchor"
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
             <button
               type="button"
               className={`things-checkbox ${
@@ -436,6 +446,7 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
                   tk.status === 'COMPLETED' ? 'OPEN' : 'COMPLETED'
                 );
               }}
+              onDoubleClick={(e) => e.stopPropagation()}
               onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -520,12 +531,14 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
           <button
             type="button"
             className="board-card-edit-btn"
+            data-testid={`board-card-open-modal-${tk.id}`}
             title={t.actionEdit}
             aria-label={t.actionEdit}
             onClick={(e) => {
               e.stopPropagation();
               onOpenTaskEditor(tk.id);
             }}
+            onDoubleClick={(e) => e.stopPropagation()}
           >
             <Edit3 size={12.5} />
           </button>
@@ -1180,6 +1193,8 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
   const [editingPhaseTitle, setEditingPhaseTitle] = useState('');
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const lastRoadmapPointerTypeRef = useRef<string>('mouse');
+  const suppressNextBarClickRef = useRef<boolean>(false);
   const dayWidth = ZOOM_DAY_WIDTH_PX[zoom];
   const timelineWidthPx = layout.totalDays * dayWidth;
 
@@ -1304,6 +1319,11 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
       const finished = barDrag;
       setBarDrag(null);
       if (!finished || !finished.armed) return;
+
+      suppressNextBarClickRef.current = true;
+      window.setTimeout(() => {
+        suppressNextBarClickRef.current = false;
+      }, 80);
 
       if (finished.deltaDays !== 0) {
         if (finished.kind === 'phase') {
@@ -2218,17 +2238,25 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                               t.dragTasksCount(dragIdsForRow.length)
                             );
                           }}
+                          onPointerDown={(e) => {
+                            lastRoadmapPointerTypeRef.current = e.pointerType || 'mouse';
+                          }}
                           onClick={(e) => {
                             e.stopPropagation();
                             if (e.shiftKey) {
                               onSelectTask(tk.id, true, true);
                             } else if (e.ctrlKey || e.metaKey || selectedTaskIds.length > 0) {
                               onSelectTask(tk.id, true, false);
+                            } else if (lastRoadmapPointerTypeRef.current === 'touch') {
+                              onOpenTaskEditor(tk.id);
                             } else {
                               onSelectTask(tk.id, false, false);
                             }
                           }}
-                          onDoubleClick={() => onOpenTaskEditor(tk.id)}
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            onOpenTaskEditor(tk.id);
+                          }}
                         >
                           <button
                             type="button"
@@ -2242,6 +2270,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                                 status: tk.status === 'COMPLETED' ? 'OPEN' : 'COMPLETED'
                               });
                             }}
+                            onDoubleClick={(e) => e.stopPropagation()}
                           >
                             {tk.status === 'COMPLETED' && (
                               <Check size={11.5} strokeWidth={3} />
@@ -2271,6 +2300,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                                 e.stopPropagation();
                                 stepTaskByDays(tk, -1);
                               }}
+                              onDoubleClick={(e) => e.stopPropagation()}
                             >
                               <ChevronLeft size={11.5} />
                             </button>
@@ -2282,17 +2312,21 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                                 e.stopPropagation();
                                 stepTaskByDays(tk, 1);
                               }}
+                              onDoubleClick={(e) => e.stopPropagation()}
                             >
                               <ChevronRight size={11.5} />
                             </button>
                             <button
                               type="button"
                               className="roadmap-step-btn"
+                              data-testid={`roadmap-task-open-modal-${tk.id}`}
                               title={t.actionEdit}
+                              aria-label={t.actionEdit}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 onOpenTaskEditor(tk.id);
                               }}
+                              onDoubleClick={(e) => e.stopPropagation()}
                             >
                               <Edit3 size={11.5} />
                             </button>
@@ -2326,6 +2360,8 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                               if (e.pointerType === 'mouse' && e.button !== 0) return;
                               if ((e.target as HTMLElement).closest('button')) return;
                               e.stopPropagation();
+                              lastRoadmapPointerTypeRef.current = e.pointerType || 'mouse';
+                              suppressNextBarClickRef.current = false;
                               setBarDrag({
                                 kind: 'task',
                                 id: tk.id,
@@ -2337,6 +2373,22 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                                 deltaDays: 0,
                                 moved: false
                               });
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (suppressNextBarClickRef.current) {
+                                suppressNextBarClickRef.current = false;
+                                return;
+                              }
+                              if (e.shiftKey) {
+                                onSelectTask(tk.id, true, true);
+                              } else if (e.ctrlKey || e.metaKey || selectedTaskIds.length > 0) {
+                                onSelectTask(tk.id, true, false);
+                              } else if (lastRoadmapPointerTypeRef.current === 'touch') {
+                                onOpenTaskEditor(tk.id);
+                              } else {
+                                onSelectTask(tk.id, false, false);
+                              }
                             }}
                             onDoubleClick={(e) => {
                               e.stopPropagation();

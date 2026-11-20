@@ -768,6 +768,10 @@ class ThingsbookViewModel @Inject constructor(
         _expandedTaskId.value = if (_expandedTaskId.value == taskId) null else taskId
     }
 
+    fun expandTask(taskId: String?) {
+        _expandedTaskId.value = taskId?.takeIf { it.isNotBlank() }
+    }
+
     fun collapseExpandedTask() {
         _expandedTaskId.value = null
     }
@@ -3150,8 +3154,8 @@ class ThingsbookViewModel @Inject constructor(
                 _isMagicPlusCreateProjectOpen.value = false
                 true
             }
-            _selectedTaskIds.value.isNotEmpty() -> {
-                _selectedTaskIds.value = emptySet()
+            _expandedTaskId.value != null -> {
+                _expandedTaskId.value = null
                 true
             }
             _isQuickFindOpen.value -> {
@@ -3182,12 +3186,33 @@ class ThingsbookViewModel @Inject constructor(
                 _isNotificationSettingsOpen.value = false
                 true
             }
-            _expandedTaskId.value != null -> {
-                _expandedTaskId.value = null
+            _selectedTaskIds.value.isNotEmpty() -> {
+                _selectedTaskIds.value = emptySet()
                 true
             }
             else -> false
         }
+    }
+
+    fun hasOpenModalOrOverlay(): Boolean {
+        return _uiErrorMessage.value != null ||
+            _pendingProjectDeletePrompt.value != null ||
+            _quickShareDraft.value != null ||
+            _pendingRestoreSession.value != null ||
+            _isBackupCreateDialogOpen.value ||
+            _pendingMergeAuthRequest.value != null ||
+            _isWeeklyReviewModalOpen.value ||
+            _isTemplatesModalOpen.value ||
+            _isMagicPlusMenuOpen.value ||
+            _isQuickCreateAreaDialogOpen.value ||
+            _isMagicPlusCreateProjectOpen.value ||
+            _isQuickFindOpen.value ||
+            _isSettingsModalOpen.value ||
+            _isGeminiModalOpen.value ||
+            _isAuthModalOpen.value ||
+            _isTagManagerOpen.value ||
+            _isAreaManagerOpen.value ||
+            _isNotificationSettingsOpen.value
     }
 
     // =========================================================================

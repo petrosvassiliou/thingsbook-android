@@ -1968,6 +1968,49 @@ export const App: React.FC = () => {
         return;
       }
 
+      const inInteractiveControl =
+        inInput || Boolean(target?.closest('button, a, [role="button"]'));
+      const anyOtherModalOpen =
+        weeklyReviewModal.open ||
+        templatesModal.open ||
+        Boolean(quickShareDraft) ||
+        Boolean(pendingDeleteProject) ||
+        emptyTrashConfirmOpen ||
+        appLockSetupOpen ||
+        perspectiveModalState.open ||
+        Boolean(dependencyModalTaskId) ||
+        batchTagPickerOpen ||
+        Boolean(whenModalTaskId) ||
+        Boolean(deadlineModalTarget) ||
+        Boolean(repeatModalTaskId) ||
+        Boolean(moveModalTaskIds) ||
+        Boolean(tagPickerTaskId) ||
+        areaManagerOpen ||
+        quickCreateAreaOpen ||
+        projectModalState.open ||
+        tagManagerOpen ||
+        notificationsModalOpen ||
+        geminiModalOpen ||
+        authModalOpen ||
+        settingsModalOpen ||
+        quickFindOpen;
+
+      if (
+        !inInput &&
+        !inInteractiveControl &&
+        !expandedTaskId &&
+        !anyOtherModalOpen &&
+        selectedTaskIds.length === 1 &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        (e.key === 'Enter' || e.key === ' ')
+      ) {
+        e.preventDefault();
+        setExpandedTaskId(selectedTaskIds[0]);
+        return;
+      }
+
       const lower = e.key.toLowerCase();
 
       // Global Ctrl+Shift+R / Cmd+Shift+R -> Guided GTD Weekly Review (v2.0)
@@ -2431,7 +2474,7 @@ export const App: React.FC = () => {
     <TaskItem
       key={tk.id}
       task={tk}
-      isExpanded={expandedTaskId === tk.id}
+      isExpanded={false}
       isTodayView={activeNav.kind === 'smart' && activeNav.view === 'TODAY'}
       isSelected={selectedTaskIds.includes(tk.id)}
       isMultiSelectMode={selectedTaskIds.length > 0}
@@ -2686,6 +2729,9 @@ export const App: React.FC = () => {
           !repeatModalTaskId &&
           !moveModalTaskIds &&
           !tagPickerTaskId &&
+          !tagManagerOpen &&
+          !areaManagerOpen &&
+          !quickCreateAreaOpen &&
           !batchTagPickerOpen &&
           !dependencyModalTaskId &&
           !perspectiveModalState.open
@@ -3372,7 +3418,6 @@ export const App: React.FC = () => {
                         projectsMap={allNonDeletedProjectsMap}
                         t={t}
                         onExpandTask={(taskId) => {
-                          setTodayViewMode('list');
                           setSelectedTaskIds([]);
                           setExpandedTaskId(taskId);
                         }}
@@ -5159,64 +5204,66 @@ export const App: React.FC = () => {
       </main>
 
       {/* ==================== MODALS ==================== */}
-      {expandedTaskId &&
-        activeNav.kind === 'project' &&
-        activeProjectViewMode !== 'list' && (() => {
-          const liveExpanded = snapshot.tasks.find(
-            (x) => x.id === expandedTaskId && !x.isDeleted
-          );
-          if (!liveExpanded) return null;
-          return (
+      {expandedTaskId && (() => {
+        const liveExpanded = snapshot.tasks.find(
+          (x) => x.id === expandedTaskId && !x.isDeleted
+        );
+        if (!liveExpanded) return null;
+        return (
+          <div
+            className="modal-backdrop task-bento-modal-backdrop"
+            data-testid="task-modal-backdrop"
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpandedTaskId(null);
+            }}
+          >
             <div
-              className="modal-backdrop"
-              onClick={() => setExpandedTaskId(null)}
+              className="task-bento-modal-shell"
+              onClick={(e) => e.stopPropagation()}
             >
-              <div
-                className="board-roadmap-task-editor-shell"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <TaskItem
-                  task={liveExpanded}
-                  isExpanded
-                  isTodayView={false}
-                  isSelected={false}
-                  isMultiSelectMode={false}
-                  showContextSubtitle={false}
-                  showScheduleBadgeInCollapsed
-                  quickFindOpen={quickFindOpen}
-                  currentDayMarker={endOfToday}
-                  areasMap={areasMap}
-                  projectsMap={allNonDeletedProjectsMap}
-                  tagsMap={tagsMap}
-                  checklistItems={snapshot.checklistItems}
-                  attachments={snapshot.attachments}
-                  openTaskIdSet={openTaskIdSet}
-                  tasksByIdMap={tasksByIdMap}
-                  lang={lang}
-                  geminiApiKey={prefs.geminiApiKey}
-                  t={t}
-                  onSelect={(multiToggle, shiftRange) =>
-                    handleSelectTask(liveExpanded.id, multiToggle, shiftRange)
-                  }
-                  onExpand={() => {}}
-                  onCollapse={() => setExpandedTaskId(null)}
-                  onOpenWhenModal={(taskId) => setWhenModalTaskId(taskId)}
-                  onOpenDeadlineModal={(taskId) =>
-                    setDeadlineModalTarget({ kind: 'task', taskId })
-                  }
-                  onOpenRepeatModal={(taskId) => setRepeatModalTaskId(taskId)}
-                  onOpenMoveModal={(taskId) => setMoveModalTaskIds([taskId])}
-                  onOpenTagsModal={(taskId) => setTagPickerTaskId(taskId)}
-                  onOpenDependenciesModal={(taskId) => setDependencyModalTaskId(taskId)}
-                  onStartFocusTimer={handleStartFocusTimer}
-                  onDuplicateTask={(taskId) => void handleDuplicateTask(taskId)}
-                  onDropReorder={() => {}}
-                  onToast={showToast}
-                />
-              </div>
+              <TaskItem
+                task={liveExpanded}
+                isExpanded
+                isTodayView={activeNav.kind === 'smart' && activeNav.view === 'TODAY'}
+                isSelected={false}
+                isMultiSelectMode={false}
+                showContextSubtitle={false}
+                showScheduleBadgeInCollapsed
+                quickFindOpen={quickFindOpen}
+                currentDayMarker={endOfToday}
+                areasMap={areasMap}
+                projectsMap={allNonDeletedProjectsMap}
+                tagsMap={tagsMap}
+                checklistItems={snapshot.checklistItems}
+                attachments={snapshot.attachments}
+                openTaskIdSet={openTaskIdSet}
+                tasksByIdMap={tasksByIdMap}
+                lang={lang}
+                geminiApiKey={prefs.geminiApiKey}
+                t={t}
+                onSelect={(multiToggle, shiftRange) =>
+                  handleSelectTask(liveExpanded.id, multiToggle, shiftRange)
+                }
+                onExpand={() => {}}
+                onCollapse={() => setExpandedTaskId(null)}
+                onOpenWhenModal={(taskId) => setWhenModalTaskId(taskId)}
+                onOpenDeadlineModal={(taskId) =>
+                  setDeadlineModalTarget({ kind: 'task', taskId })
+                }
+                onOpenRepeatModal={(taskId) => setRepeatModalTaskId(taskId)}
+                onOpenMoveModal={(taskId) => setMoveModalTaskIds([taskId])}
+                onOpenTagsModal={(taskId) => setTagPickerTaskId(taskId)}
+                onOpenDependenciesModal={(taskId) => setDependencyModalTaskId(taskId)}
+                onStartFocusTimer={handleStartFocusTimer}
+                onDuplicateTask={(taskId) => void handleDuplicateTask(taskId)}
+                onDropReorder={() => {}}
+                onToast={showToast}
+              />
             </div>
-          );
-        })()}
+          </div>
+        );
+      })()}
 
       {whenModalTaskId && (() => {
         const liveWhenTask = snapshot.tasks.find((x) => x.id === whenModalTaskId);

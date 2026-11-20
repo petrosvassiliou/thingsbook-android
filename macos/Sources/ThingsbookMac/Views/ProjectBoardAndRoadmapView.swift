@@ -259,7 +259,6 @@ public struct ProjectBoardWorkspaceView: View {
     @State private var newPhaseTitle = ""
     @State private var renamingHeadingId: String? = nil
     @State private var renameText = ""
-    @State private var editingTaskInSheet: TaskItem? = nil
 
     public init(
         store: ThingsbookStore,
@@ -327,25 +326,6 @@ public struct ProjectBoardWorkspaceView: View {
             }
             .padding(.vertical, 4)
             .padding(.trailing, 8)
-        }
-        .onChange(of: store.expandedTaskId) { _, nextId in
-            if let nextId, let found = store.allOpenTasks.first(where: { $0.id == nextId && $0.projectId == project.id }) {
-                editingTaskInSheet = found
-            } else if nextId == nil {
-                editingTaskInSheet = nil
-            }
-        }
-        .sheet(item: $editingTaskInSheet, onDismiss: {
-            if store.expandedTaskId != nil {
-                store.expandedTaskId = nil
-            }
-        }) { task in
-            ScrollView {
-                TaskRowCardView(store: store, task: task, showContextSubtitle: false)
-                    .padding(16)
-            }
-            .frame(minWidth: 560, idealWidth: 600, maxHeight: 580)
-            .background(ThingsMacPalette.canvasBackground)
         }
     }
 
@@ -498,10 +478,7 @@ public struct ProjectBoardWorkspaceView: View {
                         columnHeadingId: heading?.id,
                         task: task
                     ) {
-                        store.selectedTaskIds = [task.id]
-                        store.lastSelectedTaskId = task.id
-                        store.expandedTaskId = task.id
-                        editingTaskInSheet = task
+                        store.openTaskModal(task.id)
                     }
                 }
             }
@@ -696,6 +673,7 @@ private struct KanbanTaskCardView: View {
                             .frame(width: 20, height: 20)
                     }
                     .buttonStyle(.plain)
+                    .thingsTooltip(store.tr("action_more_options"))
                 }
             }
 
@@ -827,15 +805,7 @@ private struct KanbanTaskCardView: View {
             }
         )
         .onTapGesture {
-            let flags = NSEvent.modifierFlags
-            if flags.contains(.shift) || flags.contains(.command) {
-                store.handleRowClick(taskId: task.id, modifiers: flags)
-            } else {
-                withAnimation(.spring(response: 0.22, dampingFraction: 0.86)) {
-                    store.selectedTaskIds = [task.id]
-                    store.lastSelectedTaskId = task.id
-                }
-            }
+            store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
         }
         .thingsTaskDraggable(store: store, task: task)
         .thingsDropTarget(cornerRadius: 11) { payloads in
@@ -957,6 +927,12 @@ private struct KanbanTaskCardView: View {
                 Text(store.tr("action_delete"))
             }
         } else {
+            Button {
+                onOpenDetail()
+            } label: {
+                Label("\(store.tr("action_more_options"))…", systemImage: "slider.horizontal.3")
+            }
+            Divider()
             Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
                 store.toggleTaskCompletion(latestTask)
             }
@@ -1060,7 +1036,6 @@ public struct ProjectRoadmapWorkspaceView: View {
     @State private var armedPhaseDragId: String? = nil
     @State private var armedTaskDragId: String? = nil
     @State private var unscheduledStartPopoverTaskId: String? = nil
-    @State private var editingTaskInSheet: TaskItem? = nil
     @State private var isPDFExportSheetPresented: Bool = false
 
     private let labelColumnWidth: CGFloat = 272
@@ -1188,18 +1163,6 @@ public struct ProjectRoadmapWorkspaceView: View {
             if !layout.unscheduledTasks.isEmpty || rows.isEmpty {
                 unscheduledSectionCard(unscheduledTasks: layout.unscheduledTasks)
             }
-        }
-        .sheet(item: $editingTaskInSheet, onDismiss: {
-            if store.expandedTaskId != nil {
-                store.expandedTaskId = nil
-            }
-        }) { task in
-            ScrollView {
-                TaskRowCardView(store: store, task: task, showContextSubtitle: false)
-                    .padding(16)
-            }
-            .frame(minWidth: 560, idealWidth: 600, maxHeight: 580)
-            .background(ThingsMacPalette.canvasBackground)
         }
         .sheet(isPresented: $isPDFExportSheetPresented) {
             RoadmapPDFExportSheetView(
@@ -1480,16 +1443,27 @@ public struct ProjectRoadmapWorkspaceView: View {
                     .contentShape(Rectangle())
                     .simultaneousGesture(
                         TapGesture(count: 2).onEnded {
-                            editingTaskInSheet = bar.task
+                            store.openTaskModal(bar.id)
                         }
                     )
                     .onTapGesture {
-                        let flags = NSEvent.modifierFlags
-                        if flags.contains(.shift) || flags.contains(.command) {
-                            store.handleRowClick(taskId: bar.id, modifiers: flags)
-                        } else {
-                            store.selectedTaskIds = [bar.id]
-                            store.lastSelectedTaskId = bar.id
+                        store.handleRowClick(taskId: bar.id, modifiers: NSEvent.modifierFlags)
+                    }
+                    .contextMenu {
+                        Button {
+                            store.openTaskModal(bar.id)
+                        } label: {
+                            Label("\(store.tr("action_more_options"))…", systemImage: "slider.horizontal.3")
+                        }
+                        Divider()
+                        Button(bar.task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
+                            store.toggleTaskCompletion(bar.task)
+                        }
+                        Divider()
+                        Button(role: .destructive) {
+                            store.deleteTask(bar.task)
+                        } label: {
+                            Text(store.tr("action_delete"))
                         }
                     }
                     .thingsTaskDraggable(store: store, task: bar.task)
@@ -1878,17 +1852,11 @@ public struct ProjectRoadmapWorkspaceView: View {
         .offset(x: baseX + dragX)
         .simultaneousGesture(
             TapGesture(count: 2).onEnded {
-                editingTaskInSheet = task
+                store.openTaskModal(task.id)
             }
         )
         .onTapGesture {
-            let flags = NSEvent.modifierFlags
-            if flags.contains(.shift) || flags.contains(.command) {
-                store.handleRowClick(taskId: task.id, modifiers: flags)
-            } else {
-                store.selectedTaskIds = [task.id]
-                store.lastSelectedTaskId = task.id
-            }
+            store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
         }
         .gesture(
             LongPressGesture(minimumDuration: 0.28, maximumDistance: 8)
@@ -1926,6 +1894,12 @@ public struct ProjectRoadmapWorkspaceView: View {
                 }
         )
         .contextMenu {
+            Button {
+                store.openTaskModal(task.id)
+            } label: {
+                Label("\(store.tr("action_more_options"))…", systemImage: "slider.horizontal.3")
+            }
+            Divider()
             Button(store.tr("v30_roadmap_shift_earlier")) {
                 store.shiftTaskRoadmapDates(task, deltaDays: -1)
             }
@@ -2096,12 +2070,43 @@ public struct ProjectRoadmapWorkspaceView: View {
                     store.updateTask(copy)
                 }
             }
+
+            ThingsUtilityIconButton(
+                systemImage: "slider.horizontal.3",
+                tint: .secondary,
+                helpText: store.tr("action_more_options")
+            ) {
+                store.openTaskModal(task.id)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .thingsCardSurface(cornerRadius: 10, isSelected: store.selectedTaskIds.contains(task.id))
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded {
+                store.openTaskModal(task.id)
+            }
+        )
         .onTapGesture {
             store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
+        }
+        .contextMenu {
+            Button {
+                store.openTaskModal(task.id)
+            } label: {
+                Label("\(store.tr("action_more_options"))…", systemImage: "slider.horizontal.3")
+            }
+            Divider()
+            Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
+                store.toggleTaskCompletion(task)
+            }
+            Divider()
+            Button(role: .destructive) {
+                store.deleteTask(task)
+            } label: {
+                Text(store.tr("action_delete"))
+            }
         }
         .thingsTaskDraggable(store: store, task: task)
     }

@@ -503,6 +503,13 @@ public final class ThingsbookStore: ObservableObject {
         return areas.first { $0.id == id }
     }
 
+    public func task(byId id: String) -> TaskItem? {
+        if let open = allOpenTasks.first(where: { $0.id == id && !$0.isDeleted }) {
+            return open
+        }
+        return logbookTasks.first(where: { $0.id == id && !$0.isDeleted })
+    }
+
     private func containerGroupKey(for task: TaskItem) -> String {
         if let pid = task.projectId, let proj = project(byId: pid) {
             if let aid = proj.areaId, let area = area(byId: aid) {
@@ -677,7 +684,15 @@ public final class ThingsbookStore: ObservableObject {
             return
         }
 
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+        withAnimation(.spring(response: 0.22, dampingFraction: 0.86)) {
+            selectedTaskIds = [taskId]
+            lastSelectedTaskId = taskId
+        }
+    }
+
+    public func openTaskModal(_ taskId: String) {
+        guard task(byId: taskId) != nil else { return }
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
             selectedTaskIds = [taskId]
             lastSelectedTaskId = taskId
             expandedTaskId = taskId

@@ -564,30 +564,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         )}
 
-        {/* Option A Quiet Bottom Footer Dock: "+ New Project ▾" (with Templates) + Logbook / Trash / Areas */}
-        <div className="sidebar-footer">
+        {/* 2-Row Bottom Footer Dock: Row 1 = Full-Width "+ New Project ▾", Row 2 = Spaced Utility Icons */}
+        <div className="sidebar-footer" data-testid="sidebar-footer-dock">
           <div className="sidebar-new-project-anchor">
             <button
               type="button"
               className="sidebar-footer-btn"
+              data-testid="sidebar-new-project-btn"
               title={`${t.entityNewProject} (Ctrl+Shift+N)`}
               onClick={() => setNewProjectMenuOpen((v) => !v)}
             >
-              <Plus size={14} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
-              <span
-                style={{
-                  color: 'var(--things-blue)',
-                  fontWeight: 600,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap'
-                }}
-              >
-                {t.entityNewProject}
+              <span className="sidebar-footer-btn-main">
+                <Plus size={14} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
+                <span>{t.entityNewProject}</span>
               </span>
               <ChevronDown
-                size={12}
-                style={{ color: 'var(--things-blue)', opacity: 0.78, flexShrink: 0 }}
+                size={13}
+                style={{ color: 'var(--things-blue)', opacity: 0.82, flexShrink: 0 }}
               />
             </button>
 

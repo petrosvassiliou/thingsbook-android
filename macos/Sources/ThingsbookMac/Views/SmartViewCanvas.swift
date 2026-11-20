@@ -81,11 +81,11 @@ public struct SmartViewCanvas: View {
                     }
                 }
             }
-            .padding(.horizontal, isAnyTimelineFullScreen ? 22 : 40)
-            .padding(.top, isAnyTimelineFullScreen ? 14 : 26)
+            .padding(.horizontal, isAnyTimelineFullScreen ? 20 : 26)
+            .padding(.top, isAnyTimelineFullScreen ? 14 : 24)
             .padding(.bottom, isAnyTimelineFullScreen ? 22 : 96)
-            .frame(maxWidth: (isWideProjectWorkspace || isAnyTimelineFullScreen) ? .infinity : 880, alignment: .leading)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: (isWideProjectWorkspace || isAnyTimelineFullScreen) ? .infinity : 960, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(ThingsMacPalette.canvasBackground)
         .onPreferenceChange(MacMagicPlusSlotsPreferenceKey.self) { slots in
@@ -2022,16 +2022,36 @@ public struct SmartViewCanvas: View {
     }
 
     private func emptyPlaceholder(icon: String, text: String) -> some View {
-        VStack(spacing: 12) {
+        HStack(spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 38, weight: .light))
-                .foregroundStyle(.quaternary)
-            Text(text)
-                .font(.system(size: 14))
+                .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(.tertiary)
+                .frame(width: 34, height: 34)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.primary.opacity(0.045))
+                )
+
+            Text(text)
+                .font(.system(size: 13.5, weight: .regular))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 80)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: 520, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .fill(ThingsMacPalette.cardSurface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.075), lineWidth: 0.85)
+                )
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 4)
         .magicPlusDropSlot(
             id: "empty_canvas",
             kind: .emptyContainer(headingId: nil, epochDayOverride: nil, evening: false),

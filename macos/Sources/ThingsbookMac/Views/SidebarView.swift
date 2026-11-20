@@ -140,8 +140,8 @@ public struct SidebarView: View {
             Divider()
                 .opacity(0.65)
 
-            // Bottom Sidebar Bar (+ New Project ▾ menu with Templates & Import, quiet Logbook/Trash/Areas footer dock)
-            HStack(spacing: 8) {
+            // 2-Row Bottom Sidebar Dock: Row 1 = Full-Width "+ New Project ▾" Menu, Row 2 = Spaced Utility Dock
+            VStack(alignment: .leading, spacing: 7) {
                 Menu {
                     Button {
                         store.newProjectDefaultAreaId = defaultNewProjectAreaId
@@ -194,27 +194,66 @@ public struct SidebarView: View {
                         Label(store.tr("gemini_project_architect_title"), systemImage: "sparkles")
                     }
                 } label: {
-                    HStack(spacing: 4.5) {
+                    HStack(spacing: 6) {
                         Image(systemName: "plus")
-                            .font(.system(size: 11.5, weight: .semibold))
+                            .font(.system(size: 11.5, weight: .bold))
                         Text(store.tr("entity_new_project"))
                             .font(.system(size: 12.5, weight: .semibold))
                             .lineLimit(1)
+                        Spacer(minLength: 6)
                         Image(systemName: "chevron.down")
-                            .font(.system(size: 8.5, weight: .bold))
-                            .opacity(0.78)
+                            .font(.system(size: 9.5, weight: .bold))
+                            .opacity(0.82)
                     }
                     .foregroundStyle(ThingsMacPalette.accentBlue)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6.5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(ThingsMacPalette.accentBlue.opacity(0.11))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.24), lineWidth: 0.8)
+                            )
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
                 .menuStyle(.borderlessButton)
-                .fixedSize()
+                .menuIndicator(.hidden)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .thingsTooltip(store.tr("entity_new_project"))
 
-                Spacer(minLength: 4)
-
-                HStack(spacing: 3) {
+                HStack(spacing: 6) {
                     footerSmartIconButton(.logbook)
+
+                    Spacer(minLength: 4)
+
                     footerSmartIconButton(.trash)
+
+                    Spacer(minLength: 4)
+
+                    Button {
+                        store.isAreaManagerPresented = true
+                    } label: {
+                        HStack(spacing: 3.5) {
+                            Image(systemName: "folder")
+                                .font(.system(size: 10.5))
+                            Text("\(store.areas.count)/\(ThingsSQLiteDatabase.maxAreas)")
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color.primary.opacity(0.045))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .thingsTooltip(store.trf("areas_active_count", store.areas.count, ThingsSQLiteDatabase.maxAreas))
+
+                    Spacer(minLength: 4)
 
                     Button {
                         store.isTagManagerPresented = true
@@ -231,27 +270,8 @@ public struct SidebarView: View {
                     }
                     .buttonStyle(.plain)
                     .thingsTooltip(store.tr("tags_manage_title"))
-
-                    Button {
-                        store.isAreaManagerPresented = true
-                    } label: {
-                        HStack(spacing: 3.5) {
-                            Image(systemName: "folder")
-                                .font(.system(size: 10.5))
-                            Text("\(store.areas.count)/\(ThingsSQLiteDatabase.maxAreas)")
-                                .font(.system(size: 11, weight: .medium, design: .rounded))
-                        }
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(Color.primary.opacity(0.04))
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .thingsTooltip(store.trf("areas_active_count", store.areas.count, ThingsSQLiteDatabase.maxAreas))
                 }
+                .padding(.horizontal, 2)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)

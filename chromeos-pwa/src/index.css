@@ -368,6 +368,7 @@ button {
 
 .sidebar-new-project-anchor {
   position: relative;
+  width: 100%;
   min-width: 0;
 }
 
@@ -375,6 +376,7 @@ button {
   position: absolute;
   bottom: calc(100% + 6px);
   left: 0;
+  right: 0;
   min-width: 214px;
   z-index: 85;
   border-radius: 12px;
@@ -388,9 +390,12 @@ button {
 }
 
 .sidebar-footer-utilities {
-  display: inline-flex;
+  width: 100%;
+  display: flex;
   align-items: center;
-  gap: 2px;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 0 2px;
   flex-shrink: 0;
 }
 
@@ -596,27 +601,41 @@ button {
 
 .sidebar-footer {
   border-top: 1px solid var(--border-subtle);
-  padding: 7px 10px 4px;
+  padding: 8px 10px 5px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
   gap: 6px;
 }
 
 .sidebar-footer-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6.5px 10px;
+  border-radius: 10px;
+  background: var(--things-blue-soft);
+  border: 1px solid rgba(56, 152, 236, 0.22);
+  color: var(--things-blue);
+  font-size: 12.6px;
+  font-weight: 600;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.sidebar-footer-btn-main {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 8px;
-  border-radius: var(--radius-xs);
-  color: var(--text-secondary);
-  font-size: 12.4px;
-  font-weight: 550;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .sidebar-footer-btn:hover {
-  background: var(--bg-sidebar-hover);
-  color: var(--text-primary);
+  background: rgba(56, 152, 236, 0.19);
+  border-color: rgba(56, 152, 236, 0.36);
+  color: var(--things-blue);
 }
 
 .sidebar-version-row {
@@ -927,8 +946,9 @@ button {
 }
 
 .inline-qf-bar {
-  max-width: 840px;
-  margin: 0 auto;
+  max-width: 880px;
+  width: 100%;
+  margin: 0;
 }
 
 .inline-qf-input-wrap {
@@ -1085,12 +1105,13 @@ button {
 .workspace-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 18px 28px 108px;
+  padding: 18px 24px 108px;
 }
 
 .workspace-container {
-  max-width: 840px;
-  margin: 0 auto;
+  max-width: 960px;
+  width: 100%;
+  margin: 0;
 }
 
 .view-header {
@@ -2515,9 +2536,15 @@ kbd {
 }
 
 .empty-state {
-  text-align: center;
-  padding: 54px 20px;
+  text-align: left;
+  max-width: 520px;
+  margin-top: 6px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
   color: var(--text-muted);
+  font-size: 13.8px;
 }
 
 .empty-state-icon {
@@ -5872,6 +5899,8 @@ button.v2-stalled-pill:hover {
   white-space: normal;
   word-break: normal;
   overflow-wrap: break-word;
+  -webkit-hyphens: auto;
+  hyphens: auto;
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.28;

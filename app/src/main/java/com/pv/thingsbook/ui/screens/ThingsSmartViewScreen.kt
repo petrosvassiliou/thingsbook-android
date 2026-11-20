@@ -1009,8 +1009,8 @@ fun ThingsSmartViewScreen(
                 Column(
                     modifier = Modifier
                         .padding(
-                            start = if (showSidebar) 12.dp else 0.dp,
-                            end = if (showSidebar) 20.dp else 0.dp
+                            start = if (showSidebar) 4.dp else 0.dp,
+                            end = if (showSidebar) 16.dp else 0.dp
                         )
                         .widthIn(
                             max = when {
@@ -2925,14 +2925,24 @@ private fun ThingsMainTaskLazyList(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 48.dp),
-                        contentAlignment = Alignment.Center
+                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.CenterStart
                     ) {
-                        Text(
-                            text = stringResource(R.string.trash_empty_state),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.secondaryText
-                        )
+                        Surface(
+                            modifier = Modifier
+                                .widthIn(max = 520.dp)
+                                .fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            color = colors.cardSurface,
+                            border = BorderStroke(0.75.dp, colors.hairlineDivider)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.trash_empty_state),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.secondaryText,
+                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 15.dp)
+                            )
+                        }
                     }
                 }
             } else {
@@ -8134,45 +8144,59 @@ private fun ThingsChromebookSidebar(
             }
         }
 
-        // Bottom Sidebar Actions: "+ New Project ▾" (with Templates & Import) + quiet Logbook / Trash / Categories / Areas X/8 dock
+        // 2-Row Bottom Sidebar Dock: Row 1 = Full-Width "+ New Project ▾", Row 2 = Spaced Utility Dock
         HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
         var showNewProjectFooterMenu by remember { mutableStateOf(false) }
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .padding(top = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Box(modifier = Modifier.weight(1f, fill = false)) {
+            Box(modifier = Modifier.fillMaxWidth()) {
                 ThingsHoverTooltip(text = "${stringResource(R.string.entity_new_project)} (Ctrl+Shift+N)") {
-                    Row(
+                    Surface(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .clickable { showNewProjectFooterMenu = true }
-                            .padding(horizontal = 7.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { showNewProjectFooterMenu = true },
+                        shape = RoundedCornerShape(10.dp),
+                        color = colors.thingsBlueSoft.copy(alpha = 0.78f),
+                        border = BorderStroke(0.75.dp, colors.thingsBlue.copy(alpha = 0.26f))
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Add,
-                            contentDescription = null,
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Text(
-                            text = stringResource(R.string.entity_new_project),
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = colors.thingsBlue,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Icon(
-                            imageVector = Icons.Outlined.ExpandMore,
-                            contentDescription = null,
-                            tint = colors.thingsBlue.copy(alpha = 0.8f),
-                            modifier = Modifier.size(14.dp)
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 6.5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f, fill = false),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Add,
+                                    contentDescription = null,
+                                    tint = colors.thingsBlue,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Text(
+                                    text = stringResource(R.string.entity_new_project),
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = colors.thingsBlue,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.Outlined.ExpandMore,
+                                contentDescription = null,
+                                tint = colors.thingsBlue.copy(alpha = 0.85f),
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
                     }
                 }
 
@@ -8214,8 +8238,11 @@ private fun ThingsChromebookSidebar(
             }
 
             Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 val logbookSelected = navTarget == ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK)
                 val logbookLabel = stringResource(SmartViewType.LOGBOOK.titleRes)
@@ -8285,6 +8312,35 @@ private fun ThingsChromebookSidebar(
                     }
                 }
 
+                ThingsHoverTooltip(
+                    text = stringResource(
+                        R.string.areas_manage_count_tooltip,
+                        areas.size,
+                        ThingsRepository.MAX_AREAS
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .clickable(onClick = onOpenAreaManager)
+                            .padding(horizontal = 7.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.5.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Folder,
+                            contentDescription = areasLabel,
+                            tint = colors.secondaryText,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = "${areas.size}/${ThingsRepository.MAX_AREAS}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.secondaryText
+                        )
+                    }
+                }
+
                 val categoriesLabel = stringResource(R.string.topbar_tooltip_tags)
                 ThingsHoverTooltip(text = categoriesLabel) {
                     IconButton(
@@ -8301,35 +8357,6 @@ private fun ThingsChromebookSidebar(
                             contentDescription = categoriesLabel,
                             tint = colors.secondaryText,
                             modifier = Modifier.size(15.dp)
-                        )
-                    }
-                }
-
-                ThingsHoverTooltip(
-                    text = stringResource(
-                        R.string.areas_manage_count_tooltip,
-                        areas.size,
-                        ThingsRepository.MAX_AREAS
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .clickable(onClick = onOpenAreaManager)
-                            .padding(horizontal = 6.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Folder,
-                            contentDescription = areasLabel,
-                            tint = colors.secondaryText,
-                            modifier = Modifier.size(13.dp)
-                        )
-                        Text(
-                            text = "${areas.size}/${ThingsRepository.MAX_AREAS}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colors.secondaryText
                         )
                     }
                 }

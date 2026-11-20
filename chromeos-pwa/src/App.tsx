@@ -2798,6 +2798,7 @@ export const App: React.FC = () => {
   return (
     <div
       className="app-shell"
+      lang={lang}
       onClick={() => {
         if (
           expandedTaskId &&

@@ -1,10 +1,13 @@
 package com.pv.thingsbook
 
 import com.pv.thingsbook.domain.model.Heading
+import com.pv.thingsbook.domain.model.PdfPageOrientation
 import com.pv.thingsbook.domain.model.Project
 import com.pv.thingsbook.domain.model.ProjectRoadmapEngine
 import com.pv.thingsbook.domain.model.ProjectStatus
 import com.pv.thingsbook.domain.model.ProjectWorkspaceMode
+import com.pv.thingsbook.domain.model.RoadmapPdfExportConfig
+import com.pv.thingsbook.domain.model.RoadmapPdfTimelinePreset
 import com.pv.thingsbook.domain.model.ScheduleState
 import com.pv.thingsbook.domain.model.TaskItem
 import com.pv.thingsbook.domain.model.TaskStatus
@@ -360,7 +363,189 @@ class V3Milestone3RoadmapTest {
     }
 
     @Test
-    fun `Milestone 3 strings_xml keys exist across all 5 supported locales`() {
+    fun `buildRoadmapLayout caps endEpochDay at at most 1 month after lastTaskEndDay even when project deadline and phase endDate are months away`() {
+        val today = LocalDate.of(2026, 11, 20)
+        val todayEpoch = today.toEpochDay()
+
+        val projectWithFarDeadline = sampleProject.copy(
+            deadline = dayMillis(LocalDate.of(2027, 4, 30))
+        )
+        val phase1 = makeHeading(
+            id = "h-p1",
+            title = "Technische Umsetzung",
+            sortOrder = 1.0,
+            startDate = dayMillis(LocalDate.of(2026, 11, 20)),
+            endDate = dayMillis(LocalDate.of(2026, 12, 5))
+        )
+        val phase4 = makeHeading(
+            id = "h-p4",
+            title = "Betriebsübergabe und Langzeitbegleitung",
+            sortOrder = 2.0,
+            startDate = dayMillis(LocalDate.of(2026, 12, 10)),
+            endDate = dayMillis(LocalDate.of(2027, 2, 15))
+        )
+        val task1 = makeTask(
+            id = "t-1",
+            headingId = "h-p1",
+            scheduleState = ScheduleState.TODAY,
+            whenDate = dayMillis(LocalDate.of(2026, 11, 20)),
+            deadline = dayMillis(LocalDate.of(2026, 11, 28)),
+            sortOrder = 1.0
+        )
+        val lastTask = makeTask(
+            id = "t-last",
+            headingId = "h-p4",
+            scheduleState = ScheduleState.UPCOMING,
+            whenDate = dayMillis(LocalDate.of(2026, 12, 12)),
+            deadline = dayMillis(LocalDate.of(2026, 12, 18)),
+            sortOrder = 2.0
+        )
+
+        val layout = ProjectRoadmapEngine.buildRoadmapLayout(
+            project = projectWithFarDeadline,
+            headings = listOf(phase1, phase4),
+            tasks = listOf(task1, lastTask),
+            todayEpochDay = todayEpoch,
+            zoneId = berlinZone
+        )
+
+        // Last task due date = 2026-12-18 -> 1-month cap is strictly 2027-01-18 (not Feb 2027 or Apr/May 2027!)
+        val expectedOneMonthCap = LocalDate.of(2027, 1, 18).toEpochDay()
+        assertEquals(todayEpoch - 3L, layout.startEpochDay)
+        assertEquals(expectedOneMonthCap, layout.endEpochDay)
+        assertTrue(layout.endEpochDay <= expectedOneMonthCap)
+
+        // When project has zero scheduled tasks, far-future phase endDate and project deadline are capped at today + 1 month
+        val tasksEmptyLayout = ProjectRoadmapEngine.buildRoadmapLayout(
+            project = projectWithFarDeadline,
+            headings = listOf(phase4),
+            tasks = emptyList(),
+            todayEpochDay = todayEpoch,
+            zoneId = berlinZone
+        )
+        assertEquals(today.plusMonths(1).toEpochDay(), tasksEmptyLayout.endEpochDay)
+    }
+
+    @Test
+    fun `filterLayoutForExport filters selected phases, clamps timeline bounds, prunes excluded dependency edges, and verifies A4 PdfPageOrientation`() {
+        assertEquals(842, PdfPageOrientation.LANDSCAPE.pageWidthPt)
+        assertEquals(595, PdfPageOrientation.LANDSCAPE.pageHeightPt)
+        assertEquals(595, PdfPageOrientation.PORTRAIT.pageWidthPt)
+        assertEquals(842, PdfPageOrientation.PORTRAIT.pageHeightPt)
+        assertEquals(
+            listOf(
+                RoadmapPdfTimelinePreset.FULL_PROJECT,
+                RoadmapPdfTimelinePreset.FROM_TODAY,
+                RoadmapPdfTimelinePreset.NEXT_30_DAYS,
+                RoadmapPdfTimelinePreset.CUSTOM
+            ),
+            RoadmapPdfTimelinePreset.entries
+        )
+
+        val today = LocalDate.of(2026, 9, 10)
+        val todayEpoch = today.toEpochDay()
+
+        val headingA = makeHeading(
+            id = "h-a",
+            title = "Technische Umsetzung",
+            sortOrder = 1.0,
+            startDate = dayMillis(today.minusDays(2)),
+            endDate = dayMillis(today.plusDays(25))
+        )
+        val headingB = makeHeading(
+            id = "h-b",
+            title = "Betriebsübergabe",
+            sortOrder = 2.0,
+            startDate = dayMillis(today.plusDays(4)),
+            endDate = dayMillis(today.plusDays(18))
+        )
+
+        val tGen = makeTask(
+            id = "t-gen",
+            headingId = null,
+            scheduleState = ScheduleState.TODAY,
+            whenDate = dayMillis(today)
+        )
+        val tA1 = makeTask(
+            id = "t-a1",
+            headingId = "h-a",
+            scheduleState = ScheduleState.TODAY,
+            whenDate = dayMillis(today.minusDays(1)),
+            deadline = dayMillis(today.plusDays(5)),
+            sortOrder = 1.0
+        )
+        val tA2 = makeTask(
+            id = "t-a2",
+            headingId = "h-a",
+            scheduleState = ScheduleState.UPCOMING,
+            whenDate = dayMillis(today.plusDays(6)),
+            deadline = dayMillis(today.plusDays(12)),
+            blockedByTaskIds = listOf("t-a1"),
+            sortOrder = 2.0
+        )
+        val tAOutside = makeTask(
+            id = "t-a-outside",
+            headingId = "h-a",
+            scheduleState = ScheduleState.UPCOMING,
+            whenDate = dayMillis(today.plusDays(20)),
+            deadline = dayMillis(today.plusDays(22)),
+            blockedByTaskIds = listOf("t-a2"),
+            sortOrder = 3.0
+        )
+        val tB1 = makeTask(
+            id = "t-b1",
+            headingId = "h-b",
+            scheduleState = ScheduleState.UPCOMING,
+            whenDate = dayMillis(today.plusDays(5)),
+            deadline = dayMillis(today.plusDays(9)),
+            blockedByTaskIds = listOf("t-a1"),
+            sortOrder = 1.0
+        )
+
+        val fullLayout = ProjectRoadmapEngine.buildRoadmapLayout(
+            project = sampleProject,
+            headings = listOf(headingA, headingB),
+            tasks = listOf(tGen, tA1, tA2, tAOutside, tB1),
+            todayEpochDay = todayEpoch,
+            zoneId = berlinZone
+        )
+        assertEquals(3, fullLayout.dependencyEdges.size)
+
+        val customStart = todayEpoch + 1L
+        val customEnd = todayEpoch + 10L
+        val config = RoadmapPdfExportConfig(
+            selectedLaneKeys = setOf("h-a"),
+            startEpochDay = customStart,
+            endEpochDay = customEnd,
+            orientation = PdfPageOrientation.PORTRAIT
+        )
+        val filtered = ProjectRoadmapEngine.filterLayoutForExport(fullLayout, config)
+
+        assertEquals(customStart, filtered.startEpochDay)
+        assertEquals(customEnd, filtered.endEpochDay)
+        assertEquals(10, filtered.totalDays)
+        assertEquals(listOf("h-a"), filtered.lanes.map { it.laneKey })
+
+        val clampedPhase = filtered.lanes.single().phaseBar!!
+        assertEquals(customStart, clampedPhase.startEpochDay)
+        assertEquals(customEnd, clampedPhase.endEpochDay)
+        assertEquals(10, clampedPhase.spanDays)
+
+        val keptBarsById = filtered.taskBars.associateBy { it.taskId }
+        assertEquals(setOf("t-a1", "t-a2"), keptBarsById.keys)
+        assertEquals(customStart, keptBarsById.getValue("t-a1").startEpochDay)
+        assertEquals(todayEpoch + 5L, keptBarsById.getValue("t-a1").endEpochDay)
+        assertEquals(todayEpoch + 6L, keptBarsById.getValue("t-a2").startEpochDay)
+        assertEquals(customEnd, keptBarsById.getValue("t-a2").endEpochDay)
+
+        // Only intra-selected-window edge t-a1 -> t-a2 remains; t-a2 -> t-a-outside and t-a1 -> t-b1 are pruned!
+        assertEquals(1, filtered.dependencyEdges.size)
+        assertEquals("t-a1", filtered.dependencyEdges.single().fromTaskId)
+        assertEquals("t-a2", filtered.dependencyEdges.single().toTaskId)
+    }
+
+    @Test
+    fun `Milestone 3 and v3_0_0_alpha_13 PDF export strings_xml keys exist across all 5 supported locales`() {
         val resRoot = sequenceOf(
             File("src/main/res"),
             File("app/src/main/res")
@@ -388,7 +573,18 @@ class V3Milestone3RoadmapTest {
             "v30_roadmap_shift_earlier",
             "v30_roadmap_shift_later",
             "v30_drag_multi_count",
-            "v30_drop_moved_feedback"
+            "v30_drop_moved_feedback",
+            "v30_pdf_export_dialog_title",
+            "v30_pdf_phases_label",
+            "v30_pdf_select_all_phases",
+            "v30_pdf_timeline_label",
+            "v30_pdf_timeline_auto",
+            "v30_pdf_timeline_from_today",
+            "v30_pdf_timeline_next_30d",
+            "v30_pdf_timeline_custom",
+            "v30_pdf_orientation_label",
+            "v30_pdf_orientation_landscape",
+            "v30_pdf_orientation_portrait"
         )
 
         val dbf = DocumentBuilderFactory.newInstance()

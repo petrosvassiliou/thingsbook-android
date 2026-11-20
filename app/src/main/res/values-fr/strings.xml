@@ -549,6 +549,17 @@
     <string name="v30_board_add_phase">Nouvelle phase</string>
     <string name="v30_drag_multi_count">%1$d tâches</string>
     <string name="v30_drop_moved_feedback">%1$d tâches déplacées</string>
+    <string name="v30_pdf_export_dialog_title">Exporter la feuille de route en PDF</string>
+    <string name="v30_pdf_phases_label">Phases du projet</string>
+    <string name="v30_pdf_select_all_phases">Tout sélectionner</string>
+    <string name="v30_pdf_timeline_label">Période de la chronologie</string>
+    <string name="v30_pdf_timeline_auto">Projet complet</string>
+    <string name="v30_pdf_timeline_from_today">À partir d\'aujourd\'hui</string>
+    <string name="v30_pdf_timeline_next_30d">30 prochains jours</string>
+    <string name="v30_pdf_timeline_custom">Plage personnalisée</string>
+    <string name="v30_pdf_orientation_label">Orientation de la page</string>
+    <string name="v30_pdf_orientation_landscape">Paysage</string>
+    <string name="v30_pdf_orientation_portrait">Portrait</string>
     <string name="v30_external_import_export_tab">Asana et Planner</string>
     <string name="v30_import_asana">Importer depuis Asana (CSV / JSON)</string>
     <string name="v30_export_asana_csv">Exporter vers Asana CSV</string>

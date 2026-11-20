@@ -1298,7 +1298,7 @@ button {
 
 .project-heading-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 8px;
@@ -1317,21 +1317,31 @@ button {
 .project-phase-accent {
   width: 3.5px;
   height: 16px;
+  margin-top: 2px;
   border-radius: 999px;
   background: var(--things-blue);
   flex-shrink: 0;
 }
 
 .project-heading-title-btn {
-  flex: 1;
-  min-width: 120px;
+  flex: 1 1 200px;
+  min-width: 180px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   text-align: left;
   color: var(--text-primary);
   font-weight: 700;
   font-size: 13.8px;
+}
+
+.project-heading-title-text {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.32;
 }
 
 .phase-end-pill {
@@ -1387,7 +1397,7 @@ button {
 
 .phase-milestone-left {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 9px;
   min-width: 0;
   flex: 1;
@@ -1403,9 +1413,11 @@ button {
   font-size: 13.4px;
   font-weight: 680;
   color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+  line-height: 1.3;
 }
 
 .phase-milestone-sub {
@@ -1420,7 +1432,8 @@ button {
 .project-heading-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  flex-wrap: wrap;
+  gap: 3px;
 }
 
 /* Area Project Row Card */
@@ -4128,14 +4141,14 @@ button.v2-stalled-pill:hover {
 
 .board-column-title-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 6px;
 }
 
 .board-column-title-left {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 7px;
   min-width: 0;
   flex: 1;
@@ -4144,6 +4157,7 @@ button.v2-stalled-pill:hover {
 .board-column-accent {
   width: 4px;
   height: 15px;
+  margin-top: 2px;
   border-radius: 999px;
   background: linear-gradient(180deg, #74C4FF 0%, #3898EC 100%);
   flex-shrink: 0;
@@ -4154,12 +4168,17 @@ button.v2-stalled-pill:hover {
 }
 
 .board-column-title {
+  flex: 1;
+  min-width: 0;
   font-size: 13.5px;
   font-weight: 700;
+  line-height: 1.3;
   color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .board-phase-rename-input {
@@ -4177,6 +4196,7 @@ button.v2-stalled-pill:hover {
   justify-content: center;
   min-width: 20px;
   height: 18px;
+  margin-top: 1px;
   padding: 0 6px;
   border-radius: var(--radius-pill);
   background: var(--bg-card);
@@ -4185,6 +4205,13 @@ button.v2-stalled-pill:hover {
   font-size: 11px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.board-column-ring-wrap {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 2px;
   flex-shrink: 0;
 }
 
@@ -4604,6 +4631,24 @@ button.v2-stalled-pill:hover {
 
 .roadmap-sticky-cell.lane-cell {
   background: var(--bg-subtle);
+  padding: 6px 10px 6px 12px;
+  align-items: stretch;
+}
+
+.roadmap-lane-cell-stack {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+
+.roadmap-lane-top-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  min-width: 0;
 }
 
 .roadmap-lane-title {
@@ -4611,10 +4656,60 @@ button.v2-stalled-pill:hover {
   min-width: 0;
   font-size: 12.6px;
   font-weight: 700;
+  line-height: 1.28;
   color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.roadmap-lane-ring-wrap {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.roadmap-lane-dates-subrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-left: 11px;
+}
+
+.roadmap-lane-date-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3.5px;
+  padding: 1.5px 6.5px;
+  border-radius: 999px;
+  font-size: 10.4px;
+  font-weight: 600;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  color: var(--text-muted);
   white-space: nowrap;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+.roadmap-lane-date-chip:hover {
+  border-color: var(--things-blue);
+  color: var(--things-blue);
+}
+
+.roadmap-lane-date-chip.has-date {
+  background: var(--things-blue-soft);
+  border-color: rgba(56, 152, 236, 0.3);
+  color: var(--things-blue);
+}
+
+.roadmap-lane-date-chip.overdue {
+  background: var(--deadline-red-bg);
+  border-color: rgba(229, 57, 53, 0.34);
+  color: var(--deadline-red);
 }
 
 .roadmap-task-label {
@@ -4672,7 +4767,7 @@ button.v2-stalled-pill:hover {
 /* Glacier-Blue Phase Header Bar */
 .roadmap-phase-bar {
   position: absolute;
-  top: 7px;
+  top: 16px;
   height: 26px;
   border-radius: 8px;
   background: linear-gradient(90deg, #74C4FF 0%, #3898EC 100%);
@@ -4705,9 +4800,28 @@ button.v2-stalled-pill:hover {
 .roadmap-phase-bar-label {
   font-size: 11.5px;
   font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.roadmap-phase-bar-spacer {
+  flex: 1;
+}
+
+.roadmap-phase-bar-outside-label {
+  position: absolute;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--things-blue);
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  pointer-events: none;
+  z-index: 5;
 }
 
 .roadmap-bar-step-controls {
@@ -4739,7 +4853,7 @@ button.v2-stalled-pill:hover {
 
 .roadmap-set-phase-dates-inline {
   position: absolute;
-  top: 8px;
+  top: 16px;
   height: 24px;
   padding: 0 9px;
   border-radius: 999px;
@@ -4892,7 +5006,18 @@ button.v2-stalled-pill:hover {
   flex: 1;
 }
 
-.roadmap-unscheduled-name,
+.roadmap-unscheduled-name {
+  font-size: 13px;
+  font-weight: 620;
+  color: var(--text-primary);
+  text-align: left;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+  line-height: 1.3;
+}
+
 .roadmap-unscheduled-task-btn {
   font-size: 13px;
   font-weight: 560;
@@ -4913,4 +5038,214 @@ button.v2-stalled-pill:hover {
   flex-wrap: wrap;
   gap: 5px;
 }
+
+/* ---------- Soft Bento PDF Export Configuration Modal ---------- */
+
+.pdf-export-modal-panel {
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pdf-export-modal-panel .modal-header {
+  margin-bottom: 2px;
+}
+
+.pdf-export-modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.pdf-export-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 13px;
+  border-radius: 13px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+}
+
+.pdf-export-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pdf-export-section-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+
+.pdf-select-all-btn {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--things-blue);
+  padding: 2px 7px;
+  border-radius: 6px;
+  transition: background 0.12s ease;
+}
+
+.pdf-select-all-btn:hover {
+  background: var(--things-blue-soft);
+}
+
+.pdf-phases-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 196px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.pdf-phase-checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.pdf-phase-checkbox-row:hover {
+  border-color: var(--border-strong);
+}
+
+.pdf-phase-checkbox-row.checked {
+  border-color: rgba(56, 152, 236, 0.45);
+  background: var(--things-blue-soft);
+}
+
+.pdf-phase-checkbox-row input[type="checkbox"] {
+  margin-top: 2px;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--things-blue);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.pdf-phase-option-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 630;
+  line-height: 1.32;
+  color: var(--text-primary);
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.pdf-timeline-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pdf-custom-dates-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.pdf-custom-date-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pdf-custom-date-caption {
+  font-size: 11.4px;
+  font-weight: 620;
+  color: var(--text-secondary);
+}
+
+.pdf-orientation-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.pdf-orientation-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border-subtle);
+  text-align: left;
+  transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+}
+
+.pdf-orientation-card:hover {
+  border-color: var(--border-strong);
+}
+
+.pdf-orientation-card.active {
+  border-color: var(--things-blue);
+  background: var(--things-blue-soft);
+  box-shadow: 0 0 0 2px var(--focus-ring-blue);
+}
+
+.pdf-page-preview {
+  display: inline-block;
+  border-radius: 3px;
+  border: 1.5px solid var(--things-blue);
+  background: rgba(56, 152, 236, 0.14);
+  flex-shrink: 0;
+}
+
+.pdf-page-preview.landscape {
+  width: 26px;
+  height: 18px;
+}
+
+.pdf-page-preview.portrait {
+  width: 18px;
+  height: 26px;
+}
+
+.pdf-orientation-texts {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.pdf-orientation-name {
+  font-size: 13px;
+  font-weight: 680;
+  color: var(--text-primary);
+}
+
+.pdf-orientation-dim {
+  font-size: 10.8px;
+  font-weight: 540;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.pdf-export-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 2px;
+}
+
 

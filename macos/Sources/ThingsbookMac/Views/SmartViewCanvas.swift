@@ -953,10 +953,11 @@ public struct SmartViewCanvas: View {
         let phaseProgress = totalPhaseCount > 0 ? Double(doneCount) / Double(totalPhaseCount) : 0.0
 
         return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
                 Capsule(style: .continuous)
                     .fill(ThingsMacPalette.accentBlue)
                     .frame(width: 3.5, height: 17)
+                    .padding(.top, 2)
 
                 if isRenaming {
                     TextField(store.tr("entity_new_heading"), text: $renameHeadingText)
@@ -985,18 +986,23 @@ public struct SmartViewCanvas: View {
                             }
                         }
                     } label: {
-                        HStack(spacing: 6) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(heading.title)
                                 .font(.system(size: 14.5, weight: .bold))
                                 .foregroundStyle(.primary)
+                                .lineLimit(nil)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
                             if isCollapsed && !tasks.isEmpty {
                                 Text("(\(tasks.count))")
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundStyle(.secondary)
+                                    .fixedSize()
                             }
                         }
                     }
                     .buttonStyle(.plain)
+                    .layoutPriority(1)
 
                     if totalPhaseCount > 0 {
                         ProjectProgressRing(
@@ -1008,21 +1014,25 @@ public struct SmartViewCanvas: View {
                             completedCount: doneCount,
                             totalCount: totalPhaseCount
                         )
+                        .fixedSize()
+                        .padding(.top, 2)
                     }
 
                     PhaseStartDatePillButton(
                         store: store,
                         heading: heading
                     )
+                    .fixedSize()
 
                     PhaseEndDatePillButton(
                         store: store,
                         heading: heading,
                         hasOpenTasks: rawOpenCount > 0
                     )
+                    .fixedSize()
                 }
 
-                Spacer()
+                Spacer(minLength: 4)
 
                 Button {
                     store.createNewTaskInCurrentContext(preferredHeadingId: heading.id)

@@ -11,13 +11,15 @@ import {
 import {
   DRAG_MIME_MULTI_TASKS,
   DRAG_MIME_SINGLE_TASK,
+  addOneMonthLocal,
   buildProjectRoadmapLayout,
   extractDraggedTaskIds,
   generateRoadmapPdfBytes,
   localDaysBetween,
   normalizeProjectViewMode,
   shiftPhaseDatesByDays,
-  shiftTaskDatesByDays
+  shiftTaskDatesByDays,
+  wrapTextLines
 } from '../src/domain/v30Roadmap.ts';
 import {
   DEFAULT_PREFS,
@@ -579,7 +581,7 @@ test('ThingsLocalDb multi-task cross-container moves preserve relative sortOrder
     attachments: snap.attachments,
     projectTemplates: snap.projectTemplates,
     preferences: {},
-    appVersionName: '3.0.0-alpha.12'
+    appVersionName: '3.0.0-alpha.13'
   });
   const encryptedBytes = await encodeThingsBackup(backupPayload, 'milestone3-secret');
   const decodedPayload = await decodeThingsBackup(encryptedBytes, 'milestone3-secret');
@@ -622,4 +624,235 @@ test('ThingsLocalDb multi-task cross-container moves preserve relative sortOrder
     db.getSnapshot().projects.find((p) => p.id === project.id)?.viewMode,
     'roadmap'
   );
+});
+
+test('v3.0.0-alpha.13 buildProjectRoadmapLayout caps horizon strictly to <= 1 month after last task due/end date', () => {
+  // Month-end DST-safe clamping checks
+  assert.equal(
+    addOneMonthLocal(startOfDayEpoch(new Date(2026, 0, 31))),
+    startOfDayEpoch(new Date(2026, 1, 28))
+  );
+  assert.equal(
+    addOneMonthLocal(startOfDayEpoch(new Date(2028, 0, 31))),
+    startOfDayEpoch(new Date(2028, 1, 29))
+  );
+  assert.equal(
+    addOneMonthLocal(startOfDayEpoch(new Date(2026, 11, 18))),
+    startOfDayEpoch(new Date(2027, 0, 18))
+  );
+
+  // Spec scenario: Today = 2026-11-20, last task due date = 2026-12-18,
+  // Phase 4 ends 2027-02-15, project.deadline = 2027-04-30 -> windowEndEpoch strictly 2027-01-18!
+  const today = startOfDayEpoch(new Date(2026, 10, 20));
+  const lastTaskDue = startOfDayEpoch(new Date(2026, 11, 18));
+  const phase4End = startOfDayEpoch(new Date(2027, 1, 15));
+  const farProjectDeadline = startOfDayEpoch(new Date(2027, 3, 30));
+
+  const project = makeProject({
+    id: 'proj-horizon-cap',
+    title: 'Enterprise Rollout',
+    deadline: farProjectDeadline
+  });
+
+  const phase1 = makeHeading({
+    id: 'hd-1',
+    projectId: project.id,
+    title: 'Technische Umsetzung und Systemintegration',
+    startDate: today,
+    endDate: lastTaskDue,
+    sortOrder: 1000
+  });
+  const phase4 = makeHeading({
+    id: 'hd-4',
+    projectId: project.id,
+    title: 'Betriebsübergabe und Langzeitbegleitung',
+    startDate: startOfDayEpoch(new Date(2026, 11, 10)),
+    endDate: phase4End,
+    sortOrder: 4000
+  });
+
+  const lastTask = makeTask({
+    id: 'tk-last',
+    projectId: project.id,
+    headingId: phase1.id,
+    title: 'Final Cutover Verification',
+    whenDate: startOfDayEpoch(new Date(2026, 11, 15)),
+    deadline: lastTaskDue
+  });
+
+  const layout = buildProjectRoadmapLayout(
+    project,
+    [phase1, phase4],
+    [lastTask],
+    today
+  );
+
+  const expectedCap = startOfDayEpoch(new Date(2027, 0, 18));
+  assert.equal(layout.windowEndEpoch, expectedCap);
+  assert.equal(layout.days[layout.days.length - 1].epoch, expectedCap);
+
+  // Phase 4 extends beyond windowEndEpoch, so its lane indices are clamped strictly within [0 .. totalDays - 1]
+  const lane4 = layout.lanes.find((l) => l.heading?.id === phase4.id)!;
+  assert.ok(lane4.endDayIndex != null && lane4.endDayIndex === layout.totalDays - 1);
+
+  // Zero plotted tasks scenario: caps at <= today + 1 month even when phase/project dates are months out
+  const zeroTasksLayout = buildProjectRoadmapLayout(
+    project,
+    [phase4],
+    [],
+    today
+  );
+  assert.equal(
+    zeroTasksLayout.windowEndEpoch,
+    startOfDayEpoch(new Date(2026, 11, 20))
+  );
+});
+
+test('v3.0.0-alpha.13 generateRoadmapPdfBytes supports A4 portrait vs landscape, phase filtering, custom timeline range, full phase titles, and pagination', async () => {
+  const today = startOfDayEpoch(new Date(2026, 10, 20));
+  const project = makeProject({
+    id: 'proj-pdf-v13',
+    title: 'Q1 Platform Migration'
+  });
+
+  const phaseKeep = makeHeading({
+    id: 'hd-keep',
+    projectId: project.id,
+    title: 'Technische Umsetzung Architektur und Infrastruktur Validierung',
+    startDate: today,
+    endDate: addDaysLocal(today, 1), // Narrow 2-day phase bar -> unclipped title beside bar!
+    sortOrder: 1000
+  });
+  const phaseOmit = makeHeading({
+    id: 'hd-omit',
+    projectId: project.id,
+    title: 'Excluded Secret Phase',
+    startDate: today,
+    endDate: addDaysLocal(today, 5),
+    sortOrder: 2000
+  });
+
+  const inRangeTask = makeTask({
+    id: 'tk-in-range',
+    projectId: project.id,
+    headingId: phaseKeep.id,
+    title: 'Migrate Core Database',
+    whenDate: addDaysLocal(today, 2),
+    deadline: addDaysLocal(today, 4),
+    sortOrder: 100
+  });
+  const outOfRangeTask = makeTask({
+    id: 'tk-out-of-range',
+    projectId: project.id,
+    headingId: phaseKeep.id,
+    title: 'Late December Audit',
+    whenDate: addDaysLocal(today, 35),
+    deadline: addDaysLocal(today, 37),
+    sortOrder: 200
+  });
+  const omittedPhaseTask = makeTask({
+    id: 'tk-omitted-phase',
+    projectId: project.id,
+    headingId: phaseOmit.id,
+    title: 'Hidden Phase Task',
+    whenDate: addDaysLocal(today, 1),
+    sortOrder: 300
+  });
+
+  const layout = buildProjectRoadmapLayout(
+    project,
+    [phaseKeep, phaseOmit],
+    [inRangeTask, outOfRangeTask, omittedPhaseTask],
+    today
+  );
+
+  // 1. Landscape A4 (/MediaBox [0 0 842 595])
+  const landscapeBytes = generateRoadmapPdfBytes(
+    layout,
+    project.title,
+    { ungroupedTitle: 'General' },
+    { orientation: 'landscape' }
+  );
+  const landscapeAscii = new TextDecoder('ascii').decode(landscapeBytes);
+  assert.ok(landscapeAscii.includes('/MediaBox [0 0 842 595]'));
+
+  // 2. Portrait A4 (/MediaBox [0 0 595 842]) + Phase filtering + Custom 45-day range
+  //    Wait: custom 14-day range [today .. today+13] excludes outOfRangeTask (at today+35)
+  const portraitFilteredBytes = generateRoadmapPdfBytes(
+    layout,
+    project.title,
+    { ungroupedTitle: 'General' },
+    {
+      orientation: 'portrait',
+      selectedLaneIds: [phaseKeep.id],
+      startEpoch: today,
+      endEpoch: addDaysLocal(today, 13)
+    }
+  );
+  const portraitAscii = new TextDecoder('ascii').decode(portraitFilteredBytes);
+  assert.ok(portraitAscii.includes('/MediaBox [0 0 595 842]'));
+  assert.ok(portraitAscii.includes('Migrate Core Database'));
+  assert.ok(!portraitAscii.includes('Excluded Secret Phase'));
+  assert.ok(!portraitAscii.includes('Hidden Phase Task'));
+  assert.ok(!portraitAscii.includes('Late December Audit'));
+  // Full Phase title wrapped across lines & rendered without ellipsis on narrow bar
+  const wrappedCheck = wrapTextLines(phaseKeep.title, 30);
+  assert.ok(wrappedCheck.length >= 2);
+  for (const part of wrappedCheck) {
+    assert.ok(portraitAscii.includes(part));
+  }
+  assert.ok(portraitAscii.includes(phaseKeep.title));
+
+  // 3. Multi-page pagination on Landscape when tasks exceed 1 A4 page + 45-day Portrait tick spacing
+  const manyTasks: TaskRecord[] = [];
+  for (let i = 0; i < 28; i++) {
+    manyTasks.push(
+      makeTask({
+        id: `tk-bulk-${i}`,
+        projectId: project.id,
+        headingId: phaseKeep.id,
+        title: `Deliverable Step ${i + 1}`,
+        whenDate: addDaysLocal(today, i % 20),
+        sortOrder: 1000 + i * 10
+      })
+    );
+  }
+  const largeLayout = buildProjectRoadmapLayout(project, [phaseKeep], manyTasks, today);
+  const multiPageLandscape = new TextDecoder('ascii').decode(
+    generateRoadmapPdfBytes(
+      largeLayout,
+      project.title,
+      { ungroupedTitle: 'General' },
+      {
+        orientation: 'landscape',
+        startEpoch: today,
+        endEpoch: addDaysLocal(today, 44)
+      }
+    )
+  );
+  assert.ok(multiPageLandscape.includes('/Count 2'));
+  assert.ok(multiPageLandscape.includes('Page 1 / 2'));
+  assert.ok(multiPageLandscape.includes('Page 2 / 2'));
+
+  // 4. Verify all 11 new PDF export i18n keys across all 5 languages
+  const { TRANSLATIONS } = await import('../src/i18n/translations.ts');
+  const pdfKeys = [
+    'pdfExportDialogTitle',
+    'pdfPhasesLabel',
+    'pdfSelectAllPhases',
+    'pdfTimelineLabel',
+    'pdfTimelineAuto',
+    'pdfTimelineFromToday',
+    'pdfTimelineNext30d',
+    'pdfTimelineCustom',
+    'pdfOrientationLabel',
+    'pdfOrientationLandscape',
+    'pdfOrientationPortrait'
+  ] as const;
+  for (const lang of ['en', 'de', 'fr', 'it', 'es'] as const) {
+    for (const key of pdfKeys) {
+      assert.equal(typeof TRANSLATIONS[lang][key], 'string');
+      assert.ok(TRANSLATIONS[lang][key].trim().length > 0, `Missing ${lang}.${key}`);
+    }
+  }
 });

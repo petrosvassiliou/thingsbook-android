@@ -4459,7 +4459,7 @@ export const App: React.FC = () => {
                               >
                                 <span className="project-heading-title-btn" style={{ cursor: 'default' }}>
                                   <span className="project-phase-accent general" />
-                                  <span>{t.projectUngroupedColumn}</span>
+                                  <span className="project-heading-title-text">{t.projectUngroupedColumn}</span>
                                 </span>
                                 <div className="project-heading-actions">
                                   <button
@@ -4628,7 +4628,9 @@ export const App: React.FC = () => {
                                   onClick={toggleCollapse}
                                 >
                                   <span className="project-phase-accent" />
-                                  <span>{hd.title || t.entityHeading}</span>
+                                  <span className="project-heading-title-text">
+                                    {hd.title || t.entityHeading}
+                                  </span>
                                   {allHdTasks.length > 0 && (
                                     <ProjectProgressRing
                                       completed={doneHdTasks}

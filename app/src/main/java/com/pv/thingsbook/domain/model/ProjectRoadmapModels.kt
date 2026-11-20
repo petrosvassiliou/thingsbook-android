@@ -70,8 +70,27 @@ data class ProjectRoadmapLayout(
     val unscheduledTasks: List<TaskItem>
 ) {
     val totalDays: Int
-        get() = (endEpochDay - startEpochDay + 1L).coerceAtLeast(21L).toInt()
+        get() = (endEpochDay - startEpochDay + 1L).coerceAtLeast(1L).toInt()
 }
+
+enum class PdfPageOrientation(val pageWidthPt: Int, val pageHeightPt: Int) {
+    LANDSCAPE(842, 595),
+    PORTRAIT(595, 842)
+}
+
+enum class RoadmapPdfTimelinePreset {
+    FULL_PROJECT,
+    FROM_TODAY,
+    NEXT_30_DAYS,
+    CUSTOM
+}
+
+data class RoadmapPdfExportConfig(
+    val selectedLaneKeys: Set<String>,
+    val startEpochDay: Long,
+    val endEpochDay: Long,
+    val orientation: PdfPageOrientation = PdfPageOrientation.LANDSCAPE
+)
 
 object ProjectRoadmapEngine {
 
@@ -272,18 +291,11 @@ object ProjectRoadmapEngine {
             }
         }
 
-        // 3. Window [startEpochDay, endEpochDay] (totalDays >= 21, covering today - 3 through maxScheduledDay + 7)
-        val projectDeadlineDay = project.deadline?.let { epochMillisToEpochDay(it, zoneId) }
+        // 3. Window [startEpochDay, endEpochDay] (totalDays >= 21, capped at <= 1 month after last task end date)
         val minScheduledDay = sequence {
             allPhaseBars.forEach { yield(it.startEpochDay) }
             allTaskBars.forEach { yield(it.startEpochDay) }
         }.minOrNull()
-
-        val maxScheduledDay = sequence {
-            allPhaseBars.forEach { yield(it.endEpochDay) }
-            allTaskBars.forEach { yield(it.endEpochDay) }
-            if (projectDeadlineDay != null) yield(projectDeadlineDay)
-        }.maxOrNull() ?: todayEpochDay
 
         val startEpochDay = if (minScheduledDay != null && minScheduledDay < todayEpochDay - LEADING_BUFFER_DAYS) {
             minScheduledDay - 1L
@@ -291,11 +303,31 @@ object ProjectRoadmapEngine {
             todayEpochDay - LEADING_BUFFER_DAYS
         }
 
-        val candidateEndDay = maxOf(
-            todayEpochDay - LEADING_BUFFER_DAYS + (MIN_TIMELINE_DAYS - 1L),
-            maxScheduledDay + TRAILING_BUFFER_DAYS
-        )
-        val endEpochDay = maxOf(candidateEndDay, startEpochDay + (MIN_TIMELINE_DAYS - 1L))
+        val endEpochDay = if (allTaskBars.isNotEmpty()) {
+            val lastTaskEndDay = allTaskBars.maxOf { it.endEpochDay }
+            val oneMonthCapDay = LocalDate.ofEpochDay(lastTaskEndDay).plusMonths(1).toEpochDay()
+            val maxTaskOrPhaseEnd = maxOf(
+                lastTaskEndDay,
+                allPhaseBars.maxOfOrNull { it.endEpochDay } ?: lastTaskEndDay
+            )
+            val uncappedDesiredEnd = maxOf(
+                startEpochDay + (MIN_TIMELINE_DAYS - 1L),
+                maxTaskOrPhaseEnd + TRAILING_BUFFER_DAYS
+            )
+            if (oneMonthCapDay >= startEpochDay) {
+                maxOf(lastTaskEndDay, minOf(uncappedDesiredEnd, oneMonthCapDay))
+            } else {
+                uncappedDesiredEnd
+            }
+        } else {
+            minOf(
+                maxOf(
+                    startEpochDay + 20L,
+                    (allPhaseBars.maxOfOrNull { it.endEpochDay } ?: todayEpochDay) + 7L
+                ),
+                LocalDate.ofEpochDay(todayEpochDay).plusMonths(1).toEpochDay().coerceAtLeast(startEpochDay + 20L)
+            )
+        }
 
         // 4. Dependency edges among plotted tasks in this project
         val plottedById = allTaskBars.associateBy { it.taskId }
@@ -326,6 +358,73 @@ object ProjectRoadmapEngine {
             dependencyEdges = dependencyEdges,
             unscheduledHeadings = unscheduledHeadings,
             unscheduledTasks = unscheduledTasks
+        )
+    }
+
+    fun filterLayoutForExport(
+        layout: ProjectRoadmapLayout,
+        config: RoadmapPdfExportConfig
+    ): ProjectRoadmapLayout {
+        val safeStart = minOf(config.startEpochDay, config.endEpochDay)
+        val safeEnd = maxOf(config.startEpochDay, config.endEpochDay)
+
+        val filteredLanes = mutableListOf<RoadmapLane>()
+        val filteredPhaseBars = mutableListOf<RoadmapPhaseBar>()
+        val filteredTaskBars = mutableListOf<RoadmapTaskBar>()
+
+        for (lane in layout.lanes) {
+            if (lane.laneKey !in config.selectedLaneKeys) continue
+
+            val pb = lane.phaseBar
+            val clampedPhaseBar = if (pb != null && pb.endEpochDay >= safeStart && pb.startEpochDay <= safeEnd) {
+                pb.copy(
+                    startEpochDay = maxOf(pb.startEpochDay, safeStart),
+                    endEpochDay = minOf(pb.endEpochDay, safeEnd)
+                )
+            } else {
+                null
+            }
+
+            val clampedTaskBars = lane.taskBars.mapNotNull { tb ->
+                if (tb.endEpochDay >= safeStart && tb.startEpochDay <= safeEnd) {
+                    tb.copy(
+                        startEpochDay = maxOf(tb.startEpochDay, safeStart),
+                        endEpochDay = minOf(tb.endEpochDay, safeEnd)
+                    )
+                } else {
+                    null
+                }
+            }
+
+            val originallyEmptyScheduled = lane.phaseBar == null && lane.taskBars.isEmpty()
+            if (clampedPhaseBar != null || clampedTaskBars.isNotEmpty() || originallyEmptyScheduled) {
+                if (clampedPhaseBar != null) {
+                    filteredPhaseBars += clampedPhaseBar
+                }
+                filteredTaskBars += clampedTaskBars
+                filteredLanes += lane.copy(
+                    phaseBar = clampedPhaseBar,
+                    taskBars = clampedTaskBars
+                )
+            }
+        }
+
+        val keptTaskIds = filteredTaskBars.mapTo(HashSet()) { it.taskId }
+        val filteredEdges = layout.dependencyEdges.filter { edge ->
+            edge.fromTaskId in keptTaskIds && edge.toTaskId in keptTaskIds
+        }
+        val filteredUnscheduledHeadings = layout.unscheduledHeadings.filter { it.id in config.selectedLaneKeys }
+        val filteredUnscheduledTasks = filteredLanes.flatMap { it.unscheduledTasks }
+
+        return layout.copy(
+            startEpochDay = safeStart,
+            endEpochDay = safeEnd,
+            lanes = filteredLanes,
+            phaseBars = filteredPhaseBars,
+            taskBars = filteredTaskBars,
+            dependencyEdges = filteredEdges,
+            unscheduledHeadings = filteredUnscheduledHeadings,
+            unscheduledTasks = filteredUnscheduledTasks
         )
     }
 

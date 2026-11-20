@@ -434,6 +434,17 @@ export interface TranslationStrings {
   roadmapShiftLater: string;
   dragTasksCount: (count: number) => string;
   dropMovedFeedback: (count: number) => string;
+  pdfExportDialogTitle: string;
+  pdfPhasesLabel: string;
+  pdfSelectAllPhases: string;
+  pdfTimelineLabel: string;
+  pdfTimelineAuto: string;
+  pdfTimelineFromToday: string;
+  pdfTimelineNext30d: string;
+  pdfTimelineCustom: string;
+  pdfOrientationLabel: string;
+  pdfOrientationLandscape: string;
+  pdfOrientationPortrait: string;
 }
 
 export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
@@ -890,7 +901,18 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     roadmapShiftEarlier: '-1 Day',
     roadmapShiftLater: '+1 Day',
     dragTasksCount: (count) => `${count} To-Dos`,
-    dropMovedFeedback: (count) => `Moved ${count} to-dos`
+    dropMovedFeedback: (count) => `Moved ${count} to-dos`,
+    pdfExportDialogTitle: 'Export Roadmap as PDF',
+    pdfPhasesLabel: 'Project Phases',
+    pdfSelectAllPhases: 'Select All',
+    pdfTimelineLabel: 'Timeline Range',
+    pdfTimelineAuto: 'Full Project',
+    pdfTimelineFromToday: 'From Today',
+    pdfTimelineNext30d: 'Next 30 Days',
+    pdfTimelineCustom: 'Custom Range',
+    pdfOrientationLabel: 'Page Orientation',
+    pdfOrientationLandscape: 'Landscape',
+    pdfOrientationPortrait: 'Portrait'
   },
   de: {
     appName: 'Thingsbook',
@@ -1348,7 +1370,18 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     roadmapShiftEarlier: '-1 Tag',
     roadmapShiftLater: '+1 Tag',
     dragTasksCount: (count) => `${count} Aufgaben`,
-    dropMovedFeedback: (count) => `${count} Aufgaben verschoben`
+    dropMovedFeedback: (count) => `${count} Aufgaben verschoben`,
+    pdfExportDialogTitle: 'Roadmap als PDF exportieren',
+    pdfPhasesLabel: 'Projektphasen',
+    pdfSelectAllPhases: 'Alle auswählen',
+    pdfTimelineLabel: 'Zeitraum',
+    pdfTimelineAuto: 'Gesamtes Projekt',
+    pdfTimelineFromToday: 'Ab Heute',
+    pdfTimelineNext30d: 'Nächste 30 Tage',
+    pdfTimelineCustom: 'Benutzerdefiniert',
+    pdfOrientationLabel: 'Seitenausrichtung',
+    pdfOrientationLandscape: 'Querformat',
+    pdfOrientationPortrait: 'Hochformat'
   },
   fr: {
     appName: 'Thingsbook',
@@ -1804,7 +1837,18 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     roadmapShiftEarlier: '-1 jour',
     roadmapShiftLater: '+1 jour',
     dragTasksCount: (count) => `${count} tâches`,
-    dropMovedFeedback: (count) => `${count} tâches déplacées`
+    dropMovedFeedback: (count) => `${count} tâches déplacées`,
+    pdfExportDialogTitle: 'Exporter la feuille de route en PDF',
+    pdfPhasesLabel: 'Phases du projet',
+    pdfSelectAllPhases: 'Tout sélectionner',
+    pdfTimelineLabel: 'Période de la chronologie',
+    pdfTimelineAuto: 'Projet complet',
+    pdfTimelineFromToday: 'À partir d’aujourd’hui',
+    pdfTimelineNext30d: '30 prochains jours',
+    pdfTimelineCustom: 'Plage personnalisée',
+    pdfOrientationLabel: 'Orientation de la page',
+    pdfOrientationLandscape: 'Paysage',
+    pdfOrientationPortrait: 'Portrait'
   },
   it: {
     appName: 'Thingsbook',
@@ -2260,7 +2304,18 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     roadmapShiftEarlier: '-1 giorno',
     roadmapShiftLater: '+1 giorno',
     dragTasksCount: (count) => `${count} attività`,
-    dropMovedFeedback: (count) => `${count} attività spostate`
+    dropMovedFeedback: (count) => `${count} attività spostate`,
+    pdfExportDialogTitle: 'Esporta Roadmap in PDF',
+    pdfPhasesLabel: 'Fasi del progetto',
+    pdfSelectAllPhases: 'Seleziona tutto',
+    pdfTimelineLabel: 'Periodo della cronologia',
+    pdfTimelineAuto: 'Intero progetto',
+    pdfTimelineFromToday: 'Da oggi',
+    pdfTimelineNext30d: 'Prossimi 30 giorni',
+    pdfTimelineCustom: 'Intervallo personalizzato',
+    pdfOrientationLabel: 'Orientamento pagina',
+    pdfOrientationLandscape: 'Orizzontale',
+    pdfOrientationPortrait: 'Verticale'
   },
   es: {
     appName: 'Thingsbook',
@@ -2716,7 +2771,18 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     roadmapShiftEarlier: '-1 día',
     roadmapShiftLater: '+1 día',
     dragTasksCount: (count) => `${count} tareas`,
-    dropMovedFeedback: (count) => `${count} tareas movidas`
+    dropMovedFeedback: (count) => `${count} tareas movidas`,
+    pdfExportDialogTitle: 'Exportar hoja de ruta en PDF',
+    pdfPhasesLabel: 'Fases del proyecto',
+    pdfSelectAllPhases: 'Seleccionar todo',
+    pdfTimelineLabel: 'Periodo de la línea de tiempo',
+    pdfTimelineAuto: 'Proyecto completo',
+    pdfTimelineFromToday: 'Desde hoy',
+    pdfTimelineNext30d: 'Próximos 30 días',
+    pdfTimelineCustom: 'Rango personalizado',
+    pdfOrientationLabel: 'Orientación de página',
+    pdfOrientationLandscape: 'Horizontal',
+    pdfOrientationPortrait: 'Vertical'
   }
 };
 

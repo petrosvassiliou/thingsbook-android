@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -68,6 +69,10 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material.icons.outlined.WbSunny
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -77,6 +82,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -85,6 +91,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -138,15 +145,20 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import com.pv.thingsbook.R
 import com.pv.thingsbook.domain.model.Area
 import com.pv.thingsbook.domain.model.EffortLevel
 import com.pv.thingsbook.domain.model.Heading
+import com.pv.thingsbook.domain.model.PdfPageOrientation
 import com.pv.thingsbook.domain.model.Project
 import com.pv.thingsbook.domain.model.ProjectRoadmapEngine
 import com.pv.thingsbook.domain.model.ProjectRoadmapLayout
 import com.pv.thingsbook.domain.model.ProjectWorkspaceMode
+import com.pv.thingsbook.domain.model.RoadmapPdfExportConfig
+import com.pv.thingsbook.domain.model.RoadmapPdfTimelinePreset
 import com.pv.thingsbook.domain.model.RoadmapPhaseBar
 import com.pv.thingsbook.domain.model.RoadmapTaskBar
 import com.pv.thingsbook.domain.model.ScheduleState
@@ -944,16 +956,17 @@ private fun ProjectBoardPhaseColumn(
                     } else {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            verticalAlignment = Alignment.Top,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Row(
                                 modifier = Modifier.weight(1f),
-                                verticalAlignment = Alignment.CenterVertically,
+                                verticalAlignment = Alignment.Top,
                                 horizontalArrangement = Arrangement.spacedBy(7.dp)
                             ) {
                                 Box(
                                     modifier = Modifier
+                                        .padding(top = 3.dp)
                                         .width(4.dp)
                                         .height(18.dp)
                                         .clip(RoundedCornerShape(50))
@@ -967,11 +980,13 @@ private fun ProjectBoardPhaseColumn(
                                     text = columnTitle,
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                     color = colors.primaryText,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f, fill = false)
+                                    maxLines = Int.MAX_VALUE,
+                                    modifier = Modifier
+                                        .weight(1f, fill = false)
+                                        .padding(top = 2.dp)
                                 )
                                 Surface(
+                                    modifier = Modifier.padding(top = 2.dp),
                                     shape = RoundedCornerShape(50),
                                     color = colors.cardSurface
                                 ) {
@@ -1530,7 +1545,7 @@ fun ProjectRoadmapWorkspace(
     var zoomIndex by remember { mutableIntStateOf(1) }
     val dayWidthDp: Dp = zoomLevelsDp[zoomIndex.coerceIn(0, zoomLevelsDp.lastIndex)]
     val dayWidthPx = with(density) { dayWidthDp.toPx() }
-    val labelColWidth: Dp = if (isWideScreen) 216.dp else 148.dp
+    val labelColWidth: Dp = if (isWideScreen) 256.dp else 188.dp
 
     val horizontalScrollState = rememberScrollState()
     val verticalScrollState = rememberScrollState()
@@ -1549,8 +1564,9 @@ fun ProjectRoadmapWorkspace(
         runCatching { horizontalScrollState.scrollTo(targetPx) }
     }
 
+    var showPdfExportDialog by remember { mutableStateOf(false) }
     val exportChooserTitle = stringResource(R.string.v30_roadmap_export)
-    val triggerExport: (Boolean) -> Unit = { asPdf ->
+    val triggerPngExport: () -> Unit = {
         coroutineScope.launch {
             runCatching {
                 RoadmapExporter.exportAndShareRoadmap(
@@ -1559,7 +1575,7 @@ fun ProjectRoadmapWorkspace(
                     headingCounts = headingTaskCounts,
                     locale = locale,
                     isDark = colors.isDark,
-                    asPdf = asPdf,
+                    asPdf = false,
                     exportChooserTitle = exportChooserTitle
                 )
             }.onFailure { err ->
@@ -1723,8 +1739,8 @@ fun ProjectRoadmapWorkspace(
             }
 
             RoadmapExportMenuPill(
-                onExportPdf = { triggerExport(true) },
-                onExportPng = { triggerExport(false) }
+                onExportPdf = { showPdfExportDialog = true },
+                onExportPng = { triggerPngExport() }
             )
         }
 
@@ -1778,6 +1794,7 @@ fun ProjectRoadmapWorkspace(
                             dayWidthDp = dayWidthDp,
                             dayWidthPx = dayWidthPx,
                             labelColWidth = labelColWidth,
+                            locale = locale,
                             horizontalScrollState = horizontalScrollState,
                             livePreviewDeltaDays = livePreviewDeltaDays,
                             onShiftHeadingDates = onShiftHeadingDates,
@@ -1841,16 +1858,17 @@ fun ProjectRoadmapWorkspace(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                    verticalAlignment = Alignment.Top,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Row(
                                         modifier = Modifier.weight(1f),
-                                        verticalAlignment = Alignment.CenterVertically,
+                                        verticalAlignment = Alignment.Top,
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         Box(
                                             modifier = Modifier
+                                                .padding(top = 3.dp)
                                                 .width(3.5.dp)
                                                 .height(16.dp)
                                                 .clip(RoundedCornerShape(50))
@@ -1860,8 +1878,8 @@ fun ProjectRoadmapWorkspace(
                                             text = heading.title.ifBlank { stringResource(R.string.entity_heading) },
                                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                             color = colors.primaryText,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            maxLines = Int.MAX_VALUE,
+                                            modifier = Modifier.weight(1f)
                                         )
                                     }
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1933,6 +1951,36 @@ fun ProjectRoadmapWorkspace(
                 }
             }
         }
+    }
+
+    if (showPdfExportDialog) {
+        RoadmapPdfExportDialog(
+            project = project,
+            projectHeadings = projectHeadings,
+            primaryTasks = primaryTasks,
+            layout = layout,
+            locale = locale,
+            onDismiss = { showPdfExportDialog = false },
+            onConfirmExport = { config ->
+                showPdfExportDialog = false
+                coroutineScope.launch {
+                    runCatching {
+                        RoadmapExporter.exportPdf(
+                            context = context,
+                            project = project,
+                            layout = layout,
+                            config = config,
+                            headingCounts = headingTaskCounts,
+                            locale = locale,
+                            isDark = colors.isDark,
+                            exportChooserTitle = exportChooserTitle
+                        )
+                    }.onFailure { err ->
+                        onShowError(err.localizedMessage ?: err.message ?: "Export failed")
+                    }
+                }
+            }
+        )
     }
 
     unscheduledHeadingPickerTarget?.let { targetHeading ->
@@ -2062,8 +2110,43 @@ private fun RoadmapDayHeaderStrip(
     }
 }
 
-private val PHASE_ROW_HEIGHT = 42.dp
+private val MIN_PHASE_ROW_HEIGHT = 56.dp
 private val TASK_ROW_HEIGHT = 38.dp
+
+private fun estimateWrappedLineCount(text: String, charsPerLine: Int): Int {
+    if (text.isBlank()) return 1
+    val safeLimit = charsPerLine.coerceAtLeast(10)
+    var lines = 1
+    var currentLen = 0
+    for (word in text.trim().split(Regex("\\s+"))) {
+        if (word.isEmpty()) continue
+        if (currentLen == 0) {
+            if (word.length <= safeLimit) {
+                currentLen = word.length
+            } else {
+                lines += (word.length - 1) / safeLimit
+                currentLen = ((word.length - 1) % safeLimit) + 1
+            }
+        } else if (currentLen + 1 + word.length <= safeLimit) {
+            currentLen += 1 + word.length
+        } else {
+            lines++
+            if (word.length <= safeLimit) {
+                currentLen = word.length
+            } else {
+                lines += (word.length - 1) / safeLimit
+                currentLen = ((word.length - 1) % safeLimit) + 1
+            }
+        }
+    }
+    return lines.coerceAtLeast(1)
+}
+
+private fun computePhaseRowHeightDp(title: String, labelColWidth: Dp): Dp {
+    val approxCharsPerLine = ((labelColWidth.value - 38f) / 6.7f).toInt().coerceAtLeast(14)
+    val wrappedLines = estimateWrappedLineCount(title, approxCharsPerLine)
+    return (MIN_PHASE_ROW_HEIGHT.value.toInt() + (wrappedLines - 1).coerceAtLeast(0) * 16).dp
+}
 
 @Composable
 private fun RoadmapSynchronizedLanesBody(
@@ -2072,6 +2155,7 @@ private fun RoadmapSynchronizedLanesBody(
     dayWidthDp: Dp,
     dayWidthPx: Float,
     labelColWidth: Dp,
+    locale: Locale,
     horizontalScrollState: ScrollState,
     livePreviewDeltaDays: MutableMap<String, Long>,
     onShiftHeadingDates: (heading: Heading, deltaDays: Long, fallbackRange: Pair<Long, Long>?) -> Unit,
@@ -2081,37 +2165,40 @@ private fun RoadmapSynchronizedLanesBody(
 ) {
     val colors = ThingsTheme.colors
     val density = LocalDensity.current
-    val phaseRowPx = with(density) { PHASE_ROW_HEIGHT.toPx() }
-    val taskRowPx = with(density) { TASK_ROW_HEIGHT.toPx() }
+    val shortDateFmt = remember(locale) {
+        DateTimeFormatter.ofPattern(if (locale.language == "de") "d. MMM" else "MMM d", locale)
+    }
 
-    val rowOffsetsDp = remember(displayRows) {
-        val list = ArrayList<Dp>(displayRows.size)
+    val rowMetrics = remember(displayRows, labelColWidth) {
+        val heights = ArrayList<Dp>(displayRows.size)
+        val tops = ArrayList<Dp>(displayRows.size)
         var cursor = 0.dp
         for (row in displayRows) {
-            list += cursor
-            cursor += when (row) {
-                is RoadmapDisplayRow.PhaseRow -> PHASE_ROW_HEIGHT
+            tops += cursor
+            val h = when (row) {
+                is RoadmapDisplayRow.PhaseRow -> computePhaseRowHeightDp(row.title, labelColWidth)
                 is RoadmapDisplayRow.TaskRow -> TASK_ROW_HEIGHT
             }
+            heights += h
+            cursor += h
         }
-        list to cursor
+        Triple(heights, tops, cursor)
     }
-    val rowTopsDp = rowOffsetsDp.first
-    val totalHeightDp = rowOffsetsDp.second.coerceAtLeast(56.dp)
+    val rowHeightsDp = rowMetrics.first
+    val rowTopsDp = rowMetrics.second
+    val totalHeightDp = rowMetrics.third.coerceAtLeast(MIN_PHASE_ROW_HEIGHT)
     val totalTimelineWidthDp = dayWidthDp * layout.totalDays
 
-    // Map taskId -> (rowTopPx, rowHeightPx, taskBar) for fast cubic-Bézier dependency rendering
-    val taskRowGeometry = remember(displayRows, phaseRowPx, taskRowPx) {
+    // Map taskId -> (rowTopPx, rowHeightPx, taskBar) synchronized with dynamic Phase row heights
+    val taskRowGeometry = remember(displayRows, rowHeightsDp, density) {
         val map = HashMap<String, Triple<Float, Float, RoadmapTaskBar>>()
         var yPx = 0f
-        for (row in displayRows) {
-            when (row) {
-                is RoadmapDisplayRow.PhaseRow -> yPx += phaseRowPx
-                is RoadmapDisplayRow.TaskRow -> {
-                    map[row.taskBar.taskId] = Triple(yPx, taskRowPx, row.taskBar)
-                    yPx += taskRowPx
-                }
+        displayRows.forEachIndexed { idx, row ->
+            val hPx = with(density) { rowHeightsDp[idx].toPx() }
+            if (row is RoadmapDisplayRow.TaskRow) {
+                map[row.taskBar.taskId] = Triple(yPx, hPx, row.taskBar)
             }
+            yPx += hPx
         }
         map
     }
@@ -2131,83 +2218,134 @@ private fun RoadmapSynchronizedLanesBody(
                 .fillMaxHeight()
                 .background(colors.sidebarBackground.copy(alpha = 0.36f))
         ) {
-            displayRows.forEach { row ->
+            displayRows.forEachIndexed { idx, row ->
+                val rowHeightDp = rowHeightsDp[idx]
                 when (row) {
                     is RoadmapDisplayRow.PhaseRow -> {
                         val phaseProgress = if (row.totalCount > 0) {
                             row.completedCount.toFloat() / row.totalCount.toFloat()
                         } else 0f
-                        Row(
+                        val phaseDateText = row.phaseBar?.let { pb ->
+                            val s = LocalDate.ofEpochDay(pb.startEpochDay).format(shortDateFmt)
+                            val e = LocalDate.ofEpochDay(pb.endEpochDay).format(shortDateFmt)
+                            if (pb.startEpochDay == pb.endEpochDay) s else "$s – $e"
+                        }
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(PHASE_ROW_HEIGHT)
+                                .height(rowHeightDp)
                                 .background(colors.thingsBlueSoft.copy(alpha = 0.35f))
-                                .padding(horizontal = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalArrangement = Arrangement.SpaceBetween
                         ) {
+                            // Top Row: Full-width multi-line Phase Title (zero truncation!)
                             Row(
-                                modifier = Modifier.weight(1f),
-                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.Top,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Box(
                                     modifier = Modifier
+                                        .padding(top = 2.dp)
                                         .width(3.5.dp)
-                                        .height(15.dp)
+                                        .height(14.dp)
                                         .clip(RoundedCornerShape(50))
                                         .background(colors.thingsBlue)
                                 )
                                 Text(
                                     text = row.title,
-                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                    style = MaterialTheme.typography.labelLarge.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        lineHeight = 15.5.sp
+                                    ),
                                     color = colors.primaryText,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f, fill = false)
+                                    maxLines = Int.MAX_VALUE,
+                                    modifier = Modifier.weight(1f)
                                 )
-                                if (row.totalCount > 0) {
-                                    ProjectProgressRing(progress = phaseProgress, size = 13.dp)
-                                }
                             }
-                            if (row.heading != null && row.phaseBar != null) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(1.dp)) {
-                                    ThingsHoverTooltip(text = shiftEarlierLabel) {
-                                        IconButton(
-                                            onClick = {
-                                                onShiftHeadingDates(
-                                                    row.heading,
-                                                    -1L,
-                                                    row.phaseBar.startEpochDay to row.phaseBar.endEpochDay
-                                                )
-                                            },
-                                            modifier = Modifier.size(20.dp)
+
+                            // Sub-Row Underneath: Progress Ring + Compact Start/End Date Chip + Shift Controls
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 9.5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    if (row.totalCount > 0) {
+                                        ProjectProgressRing(progress = phaseProgress, size = 12.5.dp)
+                                    }
+                                    if (phaseDateText != null) {
+                                        Row(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(50))
+                                                .background(colors.cardSurface.copy(alpha = 0.78f))
+                                                .padding(horizontal = 6.5.dp, vertical = 1.5.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(3.dp)
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Outlined.ChevronLeft,
-                                                contentDescription = shiftEarlierLabel,
+                                                imageVector = Icons.Outlined.CalendarToday,
+                                                contentDescription = null,
                                                 tint = colors.thingsBlue,
-                                                modifier = Modifier.size(14.dp)
+                                                modifier = Modifier.size(9.5.dp)
+                                            )
+                                            Text(
+                                                text = phaseDateText,
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    fontSize = 9.5.sp,
+                                                    fontWeight = FontWeight.SemiBold
+                                                ),
+                                                color = colors.secondaryText,
+                                                maxLines = 1
                                             )
                                         }
                                     }
-                                    ThingsHoverTooltip(text = shiftLaterLabel) {
-                                        IconButton(
-                                            onClick = {
-                                                onShiftHeadingDates(
-                                                    row.heading,
-                                                    1L,
-                                                    row.phaseBar.startEpochDay to row.phaseBar.endEpochDay
+                                }
+                                if (row.heading != null && row.phaseBar != null) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+                                        ThingsHoverTooltip(text = shiftEarlierLabel) {
+                                            IconButton(
+                                                onClick = {
+                                                    onShiftHeadingDates(
+                                                        row.heading,
+                                                        -1L,
+                                                        row.phaseBar.startEpochDay to row.phaseBar.endEpochDay
+                                                    )
+                                                },
+                                                modifier = Modifier.size(20.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.ChevronLeft,
+                                                    contentDescription = shiftEarlierLabel,
+                                                    tint = colors.thingsBlue,
+                                                    modifier = Modifier.size(14.dp)
                                                 )
-                                            },
-                                            modifier = Modifier.size(20.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Outlined.ChevronRight,
-                                                contentDescription = shiftLaterLabel,
-                                                tint = colors.thingsBlue,
-                                                modifier = Modifier.size(14.dp)
-                                            )
+                                            }
+                                        }
+                                        ThingsHoverTooltip(text = shiftLaterLabel) {
+                                            IconButton(
+                                                onClick = {
+                                                    onShiftHeadingDates(
+                                                        row.heading,
+                                                        1L,
+                                                        row.phaseBar.startEpochDay to row.phaseBar.endEpochDay
+                                                    )
+                                                },
+                                                modifier = Modifier.size(20.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.ChevronRight,
+                                                    contentDescription = shiftLaterLabel,
+                                                    tint = colors.thingsBlue,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -2317,13 +2455,10 @@ private fun RoadmapSynchronizedLanesBody(
                         )
                     }
 
-                    // Horizontal row separators
+                    // Horizontal row separators synchronized with rowHeightsDp
                     var rowY = 0f
-                    displayRows.forEach { row ->
-                        rowY += when (row) {
-                            is RoadmapDisplayRow.PhaseRow -> phaseRowPx
-                            is RoadmapDisplayRow.TaskRow -> taskRowPx
-                        }
+                    rowHeightsDp.forEach { rowH ->
+                        rowY += rowH.toPx()
                         drawLine(
                             color = colors.hairlineDivider.copy(alpha = 0.45f),
                             start = Offset(0f, rowY),
@@ -2347,6 +2482,7 @@ private fun RoadmapSynchronizedLanesBody(
                 // Phase Bars & Task Bars with Horizontal Drag-to-Reschedule
                 displayRows.forEachIndexed { idx, row ->
                     val topDp = rowTopsDp[idx]
+                    val rowHeightDp = rowHeightsDp[idx]
                     when (row) {
                         is RoadmapDisplayRow.PhaseRow -> {
                             val pb = row.phaseBar
@@ -2355,7 +2491,10 @@ private fun RoadmapSynchronizedLanesBody(
                                 RoadmapDraggablePhaseBar(
                                     phaseBar = pb,
                                     startEpochDayWindow = layout.startEpochDay,
+                                    endEpochDayWindow = layout.endEpochDay,
                                     topDp = topDp,
+                                    rowHeightDp = rowHeightDp,
+                                    totalTimelineWidthDp = totalTimelineWidthDp,
                                     dayWidthDp = dayWidthDp,
                                     dayWidthPx = dayWidthPx,
                                     previewDelta = livePreviewDeltaDays["phase_${heading.id}"] ?: 0L,
@@ -2375,6 +2514,7 @@ private fun RoadmapSynchronizedLanesBody(
                             RoadmapDraggableTaskBar(
                                 taskBar = tb,
                                 startEpochDayWindow = layout.startEpochDay,
+                                endEpochDayWindow = layout.endEpochDay,
                                 todayEpochDay = layout.todayEpochDay,
                                 topDp = topDp,
                                 dayWidthDp = dayWidthDp,
@@ -2409,8 +2549,13 @@ private fun RoadmapSynchronizedLanesBody(
                             val fromDelta = livePreviewDeltaDays["task_${edge.fromTaskId}"] ?: 0L
                             val toDelta = livePreviewDeltaDays["task_${edge.toTaskId}"] ?: 0L
 
-                            val fromEndIdx = (fromInfo.third.endEpochDay + fromDelta - layout.startEpochDay + 1L)
-                            val toStartIdx = (toInfo.third.startEpochDay + toDelta - layout.startEpochDay)
+                            val clampedFromEnd = (fromInfo.third.endEpochDay + fromDelta)
+                                .coerceIn(layout.startEpochDay, layout.endEpochDay)
+                            val clampedToStart = (toInfo.third.startEpochDay + toDelta)
+                                .coerceIn(layout.startEpochDay, layout.endEpochDay)
+
+                            val fromEndIdx = clampedFromEnd - layout.startEpochDay + 1L
+                            val toStartIdx = clampedToStart - layout.startEpochDay
 
                             val startX = fromEndIdx * dayWidthPx - hPad
                             val startY = fromInfo.first + fromInfo.second * 0.5f
@@ -2465,22 +2610,55 @@ private fun RoadmapSynchronizedLanesBody(
 private fun RoadmapDraggablePhaseBar(
     phaseBar: RoadmapPhaseBar,
     startEpochDayWindow: Long,
+    endEpochDayWindow: Long,
     topDp: Dp,
+    rowHeightDp: Dp,
+    totalTimelineWidthDp: Dp,
     dayWidthDp: Dp,
     dayWidthPx: Float,
     previewDelta: Long,
     onPreviewDeltaChanged: (Long) -> Unit,
     onCommitShift: (Long) -> Unit
 ) {
+    val colors = ThingsTheme.colors
+    val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
     val currentDayWidthPx by rememberUpdatedState(dayWidthPx)
     val currentOnPreview by rememberUpdatedState(onPreviewDeltaChanged)
     val currentOnCommit by rememberUpdatedState(onCommitShift)
 
-    val effectiveStartDay = phaseBar.startEpochDay + previewDelta
-    val spanDays = phaseBar.spanDays
-    val xOffsetDp = dayWidthDp * (effectiveStartDay - startEpochDayWindow).toInt()
-    val barWidthDp = (dayWidthDp * spanDays).coerceAtLeast(dayWidthDp)
+    val rawStartDay = phaseBar.startEpochDay + previewDelta
+    val rawEndDay = phaseBar.endEpochDay + previewDelta
+    if (rawEndDay < startEpochDayWindow || rawStartDay > endEpochDayWindow) return
+
+    val visibleStartDay = rawStartDay.coerceIn(startEpochDayWindow, endEpochDayWindow)
+    val visibleEndDay = rawEndDay.coerceIn(visibleStartDay, endEpochDayWindow)
+    val visibleSpanDays = (visibleEndDay - visibleStartDay + 1L).coerceAtLeast(1L).toInt()
+
+    val xOffsetDp = dayWidthDp * (visibleStartDay - startEpochDayWindow).toInt()
+    val barWidthDp = (dayWidthDp * visibleSpanDays).coerceAtLeast(dayWidthDp)
+    val barHeightDp = 28.dp
+    val barTopDp = topDp + (rowHeightDp - barHeightDp) / 2
+
+    val labelText = remember(phaseBar.title, previewDelta) {
+        buildString {
+            append(phaseBar.title)
+            if (previewDelta != 0L) {
+                append(if (previewDelta > 0) " (+${previewDelta}d)" else " (${previewDelta}d)")
+            }
+        }
+    }
+    val measuredLabelPx = remember(labelText, density) {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = with(density) { 11.sp.toPx() }
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }.measureText(labelText)
+    }
+    val barWidthPx = with(density) { barWidthDp.toPx() }
+    val xOffsetPx = with(density) { xOffsetDp.toPx() }
+    val totalTimelineWidthPx = with(density) { totalTimelineWidthDp.toPx() }
+    val innerPadPx = with(density) { 26.dp.toPx() }
+    val fitsInsideBar = barWidthPx >= measuredLabelPx + innerPadPx
 
     val gradientBrush = Brush.horizontalGradient(
         colors = if (phaseBar.hasExplicitDates) {
@@ -2492,9 +2670,9 @@ private fun RoadmapDraggablePhaseBar(
 
     Box(
         modifier = Modifier
-            .offset(x = xOffsetDp, y = topDp + 7.dp)
+            .offset(x = xOffsetDp, y = barTopDp)
             .width(barWidthDp)
-            .height(PHASE_ROW_HEIGHT - 14.dp)
+            .height(barHeightDp)
             .padding(horizontal = 3.dp)
             .shadow(if (previewDelta != 0L) 6.dp else 2.dp, RoundedCornerShape(10.dp))
             .clip(RoundedCornerShape(10.dp))
@@ -2536,18 +2714,63 @@ private fun RoadmapDraggablePhaseBar(
             .padding(horizontal = 10.dp),
         contentAlignment = Alignment.CenterStart
     ) {
-        Text(
-            text = buildString {
-                append(phaseBar.title)
-                if (previewDelta != 0L) {
-                    append(if (previewDelta > 0) " (+${previewDelta}d)" else " (${previewDelta}d)")
-                }
-            },
-            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-            color = Color.White,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
+        if (fitsInsideBar) {
+            Text(
+                text = labelText,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = Color.White,
+                softWrap = false,
+                maxLines = 1
+            )
+        }
+    }
+
+    if (!fitsInsideBar && labelText.isNotBlank()) {
+        val spaceRightPx = totalTimelineWidthPx - (xOffsetPx + barWidthPx)
+        val spaceLeftPx = xOffsetPx
+        val placeOnRight = spaceRightPx >= measuredLabelPx + with(density) { 12.dp.toPx() } ||
+            spaceRightPx >= spaceLeftPx
+
+        if (placeOnRight) {
+            Box(
+                modifier = Modifier
+                    .offset(x = xOffsetDp + barWidthDp + 4.dp, y = barTopDp)
+                    .height(barHeightDp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Text(
+                    text = labelText,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = colors.thingsBlue,
+                    softWrap = false,
+                    maxLines = 1,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(colors.cardSurface.copy(alpha = 0.88f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .offset(x = 0.dp, y = barTopDp)
+                    .width((xOffsetDp - 4.dp).coerceAtLeast(0.dp))
+                    .height(barHeightDp),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                Text(
+                    text = labelText,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = colors.thingsBlue,
+                    softWrap = false,
+                    maxLines = 1,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(colors.cardSurface.copy(alpha = 0.88f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+        }
     }
 }
 
@@ -2555,6 +2778,7 @@ private fun RoadmapDraggablePhaseBar(
 private fun RoadmapDraggableTaskBar(
     taskBar: RoadmapTaskBar,
     startEpochDayWindow: Long,
+    endEpochDayWindow: Long,
     todayEpochDay: Long,
     topDp: Dp,
     dayWidthDp: Dp,
@@ -2572,8 +2796,12 @@ private fun RoadmapDraggableTaskBar(
 
     val effectiveStartDay = taskBar.startEpochDay + previewDelta
     val effectiveEndDay = taskBar.endEpochDay + previewDelta
-    val spanDays = taskBar.spanDays
-    val xOffsetDp = dayWidthDp * (effectiveStartDay - startEpochDayWindow).toInt()
+    if (effectiveEndDay < startEpochDayWindow || effectiveStartDay > endEpochDayWindow) return
+
+    val visibleStartDay = effectiveStartDay.coerceIn(startEpochDayWindow, endEpochDayWindow)
+    val visibleEndDay = effectiveEndDay.coerceIn(visibleStartDay, endEpochDayWindow)
+    val spanDays = (visibleEndDay - visibleStartDay + 1L).coerceAtLeast(1L).toInt()
+    val xOffsetDp = dayWidthDp * (visibleStartDay - startEpochDayWindow).toInt()
     val barWidthDp = (dayWidthDp * spanDays).coerceAtLeast(dayWidthDp)
 
     val isOverdue = taskBar.task.status == TaskStatus.OPEN &&
@@ -2667,18 +2895,746 @@ private fun RoadmapDraggableTaskBar(
 }
 
 // =============================================================================
-// 1-Click PDF & PNG Roadmap Exporter (`android.graphics.Canvas` + `FileProvider`)
+// Interactive PDF Export Configuration Dialog (`RoadmapPdfExportDialog`)
+// =============================================================================
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun RoadmapPdfExportDialog(
+    project: Project,
+    projectHeadings: List<Heading>,
+    primaryTasks: List<TaskItem>,
+    layout: ProjectRoadmapLayout,
+    locale: Locale,
+    onDismiss: () -> Unit,
+    onConfirmExport: (RoadmapPdfExportConfig) -> Unit
+) {
+    val colors = ThingsTheme.colors
+    val haptics = LocalHapticFeedback.current
+    val zone = ZoneId.systemDefault()
+    val generalTitle = stringResource(R.string.v30_board_ungrouped_column)
+    val fallbackHeadingTitle = stringResource(R.string.entity_heading)
+
+    val phaseOptions = remember(projectHeadings, primaryTasks, layout, generalTitle, fallbackHeadingTitle) {
+        val activeHeadings = projectHeadings
+            .filter { !it.isDeleted && !it.isArchived }
+            .sortedWith(compareBy<Heading> { it.sortOrder }.thenBy { it.createdAt }.thenBy { it.id })
+        val validIds = activeHeadings.mapTo(HashSet()) { it.id }
+        val hasGeneral = layout.lanes.any { it.laneKey == "general" } ||
+            primaryTasks.any {
+                !it.isDeleted && it.status != TaskStatus.CANCELED &&
+                    (it.headingId == null || it.headingId !in validIds)
+            } ||
+            activeHeadings.isEmpty()
+
+        buildList {
+            if (hasGeneral) {
+                add("general" to generalTitle)
+            }
+            for (h in activeHeadings) {
+                add(h.id to h.title.ifBlank { fallbackHeadingTitle })
+            }
+        }
+    }
+
+    var selectedKeys by remember(phaseOptions) {
+        mutableStateOf(phaseOptions.mapTo(linkedSetOf()) { it.first })
+    }
+    var timelinePreset by remember {
+        mutableStateOf(RoadmapPdfTimelinePreset.FULL_PROJECT)
+    }
+    var customStartDay by remember(layout.startEpochDay) {
+        mutableLongStateOf(layout.startEpochDay)
+    }
+    var customEndDay by remember(layout.endEpochDay) {
+        mutableLongStateOf(layout.endEpochDay)
+    }
+    var orientation by remember {
+        mutableStateOf(PdfPageOrientation.LANDSCAPE)
+    }
+
+    var showCustomStartPicker by remember { mutableStateOf(false) }
+    var showCustomEndPicker by remember { mutableStateOf(false) }
+
+    val resolvedRange = remember(timelinePreset, customStartDay, customEndDay, layout) {
+        when (timelinePreset) {
+            RoadmapPdfTimelinePreset.FULL_PROJECT -> layout.startEpochDay to layout.endEpochDay
+            RoadmapPdfTimelinePreset.FROM_TODAY -> {
+                val end = maxOf(layout.todayEpochDay, layout.endEpochDay)
+                layout.todayEpochDay to end
+            }
+            RoadmapPdfTimelinePreset.NEXT_30_DAYS -> {
+                layout.todayEpochDay to (layout.todayEpochDay + 30L)
+            }
+            RoadmapPdfTimelinePreset.CUSTOM -> {
+                minOf(customStartDay, customEndDay) to maxOf(customStartDay, customEndDay)
+            }
+        }
+    }
+
+    val dateFmt = remember(locale) {
+        DateTimeFormatter.ofPattern(if (locale.language == "de") "d. MMM yyyy" else "MMM d, yyyy", locale)
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        ThingsTooltipHostBox {
+            Surface(
+                modifier = Modifier
+                    .widthIn(max = 468.dp)
+                    .fillMaxWidth(0.92f)
+                    .heightIn(max = 680.dp)
+                    .clip(RoundedCornerShape(20.dp)),
+                shape = RoundedCornerShape(20.dp),
+                color = colors.cardElevatedSurface,
+                border = BorderStroke(1.dp, colors.hairlineDivider),
+                shadowElevation = 12.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 16.dp)
+                ) {
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(RoundedCornerShape(9.dp))
+                                    .background(colors.thingsBlueSoft),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Description,
+                                    contentDescription = null,
+                                    tint = colors.thingsBlue,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = stringResource(R.string.v30_pdf_export_dialog_title),
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = colors.primaryText
+                                )
+                                Text(
+                                    text = project.title,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.secondaryText,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.action_cancel),
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(color = colors.hairlineDivider, thickness = 0.8.dp)
+
+                    // Scrollable Body
+                    Column(
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                            .padding(vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        // 1. Project Phases Multi-Select
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            val allSelected = phaseOptions.isNotEmpty() && selectedKeys.size == phaseOptions.size
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.v30_pdf_phases_label),
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = colors.primaryText
+                                )
+                                Surface(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .pointerHoverIcon(PointerIcon.Hand)
+                                        .clickable {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            selectedKeys = if (allSelected) {
+                                                linkedSetOf()
+                                            } else {
+                                                phaseOptions.mapTo(linkedSetOf()) { it.first }
+                                            }
+                                        },
+                                    shape = RoundedCornerShape(50),
+                                    color = if (allSelected) colors.thingsBlueSoft else colors.tagPillBg,
+                                    border = BorderStroke(
+                                        0.75.dp,
+                                        if (allSelected) colors.thingsBlue.copy(alpha = 0.45f) else colors.hairlineDivider
+                                    )
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.v30_pdf_select_all_phases),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = if (allSelected) colors.thingsBlue else colors.secondaryText,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                phaseOptions.forEach { (laneKey, phaseTitle) ->
+                                    val checked = laneKey in selectedKeys
+                                    Surface(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .pointerHoverIcon(PointerIcon.Hand)
+                                            .clickable {
+                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                val next = LinkedHashSet(selectedKeys)
+                                                if (!next.add(laneKey)) next.remove(laneKey)
+                                                selectedKeys = next
+                                            },
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = if (checked) colors.thingsBlueSoft.copy(alpha = 0.42f) else colors.cardSurface,
+                                        border = BorderStroke(
+                                            0.85.dp,
+                                            if (checked) colors.thingsBlue.copy(alpha = 0.45f) else colors.hairlineDivider
+                                        )
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Checkbox(
+                                                checked = checked,
+                                                onCheckedChange = { wantChecked ->
+                                                    val next = LinkedHashSet(selectedKeys)
+                                                    if (wantChecked) next.add(laneKey) else next.remove(laneKey)
+                                                    selectedKeys = next
+                                                },
+                                                colors = CheckboxDefaults.colors(
+                                                    checkedColor = colors.thingsBlue,
+                                                    uncheckedColor = colors.secondaryText
+                                                ),
+                                                modifier = Modifier.size(30.dp)
+                                            )
+                                            Text(
+                                                text = phaseTitle,
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                                color = colors.primaryText,
+                                                maxLines = Int.MAX_VALUE,
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .padding(vertical = 4.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 2. Timeline Range Selector
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = stringResource(R.string.v30_pdf_timeline_label),
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                color = colors.primaryText
+                            )
+
+                            val presetItems = listOf(
+                                RoadmapPdfTimelinePreset.FULL_PROJECT to stringResource(R.string.v30_pdf_timeline_auto),
+                                RoadmapPdfTimelinePreset.FROM_TODAY to stringResource(R.string.v30_pdf_timeline_from_today),
+                                RoadmapPdfTimelinePreset.NEXT_30_DAYS to stringResource(R.string.v30_pdf_timeline_next_30d),
+                                RoadmapPdfTimelinePreset.CUSTOM to stringResource(R.string.v30_pdf_timeline_custom)
+                            )
+
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                                verticalArrangement = Arrangement.spacedBy(7.dp)
+                            ) {
+                                presetItems.forEach { (preset, label) ->
+                                    val isSelected = timelinePreset == preset
+                                    Surface(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .pointerHoverIcon(PointerIcon.Hand)
+                                            .clickable {
+                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                timelinePreset = preset
+                                            },
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (isSelected) colors.thingsBlueSoft else colors.cardSurface,
+                                        border = BorderStroke(
+                                            if (isSelected) 1.25.dp else 0.75.dp,
+                                            if (isSelected) colors.thingsBlue else colors.hairlineDivider
+                                        )
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            style = MaterialTheme.typography.labelMedium.copy(
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                            ),
+                                            color = if (isSelected) colors.thingsBlue else colors.primaryText,
+                                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.5.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (timelinePreset == RoadmapPdfTimelinePreset.CUSTOM) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Surface(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(11.dp))
+                                            .pointerHoverIcon(PointerIcon.Hand)
+                                            .clickable { showCustomStartPicker = true },
+                                        shape = RoundedCornerShape(11.dp),
+                                        color = colors.cardSurface,
+                                        border = BorderStroke(0.85.dp, colors.thingsBlue.copy(alpha = 0.42f))
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.CalendarToday,
+                                                contentDescription = null,
+                                                tint = colors.thingsBlue,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Column {
+                                                Text(
+                                                    text = stringResource(R.string.v30_phase_set_start_date),
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                                    color = colors.secondaryText
+                                                )
+                                                Text(
+                                                    text = LocalDate.ofEpochDay(customStartDay).format(dateFmt),
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                    color = colors.primaryText
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Surface(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(11.dp))
+                                            .pointerHoverIcon(PointerIcon.Hand)
+                                            .clickable { showCustomEndPicker = true },
+                                        shape = RoundedCornerShape(11.dp),
+                                        color = colors.cardSurface,
+                                        border = BorderStroke(0.85.dp, colors.thingsBlue.copy(alpha = 0.42f))
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Flag,
+                                                contentDescription = null,
+                                                tint = colors.thingsBlue,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Column {
+                                                Text(
+                                                    text = stringResource(R.string.phase_set_end_date),
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                                    color = colors.secondaryText
+                                                )
+                                                Text(
+                                                    text = LocalDate.ofEpochDay(customEndDay).format(dateFmt),
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                    color = colors.primaryText
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                Text(
+                                    text = "${LocalDate.ofEpochDay(resolvedRange.first).format(dateFmt)} – ${LocalDate.ofEpochDay(resolvedRange.second).format(dateFmt)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.secondaryText
+                                )
+                            }
+                        }
+
+                        // 3. Page Orientation 2-Card Selector
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = stringResource(R.string.v30_pdf_orientation_label),
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                color = colors.primaryText
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                val orientationCards = listOf(
+                                    PdfPageOrientation.LANDSCAPE to stringResource(R.string.v30_pdf_orientation_landscape),
+                                    PdfPageOrientation.PORTRAIT to stringResource(R.string.v30_pdf_orientation_portrait)
+                                )
+                                orientationCards.forEach { (option, label) ->
+                                    val selected = orientation == option
+                                    Surface(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(13.dp))
+                                            .pointerHoverIcon(PointerIcon.Hand)
+                                            .clickable {
+                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                orientation = option
+                                            },
+                                        shape = RoundedCornerShape(13.dp),
+                                        color = if (selected) colors.thingsBlueSoft else colors.cardSurface,
+                                        border = BorderStroke(
+                                            if (selected) 1.5.dp else 0.85.dp,
+                                            if (selected) colors.thingsBlue else colors.hairlineDivider
+                                        )
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .width(if (option == PdfPageOrientation.LANDSCAPE) 22.dp else 15.dp)
+                                                    .height(if (option == PdfPageOrientation.LANDSCAPE) 15.dp else 22.dp)
+                                                    .clip(RoundedCornerShape(3.dp))
+                                                    .background(
+                                                        if (selected) colors.thingsBlue.copy(alpha = 0.22f)
+                                                        else colors.tagPillBg
+                                                    )
+                                                    .border(
+                                                        1.25.dp,
+                                                        if (selected) colors.thingsBlue else colors.secondaryText,
+                                                        RoundedCornerShape(3.dp)
+                                                    )
+                                            )
+                                            Column {
+                                                Text(
+                                                    text = label,
+                                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                                    color = if (selected) colors.thingsBlue else colors.primaryText
+                                                )
+                                                Text(
+                                                    text = "A4 • ${option.pageWidthPt} × ${option.pageHeightPt}",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                                    color = colors.secondaryText
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = colors.hairlineDivider, thickness = 0.8.dp)
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Footer Buttons
+                    val canExport = selectedKeys.isNotEmpty() || phaseOptions.isEmpty()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(onClick = onDismiss) {
+                            Text(
+                                text = stringResource(R.string.action_cancel),
+                                color = colors.secondaryText,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                onConfirmExport(
+                                    RoadmapPdfExportConfig(
+                                        selectedLaneKeys = selectedKeys,
+                                        startEpochDay = resolvedRange.first,
+                                        endEpochDay = resolvedRange.second,
+                                        orientation = orientation
+                                    )
+                                )
+                            },
+                            enabled = canExport,
+                            shape = RoundedCornerShape(11.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = colors.thingsBlue,
+                                contentColor = Color.White
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.FileDownload,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = stringResource(R.string.v30_roadmap_export_pdf),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showCustomStartPicker) {
+        DeadlineDatePickerDialog(
+            currentDeadline = ProjectRoadmapEngine.epochDayToStartOfDayMillis(customStartDay, zone),
+            locale = locale,
+            onApplyDeadline = { pickedMs ->
+                val pickedDay = pickedMs?.let { ProjectRoadmapEngine.epochMillisToEpochDay(it, zone) }
+                    ?: layout.startEpochDay
+                customStartDay = pickedDay
+                if (customEndDay < pickedDay) {
+                    customEndDay = pickedDay
+                }
+            },
+            onDismiss = { showCustomStartPicker = false },
+            titleText = stringResource(R.string.v30_phase_set_start_date)
+        )
+    }
+
+    if (showCustomEndPicker) {
+        DeadlineDatePickerDialog(
+            currentDeadline = ProjectRoadmapEngine.epochDayToStartOfDayMillis(customEndDay, zone),
+            locale = locale,
+            onApplyDeadline = { pickedMs ->
+                val pickedDay = pickedMs?.let { ProjectRoadmapEngine.epochMillisToEpochDay(it, zone) }
+                    ?: layout.endEpochDay
+                customEndDay = pickedDay
+                if (customStartDay > pickedDay) {
+                    customStartDay = pickedDay
+                }
+            },
+            onDismiss = { showCustomEndPicker = false },
+            titleText = stringResource(R.string.phase_set_end_date)
+        )
+    }
+}
+
+// =============================================================================
+// Multi-Page A4 PDF & 1-Click PNG Roadmap Exporter (`android.graphics.Canvas`)
 // =============================================================================
 
 object RoadmapExporter {
 
     private const val EXPORT_HEADER_H = 76f
     private const val EXPORT_DAY_HEADER_H = 44f
-    private const val EXPORT_LABEL_W = 240f
+    private const val EXPORT_LABEL_W = 256f
     private const val EXPORT_DAY_W = 42f
-    private const val EXPORT_PHASE_H = 40f
+    private const val EXPORT_PHASE_MIN_H = 48f
     private const val EXPORT_TASK_H = 34f
     private const val EXPORT_PADDING = 24f
+
+    private const val PDF_MARGIN_PT = 24f
+    private const val PDF_HEADER_H_PT = 52f
+    private const val PDF_DAY_HEADER_H_PT = 36f
+
+    private data class MeasuredExportRow(
+        val row: RoadmapDisplayRow,
+        val wrappedLines: List<String>,
+        val subtext: String?,
+        val heightPt: Float
+    )
+
+    suspend fun exportPdf(
+        context: Context,
+        project: Project,
+        layout: ProjectRoadmapLayout,
+        config: RoadmapPdfExportConfig,
+        headingCounts: Map<String, Pair<Int, Int>> = emptyMap(),
+        locale: Locale = Locale.getDefault(),
+        isDark: Boolean = false,
+        exportChooserTitle: String = context.getString(R.string.v30_roadmap_export)
+    ): File {
+        val generalLabel = context.getString(R.string.v30_board_ungrouped_column)
+        val filteredLayout = ProjectRoadmapEngine.filterLayoutForExport(
+            layout = layout.copy(project = project),
+            config = config
+        )
+
+        val outFile = withContext(Dispatchers.IO) {
+            val pageWidth = config.orientation.pageWidthPt
+            val pageHeight = config.orientation.pageHeightPt
+            val labelColW = if (config.orientation == PdfPageOrientation.LANDSCAPE) 210f else 168f
+
+            val rawRows = buildExportRows(filteredLayout, headingCounts, generalLabel)
+            val phaseMeasurePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                textSize = 10.5f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            }
+            val shortDateFmt = DateTimeFormatter.ofPattern(
+                if (locale.language == "de") "d. MMM" else "MMM d",
+                locale
+            )
+
+            val measuredRows = rawRows.map { r ->
+                when (r) {
+                    is RoadmapDisplayRow.PhaseRow -> {
+                        val lines = wrapTextLines(r.title, phaseMeasurePaint, labelColW - 22f)
+                        val dateSub = r.phaseBar?.let { pb ->
+                            val s = LocalDate.ofEpochDay(pb.startEpochDay).format(shortDateFmt)
+                            val e = LocalDate.ofEpochDay(pb.endEpochDay).format(shortDateFmt)
+                            if (pb.startEpochDay == pb.endEpochDay) s else "$s – $e"
+                        }
+                        val h = maxOf(
+                            38f,
+                            12f + lines.size * 13f + (if (dateSub != null) 12f else 2f)
+                        )
+                        MeasuredExportRow(r, lines, dateSub, h)
+                    }
+                    is RoadmapDisplayRow.TaskRow -> {
+                        MeasuredExportRow(
+                            row = r,
+                            wrappedLines = listOf(r.taskBar.title.ifBlank { "To-Do" }),
+                            subtext = null,
+                            heightPt = 28f
+                        )
+                    }
+                }
+            }
+
+            val availableBodyH = (pageHeight - PDF_MARGIN_PT * 2f - PDF_HEADER_H_PT - PDF_DAY_HEADER_H_PT)
+                .coerceAtLeast(140f)
+            val pages = paginateRowsForA4(measuredRows, availableBodyH)
+
+            val backupsDir = File(context.cacheDir, "backups").apply { mkdirs() }
+            val safeProjectSlug = project.title
+                .replace(Regex("[^A-Za-z0-9_-]+"), "-")
+                .trim('-')
+                .take(40)
+                .ifEmpty { "Project" }
+            val dateStamp = LocalDate.now().toString()
+            val targetFile = File(backupsDir, "Thingsbook-Roadmap-$safeProjectSlug-$dateStamp.pdf")
+
+            val pdfDoc = PdfDocument()
+            try {
+                val totalPageCount = pages.size.coerceAtLeast(1)
+                if (pages.isEmpty()) {
+                    val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create()
+                    val page = pdfDoc.startPage(pageInfo)
+                    drawA4PdfPage(
+                        canvas = page.canvas,
+                        layout = filteredLayout,
+                        pageRows = emptyList(),
+                        pageNumber = 1,
+                        totalPages = 1,
+                        pageWidth = pageWidth.toFloat(),
+                        pageHeight = pageHeight.toFloat(),
+                        labelColW = labelColW,
+                        locale = locale,
+                        isDark = isDark
+                    )
+                    pdfDoc.finishPage(page)
+                } else {
+                    pages.forEachIndexed { idx, pageRows ->
+                        val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, idx + 1).create()
+                        val page = pdfDoc.startPage(pageInfo)
+                        drawA4PdfPage(
+                            canvas = page.canvas,
+                            layout = filteredLayout,
+                            pageRows = pageRows,
+                            pageNumber = idx + 1,
+                            totalPages = totalPageCount,
+                            pageWidth = pageWidth.toFloat(),
+                            pageHeight = pageHeight.toFloat(),
+                            labelColW = labelColW,
+                            locale = locale,
+                            isDark = isDark
+                        )
+                        pdfDoc.finishPage(page)
+                    }
+                }
+                FileOutputStream(targetFile).use { out ->
+                    pdfDoc.writeTo(out)
+                    out.flush()
+                }
+            } finally {
+                pdfDoc.close()
+            }
+            targetFile
+        }
+
+        shareExportedFile(
+            context = context,
+            outFile = outFile,
+            projectTitle = project.title,
+            mimeType = "application/pdf",
+            exportChooserTitle = exportChooserTitle
+        )
+        return outFile
+    }
+
+    private fun paginateRowsForA4(
+        rows: List<MeasuredExportRow>,
+        availableBodyH: Float
+    ): List<List<MeasuredExportRow>> {
+        if (rows.isEmpty()) return emptyList()
+        val pages = mutableListOf<List<MeasuredExportRow>>()
+        var current = mutableListOf<MeasuredExportRow>()
+        var usedH = 0f
+
+        rows.forEachIndexed { idx, item ->
+            val nextItem = rows.getOrNull(idx + 1)
+            val wouldOrphanPhaseHeader = item.row is RoadmapDisplayRow.PhaseRow &&
+                nextItem?.row is RoadmapDisplayRow.TaskRow &&
+                current.isNotEmpty() &&
+                usedH + item.heightPt + nextItem.heightPt > availableBodyH
+
+            if ((current.isNotEmpty() && usedH + item.heightPt > availableBodyH) || wouldOrphanPhaseHeader) {
+                pages += current
+                current = mutableListOf()
+                usedH = 0f
+            }
+            current += item
+            usedH += item.heightPt
+        }
+        if (current.isNotEmpty()) {
+            pages += current
+        }
+        return pages
+    }
 
     suspend fun exportAndShareRoadmap(
         context: Context,
@@ -2689,11 +3645,41 @@ object RoadmapExporter {
         asPdf: Boolean,
         exportChooserTitle: String
     ) {
+        if (asPdf) {
+            val defaultConfig = RoadmapPdfExportConfig(
+                selectedLaneKeys = layout.lanes.mapTo(linkedSetOf()) { it.laneKey },
+                startEpochDay = layout.startEpochDay,
+                endEpochDay = layout.endEpochDay,
+                orientation = PdfPageOrientation.LANDSCAPE
+            )
+            exportPdf(
+                context = context,
+                project = layout.project,
+                layout = layout,
+                config = defaultConfig,
+                headingCounts = headingCounts,
+                locale = locale,
+                isDark = isDark,
+                exportChooserTitle = exportChooserTitle
+            )
+            return
+        }
+
         val generalLabel = context.getString(R.string.v30_board_ungrouped_column)
         val outFile = withContext(Dispatchers.IO) {
             val rows = buildExportRows(layout, headingCounts, generalLabel)
-            val rowsHeight = rows.sumOf {
-                (if (it is RoadmapDisplayRow.PhaseRow) EXPORT_PHASE_H else EXPORT_TASK_H).toDouble()
+            val measureBoldPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                textSize = 12.5f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            }
+            val rowsHeight = rows.sumOf { row ->
+                when (row) {
+                    is RoadmapDisplayRow.PhaseRow -> {
+                        val lines = wrapTextLines(row.title, measureBoldPaint, EXPORT_LABEL_W - 24f)
+                        maxOf(EXPORT_PHASE_MIN_H, 20f + lines.size * 15f + (if (row.phaseBar != null) 13f else 2f)).toDouble()
+                    }
+                    is RoadmapDisplayRow.TaskRow -> EXPORT_TASK_H.toDouble()
+                }
             }.toFloat().coerceAtLeast(72f)
 
             val totalWidth = (EXPORT_PADDING * 2f + EXPORT_LABEL_W + layout.totalDays * EXPORT_DAY_W).roundToInt()
@@ -2706,69 +3692,59 @@ object RoadmapExporter {
                 .take(40)
                 .ifEmpty { "Project" }
             val dateStamp = LocalDate.now().toString()
-            val ext = if (asPdf) "pdf" else "png"
-            val targetFile = File(backupsDir, "Thingsbook-Roadmap-$safeProjectSlug-$dateStamp.$ext")
+            val targetFile = File(backupsDir, "Thingsbook-Roadmap-$safeProjectSlug-$dateStamp.png")
 
-            if (asPdf) {
-                val pdfDoc = PdfDocument()
-                try {
-                    val pageInfo = PdfDocument.PageInfo.Builder(totalWidth, totalHeight, 1).create()
-                    val page = pdfDoc.startPage(pageInfo)
-                    drawRoadmapToAndroidCanvas(
-                        canvas = page.canvas,
-                        layout = layout,
-                        rows = rows,
-                        totalWidth = totalWidth.toFloat(),
-                        totalHeight = totalHeight.toFloat(),
-                        locale = locale,
-                        isDark = isDark
-                    )
-                    pdfDoc.finishPage(page)
-                    FileOutputStream(targetFile).use { out ->
-                        pdfDoc.writeTo(out)
-                        out.flush()
-                    }
-                } finally {
-                    pdfDoc.close()
+            val maxBitmapDim = 4096f
+            val scale = minOf(1f, maxBitmapDim / maxOf(totalWidth.toFloat(), totalHeight.toFloat()))
+            val bmpW = (totalWidth * scale).roundToInt().coerceAtLeast(1)
+            val bmpH = (totalHeight * scale).roundToInt().coerceAtLeast(1)
+            val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+            try {
+                val bmpCanvas = android.graphics.Canvas(bitmap)
+                bmpCanvas.scale(scale, scale)
+                drawRoadmapToAndroidCanvas(
+                    canvas = bmpCanvas,
+                    layout = layout,
+                    rows = rows,
+                    totalWidth = totalWidth.toFloat(),
+                    totalHeight = totalHeight.toFloat(),
+                    locale = locale,
+                    isDark = isDark
+                )
+                FileOutputStream(targetFile).use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                    out.flush()
                 }
-            } else {
-                val maxBitmapDim = 4096f
-                val scale = minOf(1f, maxBitmapDim / maxOf(totalWidth.toFloat(), totalHeight.toFloat()))
-                val bmpW = (totalWidth * scale).roundToInt().coerceAtLeast(1)
-                val bmpH = (totalHeight * scale).roundToInt().coerceAtLeast(1)
-                val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
-                try {
-                    val bmpCanvas = android.graphics.Canvas(bitmap)
-                    bmpCanvas.scale(scale, scale)
-                    drawRoadmapToAndroidCanvas(
-                        canvas = bmpCanvas,
-                        layout = layout,
-                        rows = rows,
-                        totalWidth = totalWidth.toFloat(),
-                        totalHeight = totalHeight.toFloat(),
-                        locale = locale,
-                        isDark = isDark
-                    )
-                    FileOutputStream(targetFile).use { out ->
-                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-                        out.flush()
-                    }
-                } finally {
-                    bitmap.recycle()
-                }
+            } finally {
+                bitmap.recycle()
             }
             targetFile
         }
 
+        shareExportedFile(
+            context = context,
+            outFile = outFile,
+            projectTitle = layout.project.title,
+            mimeType = "image/png",
+            exportChooserTitle = exportChooserTitle
+        )
+    }
+
+    private fun shareExportedFile(
+        context: Context,
+        outFile: File,
+        projectTitle: String,
+        mimeType: String,
+        exportChooserTitle: String
+    ) {
         val shareUri = FileProvider.getUriForFile(
             context,
             "${context.packageName}.fileprovider",
             outFile
         )
-        val mimeType = if (asPdf) "application/pdf" else "image/png"
         val sendIntent = Intent(Intent.ACTION_SEND).apply {
             type = mimeType
-            putExtra(Intent.EXTRA_SUBJECT, "${layout.project.title} — Roadmap")
+            putExtra(Intent.EXTRA_SUBJECT, "$projectTitle — Roadmap")
             putExtra(Intent.EXTRA_STREAM, shareUri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
@@ -2803,6 +3779,355 @@ object RoadmapExporter {
         return rows
     }
 
+    private fun drawA4PdfPage(
+        canvas: android.graphics.Canvas,
+        layout: ProjectRoadmapLayout,
+        pageRows: List<MeasuredExportRow>,
+        pageNumber: Int,
+        totalPages: Int,
+        pageWidth: Float,
+        pageHeight: Float,
+        labelColW: Float,
+        locale: Locale,
+        isDark: Boolean
+    ) {
+        val bgArgb = if (isDark) 0xFF121417.toInt() else 0xFFFFFFFF.toInt()
+        val cardArgb = if (isDark) 0xFF1B1F25.toInt() else 0xFFF9FAFC.toInt()
+        val sidebarArgb = if (isDark) 0xFF171A1E.toInt() else 0xFFF3F5F9.toInt()
+        val dividerArgb = if (isDark) 0xFF2B313B.toInt() else 0xFFE4E8F0.toInt()
+        val primaryTextArgb = if (isDark) 0xFFF3F5F8.toInt() else 0xFF15181E.toInt()
+        val secondaryTextArgb = if (isDark) 0xFF9AA3B2.toInt() else 0xFF5F6775.toInt()
+        val blueArgb = if (isDark) 0xFF6BC0FF.toInt() else 0xFF3898EC.toInt()
+        val blueSoftArgb = if (isDark) 0xFF1A3047.toInt() else 0xFFE5F3FF.toInt()
+        val amberArgb = if (isDark) 0xFFFBBF24.toInt() else 0xFFD69F3A.toInt()
+
+        val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 0.85f
+        }
+        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = primaryTextArgb
+            textSize = 16.5f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val subtitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = secondaryTextArgb
+            textSize = 10f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+        }
+        val pageNumPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = secondaryTextArgb
+            textSize = 10f
+            textAlign = Paint.Align.RIGHT
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val phaseTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = primaryTextArgb
+            textSize = 10.5f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val phaseSubPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = secondaryTextArgb
+            textSize = 8.8f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+        }
+        val taskLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = primaryTextArgb
+            textSize = 9.5f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+        }
+
+        // Page background
+        fillPaint.color = bgArgb
+        canvas.drawRect(0f, 0f, pageWidth, pageHeight, fillPaint)
+
+        val tableLeft = PDF_MARGIN_PT
+        val tableRight = pageWidth - PDF_MARGIN_PT
+        val tableTop = PDF_MARGIN_PT + PDF_HEADER_H_PT
+        val bodyTop = tableTop + PDF_DAY_HEADER_H_PT
+        val rowsTotalH = pageRows.sumOf { it.heightPt.toDouble() }.toFloat().coerceAtLeast(64f)
+        val tableBottom = minOf(pageHeight - PDF_MARGIN_PT, bodyTop + rowsTotalH)
+        val timelineLeft = tableLeft + labelColW
+        val timelineWidth = (tableRight - timelineLeft).coerceAtLeast(100f)
+        val totalDays = layout.totalDays.coerceAtLeast(1)
+        val dayW = timelineWidth / totalDays.toFloat()
+
+        // Header Title + Date Range + Page Number
+        val fmt = DateTimeFormatter.ofPattern(if (locale.language == "de") "d. MMM yyyy" else "MMM d, yyyy", locale)
+        val rangeText = "${LocalDate.ofEpochDay(layout.startEpochDay).format(fmt)} – ${LocalDate.ofEpochDay(layout.endEpochDay).format(fmt)}"
+        canvas.drawText(
+            ellipsizeText(layout.project.title, titlePaint, tableRight - tableLeft - 80f),
+            tableLeft,
+            PDF_MARGIN_PT + 19f,
+            titlePaint
+        )
+        canvas.drawText(
+            "Thingsbook Roadmap  •  $rangeText  •  ${layout.project.completedTaskCount}/${layout.project.totalTaskCount}",
+            tableLeft,
+            PDF_MARGIN_PT + 36f,
+            subtitlePaint
+        )
+        canvas.drawText(
+            "$pageNumber / $totalPages",
+            tableRight,
+            PDF_MARGIN_PT + 19f,
+            pageNumPaint
+        )
+
+        // Table surface + Sidebar shading
+        fillPaint.color = cardArgb
+        canvas.drawRoundRect(RectF(tableLeft, tableTop, tableRight, tableBottom), 12f, 12f, fillPaint)
+        fillPaint.color = sidebarArgb
+        canvas.drawRect(tableLeft, tableTop, timelineLeft, tableBottom, fillPaint)
+        canvas.drawRect(tableLeft, tableTop, tableRight, bodyTop, fillPaint)
+
+        // Adaptive Day / Week / Month Header Ticks (prevents overlapping numbers on wide ranges)
+        val monthPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = blueArgb
+            textSize = 8.5f
+            textAlign = Paint.Align.LEFT
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val dayTickPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 8.5f
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val monthShortFmt = DateTimeFormatter.ofPattern("MMM", locale)
+        var lastMonthLabelRight = timelineLeft - 8f
+        var lastDayTickRight = timelineLeft - 8f
+
+        for (i in 0 until totalDays) {
+            val day = layout.startEpochDay + i
+            val d = LocalDate.ofEpochDay(day)
+            val colLeft = timelineLeft + i * dayW
+            val colCenter = colLeft + dayW * 0.5f
+            val isToday = day == layout.todayEpochDay
+            val isWeekend = d.dayOfWeek == DayOfWeek.SATURDAY || d.dayOfWeek == DayOfWeek.SUNDAY
+            val isMonday = d.dayOfWeek == DayOfWeek.MONDAY
+
+            if (isToday) {
+                fillPaint.color = blueSoftArgb
+                canvas.drawRect(colLeft, tableTop, colLeft + maxOf(dayW, 1.5f), tableBottom, fillPaint)
+            } else if (isWeekend && dayW >= 5f) {
+                fillPaint.color = if (isDark) 0x22FFFFFF else 0x0A000000
+                canvas.drawRect(colLeft, bodyTop, colLeft + dayW, tableBottom, fillPaint)
+            }
+
+            if (i == 0 || d.dayOfMonth == 1) {
+                val mLabel = if (d.dayOfMonth == 1 && d.monthValue == 1) {
+                    "${d.format(monthShortFmt).uppercase(locale)} '${(d.year % 100)}"
+                } else {
+                    d.format(monthShortFmt).uppercase(locale)
+                }
+                val mWidth = monthPaint.measureText(mLabel)
+                val mX = (colLeft + 2f).coerceAtMost(tableRight - mWidth - 2f)
+                if (mX >= lastMonthLabelRight + 5f && mX >= timelineLeft) {
+                    canvas.drawText(mLabel, mX, tableTop + 12.5f, monthPaint)
+                    lastMonthLabelRight = mX + mWidth
+                }
+            }
+
+            val wantsDayTick = when {
+                isToday -> true
+                dayW >= 16f -> true
+                dayW >= 9.5f -> i % 2 == 0
+                dayW >= 4.5f -> isMonday || d.dayOfMonth == 1
+                dayW >= 2.2f -> (isMonday && (i / 7) % 2 == 0) || d.dayOfMonth == 1
+                else -> d.dayOfMonth == 1
+            }
+            if (wantsDayTick) {
+                val numStr = d.dayOfMonth.toString()
+                val halfW = dayTickPaint.measureText(numStr) * 0.5f + 2f
+                val clampedCenter = colCenter.coerceIn(timelineLeft + halfW, tableRight - halfW)
+                if (clampedCenter - halfW >= lastDayTickRight + 2f || isToday) {
+                    dayTickPaint.color = if (isToday) blueArgb else secondaryTextArgb
+                    canvas.drawText(numStr, clampedCenter, tableTop + 28f, dayTickPaint)
+                    lastDayTickRight = maxOf(lastDayTickRight, clampedCenter + halfW)
+                }
+            }
+
+            if (dayW >= 8f || isMonday || d.dayOfMonth == 1) {
+                strokePaint.color = dividerArgb
+                strokePaint.strokeWidth = if (d.dayOfMonth == 1) 1f else 0.65f
+                canvas.drawLine(colLeft, tableTop, colLeft, tableBottom, strokePaint)
+            }
+        }
+
+        // Rows, Wrapped Full Phase Titles, Clamped Phase Bars + Unclipped Labels, & Task Bars
+        val taskGeometry = HashMap<String, Triple<Float, Float, RoadmapTaskBar>>()
+        var curY = bodyTop
+        for (item in pageRows) {
+            val rowH = item.heightPt
+            when (val r = item.row) {
+                is RoadmapDisplayRow.PhaseRow -> {
+                    fillPaint.color = if (isDark) 0x223898EC else 0x143898EC
+                    canvas.drawRect(tableLeft, curY, timelineLeft, curY + rowH, fillPaint)
+
+                    // Accent bar + full multi-line Phase title in left column (zero ellipsis!)
+                    fillPaint.color = blueArgb
+                    canvas.drawRoundRect(
+                        RectF(tableLeft + 7f, curY + 7f, tableLeft + 10f, curY + 19f),
+                        2f,
+                        2f,
+                        fillPaint
+                    )
+                    var lineY = curY + 16f
+                    for (line in item.wrappedLines) {
+                        canvas.drawText(line, tableLeft + 14f, lineY, phaseTitlePaint)
+                        lineY += 13f
+                    }
+                    if (item.subtext != null) {
+                        canvas.drawText(item.subtext, tableLeft + 14f, lineY - 1f, phaseSubPaint)
+                    }
+
+                    val pb = r.phaseBar
+                    if (pb != null && pb.endEpochDay >= layout.startEpochDay && pb.startEpochDay <= layout.endEpochDay) {
+                        val visStart = pb.startEpochDay.coerceIn(layout.startEpochDay, layout.endEpochDay)
+                        val visEnd = pb.endEpochDay.coerceIn(visStart, layout.endEpochDay)
+                        val barLeft = timelineLeft + (visStart - layout.startEpochDay) * dayW + 1.5f
+                        val rawRight = timelineLeft + (visEnd - layout.startEpochDay + 1L) * dayW - 1.5f
+                        val barRight = maxOf(barLeft + minOf(10f, dayW * 0.85f), minOf(rawRight, tableRight - 1.5f))
+                        val barH = 18f
+                        val barTop = curY + (rowH - barH) * 0.5f
+                        val barRect = RectF(barLeft, barTop, barRight, barTop + barH)
+
+                        val gradPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            style = Paint.Style.FILL
+                            shader = LinearGradient(
+                                barRect.left,
+                                barRect.top,
+                                barRect.right,
+                                barRect.top,
+                                0xFF74C4FF.toInt(),
+                                0xFF3898EC.toInt(),
+                                Shader.TileMode.CLAMP
+                            )
+                        }
+                        canvas.drawRoundRect(barRect, 6f, 6f, gradPaint)
+
+                        drawPhaseTimelineTitle(
+                            canvas = canvas,
+                            title = pb.title,
+                            barRect = barRect,
+                            timelineLeft = timelineLeft,
+                            tableRight = tableRight,
+                            blueArgb = blueArgb,
+                            cardArgb = cardArgb,
+                            textSize = 9.2f
+                        )
+                    }
+                }
+
+                is RoadmapDisplayRow.TaskRow -> {
+                    val tb = r.taskBar
+                    taskGeometry[tb.taskId] = Triple(curY, rowH, tb)
+                    canvas.drawText(
+                        ellipsizeText("• ${tb.title.ifBlank { "To-Do" }}", taskLabelPaint, labelColW - 22f),
+                        tableLeft + 12f,
+                        curY + rowH * 0.5f + 3.5f,
+                        taskLabelPaint
+                    )
+
+                    if (tb.endEpochDay >= layout.startEpochDay && tb.startEpochDay <= layout.endEpochDay) {
+                        val visStart = tb.startEpochDay.coerceIn(layout.startEpochDay, layout.endEpochDay)
+                        val visEnd = tb.endEpochDay.coerceIn(visStart, layout.endEpochDay)
+                        val barLeft = timelineLeft + (visStart - layout.startEpochDay) * dayW + 1.5f
+                        val rawRight = timelineLeft + (visEnd - layout.startEpochDay + 1L) * dayW - 1.5f
+                        val barRight = maxOf(barLeft + minOf(8f, dayW * 0.8f), minOf(rawRight, tableRight - 1.5f))
+                        val barH = 16f
+                        val barTop = curY + (rowH - barH) * 0.5f
+                        val barRect = RectF(barLeft, barTop, barRight, barTop + barH)
+
+                        fillPaint.color = if (tb.isActivelyBlocked) (if (isDark) 0x33FBBF24 else 0x26D69F3A) else blueSoftArgb
+                        canvas.drawRoundRect(barRect, 5f, 5f, fillPaint)
+
+                        strokePaint.color = if (tb.isActivelyBlocked) amberArgb else blueArgb
+                        strokePaint.strokeWidth = 1f
+                        canvas.drawRoundRect(barRect, 5f, 5f, strokePaint)
+
+                        val taskBarTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            color = if (tb.isActivelyBlocked) amberArgb else primaryTextArgb
+                            textSize = 8.5f
+                            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                        }
+                        if (barRect.width() >= 22f) {
+                            canvas.drawText(
+                                ellipsizeText(tb.title.ifBlank { "To-Do" }, taskBarTextPaint, barRect.width() - 8f),
+                                barRect.left + 4f,
+                                barRect.centerY() + 3f,
+                                taskBarTextPaint
+                            )
+                        }
+                    }
+                }
+            }
+            curY += rowH
+            strokePaint.color = dividerArgb
+            strokePaint.strokeWidth = 0.75f
+            canvas.drawLine(tableLeft, curY, tableRight, curY, strokePaint)
+        }
+
+        // Today vertical dashed line
+        if (layout.todayEpochDay in layout.startEpochDay..layout.endEpochDay) {
+            val todayX = timelineLeft + (layout.todayEpochDay - layout.startEpochDay) * dayW + dayW * 0.5f
+            val todayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = blueArgb
+                style = Paint.Style.STROKE
+                strokeWidth = 1.6f
+                pathEffect = DashPathEffect(floatArrayOf(5f, 3.5f), 0f)
+            }
+            canvas.drawLine(todayX, bodyTop, todayX, tableBottom, todayPaint)
+        }
+
+        // Dependency Cubic-Bézier Curves + Arrowheads among tasks on this page
+        for (edge in layout.dependencyEdges) {
+            val fromGeom = taskGeometry[edge.fromTaskId] ?: continue
+            val toGeom = taskGeometry[edge.toTaskId] ?: continue
+            val visFromEnd = fromGeom.third.endEpochDay.coerceIn(layout.startEpochDay, layout.endEpochDay)
+            val visToStart = toGeom.third.startEpochDay.coerceIn(layout.startEpochDay, layout.endEpochDay)
+            val sx = timelineLeft + (visFromEnd - layout.startEpochDay + 1L) * dayW - 1.5f
+            val sy = fromGeom.first + fromGeom.second * 0.5f
+            val ex = timelineLeft + (visToStart - layout.startEpochDay) * dayW + 1.5f
+            val ey = toGeom.first + toGeom.second * 0.5f
+            val ctrl = maxOf(kotlin.math.abs(ex - sx) * 0.48f, 12f)
+            val c1x = sx + ctrl
+            val c2x = ex - ctrl
+
+            val edgeColor = if (edge.isActivelyBlocking) amberArgb else blueArgb
+            val curvePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = edgeColor
+                style = Paint.Style.STROKE
+                strokeWidth = 1.35f
+                strokeCap = Paint.Cap.ROUND
+            }
+            val path = android.graphics.Path().apply {
+                moveTo(sx, sy)
+                cubicTo(c1x, sy, c2x, ey, ex, ey)
+            }
+            canvas.drawPath(path, curvePaint)
+
+            val angle = atan2(ey - ey, ex - c2x)
+            val arrowLen = 4.8f
+            val arrowPath = android.graphics.Path().apply {
+                moveTo(ex, ey)
+                lineTo(ex - arrowLen * cos(angle - 0.52f), ey - arrowLen * sin(angle - 0.52f))
+                lineTo(ex - arrowLen * cos(angle + 0.52f), ey - arrowLen * sin(angle + 0.52f))
+                close()
+            }
+            fillPaint.color = edgeColor
+            canvas.drawPath(arrowPath, fillPaint)
+        }
+
+        // Outer table frame & label divider
+        strokePaint.color = dividerArgb
+        strokePaint.strokeWidth = 1f
+        canvas.drawLine(timelineLeft, tableTop, timelineLeft, tableBottom, strokePaint)
+        canvas.drawLine(tableLeft, bodyTop, tableRight, bodyTop, strokePaint)
+        canvas.drawRoundRect(RectF(tableLeft, tableTop, tableRight, tableBottom), 12f, 12f, strokePaint)
+    }
+
     fun drawRoadmapToAndroidCanvas(
         canvas: android.graphics.Canvas,
         layout: ProjectRoadmapLayout,
@@ -2811,8 +4136,18 @@ object RoadmapExporter {
         isDark: Boolean = false
     ) {
         val rows = buildExportRows(layout, headingCounts, "General")
-        val rowsHeight = rows.sumOf {
-            (if (it is RoadmapDisplayRow.PhaseRow) EXPORT_PHASE_H else EXPORT_TASK_H).toDouble()
+        val measureBoldPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 12.5f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val rowsHeight = rows.sumOf { row ->
+            when (row) {
+                is RoadmapDisplayRow.PhaseRow -> {
+                    val lines = wrapTextLines(row.title, measureBoldPaint, EXPORT_LABEL_W - 24f)
+                    maxOf(EXPORT_PHASE_MIN_H, 20f + lines.size * 15f + (if (row.phaseBar != null) 13f else 2f)).toDouble()
+                }
+                is RoadmapDisplayRow.TaskRow -> EXPORT_TASK_H.toDouble()
+            }
         }.toFloat().coerceAtLeast(72f)
         val totalWidth = EXPORT_PADDING * 2f + EXPORT_LABEL_W + layout.totalDays * EXPORT_DAY_W
         val totalHeight = EXPORT_PADDING * 2f + EXPORT_HEADER_H + EXPORT_DAY_HEADER_H + rowsHeight
@@ -2858,6 +4193,11 @@ object RoadmapExporter {
             textSize = 12.5f
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
         }
+        val phaseSubPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = secondaryTextArgb
+            textSize = 10.5f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+        }
         val rowRegularPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = primaryTextArgb
             textSize = 11.5f
@@ -2870,6 +4210,7 @@ object RoadmapExporter {
 
         // Header Title + Date Range
         val fmt = DateTimeFormatter.ofPattern(if (locale.language == "de") "d. MMM yyyy" else "MMM d, yyyy", locale)
+        val shortFmt = DateTimeFormatter.ofPattern(if (locale.language == "de") "d. MMM" else "MMM d", locale)
         val rangeText = "${LocalDate.ofEpochDay(layout.startEpochDay).format(fmt)} – ${LocalDate.ofEpochDay(layout.endEpochDay).format(fmt)}"
         canvas.drawText(layout.project.title, EXPORT_PADDING, EXPORT_PADDING + 28f, titlePaint)
         canvas.drawText(
@@ -2930,25 +4271,45 @@ object RoadmapExporter {
             canvas.drawLine(colLeft, tableTop, colLeft, tableBottom, strokePaint)
         }
 
-        // Rows, Phase Glacier-Blue Bars, and Soft Bento Task Bars
+        // Rows, Wrapped Full Phase Titles, Clamped Phase Glacier-Blue Bars, and Soft Bento Task Bars
         val taskGeometry = HashMap<String, Triple<Float, Float, RoadmapTaskBar>>()
         var curY = bodyTop
         for (row in rows) {
             when (row) {
                 is RoadmapDisplayRow.PhaseRow -> {
-                    fillPaint.color = if (isDark) 0x223898EC else 0x143898EC
-                    canvas.drawRect(tableLeft, curY, timelineLeft, curY + EXPORT_PHASE_H, fillPaint)
-                    canvas.drawText(
-                        ellipsizeText(row.title, rowBoldPaint, EXPORT_LABEL_W - 24f),
-                        tableLeft + 12f,
-                        curY + 25f,
-                        rowBoldPaint
+                    val wrappedLines = wrapTextLines(row.title, rowBoldPaint, EXPORT_LABEL_W - 24f)
+                    val dateSub = row.phaseBar?.let { pb ->
+                        val s = LocalDate.ofEpochDay(pb.startEpochDay).format(shortFmt)
+                        val e = LocalDate.ofEpochDay(pb.endEpochDay).format(shortFmt)
+                        if (pb.startEpochDay == pb.endEpochDay) s else "$s – $e"
+                    }
+                    val phaseRowH = maxOf(
+                        EXPORT_PHASE_MIN_H,
+                        20f + wrappedLines.size * 15f + (if (dateSub != null) 13f else 2f)
                     )
+
+                    fillPaint.color = if (isDark) 0x223898EC else 0x143898EC
+                    canvas.drawRect(tableLeft, curY, timelineLeft, curY + phaseRowH, fillPaint)
+
+                    var textY = curY + 20f
+                    for (line in wrappedLines) {
+                        canvas.drawText(line, tableLeft + 12f, textY, rowBoldPaint)
+                        textY += 15f
+                    }
+                    if (dateSub != null) {
+                        canvas.drawText(dateSub, tableLeft + 12f, textY - 1f, phaseSubPaint)
+                    }
+
                     val pb = row.phaseBar
-                    if (pb != null) {
-                        val barLeft = timelineLeft + (pb.startEpochDay - layout.startEpochDay) * EXPORT_DAY_W + 3f
-                        val barRight = timelineLeft + (pb.endEpochDay - layout.startEpochDay + 1L) * EXPORT_DAY_W - 3f
-                        val barRect = RectF(barLeft, curY + 7f, maxOf(barLeft + 16f, barRight), curY + EXPORT_PHASE_H - 7f)
+                    if (pb != null && pb.endEpochDay >= layout.startEpochDay && pb.startEpochDay <= layout.endEpochDay) {
+                        val visStart = pb.startEpochDay.coerceIn(layout.startEpochDay, layout.endEpochDay)
+                        val visEnd = pb.endEpochDay.coerceIn(visStart, layout.endEpochDay)
+                        val barLeft = timelineLeft + (visStart - layout.startEpochDay) * EXPORT_DAY_W + 3f
+                        val rawRight = timelineLeft + (visEnd - layout.startEpochDay + 1L) * EXPORT_DAY_W - 3f
+                        val barRight = maxOf(barLeft + 16f, minOf(rawRight, tableRight - 3f))
+                        val barH = 26f
+                        val barTop = curY + (phaseRowH - barH) * 0.5f
+                        val barRect = RectF(barLeft, barTop, barRight, barTop + barH)
                         val gradPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                             style = Paint.Style.FILL
                             shader = LinearGradient(
@@ -2962,19 +4323,18 @@ object RoadmapExporter {
                             )
                         }
                         canvas.drawRoundRect(barRect, 9f, 9f, gradPaint)
-                        val barTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                            color = 0xFFFFFFFF.toInt()
+                        drawPhaseTimelineTitle(
+                            canvas = canvas,
+                            title = pb.title,
+                            barRect = barRect,
+                            timelineLeft = timelineLeft,
+                            tableRight = tableRight,
+                            blueArgb = blueArgb,
+                            cardArgb = cardArgb,
                             textSize = 11f
-                            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-                        }
-                        canvas.drawText(
-                            ellipsizeText(pb.title, barTextPaint, (barRect.width() - 14f).coerceAtLeast(0f)),
-                            barRect.left + 8f,
-                            barRect.centerY() + 4f,
-                            barTextPaint
                         )
                     }
-                    curY += EXPORT_PHASE_H
+                    curY += phaseRowH
                 }
 
                 is RoadmapDisplayRow.TaskRow -> {
@@ -2986,28 +4346,33 @@ object RoadmapExporter {
                         curY + 21f,
                         rowRegularPaint
                     )
-                    val barLeft = timelineLeft + (tb.startEpochDay - layout.startEpochDay) * EXPORT_DAY_W + 3f
-                    val barRight = timelineLeft + (tb.endEpochDay - layout.startEpochDay + 1L) * EXPORT_DAY_W - 3f
-                    val barRect = RectF(barLeft, curY + 5f, maxOf(barLeft + 14f, barRight), curY + EXPORT_TASK_H - 5f)
+                    if (tb.endEpochDay >= layout.startEpochDay && tb.startEpochDay <= layout.endEpochDay) {
+                        val visStart = tb.startEpochDay.coerceIn(layout.startEpochDay, layout.endEpochDay)
+                        val visEnd = tb.endEpochDay.coerceIn(visStart, layout.endEpochDay)
+                        val barLeft = timelineLeft + (visStart - layout.startEpochDay) * EXPORT_DAY_W + 3f
+                        val rawRight = timelineLeft + (visEnd - layout.startEpochDay + 1L) * EXPORT_DAY_W - 3f
+                        val barRight = maxOf(barLeft + 14f, minOf(rawRight, tableRight - 3f))
+                        val barRect = RectF(barLeft, curY + 5f, barRight, curY + EXPORT_TASK_H - 5f)
 
-                    fillPaint.color = if (tb.isActivelyBlocked) (if (isDark) 0x33FBBF24 else 0x26D69F3A) else blueSoftArgb
-                    canvas.drawRoundRect(barRect, 7f, 7f, fillPaint)
+                        fillPaint.color = if (tb.isActivelyBlocked) (if (isDark) 0x33FBBF24 else 0x26D69F3A) else blueSoftArgb
+                        canvas.drawRoundRect(barRect, 7f, 7f, fillPaint)
 
-                    strokePaint.color = if (tb.isActivelyBlocked) amberArgb else blueArgb
-                    strokePaint.strokeWidth = 1.3f
-                    canvas.drawRoundRect(barRect, 7f, 7f, strokePaint)
+                        strokePaint.color = if (tb.isActivelyBlocked) amberArgb else blueArgb
+                        strokePaint.strokeWidth = 1.3f
+                        canvas.drawRoundRect(barRect, 7f, 7f, strokePaint)
 
-                    val taskBarTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = if (tb.isActivelyBlocked) amberArgb else primaryTextArgb
-                        textSize = 10.5f
-                        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                        val taskBarTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            color = if (tb.isActivelyBlocked) amberArgb else primaryTextArgb
+                            textSize = 10.5f
+                            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                        }
+                        canvas.drawText(
+                            ellipsizeText(tb.title.ifBlank { "To-Do" }, taskBarTextPaint, (barRect.width() - 12f).coerceAtLeast(0f)),
+                            barRect.left + 6f,
+                            barRect.centerY() + 3.8f,
+                            taskBarTextPaint
+                        )
                     }
-                    canvas.drawText(
-                        ellipsizeText(tb.title.ifBlank { "To-Do" }, taskBarTextPaint, (barRect.width() - 12f).coerceAtLeast(0f)),
-                        barRect.left + 6f,
-                        barRect.centerY() + 3.8f,
-                        taskBarTextPaint
-                    )
                     curY += EXPORT_TASK_H
                 }
             }
@@ -3032,9 +4397,11 @@ object RoadmapExporter {
         for (edge in layout.dependencyEdges) {
             val fromGeom = taskGeometry[edge.fromTaskId] ?: continue
             val toGeom = taskGeometry[edge.toTaskId] ?: continue
-            val sx = timelineLeft + (fromGeom.third.endEpochDay - layout.startEpochDay + 1L) * EXPORT_DAY_W - 3f
+            val visFromEnd = fromGeom.third.endEpochDay.coerceIn(layout.startEpochDay, layout.endEpochDay)
+            val visToStart = toGeom.third.startEpochDay.coerceIn(layout.startEpochDay, layout.endEpochDay)
+            val sx = timelineLeft + (visFromEnd - layout.startEpochDay + 1L) * EXPORT_DAY_W - 3f
             val sy = fromGeom.first + fromGeom.second * 0.5f
-            val ex = timelineLeft + (toGeom.third.startEpochDay - layout.startEpochDay) * EXPORT_DAY_W + 3f
+            val ex = timelineLeft + (visToStart - layout.startEpochDay) * EXPORT_DAY_W + 3f
             val ey = toGeom.first + toGeom.second * 0.5f
             val ctrl = maxOf(kotlin.math.abs(ex - sx) * 0.48f, 18f)
             val c1x = sx + ctrl
@@ -3071,6 +4438,118 @@ object RoadmapExporter {
         canvas.drawLine(timelineLeft, tableTop, timelineLeft, tableBottom, strokePaint)
         canvas.drawLine(tableLeft, bodyTop, tableRight, bodyTop, strokePaint)
         canvas.drawRoundRect(RectF(tableLeft, tableTop, tableRight, tableBottom), 16f, 16f, strokePaint)
+    }
+
+    private fun drawPhaseTimelineTitle(
+        canvas: android.graphics.Canvas,
+        title: String,
+        barRect: RectF,
+        timelineLeft: Float,
+        tableRight: Float,
+        blueArgb: Int,
+        cardArgb: Int,
+        textSize: Float
+    ) {
+        val cleanTitle = title.trim()
+        if (cleanTitle.isEmpty()) return
+
+        val barTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFFFFFFFF.toInt()
+            this.textSize = textSize
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val titleWidth = barTextPaint.measureText(cleanTitle)
+        if (barRect.width() >= titleWidth + 14f) {
+            canvas.drawText(
+                cleanTitle,
+                barRect.left + 7f,
+                barRect.centerY() + textSize * 0.34f,
+                barTextPaint
+            )
+            return
+        }
+
+        // Narrow bar: draw full untruncated Phase title right beside the bar (right if room, else left)
+        val outsidePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = blueArgb
+            this.textSize = textSize
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val spaceRight = (tableRight - 6f) - (barRect.right + 5f)
+        val spaceLeft = (barRect.left - 5f) - (timelineLeft + 6f)
+        val textX = if (spaceRight >= titleWidth || spaceRight >= spaceLeft) {
+            (barRect.right + 5f).coerceAtMost((tableRight - 4f - titleWidth).coerceAtLeast(timelineLeft + 4f))
+        } else {
+            (barRect.left - 5f - titleWidth).coerceAtLeast(timelineLeft + 4f)
+        }
+        val pillBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = cardArgb
+            alpha = 225
+        }
+        val pillRect = RectF(
+            textX - 3f,
+            barRect.centerY() - textSize * 0.68f,
+            (textX + titleWidth + 3f).coerceAtMost(tableRight - 2f),
+            barRect.centerY() + textSize * 0.56f
+        )
+        canvas.drawRoundRect(pillRect, 4f, 4f, pillBgPaint)
+        canvas.drawText(cleanTitle, textX, barRect.centerY() + textSize * 0.34f, outsidePaint)
+    }
+
+    private fun wrapTextLines(text: String, paint: Paint, maxWidth: Float): List<String> {
+        val clean = text.trim()
+        if (clean.isEmpty()) return listOf("")
+        if (maxWidth <= 16f || paint.measureText(clean) <= maxWidth) return listOf(clean)
+
+        val lines = mutableListOf<String>()
+        var current = ""
+
+        fun pushLongWord(word: String) {
+            var start = 0
+            while (start < word.length) {
+                var end = start + 1
+                while (end <= word.length && paint.measureText(word.substring(start, end)) <= maxWidth) {
+                    end++
+                }
+                val takeEnd = (end - 1).coerceAtLeast(start + 1)
+                val chunk = word.substring(start, takeEnd)
+                if (takeEnd < word.length) {
+                    lines += chunk
+                } else {
+                    current = chunk
+                }
+                start = takeEnd
+            }
+        }
+
+        for (word in clean.split(Regex("\\s+"))) {
+            if (word.isEmpty()) continue
+            if (current.isEmpty()) {
+                if (paint.measureText(word) <= maxWidth) {
+                    current = word
+                } else {
+                    pushLongWord(word)
+                }
+            } else {
+                val candidate = "$current $word"
+                if (paint.measureText(candidate) <= maxWidth) {
+                    current = candidate
+                } else {
+                    lines += current
+                    current = ""
+                    if (paint.measureText(word) <= maxWidth) {
+                        current = word
+                    } else {
+                        pushLongWord(word)
+                    }
+                }
+            }
+        }
+        if (current.isNotEmpty()) {
+            lines += current
+        }
+        return if (lines.isEmpty()) listOf(clean) else lines
     }
 
     private fun ellipsizeText(text: String, paint: Paint, maxWidth: Float): String {

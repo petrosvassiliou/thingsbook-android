@@ -23,6 +23,7 @@ import com.pv.thingsbook.ui.components.ProjectDropIndicatorOverlay
 import com.pv.thingsbook.ui.components.ProjectDragAutoScrollEffect
 import com.pv.thingsbook.ui.components.RoadmapExportMenuPill
 import com.pv.thingsbook.ui.components.RoadmapExporter
+import com.pv.thingsbook.ui.components.RoadmapPdfExportDialog
 import com.pv.thingsbook.ui.components.WorkspaceDragDropDestination
 import com.pv.thingsbook.ui.components.WorkspaceDragFloatingOverlay
 import com.pv.thingsbook.ui.components.projectDropSurface
@@ -959,6 +960,8 @@ fun ThingsSmartViewScreen(
                         )
                     }
 
+                    var showTopRoadmapPdfDialog by remember { mutableStateOf(false) }
+
                     // View Title Header (Smart View, Project with 3-Mode Workspace Switcher & Target Date, Area, or Custom Perspective)
                     ViewTitleHeader(
                         navTarget = navTarget,
@@ -969,26 +972,30 @@ fun ThingsSmartViewScreen(
                         },
                         onExportProjectRoadmap = { asPdf ->
                             val proj = currentProject ?: return@ViewTitleHeader
-                            topCoroutineScope.launch {
-                                runCatching {
-                                    val roadmapLayout = ProjectRoadmapEngine.buildRoadmapLayout(
-                                        project = proj,
-                                        headings = projectHeadings,
-                                        tasks = primaryTasks,
-                                        todayEpochDay = currentEpochDayTop,
-                                        zoneId = zoneTop
-                                    )
-                                    RoadmapExporter.exportAndShareRoadmap(
-                                        context = appCtx,
-                                        layout = roadmapLayout,
-                                        headingCounts = headingTaskCountsTop,
-                                        locale = activeLocale,
-                                        isDark = colors.isDark,
-                                        asPdf = asPdf,
-                                        exportChooserTitle = exportRoadmapChooserTitle
-                                    )
-                                }.onFailure { err ->
-                                    viewModel.showUiMessage(err.localizedMessage ?: err.message ?: "Export failed")
+                            if (asPdf) {
+                                showTopRoadmapPdfDialog = true
+                            } else {
+                                topCoroutineScope.launch {
+                                    runCatching {
+                                        val roadmapLayout = ProjectRoadmapEngine.buildRoadmapLayout(
+                                            project = proj,
+                                            headings = projectHeadings,
+                                            tasks = primaryTasks,
+                                            todayEpochDay = currentEpochDayTop,
+                                            zoneId = zoneTop
+                                        )
+                                        RoadmapExporter.exportAndShareRoadmap(
+                                            context = appCtx,
+                                            layout = roadmapLayout,
+                                            headingCounts = headingTaskCountsTop,
+                                            locale = activeLocale,
+                                            isDark = colors.isDark,
+                                            asPdf = false,
+                                            exportChooserTitle = exportRoadmapChooserTitle
+                                        )
+                                    }.onFailure { err ->
+                                        viewModel.showUiMessage(err.localizedMessage ?: err.message ?: "Export failed")
+                                    }
                                 }
                             }
                         },
@@ -1048,6 +1055,45 @@ fun ThingsSmartViewScreen(
                         onMoveArea = { aId, up -> viewModel.moveArea(aId, up) },
                         onDeleteArea = { aId -> viewModel.deleteArea(aId) }
                     )
+
+                    if (showTopRoadmapPdfDialog && currentProject != null) {
+                        val topPdfLayout = remember(currentProject, projectHeadings, primaryTasks, currentEpochDayTop, zoneTop) {
+                            ProjectRoadmapEngine.buildRoadmapLayout(
+                                project = currentProject,
+                                headings = projectHeadings,
+                                tasks = primaryTasks,
+                                todayEpochDay = currentEpochDayTop,
+                                zoneId = zoneTop
+                            )
+                        }
+                        RoadmapPdfExportDialog(
+                            project = currentProject,
+                            projectHeadings = projectHeadings,
+                            primaryTasks = primaryTasks,
+                            layout = topPdfLayout,
+                            locale = activeLocale,
+                            onDismiss = { showTopRoadmapPdfDialog = false },
+                            onConfirmExport = { pdfConfig ->
+                                showTopRoadmapPdfDialog = false
+                                topCoroutineScope.launch {
+                                    runCatching {
+                                        RoadmapExporter.exportPdf(
+                                            context = appCtx,
+                                            project = currentProject,
+                                            layout = topPdfLayout,
+                                            config = pdfConfig,
+                                            headingCounts = headingTaskCountsTop,
+                                            locale = activeLocale,
+                                            isDark = colors.isDark,
+                                            exportChooserTitle = exportRoadmapChooserTitle
+                                        )
+                                    }.onFailure { err ->
+                                        viewModel.showUiMessage(err.localizedMessage ?: err.message ?: "Export failed")
+                                    }
+                                }
+                            }
+                        )
+                    }
 
                     // Interactive Tag Filter Strip (displays ONLY tags used by tasks in the current view)
                     TagFilterAndManageStrip(
@@ -6192,16 +6238,17 @@ private fun ProjectHeadingSectionHeader(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable(onClick = onToggleCollapse),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Row(
                         modifier = Modifier.weight(1f),
-                        verticalAlignment = Alignment.CenterVertically,
+                        verticalAlignment = Alignment.Top,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Box(
                             modifier = Modifier
+                                .padding(top = 4.dp)
                                 .width(3.5.dp)
                                 .height(18.dp)
                                 .clip(RoundedCornerShape(50))
@@ -6213,9 +6260,10 @@ private fun ProjectHeadingSectionHeader(
                                 color = colors.primaryText,
                                 fontWeight = FontWeight.Bold
                             ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
+                            maxLines = Int.MAX_VALUE,
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .padding(top = 1.dp)
                         )
                     }
 

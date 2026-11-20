@@ -35,7 +35,9 @@ import {
 import {
   addDaysLocal,
   daysBetweenToday,
+  fromIsoDateInputValue,
   startOfDayEpoch,
+  toIsoDateInputValue,
   type ChecklistItemRecord,
   type HeadingRecord,
   type ProjectRecord,
@@ -64,7 +66,9 @@ import {
   shiftPhaseDatesByDays,
   shiftTaskDatesByDays,
   slugifyFilename,
-  type ProjectRoadmapLayout
+  wrapTextLines,
+  type ProjectRoadmapLayout,
+  type RoadmapPdfOrientation
 } from '../domain/v30Roadmap';
 import { localDb } from '../data/localDb';
 import type { TranslationStrings } from '../i18n/translations';
@@ -705,11 +709,13 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
               )}
               <span className="board-column-count">{colTasks.length}</span>
               {allColTasks.length > 0 && (
-                <ProjectProgressRing
-                  completed={doneColCount}
-                  total={allColTasks.length}
-                  size={14}
-                />
+                <span className="board-column-ring-wrap">
+                  <ProjectProgressRing
+                    completed={doneColCount}
+                    total={allColTasks.length}
+                    size={14}
+                  />
+                </span>
               )}
             </div>
 
@@ -1088,6 +1094,7 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
 // ==================== 2. Roadmap Gantt View (ProjectRoadmapWorkspace) ====================
 
 type RoadmapZoom = 'compact' | 'standard' | 'wide';
+type RoadmapPdfTimelinePreset = 'auto' | 'from_today' | 'next_30d' | 'custom';
 
 const ZOOM_DAY_WIDTH_PX: Record<RoadmapZoom, number> = {
   compact: 28,
@@ -1095,9 +1102,17 @@ const ZOOM_DAY_WIDTH_PX: Record<RoadmapZoom, number> = {
   wide: 56
 };
 
-const LABEL_COL_WIDTH_PX = 246;
-const LANE_ROW_HEIGHT_PX = 40;
+const LABEL_COL_WIDTH_PX = 268;
+const LANE_ROW_HEIGHT_PX = 58;
 const TASK_ROW_HEIGHT_PX = 38;
+
+function resolveLaneHeaderHeightPx(laneTitle: string, hasDateSubRow: boolean): number {
+  const lineCount = wrapTextLines(laneTitle, 25).length;
+  if (hasDateSubRow) {
+    return Math.max(LANE_ROW_HEIGHT_PX, 36 + lineCount * 17);
+  }
+  return Math.max(44, 20 + lineCount * 17);
+}
 
 interface BarDragState {
   kind: 'phase' | 'task';
@@ -1144,6 +1159,15 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
 }) => {
   const [zoom, setZoom] = useState<RoadmapZoom>('standard');
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [pdfDialogOpen, setPdfDialogOpen] = useState(false);
+  const [pdfSelectedLaneIds, setPdfSelectedLaneIds] = useState<string[]>([]);
+  const [pdfTimelinePreset, setPdfTimelinePreset] =
+    useState<RoadmapPdfTimelinePreset>('auto');
+  const [pdfCustomStartIso, setPdfCustomStartIso] = useState('');
+  const [pdfCustomEndIso, setPdfCustomEndIso] = useState('');
+  const [pdfOrientation, setPdfOrientation] =
+    useState<RoadmapPdfOrientation>('landscape');
+
   const [barDrag, setBarDrag] = useState<BarDragState | null>(null);
   const [dragOverLaneId, setDragOverLaneId] = useState<string | null>(null);
   const [editingPhaseId, setEditingPhaseId] = useState<string | null>(null);
@@ -1151,6 +1175,27 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const dayWidth = ZOOM_DAY_WIDTH_PX[zoom];
+  const timelineWidthPx = layout.totalDays * dayWidth;
+
+  const selectablePdfLanes = useMemo(() => {
+    const hasHeadingLanes = layout.lanes.some((l) => l.heading != null);
+    return layout.lanes.filter(
+      (lane) =>
+        lane.heading != null || lane.plottedTasks.length > 0 || !hasHeadingLanes
+    );
+  }, [layout.lanes]);
+
+  useEffect(() => {
+    if (!pdfDialogOpen) return;
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') {
+        ev.stopPropagation();
+        setPdfDialogOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [pdfDialogOpen]);
 
   const jumpToToday = useCallback(
     (smooth: boolean = true) => {
@@ -1158,7 +1203,8 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
       if (!el) return;
       const targetLeft = Math.max(
         0,
-        layout.todayDayIndex * dayWidth - Math.max(80, (el.clientWidth - LABEL_COL_WIDTH_PX) * 0.22)
+        layout.todayDayIndex * dayWidth -
+          Math.max(80, (el.clientWidth - LABEL_COL_WIDTH_PX) * 0.22)
       );
       el.scrollTo({
         left: targetLeft,
@@ -1279,22 +1325,40 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
     });
   };
 
-  // Precompute exact Y-coordinates and bar X-coordinates for SVG cubic-Bezier dependency connectors
-  const { totalBodyHeight, svgConnectorPaths } = useMemo(() => {
+  // Precompute synchronized lane header heights, exact Y-coordinates, and bar X-coordinates for SVG dependency connectors
+  const { laneHeightsById, totalBodyHeight, svgConnectorPaths } = useMemo(() => {
+    const heights = new Map<string, number>();
     const coords = new Map<string, { xLeft: number; xRight: number; yMid: number }>();
     let yCursor = 0;
 
     for (const lane of layout.lanes) {
-      yCursor += LANE_ROW_HEIGHT_PX;
+      const displayTitle =
+        lane.heading == null
+          ? t.projectUngroupedColumn
+          : lane.heading.title || t.entityHeading;
+      const laneH = resolveLaneHeaderHeightPx(displayTitle, lane.heading != null);
+      heights.set(lane.laneId, laneH);
+      yCursor += laneH;
+
       for (const pt of lane.plottedTasks) {
         const offsetDays =
           barDrag && barDrag.kind === 'task' && barDrag.id === pt.task.id
             ? barDrag.deltaDays
             : 0;
-        const sIdx = pt.startDayIndex + offsetDays;
-        const eIdx = pt.endDayIndex + offsetDays;
-        const barLeft = sIdx * dayWidth + 4;
-        const barWidth = Math.max(18, (eIdx - sIdx + 1) * dayWidth - 8);
+        const clampedS = Math.max(
+          0,
+          Math.min(layout.totalDays - 1, pt.startDayIndex + offsetDays)
+        );
+        const clampedE = Math.max(
+          clampedS,
+          Math.min(layout.totalDays - 1, pt.endDayIndex + offsetDays)
+        );
+        const barLeft = clampedS * dayWidth + 4;
+        const maxAvailW = Math.max(18, timelineWidthPx - barLeft - 4);
+        const barWidth = Math.min(
+          maxAvailW,
+          Math.max(18, (clampedE - clampedS + 1) * dayWidth - 8)
+        );
         coords.set(pt.task.id, {
           xLeft: barLeft,
           xRight: barLeft + barWidth,
@@ -1330,12 +1394,21 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
       );
 
     return {
+      laneHeightsById: heights,
       totalBodyHeight: Math.max(LANE_ROW_HEIGHT_PX, yCursor),
       svgConnectorPaths: paths
     };
-  }, [layout.lanes, layout.dependencyEdges, dayWidth, barDrag]);
+  }, [
+    layout.lanes,
+    layout.dependencyEdges,
+    layout.totalDays,
+    dayWidth,
+    timelineWidthPx,
+    barDrag,
+    t.projectUngroupedColumn,
+    t.entityHeading
+  ]);
 
-  const timelineWidthPx = layout.totalDays * dayWidth;
   const todayRawOffset = localDaysBetween(layout.windowStartEpoch, layout.todayEpoch);
   const showTodayLine = todayRawOffset >= 0 && todayRawOffset < layout.totalDays;
 
@@ -1346,14 +1419,57 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
     return `${formatShortMonthDay(first.epoch, lang)} – ${formatShortMonthDay(last.epoch, lang)}`;
   }, [layout.days, lang]);
 
-  const handleExportPdf = () => {
+  const openPdfExportDialog = () => {
     setExportMenuOpen(false);
-    const bytes = generateRoadmapPdfBytes(layout, project.title, {
-      ungroupedTitle: t.projectUngroupedColumn,
-      todayLabel: t.viewToday,
-      unscheduledLabel: t.roadmapUnscheduledSection,
-      subtitle: rangeSummaryLabel
-    });
+    setPdfSelectedLaneIds(selectablePdfLanes.map((l) => l.laneId));
+    setPdfTimelinePreset('auto');
+    setPdfCustomStartIso(toIsoDateInputValue(layout.windowStartEpoch));
+    setPdfCustomEndIso(toIsoDateInputValue(layout.windowEndEpoch));
+    setPdfOrientation('landscape');
+    setPdfDialogOpen(true);
+  };
+
+  const handleConfirmExportPdf = () => {
+    if (pdfSelectedLaneIds.length === 0) return;
+
+    let resolvedStart = layout.windowStartEpoch;
+    let resolvedEnd = layout.windowEndEpoch;
+
+    if (pdfTimelinePreset === 'from_today') {
+      resolvedStart = layout.todayEpoch;
+      resolvedEnd = Math.max(layout.todayEpoch, layout.windowEndEpoch);
+    } else if (pdfTimelinePreset === 'next_30d') {
+      resolvedStart = layout.todayEpoch;
+      resolvedEnd = addDaysLocal(layout.todayEpoch, 29);
+    } else if (pdfTimelinePreset === 'custom') {
+      const parsedStart =
+        fromIsoDateInputValue(pdfCustomStartIso) ?? layout.windowStartEpoch;
+      const parsedEnd =
+        fromIsoDateInputValue(pdfCustomEndIso) ?? layout.windowEndEpoch;
+      resolvedStart = Math.min(parsedStart, parsedEnd);
+      resolvedEnd = Math.max(parsedStart, parsedEnd);
+    }
+
+    const exportSubtitle = `${formatShortMonthDay(resolvedStart, lang)} – ${formatShortMonthDay(resolvedEnd, lang)}`;
+
+    const bytes = generateRoadmapPdfBytes(
+      layout,
+      project.title,
+      {
+        ungroupedTitle: t.projectUngroupedColumn,
+        todayLabel: t.viewToday,
+        unscheduledLabel: t.roadmapUnscheduledSection,
+        subtitle: exportSubtitle
+      },
+      {
+        orientation: pdfOrientation,
+        selectedLaneIds: pdfSelectedLaneIds,
+        startEpoch: resolvedStart,
+        endEpoch: resolvedEnd
+      }
+    );
+
+    setPdfDialogOpen(false);
     downloadBlob(
       bytes,
       `${slugifyFilename(project.title)}-roadmap.pdf`,
@@ -1494,7 +1610,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                     type="button"
                     className="dropdown-item"
                     data-testid="roadmap-export-pdf-btn"
-                    onClick={handleExportPdf}
+                    onClick={openPdfExportDialog}
                   >
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                       <FileText size={14} style={{ color: 'var(--things-blue)' }} />
@@ -1654,15 +1770,87 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                   ? barDrag.deltaDays
                   : 0;
               const isEditing = hd != null && editingPhaseId === hd.id;
+              const phaseTitle = isGeneral
+                ? t.projectUngroupedColumn
+                : hd.title || t.entityHeading;
+              const laneRowHeight =
+                laneHeightsById.get(lane.laneId) ?? LANE_ROW_HEIGHT_PX;
+
+              const formattedStart =
+                hd?.startDate != null ? formatShortMonthDay(hd.startDate, lang) : null;
+              const formattedEnd =
+                hd?.endDate != null ? formatShortMonthDay(hd.endDate, lang) : null;
+              const hdEndDiff =
+                hd?.endDate != null ? daysBetweenToday(hd.endDate) : null;
+              const isPhaseOverdue =
+                hdEndDiff != null &&
+                hdEndDiff < 0 &&
+                lane.completedCount < lane.totalCount;
+
+              // Compute clamped Phase bar geometry strictly within [layout.windowStartEpoch, layout.windowEndEpoch]
+              let clampedPhaseBar: {
+                leftPx: number;
+                widthPx: number;
+                showTitleInside: boolean;
+                placeOutsideRight: boolean;
+              } | null = null;
+
+              if (hd && lane.startEpoch != null && lane.endEpoch != null) {
+                const shiftedStart = addDaysLocal(lane.startEpoch, phaseDragDelta);
+                const shiftedEnd = addDaysLocal(lane.endEpoch, phaseDragDelta);
+                if (
+                  shiftedEnd >= layout.windowStartEpoch &&
+                  shiftedStart <= layout.windowEndEpoch
+                ) {
+                  const visibleStart = Math.max(layout.windowStartEpoch, shiftedStart);
+                  const visibleEnd = Math.min(layout.windowEndEpoch, shiftedEnd);
+                  const sIdx = Math.max(
+                    0,
+                    Math.min(
+                      layout.totalDays - 1,
+                      localDaysBetween(layout.windowStartEpoch, visibleStart)
+                    )
+                  );
+                  const eIdx = Math.max(
+                    sIdx,
+                    Math.min(
+                      layout.totalDays - 1,
+                      localDaysBetween(layout.windowStartEpoch, visibleEnd)
+                    )
+                  );
+                  const spanDays = eIdx - sIdx + 1;
+                  const leftPx = sIdx * dayWidth + 3;
+                  const maxAvailPx = Math.max(14, timelineWidthPx - leftPx - 3);
+                  const widthPx = Math.min(
+                    maxAvailPx,
+                    Math.max(20, spanDays * dayWidth - 6)
+                  );
+                  const titleEstimatedPx = phaseTitle.length * 7.2 + 56;
+                  const showTitleInside = widthPx >= titleEstimatedPx;
+                  const outsideEstimatedPx = phaseTitle.length * 7.2 + 14;
+                  const spaceRightPx = timelineWidthPx - (leftPx + widthPx + 8);
+                  const placeOutsideRight =
+                    spaceRightPx >= outsideEstimatedPx || spaceRightPx >= leftPx;
+
+                  clampedPhaseBar = {
+                    leftPx,
+                    widthPx,
+                    showTitleInside,
+                    placeOutsideRight
+                  };
+                }
+              }
+
+              const phaseBarTopPx = Math.max(6, Math.round((laneRowHeight - 26) / 2));
 
               return (
                 <React.Fragment key={lane.laneId}>
-                  {/* Phase Lane Header Row */}
+                  {/* Phase Lane Header Row (synchronized height across left column, right grid, and SVG) */}
                   <div
                     className={`roadmap-lane-row ${
                       dragOverLaneId === lane.laneId ? 'drag-over' : ''
                     }`}
-                    style={{ height: LANE_ROW_HEIGHT_PX }}
+                    style={{ height: laneRowHeight, minHeight: laneRowHeight }}
                     onDragOver={(e) => {
                       if (hasDraggedTaskMime(e.dataTransfer)) {
                         e.preventDefault();
@@ -1679,79 +1867,116 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                       className="roadmap-sticky-cell lane-cell"
                       style={{ width: LABEL_COL_WIDTH_PX }}
                     >
-                      <span
-                        className={`board-column-accent ${isGeneral ? 'general' : ''}`}
-                      />
-                      {isEditing && hd ? (
-                        <input
-                          type="text"
-                          className="text-field board-phase-rename-input"
-                          autoFocus
-                          value={editingPhaseTitle}
-                          onChange={(e) => setEditingPhaseTitle(e.target.value)}
-                          onBlur={() => void commitPhaseRename(hd)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              void commitPhaseRename(hd);
-                            } else if (e.key === 'Escape') {
-                              setEditingPhaseId(null);
-                            }
-                          }}
-                        />
-                      ) : (
-                        <span
-                          className="roadmap-lane-title"
-                          onDoubleClick={() => {
-                            if (hd) {
-                              setEditingPhaseId(hd.id);
-                              setEditingPhaseTitle(hd.title);
-                            }
-                          }}
-                        >
-                          {isGeneral
-                            ? t.projectUngroupedColumn
-                            : hd.title || t.entityHeading}
-                        </span>
-                      )}
+                      <div className="roadmap-lane-cell-stack">
+                        <div className="roadmap-lane-top-row">
+                          <span
+                            className={`board-column-accent ${isGeneral ? 'general' : ''}`}
+                          />
+                          {isEditing && hd ? (
+                            <input
+                              type="text"
+                              className="text-field board-phase-rename-input"
+                              autoFocus
+                              value={editingPhaseTitle}
+                              onChange={(e) => setEditingPhaseTitle(e.target.value)}
+                              onBlur={() => void commitPhaseRename(hd)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  void commitPhaseRename(hd);
+                                } else if (e.key === 'Escape') {
+                                  setEditingPhaseId(null);
+                                }
+                              }}
+                            />
+                          ) : (
+                            <span
+                              className="roadmap-lane-title"
+                              onDoubleClick={() => {
+                                if (hd) {
+                                  setEditingPhaseId(hd.id);
+                                  setEditingPhaseTitle(hd.title);
+                                }
+                              }}
+                            >
+                              {phaseTitle}
+                            </span>
+                          )}
 
-                      {lane.totalCount > 0 && (
-                        <ProjectProgressRing
-                          completed={lane.completedCount}
-                          total={lane.totalCount}
-                          size={13}
-                        />
-                      )}
+                          {lane.totalCount > 0 && (
+                            <span className="roadmap-lane-ring-wrap">
+                              <ProjectProgressRing
+                                completed={lane.completedCount}
+                                total={lane.totalCount}
+                                size={13}
+                              />
+                            </span>
+                          )}
 
-                      <div className="roadmap-cell-quick-btns">
-                        {hd && (
-                          <>
+                          <div className="roadmap-cell-quick-btns">
+                            {hd && (
+                              <button
+                                type="button"
+                                className="roadmap-step-btn"
+                                title={t.actionRename}
+                                onClick={() => {
+                                  setEditingPhaseId(hd.id);
+                                  setEditingPhaseTitle(hd.title);
+                                }}
+                              >
+                                <Edit3 size={11.5} />
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="roadmap-step-btn"
+                              title={t.entityNewTodo}
+                              onClick={() => onCreateTodoInPhase(hd ? hd.id : null)}
+                            >
+                              <Plus size={12.5} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {hd && (
+                          <div className="roadmap-lane-dates-subrow">
+                            <button
+                              type="button"
+                              className={`roadmap-lane-date-chip ${
+                                formattedStart != null ? 'has-date' : ''
+                              }`}
                               title={t.phaseSetStartDate}
                               onClick={() => onOpenHeadingStartModal(hd.id)}
                             >
-                              <Calendar size={11.5} />
+                              <Calendar size={10} />
+                              <span>
+                                {formattedStart != null
+                                  ? formattedStart
+                                  : `+ ${t.phaseSetStartDate}`}
+                              </span>
                             </button>
+
                             <button
                               type="button"
-                              className="roadmap-step-btn"
+                              className={`roadmap-lane-date-chip ${
+                                isPhaseOverdue
+                                  ? 'overdue'
+                                  : formattedEnd != null
+                                    ? 'has-date'
+                                    : ''
+                              }`}
                               title={t.phaseSetEndDate}
                               onClick={() => onOpenHeadingEndModal(hd.id)}
                             >
-                              <Flag size={11.5} />
+                              <Flag size={10} />
+                              <span>
+                                {formattedEnd != null
+                                  ? formattedEnd
+                                  : `+ ${t.phaseSetEndDate}`}
+                              </span>
                             </button>
-                          </>
+                          </div>
                         )}
-                        <button
-                          type="button"
-                          className="roadmap-step-btn"
-                          title={t.entityNewTodo}
-                          onClick={() => onCreateTodoInPhase(hd ? hd.id : null)}
-                        >
-                          <Plus size={12.5} />
-                        </button>
                       </div>
                     </div>
 
@@ -1759,70 +1984,106 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                       className="roadmap-track-cell"
                       style={{ width: timelineWidthPx }}
                     >
-                      {hd && lane.startDayIndex != null && lane.endDayIndex != null ? (
-                        <div
-                          className={`roadmap-phase-bar ${
-                            lane.isInferred ? 'inferred' : ''
-                          } ${phaseDragDelta !== 0 ? 'dragging' : ''}`}
-                          data-testid={`roadmap-phase-bar-${hd.id}`}
-                          style={{
-                            left: (lane.startDayIndex + phaseDragDelta) * dayWidth + 3,
-                            width: Math.max(22, lane.spanDays * dayWidth - 6)
-                          }}
-                          onPointerDown={(e) => {
-                            if ((e.target as HTMLElement).closest('button')) return;
-                            e.stopPropagation();
-                            setBarDrag({
-                              kind: 'phase',
-                              id: hd.id,
-                              startClientX: e.clientX,
-                              deltaDays: 0,
-                              moved: false
-                            });
-                          }}
-                        >
-                          <span className="roadmap-phase-bar-label">
-                            {hd.title || t.entityHeading}
-                          </span>
-                          {phaseDragDelta !== 0 && (
-                            <span className="roadmap-drag-delta-pill">
-                              {phaseDragDelta > 0
-                                ? `+${phaseDragDelta}d`
-                                : `${phaseDragDelta}d`}
+                      {hd && clampedPhaseBar ? (
+                        <>
+                          <div
+                            className={`roadmap-phase-bar ${
+                              lane.isInferred ? 'inferred' : ''
+                            } ${phaseDragDelta !== 0 ? 'dragging' : ''}`}
+                            data-testid={`roadmap-phase-bar-${hd.id}`}
+                            style={{
+                              top: phaseBarTopPx,
+                              left: clampedPhaseBar.leftPx,
+                              width: clampedPhaseBar.widthPx
+                            }}
+                            onPointerDown={(e) => {
+                              if ((e.target as HTMLElement).closest('button')) return;
+                              e.stopPropagation();
+                              setBarDrag({
+                                kind: 'phase',
+                                id: hd.id,
+                                startClientX: e.clientX,
+                                deltaDays: 0,
+                                moved: false
+                              });
+                            }}
+                          >
+                            {clampedPhaseBar.showTitleInside ? (
+                              <span className="roadmap-phase-bar-label">
+                                {phaseTitle}
+                              </span>
+                            ) : (
+                              <span className="roadmap-phase-bar-spacer" />
+                            )}
+                            {phaseDragDelta !== 0 && (
+                              <span className="roadmap-drag-delta-pill">
+                                {phaseDragDelta > 0
+                                  ? `+${phaseDragDelta}d`
+                                  : `${phaseDragDelta}d`}
+                              </span>
+                            )}
+                            <span className="roadmap-bar-step-controls">
+                              <button
+                                type="button"
+                                className="roadmap-bar-step-btn"
+                                title={t.roadmapShiftEarlier}
+                                aria-label={t.roadmapShiftEarlier}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  stepPhaseByDays(lane, -1);
+                                }}
+                              >
+                                <ChevronLeft size={11} />
+                              </button>
+                              <button
+                                type="button"
+                                className="roadmap-bar-step-btn"
+                                title={t.roadmapShiftLater}
+                                aria-label={t.roadmapShiftLater}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  stepPhaseByDays(lane, 1);
+                                }}
+                              >
+                                <ChevronRight size={11} />
+                              </button>
+                            </span>
+                          </div>
+
+                          {!clampedPhaseBar.showTitleInside && (
+                            <span
+                              className="roadmap-phase-bar-outside-label"
+                              data-testid={`roadmap-phase-outside-label-${hd.id}`}
+                              style={
+                                clampedPhaseBar.placeOutsideRight
+                                  ? {
+                                      top: phaseBarTopPx,
+                                      left:
+                                        clampedPhaseBar.leftPx +
+                                        clampedPhaseBar.widthPx +
+                                        8
+                                    }
+                                  : {
+                                      top: phaseBarTopPx,
+                                      right:
+                                        timelineWidthPx -
+                                        clampedPhaseBar.leftPx +
+                                        8
+                                    }
+                              }
+                            >
+                              {phaseTitle}
                             </span>
                           )}
-                          <span className="roadmap-bar-step-controls">
-                            <button
-                              type="button"
-                              className="roadmap-bar-step-btn"
-                              title={t.roadmapShiftEarlier}
-                              aria-label={t.roadmapShiftEarlier}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                stepPhaseByDays(lane, -1);
-                              }}
-                            >
-                              <ChevronLeft size={11} />
-                            </button>
-                            <button
-                              type="button"
-                              className="roadmap-bar-step-btn"
-                              title={t.roadmapShiftLater}
-                              aria-label={t.roadmapShiftLater}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                stepPhaseByDays(lane, 1);
-                              }}
-                            >
-                              <ChevronRight size={11} />
-                            </button>
-                          </span>
-                        </div>
-                      ) : hd ? (
+                        </>
+                      ) : hd && lane.startEpoch == null && lane.endEpoch == null ? (
                         <button
                           type="button"
                           className="roadmap-set-phase-dates-inline"
-                          style={{ left: layout.todayDayIndex * dayWidth + 4 }}
+                          style={{
+                            top: Math.max(6, Math.round((laneRowHeight - 24) / 2)),
+                            left: layout.todayDayIndex * dayWidth + 4
+                          }}
                           onClick={() => onOpenHeadingStartModal(hd.id)}
                         >
                           <Calendar size={11} />
@@ -1840,8 +2101,20 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                       barDrag?.kind === 'task' && barDrag.id === tk.id
                         ? barDrag.deltaDays
                         : 0;
-                    const barLeft = (pt.startDayIndex + taskDragDelta) * dayWidth + 4;
-                    const barWidth = Math.max(22, pt.spanDays * dayWidth - 8);
+                    const clampedTaskS = Math.max(
+                      0,
+                      Math.min(layout.totalDays - 1, pt.startDayIndex + taskDragDelta)
+                    );
+                    const clampedTaskE = Math.max(
+                      clampedTaskS,
+                      Math.min(layout.totalDays - 1, pt.endDayIndex + taskDragDelta)
+                    );
+                    const barLeft = clampedTaskS * dayWidth + 4;
+                    const maxTaskAvailW = Math.max(18, timelineWidthPx - barLeft - 4);
+                    const barWidth = Math.min(
+                      maxTaskAvailW,
+                      Math.max(22, (clampedTaskE - clampedTaskS + 1) * dayWidth - 8)
+                    );
                     const dlDiff =
                       tk.deadline != null ? daysBetweenToday(tk.deadline) : null;
                     const dlUrgent = dlDiff != null && dlDiff <= 2 && tk.status === 'OPEN';
@@ -2175,6 +2448,221 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
           </div>
         </section>
       )}
+
+      {/* Soft Bento Export Roadmap as PDF Configuration Modal */}
+      {pdfDialogOpen &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            className="modal-backdrop"
+            data-testid="roadmap-pdf-export-modal"
+            onClick={() => setPdfDialogOpen(false)}
+          >
+            <div
+              className="modal-panel pdf-export-modal-panel"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="modal-header">
+                <div className="pdf-export-modal-title-group">
+                  <FileText size={18} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
+                  <h3 className="modal-title">{t.pdfExportDialogTitle}</h3>
+                </div>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  style={{ height: 28, minWidth: 28, padding: 0 }}
+                  aria-label={t.actionCancel}
+                  onClick={() => setPdfDialogOpen(false)}
+                >
+                  <X size={15} />
+                </button>
+              </div>
+
+              {/* 1. Project Phases Multi-Select */}
+              <div className="pdf-export-section">
+                <div className="pdf-export-section-header">
+                  <span className="pdf-export-section-label">{t.pdfPhasesLabel}</span>
+                  <button
+                    type="button"
+                    className="pdf-select-all-btn"
+                    data-testid="roadmap-pdf-select-all-btn"
+                    onClick={() =>
+                      setPdfSelectedLaneIds(selectablePdfLanes.map((l) => l.laneId))
+                    }
+                  >
+                    {t.pdfSelectAllPhases}
+                  </button>
+                </div>
+
+                <div className="pdf-phases-checklist">
+                  {selectablePdfLanes.map((lane) => {
+                    const checked = pdfSelectedLaneIds.includes(lane.laneId);
+                    const isGeneral = lane.heading === null;
+                    const displayTitle = isGeneral
+                      ? t.projectUngroupedColumn
+                      : lane.heading?.title || t.entityHeading;
+                    const taskCount = isGeneral
+                      ? lane.plottedTasks.length || lane.totalCount
+                      : lane.totalCount;
+
+                    return (
+                      <label
+                        key={lane.laneId}
+                        className={`pdf-phase-checkbox-row ${checked ? 'checked' : ''}`}
+                        data-testid={`roadmap-pdf-phase-option-${lane.laneId}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            const nextChecked = e.target.checked;
+                            setPdfSelectedLaneIds((prev) =>
+                              nextChecked
+                                ? Array.from(new Set([...prev, lane.laneId]))
+                                : prev.filter((id) => id !== lane.laneId)
+                            );
+                          }}
+                        />
+                        <span
+                          className={`board-column-accent ${isGeneral ? 'general' : ''}`}
+                        />
+                        <span className="pdf-phase-option-title">{displayTitle}</span>
+                        <span className="board-column-count">{taskCount}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 2. Timeline Range Presets + Custom Date Pickers */}
+              <div className="pdf-export-section">
+                <div className="pdf-export-section-header">
+                  <span className="pdf-export-section-label">{t.pdfTimelineLabel}</span>
+                </div>
+
+                <div className="pdf-timeline-presets">
+                  {(
+                    [
+                      ['auto', t.pdfTimelineAuto],
+                      ['from_today', t.pdfTimelineFromToday],
+                      ['next_30d', t.pdfTimelineNext30d],
+                      ['custom', t.pdfTimelineCustom]
+                    ] as Array<[RoadmapPdfTimelinePreset, string]>
+                  ).map(([presetKey, presetLabel]) => (
+                    <button
+                      key={presetKey}
+                      type="button"
+                      className={`chip-btn ${
+                        pdfTimelinePreset === presetKey ? 'active' : ''
+                      }`}
+                      data-testid={`roadmap-pdf-range-${presetKey}`}
+                      onClick={() => setPdfTimelinePreset(presetKey)}
+                    >
+                      <span>{presetLabel}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {pdfTimelinePreset === 'custom' && (
+                  <div className="pdf-custom-dates-grid">
+                    <label className="pdf-custom-date-field">
+                      <span className="pdf-custom-date-caption">
+                        {t.phaseSetStartDate}
+                      </span>
+                      <input
+                        type="date"
+                        className="text-field"
+                        data-testid="roadmap-pdf-custom-start"
+                        value={pdfCustomStartIso}
+                        onChange={(e) => setPdfCustomStartIso(e.target.value)}
+                      />
+                    </label>
+                    <label className="pdf-custom-date-field">
+                      <span className="pdf-custom-date-caption">
+                        {t.phaseSetEndDate}
+                      </span>
+                      <input
+                        type="date"
+                        className="text-field"
+                        data-testid="roadmap-pdf-custom-end"
+                        value={pdfCustomEndIso}
+                        onChange={(e) => setPdfCustomEndIso(e.target.value)}
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
+
+              {/* 3. Page Orientation Visual Selector */}
+              <div className="pdf-export-section">
+                <div className="pdf-export-section-header">
+                  <span className="pdf-export-section-label">
+                    {t.pdfOrientationLabel}
+                  </span>
+                </div>
+
+                <div className="pdf-orientation-grid">
+                  <button
+                    type="button"
+                    className={`pdf-orientation-card ${
+                      pdfOrientation === 'landscape' ? 'active' : ''
+                    }`}
+                    data-testid="roadmap-pdf-orientation-landscape"
+                    onClick={() => setPdfOrientation('landscape')}
+                  >
+                    <span className="pdf-page-preview landscape" aria-hidden="true" />
+                    <span className="pdf-orientation-texts">
+                      <span className="pdf-orientation-name">
+                        {t.pdfOrientationLandscape}
+                      </span>
+                      <span className="pdf-orientation-dim">A4 · 842 × 595 pt</span>
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`pdf-orientation-card ${
+                      pdfOrientation === 'portrait' ? 'active' : ''
+                    }`}
+                    data-testid="roadmap-pdf-orientation-portrait"
+                    onClick={() => setPdfOrientation('portrait')}
+                  >
+                    <span className="pdf-page-preview portrait" aria-hidden="true" />
+                    <span className="pdf-orientation-texts">
+                      <span className="pdf-orientation-name">
+                        {t.pdfOrientationPortrait}
+                      </span>
+                      <span className="pdf-orientation-dim">A4 · 595 × 842 pt</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="pdf-export-modal-footer">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setPdfDialogOpen(false)}
+                >
+                  {t.actionCancel}
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  data-testid="roadmap-pdf-confirm-btn"
+                  disabled={pdfSelectedLaneIds.length === 0}
+                  onClick={handleConfirmExportPdf}
+                >
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                    <Download size={14} />
+                    <span>{t.roadmapExportPdf}</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

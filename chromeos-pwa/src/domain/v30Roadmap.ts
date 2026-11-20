@@ -86,6 +86,15 @@ export interface RoadmapExportLabels {
   subtitle?: string;
 }
 
+export type RoadmapPdfOrientation = 'landscape' | 'portrait';
+
+export interface RoadmapPdfExportOptions {
+  orientation?: RoadmapPdfOrientation;
+  selectedLaneIds?: readonly string[];
+  startEpoch?: number | null;
+  endEpoch?: number | null;
+}
+
 export function normalizeProjectViewMode(mode?: string | null): ProjectViewMode {
   if (typeof mode !== 'string') return 'list';
   const low = mode.trim().toLowerCase();
@@ -104,6 +113,19 @@ export function localDaysBetween(startEpoch: number, endEpoch: number): number {
   const utcStart = Date.UTC(s.getFullYear(), s.getMonth(), s.getDate());
   const utcEnd = Date.UTC(e.getFullYear(), e.getMonth(), e.getDate());
   return Math.round((utcEnd - utcStart) / 86_400_000);
+}
+
+/**
+ * DST-safe calendar +1 month helper clamped to target month end
+ * (e.g. Jan 31 -> Feb 28/29, Dec 18 -> Jan 18).
+ */
+export function addOneMonthLocal(epochMillis: number): number {
+  const d = new Date(epochMillis);
+  const year = d.getFullYear();
+  const targetMonth = d.getMonth() + 1;
+  const lastDayOfTargetMonth = new Date(year, targetMonth + 1, 0, 0, 0, 0, 0).getDate();
+  const clampedDay = Math.min(d.getDate(), lastDayOfTargetMonth);
+  return new Date(year, targetMonth, clampedDay, 0, 0, 0, 0).getTime();
 }
 
 interface RawResolvedTaskSpan {
@@ -214,14 +236,29 @@ export function buildProjectRoadmapLayout(
   const pendingLanes: PendingLane[] = [];
   const unscheduledPhases: HeadingRecord[] = [];
   let minScheduled: number | null = null;
-  let maxScheduled: number | null = null;
+  let maxTaskOrPhaseEndEpoch: number | null = null;
+  let lastTaskEndEpoch: number | null = null;
+  let maxPhaseEndEpoch: number | null = null;
+  let plottedTaskCount = 0;
 
-  const trackWindowBounds = (startEp: number | null, endEp: number | null) => {
+  const trackTaskBounds = (startEp: number, endEp: number) => {
+    plottedTaskCount += 1;
+    minScheduled = minScheduled == null ? startEp : Math.min(minScheduled, startEp);
+    maxTaskOrPhaseEndEpoch =
+      maxTaskOrPhaseEndEpoch == null ? endEp : Math.max(maxTaskOrPhaseEndEpoch, endEp);
+    lastTaskEndEpoch =
+      lastTaskEndEpoch == null ? endEp : Math.max(lastTaskEndEpoch, endEp);
+  };
+
+  const trackPhaseBounds = (startEp: number | null, endEp: number | null) => {
     if (startEp != null) {
       minScheduled = minScheduled == null ? startEp : Math.min(minScheduled, startEp);
     }
     if (endEp != null) {
-      maxScheduled = maxScheduled == null ? endEp : Math.max(maxScheduled, endEp);
+      maxTaskOrPhaseEndEpoch =
+        maxTaskOrPhaseEndEpoch == null ? endEp : Math.max(maxTaskOrPhaseEndEpoch, endEp);
+      maxPhaseEndEpoch =
+        maxPhaseEndEpoch == null ? endEp : Math.max(maxPhaseEndEpoch, endEp);
     }
   };
 
@@ -233,7 +270,7 @@ export function buildProjectRoadmapLayout(
       const resolved = resolveRawTaskSpan(tk, null);
       if (resolved) {
         rawSpans.push(resolved);
-        trackWindowBounds(resolved.startEpoch, resolved.endEpoch);
+        trackTaskBounds(resolved.startEpoch, resolved.endEpoch);
       } else {
         unscheduled.push(tk);
       }
@@ -261,7 +298,7 @@ export function buildProjectRoadmapLayout(
       const resolved = resolveRawTaskSpan(tk, hd.id);
       if (resolved) {
         rawSpans.push(resolved);
-        trackWindowBounds(resolved.startEpoch, resolved.endEpoch);
+        trackTaskBounds(resolved.startEpoch, resolved.endEpoch);
       } else {
         unscheduled.push(tk);
       }
@@ -302,7 +339,7 @@ export function buildProjectRoadmapLayout(
       unscheduledPhases.push(hd);
     }
 
-    trackWindowBounds(phaseStart, phaseEnd);
+    trackPhaseBounds(phaseStart, phaseEnd);
 
     pendingLanes.push({
       heading: hd,
@@ -318,11 +355,8 @@ export function buildProjectRoadmapLayout(
     });
   }
 
-  if (project.deadline != null) {
-    const projDeadlineDay = normalizeLocalDayEpoch(project.deadline);
-    maxScheduled = maxScheduled == null ? projDeadlineDay : Math.max(maxScheduled, projDeadlineDay);
-  }
-
+  // Note: project.deadline deliberately does NOT stretch windowEndEpoch;
+  // horizon is capped strictly to <= 1 month after the last task due/end date.
   const defaultStart = addDaysLocal(todayDay, -3);
   const earliestAllowed = addDaysLocal(todayDay, -90);
   const windowStartEpoch =
@@ -331,16 +365,37 @@ export function buildProjectRoadmapLayout(
       : defaultStart;
 
   const minWindowEnd = addDaysLocal(windowStartEpoch, MIN_ROADMAP_WINDOW_DAYS - 1);
-  const desiredEnd =
-    maxScheduled != null ? addDaysLocal(maxScheduled, 7) : minWindowEnd;
-  const unclampedEnd = Math.max(minWindowEnd, desiredEnd, addDaysLocal(todayDay, 14));
   const maxWindowEnd = addDaysLocal(windowStartEpoch, MAX_ROADMAP_WINDOW_DAYS - 1);
-  const windowEndEpoch = Math.min(unclampedEnd, maxWindowEnd);
 
-  const totalDays = Math.max(
-    MIN_ROADMAP_WINDOW_DAYS,
-    localDaysBetween(windowStartEpoch, windowEndEpoch) + 1
-  );
+  let resolvedWindowEndEpoch: number;
+  if (plottedTaskCount > 0 && lastTaskEndEpoch != null) {
+    const oneMonthCapEpoch = addOneMonthLocal(lastTaskEndEpoch);
+    const uncappedDesiredEnd = Math.max(
+      minWindowEnd,
+      addDaysLocal(maxTaskOrPhaseEndEpoch ?? lastTaskEndEpoch, 7)
+    );
+    if (oneMonthCapEpoch >= windowStartEpoch) {
+      resolvedWindowEndEpoch = Math.max(
+        lastTaskEndEpoch,
+        Math.min(uncappedDesiredEnd, oneMonthCapEpoch)
+      );
+    } else {
+      resolvedWindowEndEpoch = minWindowEnd;
+    }
+  } else {
+    const oneMonthFromToday = addOneMonthLocal(todayDay);
+    const cappedPhaseEnd = Math.min(
+      addDaysLocal(maxPhaseEndEpoch ?? todayDay, 7),
+      oneMonthFromToday
+    );
+    resolvedWindowEndEpoch =
+      oneMonthFromToday >= minWindowEnd
+        ? Math.min(Math.max(minWindowEnd, cappedPhaseEnd), oneMonthFromToday)
+        : minWindowEnd;
+  }
+
+  const windowEndEpoch = Math.min(resolvedWindowEndEpoch, maxWindowEnd);
+  const totalDays = Math.max(1, localDaysBetween(windowStartEpoch, windowEndEpoch) + 1);
 
   const days: RoadmapDayCell[] = [];
   for (let i = 0; i < totalDays; i++) {
@@ -721,315 +776,662 @@ const MONTH_SHORT_EN = [
   'Dec'
 ];
 
+export function wrapTextLines(raw: string, maxCharsPerLine: number): string[] {
+  const clean = (raw || '').replace(/[\r\n\t]+/g, ' ').trim();
+  if (!clean) return [''];
+  const limit = Math.max(8, Math.floor(maxCharsPerLine));
+  const words = clean.split(/\s+/);
+  const lines: string[] = [];
+  let current = '';
+
+  for (const word of words) {
+    if (word.length > limit) {
+      if (current) {
+        lines.push(current);
+        current = '';
+      }
+      for (let idx = 0; idx < word.length; idx += limit) {
+        const chunk = word.slice(idx, idx + limit);
+        if (chunk.length === limit && idx + limit < word.length) {
+          lines.push(chunk);
+        } else {
+          current = chunk;
+        }
+      }
+      continue;
+    }
+
+    if (!current) {
+      current = word;
+    } else if (current.length + 1 + word.length <= limit) {
+      current = `${current} ${word}`;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+  }
+
+  if (current) {
+    lines.push(current);
+  }
+  return lines.length > 0 ? lines : [''];
+}
+
 export function generateRoadmapPdfBytes(
   layout: ProjectRoadmapLayout,
   projectTitle: string,
-  labels: RoadmapExportLabels = {}
+  labels: RoadmapExportLabels = {},
+  exportOptions: RoadmapPdfExportOptions = {}
 ): Uint8Array {
+  const orientation: RoadmapPdfOrientation =
+    exportOptions.orientation === 'portrait' ? 'portrait' : 'landscape';
+  const pageW = orientation === 'portrait' ? 595 : 842;
+  const pageH = orientation === 'portrait' ? 842 : 595;
+
   const marginX = 28;
   const marginY = 28;
-  const labelColW = 210;
-  const dayColW = 26;
-  const headerBannerH = 44;
-  const dayHeaderH = 30;
-  const laneRowH = 26;
-  const taskRowH = 24;
-  const unscheduledFooterH = layout.unscheduledTasks.length > 0 ? 30 : 0;
-
-  let bodyRowsCount = 0;
-  for (const lane of layout.lanes) {
-    bodyRowsCount += 1 + lane.plottedTasks.length;
-  }
-  if (bodyRowsCount === 0) bodyRowsCount = 1;
-
-  const gridW = layout.totalDays * dayColW;
-  const pageW = Math.max(842, marginX * 2 + labelColW + gridW);
-  const gridBodyH = bodyRowsCount * laneRowH;
-  const pageH = Math.max(
-    595,
-    marginY * 2 + headerBannerH + dayHeaderH + gridBodyH + unscheduledFooterH + 16
-  );
-
-  // Convert top-down Y coordinate (0 = top of page) to PDF Y coordinate (0 = bottom of page)
-  const pdfY = (topY: number): number => pageH - topY;
-
-  const ops: string[] = [];
-
-  const fillRgb = (r: number, g: number, b: number) => {
-    ops.push(`${fmtNum(r / 255)} ${fmtNum(g / 255)} ${fmtNum(b / 255)} rg`);
-  };
-  const strokeRgb = (r: number, g: number, b: number) => {
-    ops.push(`${fmtNum(r / 255)} ${fmtNum(g / 255)} ${fmtNum(b / 255)} RG`);
-  };
-  const rectFill = (topLeftX: number, topLeftY: number, w: number, h: number) => {
-    ops.push(`${fmtNum(topLeftX)} ${fmtNum(pdfY(topLeftY + h))} ${fmtNum(w)} ${fmtNum(h)} re f`);
-  };
-  const rectStroke = (topLeftX: number, topLeftY: number, w: number, h: number) => {
-    ops.push(`${fmtNum(topLeftX)} ${fmtNum(pdfY(topLeftY + h))} ${fmtNum(w)} ${fmtNum(h)} re S`);
-  };
-  const rectFillStroke = (topLeftX: number, topLeftY: number, w: number, h: number) => {
-    ops.push(`${fmtNum(topLeftX)} ${fmtNum(pdfY(topLeftY + h))} ${fmtNum(w)} ${fmtNum(h)} re B`);
-  };
-  const line = (x1: number, y1: number, x2: number, y2: number) => {
-    ops.push(`${fmtNum(x1)} ${fmtNum(pdfY(y1))} m ${fmtNum(x2)} ${fmtNum(pdfY(y2))} l S`);
-  };
-  const drawText = (
-    text: string,
-    x: number,
-    baselineTopY: number,
-    font: 'F1' | 'F2' = 'F1',
-    size: number = 9,
-    maxChars: number = 64
-  ) => {
-    const safe = sanitizePdfText(text, maxChars);
-    if (!safe) return;
-    ops.push(`BT /${font} ${fmtNum(size)} Tf ${fmtNum(x)} ${fmtNum(pdfY(baselineTopY))} Td (${safe}) Tj ET`);
-  };
-
-  // 1. Crisp white canvas background
-  fillRgb(255, 255, 255);
-  rectFill(0, 0, pageW, pageH);
-
-  // 2. Top Soft Bento Project Title Banner
-  const titleText = projectTitle.trim() || 'Project Roadmap';
-  fillRgb(23, 26, 30);
-  drawText(titleText, marginX, marginY + 16, 'F2', 15, 80);
-
-  const rangeStart = layout.days[0];
-  const rangeEnd = layout.days[layout.days.length - 1];
-  const rangeStr =
-    labels.subtitle ||
-    (rangeStart && rangeEnd
-      ? `${MONTH_SHORT_EN[rangeStart.monthIndex]} ${rangeStart.dayOfMonth}, ${rangeStart.year} - ${MONTH_SHORT_EN[rangeEnd.monthIndex]} ${rangeEnd.dayOfMonth}, ${rangeEnd.year}`
-      : '');
-  fillRgb(91, 98, 110);
-  drawText(`Thingsbook Roadmap  |  ${rangeStr}`, marginX, marginY + 32, 'F1', 9, 100);
-
-  // 3. Timeline Table Outer Box
-  const tableTop = marginY + headerBannerH;
-  const timelineLeft = marginX + labelColW;
+  const contentW = pageW - marginX * 2;
+  const labelColW = orientation === 'portrait' ? 176 : 206;
+  const gridW = contentW - labelColW;
   const tableW = labelColW + gridW;
+  const headerBannerH = 42;
+  const dayHeaderH = 30;
+  const taskRowH = 24;
 
-  // Header strip background
-  fillRgb(244, 246, 250);
-  rectFill(marginX, tableTop, tableW, dayHeaderH);
+  // Resolve custom or preset timeline bounds
+  const rawStart =
+    exportOptions.startEpoch != null
+      ? normalizeLocalDayEpoch(exportOptions.startEpoch)
+      : layout.windowStartEpoch;
+  const rawEnd =
+    exportOptions.endEpoch != null
+      ? normalizeLocalDayEpoch(exportOptions.endEpoch)
+      : layout.windowEndEpoch;
+  const exportStartEpoch = Math.min(rawStart, rawEnd);
+  const exportEndEpoch = Math.max(rawStart, rawEnd);
+  const exportTotalDays = Math.max(
+    1,
+    localDaysBetween(exportStartEpoch, exportEndEpoch) + 1
+  );
+  const dayColW = gridW / exportTotalDays;
 
-  fillRgb(91, 98, 110);
-  drawText('Phase / To-Do', marginX + 10, tableTop + 19, 'F2', 8.5, 32);
-
-  // 4. Weekend columns & vertical day grid lines + day headers
-  const bodyTop = tableTop + dayHeaderH;
-  // Compute exact row height dynamically from lanes + tasks
-  let totalTableBodyH = 0;
-  for (const lane of layout.lanes) {
-    totalTableBodyH += laneRowH + lane.plottedTasks.length * taskRowH;
-  }
-  if (totalTableBodyH === 0) totalTableBodyH = laneRowH;
-
-  ops.push('0.6 w');
-  for (let i = 0; i < layout.days.length; i++) {
-    const cell = layout.days[i];
-    const colX = timelineLeft + i * dayColW;
-
-    if (cell.isWeekend) {
-      fillRgb(247, 249, 252);
-      rectFill(colX, bodyTop, dayColW, totalTableBodyH);
-    }
-
-    strokeRgb(231, 235, 241);
-    line(colX, tableTop, colX, bodyTop + totalTableBodyH);
-
-    if (i === 0 || cell.dayOfMonth === 1) {
-      fillRgb(56, 152, 236);
-      drawText(MONTH_SHORT_EN[cell.monthIndex], colX + 3, tableTop + 10, 'F2', 7, 6);
-    }
-
-    if (cell.isToday) {
-      fillRgb(56, 152, 236);
-      rectFill(colX + 2, tableTop + 13, dayColW - 4, 13);
-      fillRgb(255, 255, 255);
-      drawText(String(cell.dayOfMonth), colX + 6, tableTop + 22.5, 'F2', 7.5, 4);
-    } else {
-      fillRgb(91, 98, 110);
-      drawText(String(cell.dayOfMonth), colX + 6, tableTop + 22.5, 'F1', 7.5, 4);
-    }
+  const exportDays: RoadmapDayCell[] = [];
+  let todayExportIndex = -1;
+  for (let i = 0; i < exportTotalDays; i++) {
+    const ep = addDaysLocal(exportStartEpoch, i);
+    const d = new Date(ep);
+    const dow = isoDayOfWeek(d);
+    const isToday = ep === layout.todayEpoch;
+    if (isToday) todayExportIndex = i;
+    exportDays.push({
+      dayIndex: i,
+      epoch: ep,
+      isoDate: toIsoDateInputValue(ep),
+      dayOfMonth: d.getDate(),
+      monthIndex: d.getMonth(),
+      year: d.getFullYear(),
+      weekdayIso: dow,
+      isToday,
+      isWeekend: dow === 6 || dow === 7
+    });
   }
 
-  // Divider between label column and timeline
-  strokeRgb(207, 214, 226);
-  line(timelineLeft, tableTop, timelineLeft, bodyTop + totalTableBodyH);
-  line(marginX, bodyTop, marginX + tableW, bodyTop);
+  // Filter lanes by selectedLaneIds
+  const allowedLaneSet = exportOptions.selectedLaneIds
+    ? new Set(exportOptions.selectedLaneIds)
+    : null;
+  const selectedLanes = allowedLaneSet
+    ? layout.lanes.filter((l) => allowedLaneSet.has(l.laneId))
+    : layout.lanes;
 
-  // 5. Lanes: Glacier-Blue Phase Bars & Soft Bento Task Bars
-  const taskBarCoords = new Map<
-    string,
-    { xLeft: number; xRight: number; yMid: number }
-  >();
+  const phaseWrapChars = orientation === 'portrait' ? 30 : 36;
+  const taskMaxChars = orientation === 'portrait' ? 27 : 33;
 
-  let cursorY = bodyTop;
-  for (const lane of layout.lanes) {
-    // Subtle lane header tint
-    fillRgb(249, 251, 254);
-    rectFill(marginX, cursorY, labelColW, laneRowH);
+  type PdfLaneRow = {
+    kind: 'lane';
+    laneId: string;
+    isGeneral: boolean;
+    isInferred: boolean;
+    titleLabel: string;
+    wrappedLines: string[];
+    rowH: number;
+    barStartIdx: number | null;
+    barEndIdx: number | null;
+    barSpanDays: number;
+  };
 
-    // Glacier-Blue left accent pill in label cell
-    fillRgb(56, 152, 236);
-    rectFill(marginX + 8, cursorY + 6, 3.5, laneRowH - 12);
+  type PdfTaskRow = {
+    kind: 'task';
+    task: TaskRecord;
+    isActivelyBlocked: boolean;
+    rowH: number;
+    barStartIdx: number;
+    barEndIdx: number;
+    barSpanDays: number;
+  };
 
-    fillRgb(23, 26, 30);
+  type PdfBodyRow = PdfLaneRow | PdfTaskRow;
+
+  const allBodyRows: PdfBodyRow[] = [];
+  const exportedTaskIds = new Set<string>();
+  const exportedUnscheduledTasks: TaskRecord[] = [];
+
+  for (const lane of selectedLanes) {
     const laneTitleLabel =
       lane.heading == null ? labels.ungroupedTitle || lane.title : lane.title;
-    drawText(laneTitleLabel, marginX + 16, cursorY + 16.5, 'F2', 9, 30);
+    const wrappedLines = wrapTextLines(laneTitleLabel, phaseWrapChars);
+    const laneRowH = Math.max(28, 14 + wrappedLines.length * 11);
 
-    // Phase Glacier-Blue Bar on timeline
-    if (lane.startDayIndex != null && lane.endDayIndex != null) {
-      const barX = timelineLeft + lane.startDayIndex * dayColW + 2;
-      const barW = Math.max(10, lane.spanDays * dayColW - 4);
-      const barY = cursorY + 5;
-      const barH = laneRowH - 10;
+    let barStartIdx: number | null = null;
+    let barEndIdx: number | null = null;
+    let barSpanDays = 0;
 
-      if (lane.isInferred) {
-        fillRgb(116, 196, 255);
-        strokeRgb(56, 152, 236);
-        rectFillStroke(barX, barY, barW, barH);
-        fillRgb(12, 75, 134);
-      } else {
-        // Crisp Glacier-Blue (#3898EC) with #74C4FF top highlight strip
-        fillRgb(56, 152, 236);
-        rectFill(barX, barY, barW, barH);
-        fillRgb(116, 196, 255);
-        rectFill(barX, barY, barW, 3);
-        fillRgb(255, 255, 255);
-      }
-      if (barW >= 42) {
-        drawText(laneTitleLabel, barX + 6, cursorY + 16, 'F2', 7.5, Math.floor(barW / 4.5));
-      }
+    if (
+      lane.heading != null &&
+      lane.startEpoch != null &&
+      lane.endEpoch != null &&
+      lane.endEpoch >= exportStartEpoch &&
+      lane.startEpoch <= exportEndEpoch
+    ) {
+      const clampedStart = Math.max(exportStartEpoch, lane.startEpoch);
+      const clampedEnd = Math.min(exportEndEpoch, lane.endEpoch);
+      barStartIdx = Math.max(
+        0,
+        Math.min(exportTotalDays - 1, localDaysBetween(exportStartEpoch, clampedStart))
+      );
+      barEndIdx = Math.max(
+        barStartIdx,
+        Math.min(exportTotalDays - 1, localDaysBetween(exportStartEpoch, clampedEnd))
+      );
+      barSpanDays = barEndIdx - barStartIdx + 1;
     }
 
-    strokeRgb(231, 235, 241);
-    line(marginX, cursorY + laneRowH, marginX + tableW, cursorY + laneRowH);
-    cursorY += laneRowH;
+    allBodyRows.push({
+      kind: 'lane',
+      laneId: lane.laneId,
+      isGeneral: lane.heading == null,
+      isInferred: lane.isInferred,
+      titleLabel: laneTitleLabel,
+      wrappedLines,
+      rowH: laneRowH,
+      barStartIdx,
+      barEndIdx,
+      barSpanDays
+    });
 
-    // Plotted Task Rows
     for (const pt of lane.plottedTasks) {
-      const tk = pt.task;
-      // Label cell
-      fillRgb(91, 98, 110);
-      const prefix = tk.status === 'COMPLETED' ? '[x] ' : '[ ] ';
-      drawText(`${prefix}${tk.title || 'To-Do'}`, marginX + 16, cursorY + 15.5, 'F1', 8.2, 32);
-
-      // Task Bar
-      const barX = timelineLeft + pt.startDayIndex * dayColW + 3;
-      const barW = Math.max(10, pt.spanDays * dayColW - 6);
-      const barY = cursorY + 4;
-      const barH = taskRowH - 8;
-
-      if (tk.status === 'COMPLETED') {
-        fillRgb(232, 248, 238);
-        strokeRgb(46, 173, 91);
-      } else if (pt.isActivelyBlocked) {
-        fillRgb(255, 243, 232);
-        strokeRgb(234, 88, 12);
-      } else if (tk.scheduleState === 'TODAY' || tk.scheduleState === 'THIS_EVENING') {
-        fillRgb(229, 243, 255);
-        strokeRgb(56, 152, 236);
-      } else {
-        fillRgb(240, 247, 255);
-        strokeRgb(116, 196, 255);
+      if (pt.endEpoch < exportStartEpoch || pt.startEpoch > exportEndEpoch) {
+        continue;
       }
-      ops.push('0.9 w');
-      rectFillStroke(barX, barY, barW, barH);
-      ops.push('0.6 w');
-
-      fillRgb(23, 26, 30);
-      if (barW >= 48) {
-        drawText(tk.title || 'To-Do', barX + 5, cursorY + 15, 'F1', 7.5, Math.floor(barW / 4.5));
-      }
-
-      taskBarCoords.set(tk.id, {
-        xLeft: barX,
-        xRight: barX + barW,
-        yMid: cursorY + taskRowH / 2
+      const clampedStart = Math.max(exportStartEpoch, pt.startEpoch);
+      const clampedEnd = Math.min(exportEndEpoch, pt.endEpoch);
+      const sIdx = Math.max(
+        0,
+        Math.min(exportTotalDays - 1, localDaysBetween(exportStartEpoch, clampedStart))
+      );
+      const eIdx = Math.max(
+        sIdx,
+        Math.min(exportTotalDays - 1, localDaysBetween(exportStartEpoch, clampedEnd))
+      );
+      exportedTaskIds.add(pt.task.id);
+      allBodyRows.push({
+        kind: 'task',
+        task: pt.task,
+        isActivelyBlocked: pt.isActivelyBlocked,
+        rowH: taskRowH,
+        barStartIdx: sIdx,
+        barEndIdx: eIdx,
+        barSpanDays: eIdx - sIdx + 1
       });
+    }
 
-      strokeRgb(238, 241, 246);
-      line(marginX, cursorY + taskRowH, marginX + tableW, cursorY + taskRowH);
-      cursorY += taskRowH;
+    for (const ut of lane.unscheduledTasks) {
+      exportedUnscheduledTasks.push(ut);
     }
   }
 
-  // 6. Dependency Connector Cubic-Bezier Lines + Arrowheads
-  for (const edge of layout.dependencyEdges) {
-    const src = taskBarCoords.get(edge.fromTaskId);
-    const dst = taskBarCoords.get(edge.toTaskId);
-    if (!src || !dst) continue;
+  const filteredDependencyEdges = layout.dependencyEdges.filter(
+    (edge) =>
+      exportedTaskIds.has(edge.fromTaskId) && exportedTaskIds.has(edge.toTaskId)
+  );
 
-    if (edge.isActivelyBlocking) {
-      strokeRgb(234, 88, 12);
-      fillRgb(234, 88, 12);
-    } else {
-      strokeRgb(100, 116, 139);
-      fillRgb(100, 116, 139);
+  const footerReserveH = exportedUnscheduledTasks.length > 0 ? 24 : 6;
+  const maxPageBodyH = Math.max(
+    120,
+    pageH - marginY * 2 - headerBannerH - dayHeaderH - footerReserveH
+  );
+
+  // Paginate body rows vertically across A4 pages without orphaning lane headers
+  const pageRowGroups: PdfBodyRow[][] = [];
+  let currentGroup: PdfBodyRow[] = [];
+  let currentGroupH = 0;
+
+  for (let rIdx = 0; rIdx < allBodyRows.length; rIdx++) {
+    const row = allBodyRows[rIdx];
+    const nextRow = rIdx + 1 < allBodyRows.length ? allBodyRows[rIdx + 1] : null;
+    const minNeededWithFirstChild =
+      row.kind === 'lane' && nextRow?.kind === 'task'
+        ? row.rowH + nextRow.rowH
+        : row.rowH;
+
+    if (
+      currentGroup.length > 0 &&
+      (currentGroupH + row.rowH > maxPageBodyH ||
+        (row.kind === 'lane' && currentGroupH + minNeededWithFirstChild > maxPageBodyH))
+    ) {
+      pageRowGroups.push(currentGroup);
+      currentGroup = [];
+      currentGroupH = 0;
     }
-    ops.push('1.1 w');
-    const x1 = src.xRight;
-    const y1 = src.yMid;
-    const x2 = dst.xLeft;
-    const y2 = dst.yMid;
-    const ctrlOffset = Math.max(14, Math.abs(x2 - x1) * 0.45);
-    ops.push(
-      `${fmtNum(x1)} ${fmtNum(pdfY(y1))} m ${fmtNum(x1 + ctrlOffset)} ${fmtNum(pdfY(y1))} ${fmtNum(x2 - ctrlOffset)} ${fmtNum(pdfY(y2))} ${fmtNum(x2)} ${fmtNum(pdfY(y2))} c S`
-    );
-    // Arrowhead pointing right into dst.xLeft
-    const ah = 3.2;
-    ops.push(
-      `${fmtNum(x2)} ${fmtNum(pdfY(y2))} m ${fmtNum(x2 - 5)} ${fmtNum(pdfY(y2 - ah))} l ${fmtNum(x2 - 5)} ${fmtNum(pdfY(y2 + ah))} l h f`
-    );
+
+    currentGroup.push(row);
+    currentGroupH += row.rowH;
+  }
+  if (currentGroup.length > 0 || pageRowGroups.length === 0) {
+    pageRowGroups.push(currentGroup);
   }
 
-  // 7. Today Vertical Accent Line
-  const todayRaw = localDaysBetween(layout.windowStartEpoch, layout.todayEpoch);
-  if (todayRaw >= 0 && todayRaw < layout.totalDays) {
-    const todayLineX = timelineLeft + todayRaw * dayColW + dayColW / 2;
-    ops.push('1.2 w');
-    strokeRgb(56, 152, 236);
-    line(todayLineX, bodyTop, todayLineX, bodyTop + totalTableBodyH);
-  }
+  const totalPages = pageRowGroups.length;
 
-  // Outer border around table
-  ops.push('0.8 w');
-  strokeRgb(207, 214, 226);
-  rectStroke(marginX, tableTop, tableW, dayHeaderH + totalTableBodyH);
+  // Adaptive tick spacing so day numbers never collide even on 45+ day Portrait exports
+  const tickStep = Math.max(1, Math.ceil(17 / dayColW));
+  const gridLineStep = dayColW >= 6 ? 1 : tickStep;
 
-  // 8. Unscheduled summary footer if present
-  if (layout.unscheduledTasks.length > 0) {
-    const footY = bodyTop + totalTableBodyH + 18;
-    fillRgb(91, 98, 110);
-    const unschLabel = labels.unscheduledLabel || 'Unscheduled';
-    const sampleNames = layout.unscheduledTasks
-      .slice(0, 5)
-      .map((t) => t.title || 'To-Do')
-      .join(', ');
+  const pdfY = (topY: number): number => pageH - topY;
+
+  const rangeStart = exportDays[0];
+  const rangeEnd = exportDays[exportDays.length - 1];
+  const hasCustomRange =
+    exportOptions.startEpoch != null || exportOptions.endEpoch != null;
+  const computedRangeStr =
+    rangeStart && rangeEnd
+      ? `${MONTH_SHORT_EN[rangeStart.monthIndex]} ${rangeStart.dayOfMonth}, ${rangeStart.year} - ${MONTH_SHORT_EN[rangeEnd.monthIndex]} ${rangeEnd.dayOfMonth}, ${rangeEnd.year}`
+      : '';
+  const rangeStr =
+    !hasCustomRange && labels.subtitle ? labels.subtitle : labels.subtitle && hasCustomRange ? labels.subtitle : computedRangeStr;
+
+  const pageStreams: string[] = [];
+
+  for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
+    const pageRows = pageRowGroups[pageIdx];
+    const ops: string[] = [];
+
+    const fillRgb = (r: number, g: number, b: number) => {
+      ops.push(`${fmtNum(r / 255)} ${fmtNum(g / 255)} ${fmtNum(b / 255)} rg`);
+    };
+    const strokeRgb = (r: number, g: number, b: number) => {
+      ops.push(`${fmtNum(r / 255)} ${fmtNum(g / 255)} ${fmtNum(b / 255)} RG`);
+    };
+    const rectFill = (topLeftX: number, topLeftY: number, w: number, h: number) => {
+      ops.push(`${fmtNum(topLeftX)} ${fmtNum(pdfY(topLeftY + h))} ${fmtNum(w)} ${fmtNum(h)} re f`);
+    };
+    const rectStroke = (topLeftX: number, topLeftY: number, w: number, h: number) => {
+      ops.push(`${fmtNum(topLeftX)} ${fmtNum(pdfY(topLeftY + h))} ${fmtNum(w)} ${fmtNum(h)} re S`);
+    };
+    const rectFillStroke = (topLeftX: number, topLeftY: number, w: number, h: number) => {
+      ops.push(`${fmtNum(topLeftX)} ${fmtNum(pdfY(topLeftY + h))} ${fmtNum(w)} ${fmtNum(h)} re B`);
+    };
+    const line = (x1: number, y1: number, x2: number, y2: number) => {
+      ops.push(`${fmtNum(x1)} ${fmtNum(pdfY(y1))} m ${fmtNum(x2)} ${fmtNum(pdfY(y2))} l S`);
+    };
+    const drawText = (
+      text: string,
+      x: number,
+      baselineTopY: number,
+      font: 'F1' | 'F2' = 'F1',
+      size: number = 9,
+      maxChars: number = 96
+    ) => {
+      const safe = sanitizePdfText(text, maxChars);
+      if (!safe) return;
+      ops.push(
+        `BT /${font} ${fmtNum(size)} Tf ${fmtNum(x)} ${fmtNum(pdfY(baselineTopY))} Td (${safe}) Tj ET`
+      );
+    };
+
+    // 1. Crisp white A4 page background
+    fillRgb(255, 255, 255);
+    rectFill(0, 0, pageW, pageH);
+
+    // 2. Top Soft Bento Project Title Banner
+    const titleText = projectTitle.trim() || 'Project Roadmap';
+    fillRgb(23, 26, 30);
     drawText(
-      `${unschLabel} (${layout.unscheduledTasks.length}): ${sampleNames}`,
+      titleText,
       marginX,
-      footY,
-      'F1',
-      8.5,
-      110
+      marginY + 15,
+      'F2',
+      14.5,
+      orientation === 'portrait' ? 62 : 90
     );
+
+    fillRgb(91, 98, 110);
+    const pageSuffix = totalPages > 1 ? `  |  Page ${pageIdx + 1} / ${totalPages}` : '';
+    drawText(
+      `Thingsbook Roadmap  |  ${rangeStr}${pageSuffix}`,
+      marginX,
+      marginY + 30,
+      'F1',
+      8.8,
+      120
+    );
+
+    // 3. Timeline Table Header Strip
+    const tableTop = marginY + headerBannerH;
+    const timelineLeft = marginX + labelColW;
+    const bodyTop = tableTop + dayHeaderH;
+
+    let pageTableBodyH = 0;
+    for (const r of pageRows) {
+      pageTableBodyH += r.rowH;
+    }
+    if (pageTableBodyH === 0) pageTableBodyH = 28;
+
+    fillRgb(244, 246, 250);
+    rectFill(marginX, tableTop, tableW, dayHeaderH);
+
+    fillRgb(91, 98, 110);
+    drawText('Phase / To-Do', marginX + 10, tableTop + 19, 'F2', 8.5, 32);
+
+    // 4. Weekend columns, adaptive vertical day grid lines & non-colliding day/month headers
+    ops.push('0.55 w');
+    let lastMonthLabelX = -100;
+    let lastDayLabelX = -100;
+
+    for (let i = 0; i < exportDays.length; i++) {
+      const cell = exportDays[i];
+      const colX = timelineLeft + i * dayColW;
+
+      if (cell.isWeekend) {
+        fillRgb(247, 249, 252);
+        rectFill(colX, bodyTop, dayColW, pageTableBodyH);
+      }
+
+      if (i % gridLineStep === 0 || cell.dayOfMonth === 1) {
+        strokeRgb(231, 235, 241);
+        line(colX, tableTop, colX, bodyTop + pageTableBodyH);
+      }
+
+      if ((i === 0 || cell.dayOfMonth === 1) && colX - lastMonthLabelX >= 24) {
+        fillRgb(56, 152, 236);
+        drawText(MONTH_SHORT_EN[cell.monthIndex], colX + 2, tableTop + 10, 'F2', 7, 8);
+        lastMonthLabelX = colX;
+      }
+
+      if (cell.isToday) {
+        const pillW = Math.max(13, Math.min(dayColW - 2, 20));
+        const pillX = colX + (dayColW - pillW) / 2;
+        fillRgb(56, 152, 236);
+        rectFill(pillX, tableTop + 13, pillW, 13);
+        fillRgb(255, 255, 255);
+        const numStr = String(cell.dayOfMonth);
+        const textOffset = numStr.length === 1 ? pillW / 2 - 2.1 : pillW / 2 - 4.2;
+        drawText(numStr, pillX + Math.max(1.5, textOffset), tableTop + 22.2, 'F2', 7.2, 4);
+        lastDayLabelX = colX;
+      } else {
+        const isTickCandidate =
+          tickStep === 1 || i % tickStep === 0 || cell.dayOfMonth === 1;
+        const nearToday =
+          todayExportIndex >= 0 && Math.abs(colX - (timelineLeft + todayExportIndex * dayColW)) < 15;
+        if (isTickCandidate && !nearToday && colX - lastDayLabelX >= 14.5) {
+          fillRgb(91, 98, 110);
+          const numStr = String(cell.dayOfMonth);
+          const numX =
+            dayColW >= 16
+              ? colX + dayColW / 2 - (numStr.length === 1 ? 2.1 : 4.2)
+              : colX + 1.5;
+          drawText(numStr, numX, tableTop + 22.2, 'F1', 7.2, 4);
+          lastDayLabelX = colX;
+        }
+      }
+    }
+
+    // Divider between label column and timeline
+    strokeRgb(207, 214, 226);
+    line(timelineLeft, tableTop, timelineLeft, bodyTop + pageTableBodyH);
+    line(marginX, bodyTop, marginX + tableW, bodyTop);
+
+    // 5. Render Page Rows (Wrapped Phase Titles + Unclipped Phase Bars + Task Bars)
+    const taskBarCoords = new Map<
+      string,
+      { xLeft: number; xRight: number; yMid: number }
+    >();
+
+    let cursorY = bodyTop;
+    for (const row of pageRows) {
+      if (row.kind === 'lane') {
+        fillRgb(249, 251, 254);
+        rectFill(marginX, cursorY, labelColW, row.rowH);
+
+        // Left accent pill
+        if (row.isGeneral) {
+          fillRgb(180, 189, 204);
+        } else {
+          fillRgb(56, 152, 236);
+        }
+        rectFill(marginX + 8, cursorY + 6, 3.5, row.rowH - 12);
+
+        // Full multi-line Phase title (zero truncation!)
+        fillRgb(23, 26, 30);
+        const totalTextBlockH = row.wrappedLines.length * 11;
+        const firstBaselineY =
+          cursorY + (row.rowH - totalTextBlockH) / 2 + 8.5;
+        for (let lIdx = 0; lIdx < row.wrappedLines.length; lIdx++) {
+          const lineStr = row.wrappedLines[lIdx];
+          drawText(
+            lineStr,
+            marginX + 16,
+            firstBaselineY + lIdx * 11,
+            'F2',
+            8.6,
+            Math.max(128, lineStr.length + 16)
+          );
+        }
+
+        // Clamped Phase Bar on timeline + unclipped Phase title inside or beside narrow bar
+        if (row.barStartIdx != null && row.barEndIdx != null) {
+          const rawBarX = timelineLeft + row.barStartIdx * dayColW + 1.5;
+          const maxAvailW = Math.max(4, timelineLeft + gridW - rawBarX - 1.5);
+          const barW = Math.min(maxAvailW, Math.max(6, row.barSpanDays * dayColW - 3));
+          const barH = 16;
+          const barY = cursorY + (row.rowH - barH) / 2;
+
+          if (row.isInferred) {
+            fillRgb(116, 196, 255);
+            strokeRgb(56, 152, 236);
+            rectFillStroke(rawBarX, barY, barW, barH);
+          } else {
+            fillRgb(56, 152, 236);
+            rectFill(rawBarX, barY, barW, barH);
+            fillRgb(116, 196, 255);
+            rectFill(rawBarX, barY, barW, 2.6);
+          }
+
+          const estTitleWidthPt = row.titleLabel.length * 4.4 + 12;
+          const fullMaxChars = Math.max(160, row.titleLabel.length + 16);
+          const textBaselineY = barY + 10.8;
+
+          if (barW >= estTitleWidthPt) {
+            if (row.isInferred) {
+              fillRgb(12, 75, 134);
+            } else {
+              fillRgb(255, 255, 255);
+            }
+            drawText(row.titleLabel, rawBarX + 6, textBaselineY, 'F2', 7.4, fullMaxChars);
+          } else {
+            // Narrow Phase bar: render unclipped bold Sky-Blue label right next to (or left of) the bar!
+            fillRgb(33, 126, 214);
+            const spaceRightPt = timelineLeft + gridW - (rawBarX + barW + 5);
+            const spaceLeftPt = rawBarX - timelineLeft - 5;
+            if (spaceRightPt >= estTitleWidthPt || spaceRightPt >= spaceLeftPt) {
+              drawText(
+                row.titleLabel,
+                rawBarX + barW + 5,
+                textBaselineY,
+                'F2',
+                7.4,
+                fullMaxChars
+              );
+            } else {
+              const leftX = Math.max(
+                timelineLeft + 3,
+                rawBarX - (row.titleLabel.length * 4.35 + 5)
+              );
+              drawText(row.titleLabel, leftX, textBaselineY, 'F2', 7.4, fullMaxChars);
+            }
+          }
+        }
+
+        strokeRgb(231, 235, 241);
+        line(marginX, cursorY + row.rowH, marginX + tableW, cursorY + row.rowH);
+        cursorY += row.rowH;
+      } else {
+        const tk = row.task;
+        fillRgb(91, 98, 110);
+        const prefix = tk.status === 'COMPLETED' ? '[x] ' : '[ ] ';
+        drawText(
+          `${prefix}${tk.title || 'To-Do'}`,
+          marginX + 16,
+          cursorY + 15.5,
+          'F1',
+          8.1,
+          taskMaxChars
+        );
+
+        const rawBarX = timelineLeft + row.barStartIdx * dayColW + 2;
+        const maxAvailW = Math.max(4, timelineLeft + gridW - rawBarX - 2);
+        const barW = Math.min(maxAvailW, Math.max(6, row.barSpanDays * dayColW - 4));
+        const barY = cursorY + 4;
+        const barH = row.rowH - 8;
+
+        if (tk.status === 'COMPLETED') {
+          fillRgb(232, 248, 238);
+          strokeRgb(46, 173, 91);
+        } else if (row.isActivelyBlocked) {
+          fillRgb(255, 243, 232);
+          strokeRgb(234, 88, 12);
+        } else if (tk.scheduleState === 'TODAY' || tk.scheduleState === 'THIS_EVENING') {
+          fillRgb(229, 243, 255);
+          strokeRgb(56, 152, 236);
+        } else {
+          fillRgb(240, 247, 255);
+          strokeRgb(116, 196, 255);
+        }
+        ops.push('0.9 w');
+        rectFillStroke(rawBarX, barY, barW, barH);
+        ops.push('0.55 w');
+
+        fillRgb(23, 26, 30);
+        if (barW >= 44) {
+          drawText(
+            tk.title || 'To-Do',
+            rawBarX + 5,
+            cursorY + 15,
+            'F1',
+            7.4,
+            Math.max(6, Math.floor(barW / 4.4))
+          );
+        }
+
+        taskBarCoords.set(tk.id, {
+          xLeft: rawBarX,
+          xRight: rawBarX + barW,
+          yMid: cursorY + row.rowH / 2
+        });
+
+        strokeRgb(238, 241, 246);
+        line(marginX, cursorY + row.rowH, marginX + tableW, cursorY + row.rowH);
+        cursorY += row.rowH;
+      }
+    }
+
+    // 6. Dependency Connector Cubic-Bezier Lines + Arrowheads on this page
+    for (const edge of filteredDependencyEdges) {
+      const src = taskBarCoords.get(edge.fromTaskId);
+      const dst = taskBarCoords.get(edge.toTaskId);
+      if (!src || !dst) continue;
+
+      if (edge.isActivelyBlocking) {
+        strokeRgb(234, 88, 12);
+        fillRgb(234, 88, 12);
+      } else {
+        strokeRgb(100, 116, 139);
+        fillRgb(100, 116, 139);
+      }
+      ops.push('1.1 w');
+      const x1 = src.xRight;
+      const y1 = src.yMid;
+      const x2 = dst.xLeft;
+      const y2 = dst.yMid;
+      const ctrlOffset = Math.max(12, Math.abs(x2 - x1) * 0.45);
+      ops.push(
+        `${fmtNum(x1)} ${fmtNum(pdfY(y1))} m ${fmtNum(x1 + ctrlOffset)} ${fmtNum(pdfY(y1))} ${fmtNum(x2 - ctrlOffset)} ${fmtNum(pdfY(y2))} ${fmtNum(x2)} ${fmtNum(pdfY(y2))} c S`
+      );
+      const ah = 3.0;
+      ops.push(
+        `${fmtNum(x2)} ${fmtNum(pdfY(y2))} m ${fmtNum(x2 - 4.8)} ${fmtNum(pdfY(y2 - ah))} l ${fmtNum(x2 - 4.8)} ${fmtNum(pdfY(y2 + ah))} l h f`
+      );
+    }
+
+    // 7. Today Vertical Accent Line
+    if (todayExportIndex >= 0 && todayExportIndex < exportTotalDays) {
+      const todayLineX = timelineLeft + todayExportIndex * dayColW + dayColW / 2;
+      ops.push('1.1 w');
+      strokeRgb(56, 152, 236);
+      line(todayLineX, bodyTop, todayLineX, bodyTop + pageTableBodyH);
+    }
+
+    // Outer border around table
+    ops.push('0.8 w');
+    strokeRgb(207, 214, 226);
+    rectStroke(marginX, tableTop, tableW, dayHeaderH + pageTableBodyH);
+
+    // 8. Unscheduled summary footer on final page
+    if (pageIdx === totalPages - 1 && exportedUnscheduledTasks.length > 0) {
+      const footY = bodyTop + pageTableBodyH + 16;
+      fillRgb(91, 98, 110);
+      const unschLabel = labels.unscheduledLabel || 'Unscheduled';
+      const sampleNames = exportedUnscheduledTasks
+        .slice(0, 5)
+        .map((t) => t.title || 'To-Do')
+        .join(', ');
+      drawText(
+        `${unschLabel} (${exportedUnscheduledTasks.length}): ${sampleNames}`,
+        marginX,
+        footY,
+        'F1',
+        8.2,
+        orientation === 'portrait' ? 88 : 120
+      );
+    }
+
+    pageStreams.push(ops.join('\n'));
   }
 
-  const contentStream = ops.join('\n');
+  // Assemble PDF 1.4 Catalog, Pages tree, shared Type1 Fonts, and per-page Page + Stream objects
+  const pageRefs: string[] = [];
+  for (let p = 0; p < pageStreams.length; p++) {
+    pageRefs.push(`${5 + p * 2} 0 R`);
+  }
 
   const objects: string[] = [
     '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
-    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
-    `3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${fmtNum(pageW)} ${fmtNum(pageH)}] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>\nendobj\n`,
-    '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>\nendobj\n',
-    '5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>\nendobj\n',
-    `6 0 obj\n<< /Length ${contentStream.length} >>\nstream\n${contentStream}\nendstream\nendobj\n`
+    `2 0 obj\n<< /Type /Pages /Kids [${pageRefs.join(' ')}] /Count ${pageStreams.length} >>\nendobj\n`,
+    '3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>\nendobj\n',
+    '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>\nendobj\n'
   ];
+
+  for (let p = 0; p < pageStreams.length; p++) {
+    const pageObjNum = 5 + p * 2;
+    const contentObjNum = 6 + p * 2;
+    const stream = pageStreams[p];
+    objects.push(
+      `${pageObjNum} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${fmtNum(pageW)} ${fmtNum(pageH)}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentObjNum} 0 R >>\nendobj\n`
+    );
+    objects.push(
+      `${contentObjNum} 0 obj\n<< /Length ${stream.length} >>\nstream\n${stream}\nendstream\nendobj\n`
+    );
+  }
 
   let pdf = '%PDF-1.4\n';
   const offsets: number[] = [0];
@@ -1062,18 +1464,25 @@ export function renderRoadmapToPngDataUrl(
   const dpr = 2;
   const marginX = 28;
   const marginY = 28;
-  const labelColW = 224;
+  const labelColW = 256;
   const dayColW = 32;
   const headerBannerH = 50;
   const dayHeaderH = 34;
-  const laneRowH = 30;
   const taskRowH = 28;
 
+  const laneSpecs = layout.lanes.map((lane) => {
+    const laneTitle =
+      lane.heading == null ? labels.ungroupedTitle || lane.title : lane.title;
+    const wrappedLines = wrapTextLines(laneTitle, 34);
+    const laneRowH = Math.max(34, 16 + wrappedLines.length * 14);
+    return { lane, laneTitle, wrappedLines, laneRowH };
+  });
+
   let totalBodyH = 0;
-  for (const lane of layout.lanes) {
-    totalBodyH += laneRowH + lane.plottedTasks.length * taskRowH;
+  for (const sp of laneSpecs) {
+    totalBodyH += sp.laneRowH + sp.lane.plottedTasks.length * taskRowH;
   }
-  if (totalBodyH === 0) totalBodyH = laneRowH;
+  if (totalBodyH === 0) totalBodyH = 34;
 
   const extraFooter = layout.unscheduledTasks.length > 0 ? 32 : 0;
   const gridW = layout.totalDays * dayColW;
@@ -1095,6 +1504,7 @@ export function renderRoadmapToPngDataUrl(
   const borderStrong = isDark ? '#39404D' : '#CFD6E2';
   const textPrimary = isDark ? '#F1F3F6' : '#171A1E';
   const textSecondary = isDark ? '#9BA3B0' : '#5B626E';
+  const skyBlueLabel = isDark ? '#6BC0FF' : '#217ED6';
 
   ctx.fillStyle = bgCanvas;
   ctx.fillRect(0, 0, logicalW, logicalH);
@@ -1166,26 +1576,48 @@ export function renderRoadmapToPngDataUrl(
   const barCoords = new Map<string, { xLeft: number; xRight: number; yMid: number }>();
   let cursorY = bodyTop;
 
-  for (const lane of layout.lanes) {
+  for (const { lane, laneTitle, wrappedLines, laneRowH } of laneSpecs) {
     ctx.fillStyle = isDark ? 'rgba(255,255,255,0.025)' : '#FAFBFD';
     ctx.fillRect(marginX, cursorY, labelColW, laneRowH);
 
-    ctx.fillStyle = '#3898EC';
+    ctx.fillStyle = lane.heading == null ? borderStrong : '#3898EC';
     ctx.beginPath();
     ctx.roundRect(marginX + 10, cursorY + 7, 4, laneRowH - 14, 2);
     ctx.fill();
 
-    const laneTitle =
-      lane.heading == null ? labels.ungroupedTitle || lane.title : lane.title;
+    // Full multi-line Phase title in left column (zero truncation!)
     ctx.fillStyle = textPrimary;
     ctx.font = '650 11.5px Inter, system-ui, sans-serif';
-    ctx.fillText(laneTitle.slice(0, 28), marginX + 20, cursorY + 19);
+    const textBlockH = wrappedLines.length * 14;
+    const firstLineY = cursorY + (laneRowH - textBlockH) / 2 + 11;
+    for (let lIdx = 0; lIdx < wrappedLines.length; lIdx++) {
+      ctx.fillText(wrappedLines[lIdx], marginX + 20, firstLineY + lIdx * 14);
+    }
 
-    if (lane.startDayIndex != null && lane.endDayIndex != null) {
-      const barX = timelineLeft + lane.startDayIndex * dayColW + 3;
-      const barW = Math.max(14, lane.spanDays * dayColW - 6);
-      const barY = cursorY + 5;
-      const barH = laneRowH - 10;
+    if (
+      lane.heading != null &&
+      lane.startEpoch != null &&
+      lane.endEpoch != null &&
+      lane.endEpoch >= layout.windowStartEpoch &&
+      lane.startEpoch <= layout.windowEndEpoch
+    ) {
+      const clampedStart = Math.max(layout.windowStartEpoch, lane.startEpoch);
+      const clampedEnd = Math.min(layout.windowEndEpoch, lane.endEpoch);
+      const sIdx = Math.max(
+        0,
+        Math.min(layout.totalDays - 1, localDaysBetween(layout.windowStartEpoch, clampedStart))
+      );
+      const eIdx = Math.max(
+        sIdx,
+        Math.min(layout.totalDays - 1, localDaysBetween(layout.windowStartEpoch, clampedEnd))
+      );
+      const spanDays = eIdx - sIdx + 1;
+
+      const barX = timelineLeft + sIdx * dayColW + 3;
+      const maxAvailW = Math.max(8, timelineLeft + gridW - barX - 3);
+      const barW = Math.min(maxAvailW, Math.max(14, spanDays * dayColW - 6));
+      const barH = 22;
+      const barY = cursorY + (laneRowH - barH) / 2;
 
       const grad = ctx.createLinearGradient(barX, barY, barX + barW, barY);
       grad.addColorStop(0, '#74C4FF');
@@ -1198,10 +1630,25 @@ export function renderRoadmapToPngDataUrl(
       ctx.fill();
       ctx.restore();
 
-      if (barW >= 54) {
+      ctx.font = '700 10.5px Inter, system-ui, sans-serif';
+      const measuredTitleW = ctx.measureText(laneTitle).width;
+      const titleBaselineY = barY + 14.5;
+
+      if (barW >= measuredTitleW + 16) {
         ctx.fillStyle = lane.isInferred ? textPrimary : '#FFFFFF';
-        ctx.font = '650 10px Inter, system-ui, sans-serif';
-        ctx.fillText(laneTitle.slice(0, Math.floor(barW / 6.5)), barX + 8, cursorY + 18.5);
+        ctx.fillText(laneTitle, barX + 8, titleBaselineY);
+      } else {
+        ctx.fillStyle = skyBlueLabel;
+        const spaceRight = timelineLeft + gridW - (barX + barW + 7);
+        if (spaceRight >= measuredTitleW + 4 || spaceRight >= barX - timelineLeft) {
+          ctx.fillText(laneTitle, barX + barW + 7, titleBaselineY);
+        } else {
+          ctx.fillText(
+            laneTitle,
+            Math.max(timelineLeft + 4, barX - measuredTitleW - 7),
+            titleBaselineY
+          );
+        }
       }
     }
 
@@ -1216,10 +1663,13 @@ export function renderRoadmapToPngDataUrl(
       const tk = pt.task;
       ctx.fillStyle = textSecondary;
       ctx.font = '500 11px Inter, system-ui, sans-serif';
-      ctx.fillText((tk.title || 'To-Do').slice(0, 30), marginX + 20, cursorY + 18);
+      ctx.fillText((tk.title || 'To-Do').slice(0, 34), marginX + 20, cursorY + 18);
 
       const barX = timelineLeft + pt.startDayIndex * dayColW + 4;
-      const barW = Math.max(14, pt.spanDays * dayColW - 8);
+      const barW = Math.min(
+        Math.max(8, timelineLeft + gridW - barX - 4),
+        Math.max(14, pt.spanDays * dayColW - 8)
+      );
       const barY = cursorY + 4;
       const barH = taskRowH - 8;
 

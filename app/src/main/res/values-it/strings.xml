@@ -549,6 +549,17 @@
     <string name="v30_board_add_phase">Nuova fase</string>
     <string name="v30_drag_multi_count">%1$d attività</string>
     <string name="v30_drop_moved_feedback">%1$d attività spostate</string>
+    <string name="v30_pdf_export_dialog_title">Esporta Roadmap in PDF</string>
+    <string name="v30_pdf_phases_label">Fasi del progetto</string>
+    <string name="v30_pdf_select_all_phases">Seleziona tutto</string>
+    <string name="v30_pdf_timeline_label">Periodo della cronologia</string>
+    <string name="v30_pdf_timeline_auto">Intero progetto</string>
+    <string name="v30_pdf_timeline_from_today">Da oggi</string>
+    <string name="v30_pdf_timeline_next_30d">Prossimi 30 giorni</string>
+    <string name="v30_pdf_timeline_custom">Intervallo personalizzato</string>
+    <string name="v30_pdf_orientation_label">Orientamento pagina</string>
+    <string name="v30_pdf_orientation_landscape">Orizzontale</string>
+    <string name="v30_pdf_orientation_portrait">Verticale</string>
     <string name="v30_external_import_export_tab">Asana e Planner</string>
     <string name="v30_import_asana">Importa da Asana (CSV / JSON)</string>
     <string name="v30_export_asana_csv">Esporta progetto in Asana CSV</string>

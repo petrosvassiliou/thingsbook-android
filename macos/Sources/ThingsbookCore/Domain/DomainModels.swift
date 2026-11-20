@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 public struct Area: Identifiable, Equatable, Hashable, Codable, Sendable {
     public var id: String
@@ -3369,10 +3370,84 @@ public struct ProjectRoadmapLayout: Equatable, Sendable {
     }
 }
 
+public enum RoadmapPDFOrientation: String, CaseIterable, Identifiable, Equatable, Hashable, Codable, Sendable {
+    case landscape = "landscape"
+    case portrait = "portrait"
+
+    public var id: String { rawValue }
+
+    public var pageSize: CGSize {
+        switch self {
+        case .landscape:
+            return CGSize(width: 842, height: 595)
+        case .portrait:
+            return CGSize(width: 595, height: 842)
+        }
+    }
+}
+
+public enum RoadmapPDFTimelinePreset: String, CaseIterable, Identifiable, Equatable, Hashable, Codable, Sendable {
+    case fullProject = "full_project"
+    case fromToday = "from_today"
+    case next30Days = "next_30_days"
+    case custom = "custom"
+
+    public var id: String { rawValue }
+}
+
+public struct RoadmapPDFExportOptions: Equatable, Hashable, Sendable {
+    public static let generalSectionId = "__general__"
+
+    public var selectedSectionIds: Set<String>
+    public var startEpochDay: Int
+    public var endEpochDay: Int
+    public var orientation: RoadmapPDFOrientation
+
+    public init(
+        selectedSectionIds: Set<String>,
+        startEpochDay: Int,
+        endEpochDay: Int,
+        orientation: RoadmapPDFOrientation = .landscape
+    ) {
+        self.selectedSectionIds = selectedSectionIds
+        self.startEpochDay = min(startEpochDay, endEpochDay)
+        self.endEpochDay = max(startEpochDay, endEpochDay)
+        self.orientation = orientation
+    }
+
+    public static func defaultOptions(
+        for layout: ProjectRoadmapLayout,
+        headings: [Heading],
+        orientation: RoadmapPDFOrientation = .landscape
+    ) -> RoadmapPDFExportOptions {
+        var sectionIds = Set(
+            headings
+                .filter { !$0.isDeleted && !$0.isArchived && $0.projectId == layout.projectId }
+                .map(\.id)
+        )
+        if !layout.generalTaskBars.isEmpty {
+            sectionIds.insert(generalSectionId)
+        }
+        return RoadmapPDFExportOptions(
+            selectedSectionIds: sectionIds,
+            startEpochDay: layout.startEpochDay,
+            endEpochDay: layout.endEpochDay,
+            orientation: orientation
+        )
+    }
+}
+
 public enum ProjectRoadmapEngine {
     public static func durationSpanDays(for durationMinutes: Int?) -> Int {
         let rawMinutes = (durationMinutes ?? 0) > 0 ? durationMinutes! : 30
         return max(1, (rawMinutes + 479) / 480)
+    }
+
+    public static func addOneMonth(toEpochDay day: Int, calendar: Calendar = .current) -> Int {
+        let date = DateEpochConverter.date(fromEpochDay: day, calendar: calendar)
+        let shifted = calendar.date(byAdding: .month, value: 1, to: date)
+            ?? date.addingTimeInterval(30.0 * 86_400.0)
+        return DateEpochConverter.epochDay(for: shifted, calendar: calendar)
     }
 
     public static func buildLayout(
@@ -3392,7 +3467,7 @@ public enum ProjectRoadmapEngine {
         let validHeadingIds = Set(activeHeadings.map(\.id))
 
         let candidateTasks = tasks.filter { task in
-            !task.isDeleted && task.status != .canceled && (task.projectId == nil || task.projectId == project.id)
+            !task.isDeleted && task.status != .canceled && task.projectId == project.id
         }
 
         var generalBars: [RoadmapTaskBar] = []
@@ -3410,7 +3485,7 @@ public enum ProjectRoadmapEngine {
                 let wDay = DateEpochConverter.epochDay(forMillis: whenMs, calendar: calendar)
                 let dDay = DateEpochConverter.epochDay(forMillis: deadlineMs, calendar: calendar)
                 let sDay = min(wDay, dDay)
-                let eDay = max(dDay, sDay + spanDays - 1)
+                let eDay = max(wDay, dDay)
                 let bar = RoadmapTaskBar(task: task, headingId: resolvedHid, startEpochDay: sDay, endEpochDay: eDay)
                 if let hid = resolvedHid {
                     barsByHeading[hid, default: []].append(bar)
@@ -3534,22 +3609,25 @@ public enum ProjectRoadmapEngine {
             }
         }
 
-        var scheduledMinCandidates: [Int] = resolvedPhaseBars.map(\.startEpochDay) + orderedAllTaskBars.map(\.startEpochDay)
-        var scheduledMaxCandidates: [Int] = resolvedPhaseBars.map(\.endEpochDay) + orderedAllTaskBars.map(\.endEpochDay)
-        if let pWhen = project.whenDate {
-            let d = DateEpochConverter.epochDay(forMillis: pWhen, calendar: calendar)
-            scheduledMinCandidates.append(d)
-            scheduledMaxCandidates.append(d)
-        }
-        if let pDead = project.deadline {
-            let d = DateEpochConverter.epochDay(forMillis: pDead, calendar: calendar)
-            scheduledMinCandidates.append(d)
-            scheduledMaxCandidates.append(d)
-        }
-
+        let scheduledMinCandidates: [Int] = resolvedPhaseBars.map(\.startEpochDay) + orderedAllTaskBars.map(\.startEpochDay)
         let startWindowDay = min(todayDay - 3, scheduledMinCandidates.min() ?? (todayDay - 3))
-        let maxScheduledDay = scheduledMaxCandidates.max() ?? todayDay
-        let endWindowDay = max(startWindowDay + 20, max(todayDay + 17, maxScheduledDay + 7))
+
+        let endWindowDay: Int
+        if !orderedAllTaskBars.isEmpty {
+            let lastTaskEndDay = orderedAllTaskBars.map(\.endEpochDay).max()!
+            let oneMonthCapDay = addOneMonth(toEpochDay: lastTaskEndDay, calendar: calendar)
+            let maxTaskOrPhaseDay = max(lastTaskEndDay, resolvedPhaseBars.map(\.endEpochDay).max() ?? lastTaskEndDay)
+            let uncappedEnd = max(startWindowDay + 20, maxTaskOrPhaseDay + 7)
+            endWindowDay = oneMonthCapDay >= startWindowDay
+                ? max(lastTaskEndDay, min(uncappedEnd, oneMonthCapDay))
+                : max(startWindowDay + 20, lastTaskEndDay)
+        } else {
+            let oneMonthFromToday = addOneMonth(toEpochDay: todayDay, calendar: calendar)
+            endWindowDay = max(
+                startWindowDay + 20,
+                min((resolvedPhaseBars.map(\.endEpochDay).max() ?? todayDay) + 7, oneMonthFromToday)
+            )
+        }
 
         return ProjectRoadmapLayout(
             projectId: project.id,
@@ -3562,6 +3640,99 @@ public enum ProjectRoadmapEngine {
             allTaskBars: orderedAllTaskBars,
             dependencyEdges: edges,
             unscheduledTasks: unscheduled
+        )
+    }
+
+    public static func filteredLayoutForExport(
+        layout: ProjectRoadmapLayout,
+        headings: [Heading],
+        options: RoadmapPDFExportOptions
+    ) -> ProjectRoadmapLayout {
+        let windowStart = min(options.startEpochDay, options.endEpochDay)
+        let windowEnd = max(options.startEpochDay, options.endEpochDay)
+        let includeGeneral = options.selectedSectionIds.contains(RoadmapPDFExportOptions.generalSectionId)
+        let selectedHeadingIds = options.selectedSectionIds.subtracting([RoadmapPDFExportOptions.generalSectionId])
+
+        let clampTaskBar: (RoadmapTaskBar) -> RoadmapTaskBar? = { bar in
+            guard bar.endEpochDay >= windowStart && bar.startEpochDay <= windowEnd else {
+                return nil
+            }
+            return RoadmapTaskBar(
+                task: bar.task,
+                headingId: bar.headingId,
+                startEpochDay: max(windowStart, bar.startEpochDay),
+                endEpochDay: min(windowEnd, bar.endEpochDay)
+            )
+        }
+
+        let filteredGeneralBars: [RoadmapTaskBar] = includeGeneral
+            ? layout.generalTaskBars.compactMap(clampTaskBar)
+            : []
+
+        let sortedActiveHeadings = headings
+            .filter { !$0.isDeleted && !$0.isArchived && $0.projectId == layout.projectId && selectedHeadingIds.contains($0.id) }
+            .sorted {
+                if $0.sortOrder != $1.sortOrder { return $0.sortOrder < $1.sortOrder }
+                return $0.id < $1.id
+            }
+
+        var filteredBarsByHeading: [String: [RoadmapTaskBar]] = [:]
+        var filteredAllTaskBars: [RoadmapTaskBar] = filteredGeneralBars
+        var handledHeadingIds = Set<String>()
+
+        for heading in sortedActiveHeadings {
+            handledHeadingIds.insert(heading.id)
+            let clampedChildren = (layout.taskBarsByHeading[heading.id] ?? []).compactMap(clampTaskBar)
+            if !clampedChildren.isEmpty {
+                filteredBarsByHeading[heading.id] = clampedChildren
+                filteredAllTaskBars.append(contentsOf: clampedChildren)
+            }
+        }
+
+        for hid in selectedHeadingIds.sorted() where !handledHeadingIds.contains(hid) {
+            let clampedChildren = (layout.taskBarsByHeading[hid] ?? []).compactMap(clampTaskBar)
+            if !clampedChildren.isEmpty {
+                filteredBarsByHeading[hid] = clampedChildren
+                filteredAllTaskBars.append(contentsOf: clampedChildren)
+            }
+        }
+
+        let filteredPhaseBars: [RoadmapPhaseBar] = layout.phaseBars.compactMap { pBar in
+            guard selectedHeadingIds.contains(pBar.heading.id),
+                  pBar.endEpochDay >= windowStart && pBar.startEpochDay <= windowEnd else {
+                return nil
+            }
+            return RoadmapPhaseBar(
+                heading: pBar.heading,
+                startEpochDay: max(windowStart, pBar.startEpochDay),
+                endEpochDay: min(windowEnd, pBar.endEpochDay),
+                hasExplicitDates: pBar.hasExplicitDates
+            )
+        }
+
+        let visibleTaskIds = Set(filteredAllTaskBars.map(\.id))
+        let filteredEdges = layout.dependencyEdges.filter { edge in
+            visibleTaskIds.contains(edge.fromTaskId) && visibleTaskIds.contains(edge.toTaskId)
+        }
+
+        let filteredUnscheduled = layout.unscheduledTasks.filter { task in
+            if let hid = task.headingId {
+                return selectedHeadingIds.contains(hid)
+            }
+            return includeGeneral
+        }
+
+        return ProjectRoadmapLayout(
+            projectId: layout.projectId,
+            todayEpochDay: layout.todayEpochDay,
+            startEpochDay: windowStart,
+            endEpochDay: windowEnd,
+            phaseBars: filteredPhaseBars,
+            generalTaskBars: filteredGeneralBars,
+            taskBarsByHeading: filteredBarsByHeading,
+            allTaskBars: filteredAllTaskBars,
+            dependencyEdges: filteredEdges,
+            unscheduledTasks: filteredUnscheduled
         )
     }
 

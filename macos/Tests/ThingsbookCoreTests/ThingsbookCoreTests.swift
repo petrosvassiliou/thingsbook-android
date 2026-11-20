@@ -1,5 +1,6 @@
 import XCTest
 import SQLite3
+import PDFKit
 @testable import ThingsbookCore
 
 final class ThingsbookCoreTests: XCTestCase {
@@ -408,15 +409,15 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-alpha.12")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-alpha.12")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 89)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-alpha.13")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-alpha.13")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 90)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.12", current: "2.5.0", includeBeta: false))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.12", current: "2.5.0", includeBeta: true))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.12", current: "3.0.0-alpha.11"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.13", current: "2.5.0", includeBeta: false))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.13", current: "2.5.0", includeBeta: true))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.13", current: "3.0.0-alpha.12"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-alpha.12"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.14", current: "3.0.0-alpha.13"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-alpha.13"))
         let ultraCompact = MacToolbarLayoutMetrics.compute(detailWidth: 506.0, isSidebarCollapsed: false)
         XCTAssertEqual(ultraCompact.usableWidth, 450.0)
         XCTAssertFalse(ultraCompact.showGeminiLabel)
@@ -4094,6 +4095,278 @@ final class ThingsbookCoreTests: XCTestCase {
             XCTAssertTrue(ThingsStrings.shared.format("v30_drop_moved_feedback", lang: lang, 4).contains("4"))
         }
     }
+
+    // MARK: - 35. v3.0.0-alpha.13: 1-Month Roadmap Horizon Cap, Filtered Export & A4 Portrait/Landscape PDF Bounds
+
+    @MainActor
+    func testAlpha13RoadmapHorizonCapFilteredExportAndA4PdfOrientations() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+
+        func millis(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
+            let d = cal.date(from: DateComponents(year: year, month: month, day: day))!
+            return DateEpochConverter.startOfDayMillis(for: d, calendar: cal)
+        }
+        func epochDay(_ year: Int, _ month: Int, _ day: Int) -> Int {
+            DateEpochConverter.epochDay(forMillis: millis(year, month, day), calendar: cal)
+        }
+
+        // 1. Exact 1-month horizon cap past last task due date (ignoring distant project.deadline & distant heading.endDate!)
+        let todayMs = millis(2026, 11, 20)
+        let project = Project(
+            id: "proj-alpha13",
+            title: "Cloud Rollout 2027",
+            whenDate: millis(2026, 11, 13),
+            deadline: millis(2027, 4, 30), // Distant project deadline (April 30, 2027) must NOT stretch roadmap!
+            viewMode: "roadmap",
+            totalTaskCount: 5,
+            completedTaskCount: 1,
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+
+        let phase1 = Heading(
+            id: "ph-1",
+            projectId: project.id,
+            title: "Konzeption & Architekturplanung",
+            sortOrder: 100,
+            startDate: millis(2026, 11, 13),
+            endDate: millis(2026, 11, 28),
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        let phase2 = Heading(
+            id: "ph-2",
+            projectId: project.id,
+            title: "Technische Umsetzung & Systemintegration",
+            sortOrder: 200,
+            startDate: millis(2026, 11, 29),
+            endDate: millis(2026, 12, 18),
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        let phase4Distant = Heading(
+            id: "ph-4",
+            projectId: project.id,
+            title: "Betriebsübergabe & Langzeitbegleitung",
+            sortOrder: 400,
+            startDate: millis(2026, 12, 15),
+            endDate: millis(2027, 2, 15), // Ends Feb 15, 2027 -> must be capped at Jan 18, 2027!
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+
+        let generalTask = TaskItem(
+            id: "t-gen",
+            title: "Stakeholder Kickoff",
+            scheduleState: .today,
+            whenDate: millis(2026, 11, 14),
+            projectId: project.id,
+            headingId: nil,
+            sortOrder: 5,
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        let unrelatedLooseTask = TaskItem(
+            id: "t-unrelated-inbox",
+            title: "Personal Grocery Run",
+            scheduleState: .upcoming,
+            whenDate: millis(2027, 6, 1),
+            deadline: millis(2027, 6, 10),
+            projectId: nil, // Must be excluded because projectId != project.id!
+            headingId: nil,
+            sortOrder: 6,
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        let taskPhase1 = TaskItem(
+            id: "t-p1",
+            title: "API Spec Sign-Off",
+            scheduleState: .upcoming,
+            whenDate: millis(2026, 11, 25), // Inverted whenDate > deadline test -> [min, max]
+            deadline: millis(2026, 11, 22),
+            projectId: project.id,
+            headingId: phase1.id,
+            sortOrder: 10,
+            blockedByTaskIds: [generalTask.id],
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        let lastScheduledTask = TaskItem(
+            id: "t-p2-last",
+            title: "Production Cutover",
+            scheduleState: .upcoming,
+            whenDate: millis(2026, 12, 10),
+            deadline: millis(2026, 12, 18), // Last task due date = 18.12.2026
+            projectId: project.id,
+            headingId: phase2.id,
+            sortOrder: 20,
+            blockedByTaskIds: [taskPhase1.id],
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+
+        let layout = ProjectRoadmapEngine.buildLayout(
+            project: project,
+            headings: [phase1, phase2, phase4Distant],
+            tasks: [generalTask, unrelatedLooseTask, taskPhase1, lastScheduledTask],
+            todayMillis: todayMs,
+            calendar: cal
+        )
+
+        let lastTaskEndDay = epochDay(2026, 12, 18)
+        let expectedCapDay = ProjectRoadmapEngine.addOneMonth(toEpochDay: lastTaskEndDay, calendar: cal)
+        XCTAssertEqual(expectedCapDay, epochDay(2027, 1, 18))
+        XCTAssertEqual(layout.startEpochDay, epochDay(2026, 11, 13))
+        XCTAssertEqual(layout.endEpochDay, epochDay(2027, 1, 18), "Horizon must cap strictly 1 month after last task due date (18.01.2027)")
+        XCTAssertLessThanOrEqual(layout.endEpochDay, expectedCapDay)
+        XCTAssertFalse(layout.allTaskBars.contains { $0.id == unrelatedLooseTask.id })
+
+        // Verify inverted whenDate/deadline produced [min(wDay, dDay), max(wDay, dDay)]
+        let p1Bar = try XCTUnwrap(layout.allTaskBars.first { $0.id == taskPhase1.id })
+        XCTAssertEqual(p1Bar.startEpochDay, epochDay(2026, 11, 22))
+        XCTAssertEqual(p1Bar.endEpochDay, epochDay(2026, 11, 25))
+
+        // Verify empty-tasks project caps at 1 month from today even if a phase ends months later
+        let tasklessLayout = ProjectRoadmapEngine.buildLayout(
+            project: project,
+            headings: [phase4Distant],
+            tasks: [],
+            todayMillis: todayMs,
+            calendar: cal
+        )
+        XCTAssertEqual(tasklessLayout.endEpochDay, ProjectRoadmapEngine.addOneMonth(toEpochDay: epochDay(2026, 11, 20), calendar: cal))
+
+        // 2. filteredLayoutForExport: phase selection, custom timeline clamping & dependency edge filtering
+        let customStart = epochDay(2026, 11, 24)
+        let customEnd = epochDay(2026, 12, 15)
+        let exportOptions = RoadmapPDFExportOptions(
+            selectedSectionIds: [phase1.id, phase2.id], // Exclude "__general__" and phase4Distant
+            startEpochDay: customStart,
+            endEpochDay: customEnd,
+            orientation: .portrait
+        )
+        let filtered = ProjectRoadmapEngine.filteredLayoutForExport(
+            layout: layout,
+            headings: [phase1, phase2, phase4Distant],
+            options: exportOptions
+        )
+
+        XCTAssertEqual(filtered.startEpochDay, customStart)
+        XCTAssertEqual(filtered.endEpochDay, customEnd)
+        XCTAssertTrue(filtered.generalTaskBars.isEmpty, "Deselected __general__ section must be excluded")
+        XCTAssertNil(filtered.phaseBar(for: phase4Distant.id), "Deselected Phase 4 must be excluded")
+        XCTAssertNotNil(filtered.phaseBar(for: phase1.id))
+        XCTAssertNotNil(filtered.phaseBar(for: phase2.id))
+
+        // Clamping checks: taskPhase1 [Nov 22..25] -> [Nov 24..25]; lastScheduledTask [Dec 10..18] -> [Dec 10..15]
+        let clampedP1Task = try XCTUnwrap(filtered.allTaskBars.first { $0.id == taskPhase1.id })
+        XCTAssertEqual(clampedP1Task.startEpochDay, customStart)
+        XCTAssertEqual(clampedP1Task.endEpochDay, epochDay(2026, 11, 25))
+
+        let clampedLastTask = try XCTUnwrap(filtered.allTaskBars.first { $0.id == lastScheduledTask.id })
+        XCTAssertEqual(clampedLastTask.startEpochDay, epochDay(2026, 12, 10))
+        XCTAssertEqual(clampedLastTask.endEpochDay, customEnd)
+
+        // Dependency edge filtering: edge t-gen -> t-p1 dropped (t-gen excluded), edge t-p1 -> t-p2-last kept!
+        XCTAssertEqual(filtered.dependencyEdges.map(\.id), ["\(taskPhase1.id)->\(lastScheduledTask.id)"])
+
+        // 3. True A4 Portrait (595 × 842, width < height) vs Landscape (842 × 595, width > height) PDF bounds via PDFKit
+        XCTAssertEqual(RoadmapPDFOrientation.landscape.pageSize, CGSize(width: 842, height: 595))
+        XCTAssertEqual(RoadmapPDFOrientation.portrait.pageSize, CGSize(width: 595, height: 842))
+
+        let portraitData = try XCTUnwrap(
+            ProjectRoadmapExporter.exportRoadmapPDFData(
+                project: project,
+                headings: [phase1, phase2, phase4Distant],
+                layout: layout,
+                options: exportOptions
+            )
+        )
+        XCTAssertTrue(portraitData.starts(with: Data("%PDF-".utf8)))
+        let portraitDoc = try XCTUnwrap(PDFDocument(data: portraitData))
+        XCTAssertGreaterThanOrEqual(portraitDoc.pageCount, 1)
+        let portraitPageBounds = try XCTUnwrap(portraitDoc.page(at: 0)?.bounds(for: .mediaBox))
+        XCTAssertEqual(portraitPageBounds.width, 595, accuracy: 1.0)
+        XCTAssertEqual(portraitPageBounds.height, 842, accuracy: 1.0)
+        XCTAssertLessThan(portraitPageBounds.width, portraitPageBounds.height)
+
+        let landscapeOptions = RoadmapPDFExportOptions.defaultOptions(
+            for: layout,
+            headings: [phase1, phase2, phase4Distant],
+            orientation: .landscape
+        )
+        let landscapeData = try XCTUnwrap(
+            ProjectRoadmapExporter.exportRoadmapPDFData(
+                project: project,
+                headings: [phase1, phase2, phase4Distant],
+                layout: layout,
+                options: landscapeOptions
+            )
+        )
+        XCTAssertTrue(landscapeData.starts(with: Data("%PDF-".utf8)))
+        let landscapeDoc = try XCTUnwrap(PDFDocument(data: landscapeData))
+        XCTAssertGreaterThanOrEqual(landscapeDoc.pageCount, 1)
+        let landscapePageBounds = try XCTUnwrap(landscapeDoc.page(at: 0)?.bounds(for: .mediaBox))
+        XCTAssertEqual(landscapePageBounds.width, 842, accuracy: 1.0)
+        XCTAssertEqual(landscapePageBounds.height, 595, accuracy: 1.0)
+        XCTAssertGreaterThan(landscapePageBounds.width, landscapePageBounds.height)
+
+        // Multi-page pagination check when rows exceed 1 Landscape page
+        let manyTasks: [TaskItem] = (0..<24).map { idx in
+            TaskItem(
+                id: "paged-task-\(idx)",
+                title: "Deliverable Item #\(idx + 1)",
+                scheduleState: .upcoming,
+                whenDate: millis(2026, 11, 20) + Int64(idx % 15) * 86_400_000,
+                projectId: project.id,
+                headingId: phase2.id,
+                sortOrder: Double(idx * 10),
+                createdAt: todayMs,
+                updatedAt: todayMs
+            )
+        }
+        let multiPageLayout = ProjectRoadmapEngine.buildLayout(
+            project: project,
+            headings: [phase1, phase2],
+            tasks: manyTasks,
+            todayMillis: todayMs,
+            calendar: cal
+        )
+        let multiPagePDF = try XCTUnwrap(
+            ProjectRoadmapExporter.exportRoadmapPDFData(
+                project: project,
+                headings: [phase1, phase2],
+                layout: multiPageLayout,
+                options: RoadmapPDFExportOptions.defaultOptions(for: multiPageLayout, headings: [phase1, phase2], orientation: .landscape)
+            )
+        )
+        let multiPageDoc = try XCTUnwrap(PDFDocument(data: multiPagePDF))
+        XCTAssertGreaterThanOrEqual(multiPageDoc.pageCount, 2, "24+ rows must paginate cleanly across 2+ A4 Landscape pages")
+
+        // 4. Verify all 11 new v30_pdf_* localization keys across EN, DE, FR, IT, ES
+        let pdfDialogKeys = [
+            "v30_pdf_export_dialog_title",
+            "v30_pdf_phases_label",
+            "v30_pdf_select_all_phases",
+            "v30_pdf_timeline_label",
+            "v30_pdf_timeline_auto",
+            "v30_pdf_timeline_from_today",
+            "v30_pdf_timeline_next_30d",
+            "v30_pdf_timeline_custom",
+            "v30_pdf_orientation_label",
+            "v30_pdf_orientation_landscape",
+            "v30_pdf_orientation_portrait"
+        ]
+        for lang in [AppLanguage.en, .de, .fr, .it, .es] {
+            for key in pdfDialogKeys {
+                let val = ThingsStrings.shared.text(key, lang: lang)
+                XCTAssertFalse(val.isEmpty, "Missing \(key) in \(lang.rawValue)")
+                XCTAssertNotEqual(val, key, "Unresolved \(key) in \(lang.rawValue)")
+            }
+        }
+    }
 }
+
 
 

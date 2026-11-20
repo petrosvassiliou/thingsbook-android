@@ -4961,6 +4961,18 @@ private fun SmartViewNavigationStrip(
             }
         }
 
+        if (areas.isNotEmpty()) {
+            item(key = "nav_perspectives_areas_divider") {
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 3.dp)
+                        .width(1.dp)
+                        .height(20.dp)
+                        .background(colors.hairlineDivider)
+                )
+            }
+        }
+
         // 2. Areas -> Nested Projects Hierarchy (Projects live inside Areas in Thingsbook 3.0)
         areas.forEach { area ->
             item(key = "nav_area_${area.id}") {
@@ -7774,13 +7786,173 @@ private fun ThingsChromebookSidebar(
         HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
         Spacer(modifier = Modifier.height(2.dp))
 
-        // Perspectives + Areas -> Projects Hierarchy
+        // Perspectives Soft Bento Card + Explicit Areas -> Projects Hierarchy
+        val unassignedProjects = projects.filter { it.areaId == null }
         LazyColumn(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            // v3.0 Custom Saved Perspectives Section
-            item(key = "sidebar_perspectives_header") {
+            // 1. Self-Contained Soft Bento Perspectives Card (Dynamic Filter Views — never confused with Areas)
+            item(key = "sidebar_perspectives_card") {
+                val newPerspTitle = stringResource(R.string.v30_perspective_new)
+                val perspectivesSectionLabel = stringResource(R.string.v30_perspectives_section).uppercase()
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = colors.cardSurface.copy(alpha = 0.78f),
+                    border = BorderStroke(0.75.dp, colors.hairlineDivider)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(
+                                    if (savedPerspectives.isEmpty()) {
+                                        Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable {
+                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                onCreateNewPerspective()
+                                            }
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                                .padding(start = 4.dp, end = 2.dp, top = 1.dp, bottom = 1.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.AutoAwesomeMosaic,
+                                    contentDescription = null,
+                                    tint = colors.eveningMoonIndigo,
+                                    modifier = Modifier.size(13.5.dp)
+                                )
+                                Text(
+                                    text = perspectivesSectionLabel,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.6.sp,
+                                        color = colors.secondaryText
+                                    )
+                                )
+                                if (savedPerspectives.isNotEmpty()) {
+                                    Text(
+                                        text = savedPerspectives.size.toString(),
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = colors.tertiaryText
+                                        )
+                                    )
+                                }
+                            }
+                            ThingsHoverTooltip(text = newPerspTitle) {
+                                IconButton(
+                                    onClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onCreateNewPerspective()
+                                    },
+                                    modifier = Modifier.size(22.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Add,
+                                        contentDescription = newPerspTitle,
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        savedPerspectives.forEach { persp ->
+                            val isPerspSelected = navTarget == ActiveNavigationTarget.PerspectiveDetail(persp.id)
+                            val pCount = perspectiveCounts[persp.id] ?: 0
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(50))
+                                    .background(if (isPerspSelected) colors.thingsBlueSoft else Color.Transparent)
+                                    .clickable {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onSelectPerspective(persp.id)
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 5.5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(7.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.AutoAwesomeMosaic,
+                                        contentDescription = persp.title,
+                                        tint = if (isPerspSelected) colors.thingsBlue else colors.eveningMoonIndigo,
+                                        modifier = Modifier.size(14.5.dp)
+                                    )
+                                    Text(
+                                        text = persp.title,
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontWeight = if (isPerspSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                            color = if (isPerspSelected) colors.thingsBlue else colors.primaryText
+                                        ),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    if (pCount > 0) {
+                                        Text(
+                                            text = pCount.toString(),
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = if (isPerspSelected) colors.thingsBlue else colors.secondaryText
+                                        )
+                                    }
+                                    if (isPerspSelected) {
+                                        IconButton(
+                                            onClick = { onEditPerspective(persp) },
+                                            modifier = Modifier.size(20.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Edit,
+                                                contentDescription = stringResource(R.string.v30_perspective_edit),
+                                                tint = colors.thingsBlue,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Unconditional structural divider separating dynamic Perspectives from Workspace Areas
+            item(key = "sidebar_perspectives_divider") {
+                HorizontalDivider(
+                    color = colors.hairlineDivider,
+                    thickness = 0.75.dp,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+            }
+
+            // 2. Explicit Areas (BEREICHE) Section Header
+            item(key = "sidebar_areas_header") {
+                val manageAreasTitle = stringResource(R.string.areas_manage_title)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -7793,110 +7965,43 @@ private fun ThingsChromebookSidebar(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.AutoAwesomeMosaic,
+                            imageVector = Icons.Outlined.Folder,
                             contentDescription = null,
-                            tint = colors.thingsBlue,
+                            tint = colors.secondaryText,
                             modifier = Modifier.size(14.dp)
                         )
                         Text(
-                            text = stringResource(R.string.v30_perspectives_section),
-                            style = MaterialTheme.typography.labelMedium.copy(
+                            text = areasLabel.uppercase(),
+                            style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.6.sp,
                                 color = colors.secondaryText
                             )
                         )
+                        Text(
+                            text = "${areas.size}/${ThingsRepository.MAX_AREAS}",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Medium,
+                                color = colors.tertiaryText
+                            )
+                        )
                     }
-                    ThingsHoverTooltip(text = stringResource(R.string.v30_perspective_new)) {
+                    ThingsHoverTooltip(text = manageAreasTitle) {
                         IconButton(
                             onClick = {
                                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onCreateNewPerspective()
+                                onOpenAreaManager()
                             },
                             modifier = Modifier.size(22.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.Add,
-                                contentDescription = stringResource(R.string.v30_perspective_new),
-                                tint = colors.thingsBlue,
-                                modifier = Modifier.size(15.dp)
+                                contentDescription = manageAreasTitle,
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(14.5.dp)
                             )
                         }
                     }
-                }
-            }
-
-            items(savedPerspectives, key = { "sidebar_persp_${it.id}" }) { persp ->
-                val isPerspSelected = navTarget == ActiveNavigationTarget.PerspectiveDetail(persp.id)
-                val pCount = perspectiveCounts[persp.id] ?: 0
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(50))
-                        .background(if (isPerspSelected) colors.thingsBlueSoft else Color.Transparent)
-                        .clickable {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onSelectPerspective(persp.id)
-                        }
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        modifier = Modifier.weight(1f),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(7.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.AutoAwesomeMosaic,
-                            contentDescription = persp.title,
-                            tint = if (isPerspSelected) colors.thingsBlue else colors.secondaryText,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Text(
-                            text = persp.title,
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontWeight = if (isPerspSelected) FontWeight.SemiBold else FontWeight.Medium,
-                                color = if (isPerspSelected) colors.thingsBlue else colors.primaryText
-                            ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        if (pCount > 0) {
-                            Text(
-                                text = pCount.toString(),
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = if (isPerspSelected) colors.thingsBlue else colors.secondaryText
-                            )
-                        }
-                        if (isPerspSelected) {
-                            IconButton(
-                                onClick = { onEditPerspective(persp) },
-                                modifier = Modifier.size(20.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Edit,
-                                    contentDescription = stringResource(R.string.v30_perspective_edit),
-                                    tint = colors.thingsBlue,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (savedPerspectives.isNotEmpty()) {
-                item(key = "sidebar_perspectives_divider") {
-                    HorizontalDivider(
-                        color = colors.hairlineDivider,
-                        thickness = 0.75.dp,
-                        modifier = Modifier.padding(vertical = 3.dp)
-                    )
                 }
             }
 
@@ -8064,8 +8169,41 @@ private fun ThingsChromebookSidebar(
                 }
             }
 
-            // Legacy / Unassigned Projects (not yet assigned to an Area)
-            val unassignedProjects = projects.filter { it.areaId == null }
+            // 3. Legacy / Unassigned Standalone Projects with Explicit Section Header
+            if (unassignedProjects.isNotEmpty()) {
+                item(key = "sidebar_unassigned_projects_header") {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        HorizontalDivider(
+                            color = colors.hairlineDivider,
+                            thickness = 0.75.dp,
+                            modifier = Modifier.padding(vertical = 3.dp)
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.entity_projects).uppercase(),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.6.sp,
+                                    color = colors.secondaryText
+                                )
+                            )
+                            Text(
+                                text = unassignedProjects.size.toString(),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Medium,
+                                    color = colors.tertiaryText
+                                )
+                            )
+                        }
+                    }
+                }
+            }
             items(unassignedProjects, key = { "sidebar_proj_unassigned_${it.id}" }) { project ->
                 val selected = navTarget == ActiveNavigationTarget.ProjectDetail(project.id)
                 val projStatus = StalledProjectDetector.evaluateProject(project)

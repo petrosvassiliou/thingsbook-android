@@ -329,11 +329,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           </div>
 
-          {/* 3. Custom Perspectives Section */}
+          {/* 3. Custom Perspectives Soft Bento Card (Dynamic Filter Views — visually self-contained) */}
           {onCreatePerspective && (
             <div className="sidebar-perspectives-section" data-testid="sidebar-perspectives-section">
               <div className="sidebar-section-header">
-                <span className="sidebar-section-title">{t.perspectivesSectionTitle}</span>
+                <span className="sidebar-section-heading-group">
+                  <SlidersHorizontal
+                    size={12.5}
+                    className="sidebar-section-icon perspectives"
+                    aria-hidden="true"
+                  />
+                  <span className="sidebar-section-title">{t.perspectivesSectionTitle}</span>
+                  {sortedPerspectives.length > 0 && (
+                    <span className="sidebar-section-count">{sortedPerspectives.length}</span>
+                  )}
+                </span>
                 <button
                   type="button"
                   className="sidebar-section-plus"
@@ -367,7 +377,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       <SlidersHorizontal
                         size={14}
                         style={{
-                          color: isPerspActive ? 'var(--things-blue)' : 'var(--text-secondary)',
+                          color: isPerspActive ? 'var(--things-blue)' : 'var(--gemini-violet)',
                           flexShrink: 0
                         }}
                       />
@@ -405,109 +415,141 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           )}
 
-          {(activeAreas.length > 0 || unassignedProjects.length > 0) && (
-            <div className="sidebar-divider" />
-          )}
+          {/* Unconditional structural divider separating dynamic Perspectives from Workspace Areas */}
+          <div className="sidebar-divider" data-testid="sidebar-perspectives-areas-divider" />
 
-          {/* Areas -> Projects Collapsible Hierarchy with Linear Progress Bars */}
-          {activeAreas.map((area) => {
-            const isAreaActive = activeNav.kind === 'area' && activeNav.areaId === area.id;
-            const areaProjects = activeProjects.filter((p) => p.areaId === area.id);
-            const areaKey = `area-${area.id}`;
-            const isCollapsed = Boolean(collapsedAreas[area.id]);
+          {/* 4. Areas -> Projects Collapsible Hierarchy with Explicit Section Header */}
+          <div className="sidebar-areas-section" data-testid="sidebar-areas-section">
+            <div className="sidebar-section-header" data-testid="sidebar-areas-header">
+              <span className="sidebar-section-heading-group">
+                <Folder size={12.5} className="sidebar-section-icon areas" aria-hidden="true" />
+                <span className="sidebar-section-title">{t.entityAreas}</span>
+                <span className="sidebar-section-count">
+                  {activeAreas.length}/{MAX_AREAS}
+                </span>
+              </span>
+              <button
+                type="button"
+                className="sidebar-section-plus"
+                data-testid="sidebar-areas-header-action"
+                title={t.areasManageTitle}
+                aria-label={t.areasManageTitle}
+                onClick={() => {
+                  onCloseMobile();
+                  onOpenManageAreas();
+                }}
+              >
+                <Plus size={13.5} />
+              </button>
+            </div>
 
-            return (
-              <div key={area.id} style={{ marginBottom: 4 }}>
-                <div className="nav-row-wrap">
-                  <button
-                    type="button"
-                    className="area-chevron-btn"
-                    aria-label={area.title}
-                    onClick={() =>
-                      setCollapsedAreas((prev) => ({
-                        ...prev,
-                        [area.id]: !prev[area.id]
-                      }))
-                    }
-                  >
-                    {isCollapsed ? <ChevronRight size={13.5} /> : <ChevronDown size={13.5} />}
-                  </button>
-                  <button
-                    type="button"
-                    className={`nav-item area-row ${isAreaActive ? 'active' : ''} ${
-                      dragTargetKey === areaKey ? 'drag-over' : ''
-                    }`}
-                    title={`${t.entityArea}: ${area.title}`}
-                    onClick={() => onSelectNav({ kind: 'area', areaId: area.id })}
-                    {...makeDropHandlers(areaKey, { kind: 'area', areaId: area.id })}
-                  >
-                    <span className="nav-item-icon">
-                      <Folder
-                        size={15.5}
-                        style={{
-                          color: isAreaActive ? 'var(--things-blue)' : 'var(--text-secondary)'
-                        }}
-                      />
-                    </span>
-                    <span className="nav-item-label">{area.title}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="nav-inline-plus"
-                    title={`${t.entityNewProject} (${area.title})`}
-                    onClick={() => onCreateProjectInArea(area.id)}
-                  >
-                    <Plus size={14} />
-                  </button>
-                </div>
+            {activeAreas.map((area) => {
+              const isAreaActive = activeNav.kind === 'area' && activeNav.areaId === area.id;
+              const areaProjects = activeProjects.filter((p) => p.areaId === area.id);
+              const areaKey = `area-${area.id}`;
+              const isCollapsed = Boolean(collapsedAreas[area.id]);
 
-                {!isCollapsed &&
-                  areaProjects.map((proj) => {
-                    const isProjActive =
-                      activeNav.kind === 'project' && activeNav.projectId === proj.id;
-                    const prog = projectProgress(proj.id);
-                    const projKey = `proj-${proj.id}`;
-                    return (
-                      <button
-                        key={proj.id}
-                        type="button"
-                        className={`nav-item indented project-nav-item ${
-                          isProjActive ? 'active' : ''
-                        } ${dragTargetKey === projKey ? 'drag-over' : ''}`}
-                        title={proj.title}
-                        onClick={() => onSelectNav({ kind: 'project', projectId: proj.id })}
-                        {...makeDropHandlers(projKey, { kind: 'project', projectId: proj.id })}
-                      >
-                        <FolderKanban
-                          size={13.5}
+              return (
+                <div key={area.id} style={{ marginBottom: 4 }}>
+                  <div className="nav-row-wrap">
+                    <button
+                      type="button"
+                      className="area-chevron-btn"
+                      aria-label={area.title}
+                      onClick={() =>
+                        setCollapsedAreas((prev) => ({
+                          ...prev,
+                          [area.id]: !prev[area.id]
+                        }))
+                      }
+                    >
+                      {isCollapsed ? <ChevronRight size={13.5} /> : <ChevronDown size={13.5} />}
+                    </button>
+                    <button
+                      type="button"
+                      className={`nav-item area-row ${isAreaActive ? 'active' : ''} ${
+                        dragTargetKey === areaKey ? 'drag-over' : ''
+                      }`}
+                      title={`${t.entityArea}: ${area.title}`}
+                      onClick={() => onSelectNav({ kind: 'area', areaId: area.id })}
+                      {...makeDropHandlers(areaKey, { kind: 'area', areaId: area.id })}
+                    >
+                      <span className="nav-item-icon">
+                        <Folder
+                          size={15.5}
                           style={{
-                            color: isProjActive ? 'var(--things-blue)' : 'var(--text-muted)',
-                            flexShrink: 0
+                            color: isAreaActive ? 'var(--things-blue)' : 'var(--text-secondary)'
                           }}
                         />
-                        <span className="nav-item-label">{proj.title}</span>
-                        {proj.deadline != null && (
-                          <Flag
-                            size={11.5}
-                            style={{ color: 'var(--deadline-red)', flexShrink: 0 }}
-                          />
-                        )}
-                        <ProjectProgressRing
-                          completed={prog.done}
-                          total={prog.total}
-                          size={15}
-                          showCount={prog.total > 0}
-                        />
-                      </button>
-                    );
-                  })}
-              </div>
-            );
-          })}
+                      </span>
+                      <span className="nav-item-label">{area.title}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="nav-inline-plus"
+                      title={`${t.entityNewProject} (${area.title})`}
+                      onClick={() => onCreateProjectInArea(area.id)}
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
 
-          {/* Legacy / Unassigned Projects */}
+                  {!isCollapsed &&
+                    areaProjects.map((proj) => {
+                      const isProjActive =
+                        activeNav.kind === 'project' && activeNav.projectId === proj.id;
+                      const prog = projectProgress(proj.id);
+                      const projKey = `proj-${proj.id}`;
+                      return (
+                        <button
+                          key={proj.id}
+                          type="button"
+                          className={`nav-item indented project-nav-item ${
+                            isProjActive ? 'active' : ''
+                          } ${dragTargetKey === projKey ? 'drag-over' : ''}`}
+                          title={proj.title}
+                          onClick={() => onSelectNav({ kind: 'project', projectId: proj.id })}
+                          {...makeDropHandlers(projKey, { kind: 'project', projectId: proj.id })}
+                        >
+                          <FolderKanban
+                            size={13.5}
+                            style={{
+                              color: isProjActive ? 'var(--things-blue)' : 'var(--text-muted)',
+                              flexShrink: 0
+                            }}
+                          />
+                          <span className="nav-item-label">{proj.title}</span>
+                          {proj.deadline != null && (
+                            <Flag
+                              size={11.5}
+                              style={{ color: 'var(--deadline-red)', flexShrink: 0 }}
+                            />
+                          )}
+                          <ProjectProgressRing
+                            completed={prog.done}
+                            total={prog.total}
+                            size={15}
+                            showCount={prog.total > 0}
+                          />
+                        </button>
+                      );
+                    })}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* 5. Unassigned Standalone Projects with Explicit Section Header */}
           {unassignedProjects.length > 0 && (
-            <div style={{ marginTop: activeAreas.length > 0 ? 6 : 0 }}>
+            <div className="sidebar-unassigned-projects-section" data-testid="sidebar-unassigned-projects-section">
+              <div className="sidebar-divider" />
+              <div className="sidebar-section-header" data-testid="sidebar-unassigned-projects-header">
+                <span className="sidebar-section-heading-group">
+                  <FolderKanban size={12.5} className="sidebar-section-icon projects" aria-hidden="true" />
+                  <span className="sidebar-section-title">{t.entityProjects}</span>
+                  <span className="sidebar-section-count">{unassignedProjects.length}</span>
+                </span>
+              </div>
               {unassignedProjects.map((proj) => {
                 const isProjActive =
                   activeNav.kind === 'project' && activeNav.projectId === proj.id;

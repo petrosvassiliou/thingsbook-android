@@ -52,3 +52,33 @@ test('v3.0.0-beta.7 Sidebar footer uses a collision-free 2-row dock (+ New Proje
   assert.ok(sidebarTsx.includes('data-testid="sidebar-new-project-btn"'));
   assert.ok(sidebarTsx.includes('className="sidebar-footer-btn-main"'));
 });
+
+test('v3.0.0-beta.8 Sidebar clearly separates Perspectives (Soft Bento card) from Areas and Unassigned Projects with unconditional divider & explicit section headers', () => {
+  const css = fs.readFileSync(path.join(SRC_DIR, 'index.css'), 'utf8');
+  const sidebarTsx = fs.readFileSync(path.join(SRC_DIR, 'components/Sidebar.tsx'), 'utf8');
+
+  assert.ok(!css.includes('container-type:'), 'index.css must never use container-type:');
+
+  const perspCss = css.match(/\.sidebar-perspectives-section\s*\{([^}]*)\}/)?.[1] ?? '';
+  assert.ok(
+    perspCss.includes('background: var(--bg-card);'),
+    '.sidebar-perspectives-section must be styled as a self-contained Soft Bento card'
+  );
+  assert.ok(perspCss.includes('border: 1px solid var(--border-subtle);'));
+  assert.ok(perspCss.includes('border-radius: 12px;'));
+
+  const perspIdx = sidebarTsx.indexOf('data-testid="sidebar-perspectives-section"');
+  const divIdx = sidebarTsx.indexOf('data-testid="sidebar-perspectives-areas-divider"');
+  const areasIdx = sidebarTsx.indexOf('data-testid="sidebar-areas-section"');
+  const areasHeaderIdx = sidebarTsx.indexOf('data-testid="sidebar-areas-header"');
+
+  assert.ok(perspIdx > 0, 'Perspectives Soft Bento section must exist');
+  assert.ok(divIdx > perspIdx, 'Unconditional divider must follow Perspectives');
+  assert.ok(areasIdx > divIdx, 'Areas section must follow the divider');
+  assert.ok(areasHeaderIdx > areasIdx, 'Explicit Areas section header must precede Area rows');
+  assert.ok(sidebarTsx.includes('{t.entityAreas}'), 'Areas section header must render localized t.entityAreas');
+  assert.ok(
+    sidebarTsx.includes('data-testid="sidebar-unassigned-projects-header"'),
+    'Standalone unassigned projects must also render an explicit Projects section header'
+  );
+});

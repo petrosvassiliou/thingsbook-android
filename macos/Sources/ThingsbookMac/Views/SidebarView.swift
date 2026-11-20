@@ -104,29 +104,32 @@ public struct SidebarView: View {
                         weeklyReviewMiniCard
                     }
 
-                    // 2.5 Custom Saved Perspectives (v3.0)
+                    // 2.5 Custom Saved Perspectives Soft Bento Card (v3.0 Dynamic Filter Views)
                     perspectivesSection
 
-                    // 3. Areas -> Nested Projects Hierarchy (Workspace Folders + Linear Progress)
-                    if !store.areas.isEmpty {
-                        Divider()
-                            .padding(.vertical, 3)
-                            .padding(.horizontal, 4)
+                    // Unconditional structural divider separating dynamic Perspectives from Workspace Areas
+                    Divider()
+                        .padding(.vertical, 3)
+                        .padding(.horizontal, 4)
 
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(store.areas) { area in
-                                areaSection(area)
-                            }
+                    // 3. Areas -> Nested Projects Hierarchy with Explicit Section Header
+                    VStack(alignment: .leading, spacing: 6) {
+                        areasSectionHeader
+
+                        ForEach(store.areas) { area in
+                            areaSection(area)
                         }
                     }
 
-                    // 4. Legacy / Unassigned Projects
+                    // 4. Legacy / Unassigned Standalone Projects with Explicit Section Header
                     if !store.standaloneActiveProjects.isEmpty {
                         Divider()
                             .padding(.vertical, 3)
                             .padding(.horizontal, 4)
 
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            standaloneProjectsSectionHeader
+
                             ForEach(store.standaloneActiveProjects) { proj in
                                 projectRow(proj)
                             }
@@ -690,18 +693,20 @@ public struct SidebarView: View {
     private var perspectivesSection: some View {
         let perspectives = store.sortedPerspectives
         return VStack(alignment: .leading, spacing: 3) {
-            Divider()
-                .padding(.vertical, 3)
-                .padding(.horizontal, 4)
-
             HStack(spacing: 6) {
                 Image(systemName: "line.3.horizontal.decrease.circle")
                     .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Text(store.tr("v30_perspectives_section"))
-                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.geminiPurple)
+                Text(store.tr("v30_perspectives_section").uppercased())
+                    .font(.system(size: 10.5, weight: .bold))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+
+                if !perspectives.isEmpty {
+                    Text("\(perspectives.count)")
+                        .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                }
 
                 Spacer()
 
@@ -711,19 +716,81 @@ public struct SidebarView: View {
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ThingsMacPalette.accentBlue)
                         .frame(width: 18, height: 18)
                 }
                 .buttonStyle(.plain)
                 .thingsTooltip(store.tr("v30_perspective_new"))
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 6)
             .padding(.vertical, 2)
 
             ForEach(perspectives) { perspective in
                 perspectiveRow(perspective)
             }
         }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(ThingsMacPalette.cardSurface.opacity(0.68))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.75)
+        )
+    }
+
+    private var areasSectionHeader: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "folder")
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(ThingsMacPalette.anytimeTeal)
+            Text(store.tr("entity_areas").uppercased())
+                .font(.system(size: 10.5, weight: .bold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Text("\(store.areas.count)/\(ThingsSQLiteDatabase.maxAreas)")
+                .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                .foregroundStyle(.tertiary)
+
+            Spacer()
+
+            Button {
+                if store.areas.count < ThingsSQLiteDatabase.maxAreas {
+                    store.isNewAreaSheetPresented = true
+                } else {
+                    store.isAreaManagerPresented = true
+                }
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .thingsTooltip(store.tr("areas_manage_title"))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 2)
+    }
+
+    private var standaloneProjectsSectionHeader: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "square.stack.3d.up")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(store.tr("entity_projects").uppercased())
+                .font(.system(size: 10.5, weight: .bold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Text("\(store.standaloneActiveProjects.count)")
+                .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                .foregroundStyle(.tertiary)
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 2)
     }
 
     private func perspectiveRow(_ perspective: SavedPerspective) -> some View {
@@ -737,7 +804,7 @@ public struct SidebarView: View {
             HStack(spacing: 7) {
                 Image(systemName: selected ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                     .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .secondary)
+                    .foregroundStyle(selected ? ThingsMacPalette.accentBlue : ThingsMacPalette.geminiPurple)
                     .frame(width: 18)
 
                 Text(perspective.title)
@@ -753,8 +820,8 @@ public struct SidebarView: View {
                         .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .secondary)
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5.5)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
             .background(
                 Capsule(style: .continuous)
                     .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.15) : Color.clear)

@@ -33,4 +33,39 @@ class V3Beta7LayoutPolishTest {
         val macSidebarSwift = File(repoRoot, "macos/Sources/ThingsbookMac/Views/SidebarView.swift").readText()
         assertTrue(macSidebarSwift.contains("// 2-Row Bottom Sidebar Dock: Row 1 = Full-Width \"+ New Project ▾\" Menu, Row 2 = Spaced Utility Dock"))
     }
+
+    @Test
+    fun `v3_0_0_beta_8 sidebar clearly separates Perspectives Soft Bento card from Areas and Unassigned Projects across Android, ChromeOS PWA, and macOS`() {
+        val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
+        val repoRoot = if (appSrcMain.path.startsWith("app/")) File(".") else File("..")
+
+        // 1. Android: Soft Bento Perspectives card + unconditional divider + explicit Areas (BEREICHE) & Unassigned Projects headers
+        val smartViewKt = File(appSrcMain, "java/com/pv/thingsbook/ui/screens/ThingsSmartViewScreen.kt").readText()
+        val perspCardIdx = smartViewKt.indexOf("item(key = \"sidebar_perspectives_card\")")
+        val dividerIdx = smartViewKt.indexOf("item(key = \"sidebar_perspectives_divider\")")
+        val areasHeaderIdx = smartViewKt.indexOf("item(key = \"sidebar_areas_header\")")
+        val areaItemsIdx = smartViewKt.indexOf("items(areas, key = { \"sidebar_area_\${it.id}\" })")
+        assertTrue("Perspectives must be enclosed in sidebar_perspectives_card", perspCardIdx > 0)
+        assertTrue("Unconditional divider must follow sidebar_perspectives_card", dividerIdx > perspCardIdx)
+        assertTrue("Explicit sidebar_areas_header must follow divider", areasHeaderIdx > dividerIdx)
+        assertTrue("Area rows must follow sidebar_areas_header", areaItemsIdx > areasHeaderIdx)
+        assertFalse(
+            "Perspectives divider must NOT be gated on savedPerspectives.isNotEmpty()",
+            smartViewKt.contains("if (savedPerspectives.isNotEmpty()) {\n                item(key = \"sidebar_perspectives_divider\")")
+        )
+        assertTrue(smartViewKt.contains("item(key = \"sidebar_unassigned_projects_header\")"))
+        assertTrue(smartViewKt.contains("item(key = \"nav_perspectives_areas_divider\")"))
+
+        // 2. ChromeOS PWA: Soft Bento .sidebar-perspectives-section + unconditional divider + explicit sidebar-areas-header
+        val chromeSidebar = File(repoRoot, "chromeos-pwa/src/components/Sidebar.tsx").readText()
+        assertTrue(chromeSidebar.contains("data-testid=\"sidebar-perspectives-areas-divider\""))
+        assertTrue(chromeSidebar.contains("data-testid=\"sidebar-areas-header\""))
+        assertTrue(chromeSidebar.contains("data-testid=\"sidebar-unassigned-projects-header\""))
+
+        // 3. macOS: Soft Bento perspectivesSection + unconditional Divider + areasSectionHeader & standaloneProjectsSectionHeader
+        val macSidebarSwift = File(repoRoot, "macos/Sources/ThingsbookMac/Views/SidebarView.swift").readText()
+        assertTrue(macSidebarSwift.contains("private var areasSectionHeader: some View"))
+        assertTrue(macSidebarSwift.contains("private var standaloneProjectsSectionHeader: some View"))
+        assertTrue(macSidebarSwift.contains("store.tr(\"entity_areas\").uppercased()"))
+    }
 }

@@ -4044,9 +4044,20 @@ button.v2-stalled-pill:hover {
   color: var(--things-blue);
 }
 
-/* Bento Sidebar Perspectives Section */
+/* Bento Sidebar Perspectives Soft Bento Card & Explicit Section Headers */
 .sidebar-perspectives-section {
-  margin: 8px 0 4px;
+  margin: 6px 0 2px;
+  padding: 5px 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-areas-section,
+.sidebar-unassigned-projects-section {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -4056,15 +4067,46 @@ button.v2-stalled-pill:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 2px 8px 3px 10px;
+  padding: 2px 6px 3px 6px;
+  gap: 6px;
+}
+
+.sidebar-section-heading-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sidebar-section-icon {
+  flex-shrink: 0;
+}
+
+.sidebar-section-icon.perspectives {
+  color: var(--gemini-violet);
+}
+
+.sidebar-section-icon.areas {
+  color: var(--anytime-teal);
+}
+
+.sidebar-section-icon.projects {
+  color: var(--text-muted);
 }
 
 .sidebar-section-title {
-  font-size: 10.8px;
+  font-size: 10.6px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.055em;
+  color: var(--text-secondary);
+}
+
+.sidebar-section-count {
+  font-size: 10.5px;
+  font-weight: 600;
   color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .sidebar-section-plus {
@@ -4076,6 +4118,7 @@ button.v2-stalled-pill:hover {
   justify-content: center;
   color: var(--text-secondary);
   transition: background 0.12s ease, color 0.12s ease;
+  flex-shrink: 0;
 }
 
 .sidebar-section-plus:hover {

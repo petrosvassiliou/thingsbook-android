@@ -5152,7 +5152,13 @@ button.v2-stalled-pill:hover {
 .pdf-timeline-presets {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
+}
+
+.pdf-timeline-presets .chip-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding: 6px 12px;
 }
 
 .pdf-custom-dates-grid {
@@ -5231,6 +5237,8 @@ button.v2-stalled-pill:hover {
   font-size: 13px;
   font-weight: 680;
   color: var(--text-primary);
+  white-space: normal;
+  word-break: break-word;
 }
 
 .pdf-orientation-dim {
@@ -5244,8 +5252,14 @@ button.v2-stalled-pill:hover {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
   padding-top: 2px;
+}
+
+.pdf-export-modal-footer button {
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 

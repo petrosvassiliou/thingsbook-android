@@ -140,8 +140,10 @@ struct PhaseStartDatePillButton: View {
                     )
             )
             .contentShape(Capsule(style: .continuous))
+            .fixedSize(horizontal: true, vertical: false)
         }
         .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: false)
         .onHover { hovering in
             isHovering = hovering
         }
@@ -219,8 +221,10 @@ struct PhaseEndDatePillButton: View {
                     )
             )
             .contentShape(Capsule(style: .continuous))
+            .fixedSize(horizontal: true, vertical: false)
         }
         .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: false)
         .onHover { hovering in
             isHovering = hovering
         }
@@ -473,14 +477,13 @@ public struct ProjectBoardWorkspaceView: View {
                 }
 
                 if let heading {
-                    HStack(spacing: 6) {
+                    ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 5) {
                         PhaseStartDatePillButton(store: store, heading: heading)
                         PhaseEndDatePillButton(
                             store: store,
                             heading: heading,
                             hasOpenTasks: rawOpenCount > 0
                         )
-                        Spacer(minLength: 0)
                     }
                 }
             }
@@ -513,7 +516,7 @@ public struct ProjectBoardWorkspaceView: View {
                         .font(.system(size: 11, weight: .semibold))
                     Text(store.tr("entity_new_todo"))
                         .font(.system(size: 12, weight: .semibold))
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                     Spacer()
                 }
                 .foregroundStyle(.secondary)
@@ -1226,7 +1229,9 @@ public struct ProjectRoadmapWorkspaceView: View {
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 11)
             .padding(.vertical, 5.5)
             .background(
@@ -1253,22 +1258,28 @@ public struct ProjectRoadmapWorkspaceView: View {
                     } label: {
                         Text(store.tr("v30_roadmap_shift_earlier"))
                             .font(.system(size: 11.5, weight: .semibold))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                             .padding(.horizontal, 8.5)
                             .padding(.vertical, 4.5)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .fixedSize(horizontal: true, vertical: false)
 
                     Button {
                         store.shiftTaskRoadmapDates(selectedTask, deltaDays: 1)
                     } label: {
                         Text(store.tr("v30_roadmap_shift_later"))
                             .font(.system(size: 11.5, weight: .semibold))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                             .padding(.horizontal, 8.5)
                             .padding(.vertical, 4.5)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .fixedSize(horizontal: true, vertical: false)
                 }
             }
 
@@ -2257,10 +2268,12 @@ struct RoadmapPDFExportSheetView: View {
                                     .font(.system(size: 11, weight: .semibold))
                                 Text(store.tr("v30_pdf_select_all_phases"))
                                     .font(.system(size: 11.5, weight: .semibold))
+                                    .fixedSize(horizontal: true, vertical: false)
                             }
                             .foregroundStyle(ThingsMacPalette.accentBlue)
                         }
                         .buttonStyle(.plain)
+                        .fixedSize(horizontal: true, vertical: false)
                     }
 
                     ScrollView {
@@ -2302,32 +2315,34 @@ struct RoadmapPDFExportSheetView: View {
                     .font(.system(size: 12.5, weight: .bold))
                     .foregroundStyle(.secondary)
 
-                HStack(spacing: 6) {
+                ThingsFlowLayout(horizontalSpacing: 8, verticalSpacing: 8) {
                     ForEach(RoadmapPDFTimelinePreset.allCases) { preset in
                         let isSelected = timelinePreset == preset
                         Button {
                             applyTimelinePreset(preset)
                         } label: {
                             Text(label(for: preset))
-                                .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
+                                .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
                                 .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
                                 .foregroundStyle(isSelected ? .white : .primary)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .frame(maxWidth: .infinity)
+                                .padding(.horizontal, 13)
+                                .padding(.vertical, 7)
                                 .background(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    RoundedRectangle(cornerRadius: 8.5, style: .continuous)
                                         .fill(isSelected ? ThingsMacPalette.accentBlue : ThingsMacPalette.subtleContainer)
                                 )
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    RoundedRectangle(cornerRadius: 8.5, style: .continuous)
                                         .strokeBorder(
                                             isSelected ? ThingsMacPalette.accentBlue : Color.primary.opacity(0.08),
                                             lineWidth: 0.85
                                         )
                                 )
+                                .contentShape(RoundedRectangle(cornerRadius: 8.5, style: .continuous))
                         }
                         .buttonStyle(.plain)
+                        .fixedSize(horizontal: true, vertical: false)
                     }
                 }
 
@@ -2415,6 +2430,7 @@ struct RoadmapPDFExportSheetView: View {
                 Button(store.tr("action_cancel")) {
                     isPresented = false
                 }
+                .fixedSize(horizontal: true, vertical: false)
                 .keyboardShortcut(.cancelAction)
 
                 Button {
@@ -2435,17 +2451,19 @@ struct RoadmapPDFExportSheetView: View {
                             .font(.system(size: 11.5, weight: .semibold))
                         Text(store.tr("v30_roadmap_export_pdf"))
                             .font(.system(size: 12.5, weight: .semibold))
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                     .padding(.horizontal, 6)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(ThingsMacPalette.accentBlue)
+                .fixedSize(horizontal: true, vertical: false)
                 .disabled(!canExport)
                 .keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)
-        .frame(width: 520)
+        .frame(minWidth: 560, idealWidth: 580)
         .background(ThingsMacPalette.canvasBackground)
     }
 
@@ -2541,11 +2559,11 @@ struct RoadmapPDFExportSheetView: View {
                     Text(store.tr(titleKey))
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(isSelected ? ThingsMacPalette.accentBlue : .primary)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                     Text(sizeSubtitle)
                         .font(.system(size: 10.5, weight: .medium, design: .rounded))
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer(minLength: 0)

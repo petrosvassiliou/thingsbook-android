@@ -17,8 +17,8 @@ android {
         applicationId = "com.pv.thingsbook"
         minSdk = 26
         targetSdk = 35
-        versionCode = 90
-        versionName = "3.0.0-alpha.13"
+        versionCode = 91
+        versionName = "3.0.0-alpha.14"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

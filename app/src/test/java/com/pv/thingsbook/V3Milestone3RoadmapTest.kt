@@ -215,8 +215,7 @@ class V3Milestone3RoadmapTest {
         assertEquals(today.plusDays(3).toEpochDay(), inferredBar.startEpochDay)
         assertEquals(today.plusDays(8).toEpochDay(), inferredBar.endEpochDay)
 
-        val unscheduledLane = layout.lanes.first { it.heading?.id == "h-unscheduled" }
-        assertNull(unscheduledLane.phaseBar)
+        assertNull(layout.lanes.firstOrNull { it.heading?.id == "h-unscheduled" })
         assertEquals(listOf("h-unscheduled"), layout.unscheduledHeadings.map { it.id })
         assertEquals(listOf("c-unsched"), layout.unscheduledTasks.map { it.id })
     }

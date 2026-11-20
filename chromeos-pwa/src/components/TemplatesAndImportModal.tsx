@@ -1,17 +1,22 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
+  ArrowLeftRight,
   CheckSquare,
   ClipboardList,
+  Download,
   FileCode2,
+  FileSpreadsheet,
   Folder,
   FolderPlus,
   Heading,
   Sparkles,
   Trash2,
+  Upload,
   X
 } from 'lucide-react';
 import {
   type AreaRecord,
+  type ProjectRecord,
   type ProjectTemplate,
   type ProjectTemplateBlueprint,
   type SupportedLang
@@ -21,6 +26,10 @@ import {
   parseProjectOutlineInput,
   parseTemplateBlueprintJson
 } from '../domain/v2Utils';
+import {
+  importExternalProjectAuto,
+  type ExternalExportFormat
+} from '../data/externalProjectCodec';
 import { localDb } from '../data/localDb';
 import type { TranslationStrings } from '../i18n/translations';
 
@@ -97,12 +106,14 @@ Modernizar páginas de destino, optimizar Lighthouse y lanzar documentación cla
 - [ ] Ejecutar revisión de accesibilidad y QA @30m`
 };
 
-export type TemplatesModalTab = 'gallery' | 'import';
+export type TemplatesModalTab = 'gallery' | 'import' | 'external';
 
 interface TemplatesAndImportModalProps {
   initialTab?: TemplatesModalTab;
   defaultAreaId?: string | null;
+  activeProjectId?: string | null;
   areas: AreaRecord[];
+  projects?: ProjectRecord[];
   savedTemplates: ProjectTemplate[];
   lang: SupportedLang;
   t: TranslationStrings;
@@ -138,7 +149,9 @@ function countBlueprintItems(bp: ProjectTemplateBlueprint): {
 export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = ({
   initialTab = 'gallery',
   defaultAreaId = null,
+  activeProjectId = null,
   areas,
+  projects = [],
   savedTemplates,
   lang,
   t,
@@ -151,10 +164,45 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
   const [outlineText, setOutlineText] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const asanaFileInputRef = useRef<HTMLInputElement | null>(null);
+  const plannerFileInputRef = useRef<HTMLInputElement | null>(null);
+
   const starterTemplates = useMemo(() => getStarterGtdTemplates(lang), [lang]);
   const sampleMarkdownOutline = SAMPLE_MARKDOWN_OUTLINES[lang] ?? SAMPLE_MARKDOWN_OUTLINES.en;
 
   const activeAreas = useMemo(() => areas.filter((a) => !a.isDeleted), [areas]);
+  const activeProjects = useMemo(
+    () =>
+      projects
+        .filter((p) => !p.isDeleted && p.status === 'ACTIVE')
+        .sort((a, b) => a.sortOrder - b.sortOrder || b.updatedAt - a.updatedAt),
+    [projects]
+  );
+
+  const [selectedExportProjectId, setSelectedExportProjectId] = useState<string>(() => {
+    if (
+      activeProjectId &&
+      projects.some((p) => !p.isDeleted && p.status === 'ACTIVE' && p.id === activeProjectId)
+    ) {
+      return activeProjectId;
+    }
+    const firstActive = projects.find((p) => !p.isDeleted && p.status === 'ACTIVE');
+    return firstActive?.id ?? '';
+  });
+
+  const effectiveExportProjectId = useMemo(() => {
+    if (
+      selectedExportProjectId &&
+      activeProjects.some((p) => p.id === selectedExportProjectId)
+    ) {
+      return selectedExportProjectId;
+    }
+    if (activeProjectId && activeProjects.some((p) => p.id === activeProjectId)) {
+      return activeProjectId;
+    }
+    return activeProjects[0]?.id ?? '';
+  }, [selectedExportProjectId, activeProjects, activeProjectId]);
+
   const visibleSavedTemplates = useMemo(
     () =>
       savedTemplates
@@ -204,6 +252,47 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
     });
   };
 
+  const handleExternalFileSelected = async (file: File | null | undefined) => {
+    if (!file || busy) return;
+    setBusy(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const parsed = await importExternalProjectAuto(new Uint8Array(buf), file.name);
+      const res = await localDb.importExternalProject(parsed, selectedAreaId);
+      onToast(`✓ ${t.externalImportSuccessTitle(res.title, res.taskCount)}`);
+      onCreatedProject(res.projectId);
+      onClose();
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Import failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleExternalExport = async (format: ExternalExportFormat) => {
+    if (!effectiveExportProjectId || busy) return;
+    setBusy(true);
+    try {
+      const res = await localDb.exportProjectExternal(effectiveExportProjectId, format);
+      const blobBytes = new Uint8Array(res.bytes.byteLength);
+      blobBytes.set(res.bytes);
+      const blob = new Blob([blobBytes], { type: res.mimeType });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = res.filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      onToast(`✓ ${t.externalExportSuccessTitle(res.projectTitle)}`);
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Export failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
@@ -214,7 +303,7 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
         <div className="modal-header">
           <div>
             <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <ClipboardList size={19} style={{ color: 'var(--things-blue)' }} />
+              <ClipboardList size={19} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
               <span>{t.templatesModalTitle}</span>
             </h3>
             <div style={{ fontSize: 12.2, color: 'var(--text-secondary)', marginTop: 2 }}>
@@ -226,25 +315,40 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
           </button>
         </div>
 
-        {/* Segmented Tabs: Gallery | Import Markdown / Outline */}
-        <div className="v2-segmented-bar" style={{ marginBottom: 12 }}>
+        {/* Segmented Tabs: Gallery | Import Markdown / Outline | Asana & Planner */}
+        <div
+          className="v2-segmented-bar"
+          style={{ marginBottom: 12, flexWrap: 'wrap' }}
+        >
           <button
             type="button"
             data-testid="templates-tab-gallery"
             className={`v2-segmented-btn ${tab === 'gallery' ? 'active' : ''}`}
+            style={{ whiteSpace: 'normal' }}
             onClick={() => setTab('gallery')}
           >
-            <ClipboardList size={14} />
+            <ClipboardList size={14} style={{ flexShrink: 0 }} />
             <span>{t.templatesTabGallery}</span>
           </button>
           <button
             type="button"
             data-testid="templates-tab-import"
             className={`v2-segmented-btn ${tab === 'import' ? 'active' : ''}`}
+            style={{ whiteSpace: 'normal' }}
             onClick={() => setTab('import')}
           >
-            <FileCode2 size={14} />
+            <FileCode2 size={14} style={{ flexShrink: 0 }} />
             <span>{t.templatesTabImport}</span>
+          </button>
+          <button
+            type="button"
+            data-testid="templates-tab-external"
+            className={`v2-segmented-btn ${tab === 'external' ? 'active' : ''}`}
+            style={{ whiteSpace: 'normal' }}
+            onClick={() => setTab('external')}
+          >
+            <ArrowLeftRight size={14} style={{ flexShrink: 0 }} />
+            <span>{t.externalImportExportTab}</span>
           </button>
         </div>
 
@@ -335,7 +439,12 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
                     <button
                       type="button"
                       className="btn-primary"
-                      style={{ width: '100%', justifyContent: 'center' }}
+                      style={{
+                        width: '100%',
+                        justifyContent: 'center',
+                        whiteSpace: 'normal',
+                        height: 'auto'
+                      }}
                       disabled={busy}
                       onClick={() =>
                         void handleInstantiateBlueprint({
@@ -346,7 +455,7 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
                         })
                       }
                     >
-                      <FolderPlus size={14} />
+                      <FolderPlus size={14} style={{ flexShrink: 0 }} />
                       <span>{t.templatesCreateProjectBtn}</span>
                     </button>
                   </div>
@@ -404,7 +513,13 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
                       <button
                         type="button"
                         className="btn-primary"
-                        style={{ width: '100%', justifyContent: 'center', marginTop: 'auto' }}
+                        style={{
+                          width: '100%',
+                          justifyContent: 'center',
+                          marginTop: 'auto',
+                          whiteSpace: 'normal',
+                          height: 'auto'
+                        }}
                         disabled={busy}
                         onClick={() =>
                           void handleInstantiateBlueprint({
@@ -416,7 +531,7 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
                           })
                         }
                       >
-                        <FolderPlus size={14} />
+                        <FolderPlus size={14} style={{ flexShrink: 0 }} />
                         <span>{t.templatesCreateProjectBtn}</span>
                       </button>
                     </div>
@@ -495,17 +610,24 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
               style={{
                 display: 'flex',
                 justifyContent: 'flex-end',
+                flexWrap: 'wrap',
                 gap: 8,
                 marginTop: 14
               }}
             >
-              <button type="button" className="btn-secondary" onClick={onClose}>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ whiteSpace: 'normal', height: 'auto' }}
+                onClick={onClose}
+              >
                 {t.actionCancel}
               </button>
               <button
                 type="button"
                 className="btn-primary"
                 data-testid="create-from-outline-btn"
+                style={{ whiteSpace: 'normal', height: 'auto' }}
                 disabled={
                   busy ||
                   !parsedOutline ||
@@ -515,9 +637,160 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
                 }
                 onClick={() => void handleImportCreate()}
               >
-                <FolderPlus size={15} />
+                <FolderPlus size={15} style={{ flexShrink: 0 }} />
                 <span>{t.templatesImportCreateBtn}</span>
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: ASANA & MICROSOFT PLANNER IMPORT / EXPORT */}
+        {tab === 'external' && (
+          <div className="v2-templates-scroll v3-external-stack">
+            {/* Import Section */}
+            <div className="v3-external-bento-card">
+              <div className="v2-section-label" style={{ marginBottom: 0 }}>
+                {t.externalImportSection}
+              </div>
+              <p className="v3-external-desc">{t.externalImportDesc}</p>
+
+              <input
+                ref={asanaFileInputRef}
+                type="file"
+                data-testid="import-asana-file-input"
+                accept=".csv,.json,text/csv,application/json"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  void handleExternalFileSelected(file);
+                }}
+              />
+              <input
+                ref={plannerFileInputRef}
+                type="file"
+                data-testid="import-planner-file-input"
+                accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  void handleExternalFileSelected(file);
+                }}
+              />
+
+              <div className="v3-external-btn-grid">
+                <button
+                  type="button"
+                  data-testid="import-asana-btn"
+                  className="v3-external-action-btn primary"
+                  disabled={busy}
+                  onClick={() => asanaFileInputRef.current?.click()}
+                >
+                  <Upload size={15} style={{ flexShrink: 0 }} />
+                  <span>{t.importAsanaBtn}</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="import-planner-btn"
+                  className="v3-external-action-btn primary"
+                  disabled={busy}
+                  onClick={() => plannerFileInputRef.current?.click()}
+                >
+                  <FileSpreadsheet size={15} style={{ flexShrink: 0 }} />
+                  <span>{t.importPlannerBtn}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Export Section */}
+            <div className="v3-external-bento-card">
+              <div className="v2-section-label" style={{ marginBottom: 0 }}>
+                {t.externalExportSection}
+              </div>
+
+              {activeProjects.length === 0 ? (
+                <div className="v2-templates-empty" data-testid="external-no-projects">
+                  {t.externalNoProjects}
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label
+                      htmlFor="external-export-project-select"
+                      style={{
+                        display: 'block',
+                        fontSize: 12,
+                        fontWeight: 620,
+                        color: 'var(--text-secondary)',
+                        marginBottom: 5
+                      }}
+                    >
+                      {t.externalSelectProject}
+                    </label>
+                    <select
+                      id="external-export-project-select"
+                      data-testid="external-export-project-select"
+                      className="text-field"
+                      value={effectiveExportProjectId}
+                      disabled={busy}
+                      onChange={(e) => setSelectedExportProjectId(e.target.value)}
+                    >
+                      {activeProjects.map((proj) => (
+                        <option key={proj.id} value={proj.id}>
+                          {proj.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="v3-external-btn-grid">
+                    <button
+                      type="button"
+                      data-testid="export-asana-csv-btn"
+                      className="v3-external-action-btn"
+                      disabled={busy || !effectiveExportProjectId}
+                      onClick={() => void handleExternalExport('asana-csv')}
+                    >
+                      <Download size={15} style={{ flexShrink: 0, color: 'var(--things-blue)' }} />
+                      <span>{t.exportAsanaCsvBtn}</span>
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="export-asana-json-btn"
+                      className="v3-external-action-btn"
+                      disabled={busy || !effectiveExportProjectId}
+                      onClick={() => void handleExternalExport('asana-json')}
+                    >
+                      <FileCode2 size={15} style={{ flexShrink: 0, color: 'var(--things-blue)' }} />
+                      <span>{t.exportAsanaJsonBtn}</span>
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="export-planner-xlsx-btn"
+                      className="v3-external-action-btn"
+                      disabled={busy || !effectiveExportProjectId}
+                      onClick={() => void handleExternalExport('planner-xlsx')}
+                    >
+                      <FileSpreadsheet
+                        size={15}
+                        style={{ flexShrink: 0, color: 'var(--things-blue)' }}
+                      />
+                      <span>{t.exportPlannerXlsxBtn}</span>
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="export-planner-csv-btn"
+                      className="v3-external-action-btn"
+                      disabled={busy || !effectiveExportProjectId}
+                      onClick={() => void handleExternalExport('planner-csv')}
+                    >
+                      <Download size={15} style={{ flexShrink: 0, color: 'var(--things-blue)' }} />
+                      <span>{t.exportPlannerCsvBtn}</span>
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -525,3 +798,4 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
     </div>
   );
 };
+

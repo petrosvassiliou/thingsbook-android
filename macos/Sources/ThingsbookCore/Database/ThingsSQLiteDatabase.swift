@@ -4105,6 +4105,228 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         return rows.count
     }
 
+    // MARK: - v3.0 Asana & Microsoft Planner External Project Import / Export
+
+    @discardableResult
+    public func importExternalProject(
+        _ parsed: ExternalImportedProject,
+        areaId: String? = nil,
+        workspaceId: String? = nil,
+        calendar: Calendar = .current
+    ) throws -> (project: Project, importedTaskCount: Int) {
+        let result = try queue.sync { () -> (Project, Int) in
+            let now = nowMillis()
+            let todayEpoch = DateEpochConverter.startOfDayMillis(for: Date(), calendar: calendar)
+
+            return try inTransactionLocked {
+                let activeAreas = try fetchActiveAreasLocked()
+                let validAreaIds = Set(activeAreas.map(\.id))
+                let validatedAreaId = areaId.flatMap { validAreaIds.contains($0) ? $0 : nil }
+
+                var tags = try fetchActiveTagsLocked()
+                func resolveTagIds(_ rawNames: [String]) throws -> [String] {
+                    var ids: [String] = []
+                    var seen = Set<String>()
+                    for raw in rawNames {
+                        let clean = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !clean.isEmpty else { continue }
+                        let tagId: String
+                        if let existing = tags.first(where: { $0.title.caseInsensitiveCompare(clean) == .orderedSame }) {
+                            tagId = existing.id
+                        } else {
+                            let nextSort = (tags.map(\.sortOrder).max() ?? 0.0) + 100.0
+                            let newTag = Tag(
+                                id: UUID().uuidString,
+                                title: clean,
+                                sortOrder: nextSort,
+                                createdAt: now,
+                                updatedAt: now
+                            )
+                            try upsertTagLocked(newTag, isDirty: true)
+                            tags.append(newTag)
+                            tagId = newTag.id
+                        }
+                        if seen.insert(tagId).inserted {
+                            ids.append(tagId)
+                        }
+                    }
+                    return ids
+                }
+
+                let cleanProjTitle = parsed.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                let resolvedProjTitle = cleanProjTitle.isEmpty ? "Imported Project" : cleanProjTitle
+                let projectTagIds = try resolveTagIds(parsed.tagNames)
+                let effectiveProjWorkspace = (workspaceId ?? parsed.workspaceId)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let normalizedProjWorkspace = (effectiveProjWorkspace?.isEmpty == false) ? effectiveProjWorkspace : nil
+
+                let newProjId = UUID().uuidString
+                let maxProjOrd = try maxSortOrderLocked(table: "projects")
+                let project = Project(
+                    id: newProjId,
+                    areaId: validatedAreaId,
+                    title: resolvedProjTitle,
+                    notes: parsed.notes,
+                    status: .active,
+                    scheduleState: .anytime,
+                    lastReviewedAt: now,
+                    sortOrder: maxProjOrd + 1000.0,
+                    tagIds: projectTagIds,
+                    workspaceId: normalizedProjWorkspace,
+                    createdAt: now,
+                    updatedAt: now
+                )
+                try upsertProjectLocked(project, isDirty: true)
+
+                var nextTaskOrder = (try maxSortOrderLocked(table: "tasks")) + 1000.0
+                var importedTaskCount = 0
+
+                func insertImportedTask(_ spec: ExternalImportedTask, headingId: String?) throws {
+                    let cleanTitle = spec.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !cleanTitle.isEmpty else { return }
+
+                    let resolvedTagIds = try resolveTagIds(spec.tagNames)
+                    let scheduleState: ScheduleState
+                    if spec.status == .open, let w = spec.whenDate {
+                        scheduleState = w <= todayEpoch ? .today : .upcoming
+                    } else {
+                        scheduleState = .anytime
+                    }
+
+                    let resolvedCompletedAt: Int64?
+                    if spec.status == .completed || spec.status == .canceled {
+                        resolvedCompletedAt = spec.completedAt ?? now
+                    } else {
+                        resolvedCompletedAt = nil
+                    }
+
+                    let tid = UUID().uuidString
+                    let checklists: [ChecklistItem] = spec.checklistItems.enumerated().compactMap { (cIdx, chkSpec) in
+                        let cleanChkTitle = chkSpec.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !cleanChkTitle.isEmpty else { return nil }
+                        return ChecklistItem(
+                            id: UUID().uuidString,
+                            taskId: tid,
+                            title: cleanChkTitle,
+                            isCompleted: chkSpec.isCompleted,
+                            sortOrder: Double((cIdx + 1) * 100),
+                            createdAt: now,
+                            updatedAt: now
+                        )
+                    }
+
+                    let rawAssignee = spec.assigneeId?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let normalizedAssignee = (rawAssignee?.isEmpty == false) ? rawAssignee : nil
+                    let rawTaskWorkspace = (spec.workspaceId ?? normalizedProjWorkspace)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    let normalizedTaskWorkspace = (rawTaskWorkspace?.isEmpty == false) ? rawTaskWorkspace : nil
+
+                    let task = TaskItem(
+                        id: tid,
+                        title: cleanTitle,
+                        notes: spec.notes,
+                        status: spec.status,
+                        scheduleState: scheduleState,
+                        whenDate: spec.whenDate,
+                        deadline: spec.deadline,
+                        completedAt: resolvedCompletedAt,
+                        projectId: newProjId,
+                        headingId: headingId,
+                        areaId: validatedAreaId,
+                        sortOrder: nextTaskOrder,
+                        isPinned: spec.isPinned,
+                        effortLevel: spec.effortLevel?.rawValue,
+                        workspaceId: normalizedTaskWorkspace,
+                        assigneeId: normalizedAssignee,
+                        checklistItems: checklists,
+                        createdAt: now,
+                        updatedAt: now
+                    )
+                    nextTaskOrder += 1000.0
+                    try upsertTaskLocked(task, tagIds: resolvedTagIds, isDirty: true)
+
+                    for chk in checklists {
+                        try upsertChecklistItemLocked(chk, isDirty: true)
+                    }
+                    importedTaskCount += 1
+                }
+
+                for spec in parsed.ungroupedTasks {
+                    try insertImportedTask(spec, headingId: nil)
+                }
+
+                for (idx, phase) in parsed.phases.enumerated() {
+                    let cleanPhaseTitle = phase.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if cleanPhaseTitle.isEmpty {
+                        for spec in phase.tasks {
+                            try insertImportedTask(spec, headingId: nil)
+                        }
+                    } else {
+                        let heading = Heading(
+                            id: UUID().uuidString,
+                            projectId: newProjId,
+                            title: cleanPhaseTitle,
+                            sortOrder: Double((idx + 1) * 1000),
+                            isArchived: false,
+                            startDate: phase.startDate,
+                            endDate: phase.endDate,
+                            createdAt: now,
+                            updatedAt: now
+                        )
+                        try upsertHeadingLocked(heading, isDirty: true)
+                        for spec in phase.tasks {
+                            try insertImportedTask(spec, headingId: heading.id)
+                        }
+                    }
+                }
+
+                let persistedProject = try fetchProjectByIdLocked(newProjId) ?? project
+                return (persistedProject, importedTaskCount)
+            }
+        }
+        notifyMutation()
+        return (project: result.0, importedTaskCount: result.1)
+    }
+
+    public func exportProjectExternal(
+        projectId: String,
+        format: ExternalExportFormat,
+        calendar: Calendar = .current
+    ) throws -> ExternalExportedFile {
+        try queue.sync {
+            guard let project = try fetchProjectByIdLocked(projectId), !project.isDeleted else {
+                throw ThingsDatabaseError.notFound(projectId)
+            }
+
+            let escapedPid = projectId.replacingOccurrences(of: "'", with: "''")
+            let headings = try fetchHeadingsWhereLocked(
+                "project_id = '\(escapedPid)' AND is_deleted = 0 AND is_archived = 0"
+            )
+            let activeTags = try fetchActiveTagsLocked()
+            let tagsById = Dictionary(uniqueKeysWithValues: activeTags.map { ($0.id, $0) })
+            let checklistsByTask = try fetchAllActiveChecklistItemsByTaskLocked()
+            let tagIdsByTask = try fetchAllTaskTagIdsLocked()
+
+            let tasks = try fetchTasksWhereLocked(
+                whereClause: "project_id = ? AND is_deleted = 0",
+                bind: { stmt in self.bindText(stmt, 1, projectId) },
+                orderBy: "sort_order ASC, created_at ASC",
+                tagsById: tagsById,
+                tagIdsByTask: tagIdsByTask,
+                checklistsByTask: checklistsByTask
+            )
+
+            return try ExternalProjectCodec.exportProject(
+                project: project,
+                headings: headings,
+                tasks: tasks,
+                format: format,
+                tagsById: tagsById,
+                calendar: calendar
+            )
+        }
+    }
+
     // MARK: - Full `.tbbackup` Export & Atomic Restore
 
     public func buildBackupPayload(preferences: AppPreferences, appVersionName: String = AppUpdateService.currentVersion) throws -> ThingsbookBackupPayload {

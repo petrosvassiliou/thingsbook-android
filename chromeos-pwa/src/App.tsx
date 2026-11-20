@@ -4295,6 +4295,7 @@ export const App: React.FC = () => {
                         type="button"
                         className="chip-btn"
                         data-testid="project-save-template-btn"
+                        style={{ whiteSpace: 'normal', height: 'auto' }}
                         title={t.projectSaveAsTemplateBtn}
                         onClick={async () => {
                           const tpl = await localDb.saveProjectAsTemplate(project.id);
@@ -4303,8 +4304,26 @@ export const App: React.FC = () => {
                           }
                         }}
                       >
-                        <ClipboardList size={12.5} />
+                        <ClipboardList size={12.5} style={{ flexShrink: 0 }} />
                         <span>{t.projectSaveAsTemplateBtn}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="chip-btn"
+                        data-testid="project-external-import-export-btn"
+                        style={{ whiteSpace: 'normal', height: 'auto' }}
+                        title={t.importAsanaPlannerLabel}
+                        onClick={() =>
+                          setTemplatesModal({
+                            open: true,
+                            tab: 'external',
+                            areaId: project.areaId
+                          })
+                        }
+                      >
+                        <FolderInput size={12.5} style={{ flexShrink: 0 }} />
+                        <span>{t.externalImportExportTab}</span>
                       </button>
                     </div>
                   </div>
@@ -5539,7 +5558,9 @@ export const App: React.FC = () => {
         <TemplatesAndImportModal
           initialTab={templatesModal.tab}
           defaultAreaId={templatesModal.areaId}
+          activeProjectId={activeNav.kind === 'project' ? activeNav.projectId : null}
           areas={snapshot.areas}
+          projects={snapshot.projects}
           savedTemplates={snapshot.projectTemplates}
           lang={lang}
           t={t}

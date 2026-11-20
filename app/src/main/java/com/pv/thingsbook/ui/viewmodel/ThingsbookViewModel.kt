@@ -23,6 +23,8 @@ import com.pv.thingsbook.data.backup.BackupPasswordRequiredException
 import com.pv.thingsbook.data.backup.BackupPreferencesDto
 import com.pv.thingsbook.data.backup.InvalidBackupPasswordException
 import com.pv.thingsbook.data.calendar.DeviceCalendarRepository
+import com.pv.thingsbook.data.external.ExternalExportFormat
+import com.pv.thingsbook.data.external.ExternalProjectCodec
 import com.pv.thingsbook.data.local.ThingsDatabase
 import com.pv.thingsbook.data.notifications.DailyDigestConfig
 import com.pv.thingsbook.data.notifications.ReminderScheduler
@@ -4236,7 +4238,7 @@ class ThingsbookViewModel @Inject constructor(
     val templatesModalDefaultAreaId: StateFlow<String?> = _templatesModalDefaultAreaId.asStateFlow()
 
     fun openTemplatesModal(initialTab: Int = 0, defaultAreaId: String? = null) {
-        _templatesModalInitialTab.value = initialTab.coerceIn(0, 1)
+        _templatesModalInitialTab.value = initialTab.coerceIn(0, 2)
         _templatesModalDefaultAreaId.value = defaultAreaId
         _isTemplatesModalOpen.value = true
     }
@@ -4290,6 +4292,134 @@ class ThingsbookViewModel @Inject constructor(
             _isTemplatesModalOpen.value = false
             _expandedTaskId.value = null
             _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(createdProjectId)
+        }
+    }
+
+    private class PreparedExternalExport(
+        val fileName: String,
+        val mimeType: String,
+        val bytes: ByteArray,
+        val projectTitle: String
+    )
+
+    fun importExternalProjectFromUri(
+        uri: Uri,
+        areaId: String? = null,
+        fileNameHint: String? = null
+    ) {
+        safeVmScope.launch {
+            runCatchingCancellable {
+                val fallbackTitle = getLocalizedString(R.string.entity_new_project)
+                val parsed = withContext(Dispatchers.IO) {
+                    val resolvedDisplayName = fileNameHint?.takeIf { it.isNotBlank() } ?: runCatching {
+                        appContext.contentResolver.query(
+                            uri,
+                            arrayOf(OpenableColumns.DISPLAY_NAME),
+                            null,
+                            null,
+                            null
+                        )?.use { cursor ->
+                            if (cursor.moveToFirst()) cursor.getString(0) else null
+                        }
+                    }.getOrNull() ?: uri.lastPathSegment
+
+                    val inputStream = appContext.contentResolver.openInputStream(uri)
+                        ?: throw IllegalStateException("Cannot open input stream for project URI")
+                    val rawBytes = inputStream.use { stream ->
+                        val out = ByteArrayOutputStream()
+                        val buf = ByteArray(8192)
+                        var total = 0
+                        while (true) {
+                            val read = stream.read(buf)
+                            if (read == -1) break
+                            total += read
+                            if (total > MAX_EXTERNAL_IMPORT_FILE_BYTES) {
+                                throw IllegalArgumentException("Project file > 32 MB")
+                            }
+                            out.write(buf, 0, read)
+                        }
+                        out.toByteArray()
+                    }
+                    ExternalProjectCodec.importAutoDetect(
+                        bytes = rawBytes,
+                        fileNameHint = resolvedDisplayName,
+                        fallbackTitle = fallbackTitle
+                    )
+                }
+                repository.importExternalProject(parsed = parsed, areaId = areaId)
+            }.onSuccess { (project, count) ->
+                _isTemplatesModalOpen.value = false
+                _expandedTaskId.value = null
+                _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(project.id)
+                showCelebrationToast(
+                    getLocalizedString(R.string.v30_external_import_success, project.title, count)
+                )
+            }.onFailure { err ->
+                Log.w(TAG, "External project import failed", err)
+                _uiErrorMessage.value = getLocalizedString(
+                    R.string.csv_status_import_failed,
+                    err.localizedMessage ?: err.message.orEmpty()
+                )
+            }
+        }
+    }
+
+    fun prepareExternalProjectExport(
+        projectId: String,
+        format: ExternalExportFormat,
+        onReady: (fileName: String, mimeType: String, bytes: ByteArray, projectTitle: String) -> Unit
+    ) {
+        if (projectId.isBlank()) return
+        safeVmScope.launch {
+            runCatchingCancellable {
+                val projectTitle = activeProjects.value.firstOrNull { it.id == projectId }?.title
+                    ?: withContext(Dispatchers.IO) { database.projectDao().getById(projectId)?.title }
+                    ?: getLocalizedString(R.string.entity_project)
+                val (fileName, mimeType, bytes) = withContext(Dispatchers.IO) {
+                    repository.exportProjectExternal(projectId = projectId, format = format)
+                }
+                PreparedExternalExport(
+                    fileName = fileName,
+                    mimeType = mimeType,
+                    bytes = bytes,
+                    projectTitle = projectTitle
+                )
+            }.onSuccess { prepared ->
+                onReady(prepared.fileName, prepared.mimeType, prepared.bytes, prepared.projectTitle)
+            }.onFailure { err ->
+                Log.w(TAG, "External project export failed", err)
+                _uiErrorMessage.value = getLocalizedString(
+                    R.string.csv_status_export_failed,
+                    err.localizedMessage ?: err.message.orEmpty()
+                )
+            }
+        }
+    }
+
+    fun writeExportBytesToUri(uri: Uri, bytes: ByteArray, projectTitle: String) {
+        safeVmScope.launch {
+            runCatchingCancellable {
+                withContext(Dispatchers.IO) {
+                    val outputStream = runCatching {
+                        appContext.contentResolver.openOutputStream(uri, "wt")
+                    }.getOrNull() ?: appContext.contentResolver.openOutputStream(uri)
+                        ?: throw IllegalStateException("Cannot open output stream for export URI")
+                    outputStream.use { out ->
+                        out.write(bytes)
+                        out.flush()
+                    }
+                }
+            }.onSuccess {
+                showCelebrationToast(
+                    getLocalizedString(R.string.v30_external_export_success, projectTitle)
+                )
+            }.onFailure { err ->
+                Log.w(TAG, "Writing external export bytes failed", err)
+                _uiErrorMessage.value = getLocalizedString(
+                    R.string.csv_status_export_failed,
+                    err.localizedMessage ?: err.message.orEmpty()
+                )
+            }
         }
     }
 
@@ -4415,6 +4545,7 @@ class ThingsbookViewModel @Inject constructor(
         private const val TAG = "ThingsbookVM"
         private const val MAX_CSV_IMPORT_CHARS = 10 * 1024 * 1024
         private const val MAX_BACKUP_FILE_BYTES = 80 * 1024 * 1024
+        private const val MAX_EXTERNAL_IMPORT_FILE_BYTES = 32 * 1024 * 1024
         private const val PREF_CALENDAR_EVENTS_ENABLED = "calendar_events_enabled"
         private const val PREF_SELECTED_CALENDAR_IDS = "selected_calendar_ids"
         private const val PREF_CALENDAR_IDS_INITIALIZED = "calendar_ids_initialized"

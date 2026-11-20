@@ -1023,6 +1023,9 @@ fun ThingsSmartViewScreen(
                         onSaveProjectAsTemplate = { pId, toastMsg ->
                             viewModel.saveProjectAsTemplate(pId, toastMsg)
                         },
+                        onOpenExternalImportExport = { areaId ->
+                            viewModel.openTemplatesModal(initialTab = 2, defaultAreaId = areaId)
+                        },
                         onOpenStalledProjectReview = {
                             viewModel.openWeeklyReviewModal(initialStep = 2)
                         },
@@ -3672,7 +3675,7 @@ private fun ThingsModalsOverlay(
         )
     }
 
-    // v2 Pillar 2: Reusable Project Templates & Markdown / JSON Outline Importer Modal
+    // v2 Pillar 2 + v3 Milestone 4: Reusable Project Templates, Markdown Outline & Asana / Planner Import-Export Modal
     if (isTemplatesModalOpen) {
         val fallbackProjectTitle = stringResource(R.string.entity_new_project)
         ThingsTemplatesAndImportModal(
@@ -3680,6 +3683,8 @@ private fun ThingsModalsOverlay(
             defaultAreaId = templatesModalDefaultAreaId,
             areas = areas,
             userTemplates = userProjectTemplates,
+            projects = activeProjects,
+            currentProjectId = currentProject?.id,
             locale = activeLocale,
             onCreateFromTemplate = { template, areaOverride ->
                 viewModel.createProjectFromTemplate(template, areaOverride)
@@ -3689,6 +3694,15 @@ private fun ThingsModalsOverlay(
             },
             onImportOutline = { rawOutline, areaId ->
                 viewModel.importProjectFromOutline(rawOutline, areaId, fallbackProjectTitle)
+            },
+            onImportExternalUri = { uri, areaId ->
+                viewModel.importExternalProjectFromUri(uri, areaId)
+            },
+            onExportExternalProject = { projectId, format, onPrepared ->
+                viewModel.prepareExternalProjectExport(projectId, format, onPrepared)
+            },
+            onWriteExportBytes = { uri, bytes, projectTitle ->
+                viewModel.writeExportBytesToUri(uri, bytes, projectTitle)
             },
             onDismiss = { viewModel.closeTemplatesModal() }
         )
@@ -5270,6 +5284,7 @@ private fun ViewTitleHeader(
     onEditPerspective: (SavedPerspective) -> Unit = {},
     onDeletePerspective: (String) -> Unit = {},
     onSaveProjectAsTemplate: (String, String) -> Unit = { _, _ -> },
+    onOpenExternalImportExport: (String?) -> Unit = {},
     onOpenStalledProjectReview: () -> Unit = {},
     onMarkProjectReviewed: (String) -> Unit = {},
     onUpdateProjectDeadline: (String, Long?) -> Unit,
@@ -6044,6 +6059,16 @@ private fun ViewTitleHeader(
                         title = "📋 ${stringResource(R.string.v2_save_as_template)}",
                         onClick = {
                             onSaveProjectAsTemplate(currentProject.id, templateSavedToastMsg)
+                        }
+                    )
+                }
+
+                // v3 Milestone 4: "Asana & Planner" Import / Export
+                ThingsHoverTooltip(text = stringResource(R.string.v30_external_import_export_tab)) {
+                    ThingsTagPill(
+                        title = "⇄ ${stringResource(R.string.v30_external_import_export_tab)}",
+                        onClick = {
+                            onOpenExternalImportExport(currentProject.areaId)
                         }
                     )
                 }

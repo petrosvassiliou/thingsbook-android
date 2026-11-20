@@ -8,6 +8,7 @@ public struct TemplatesAndImportSheetView: View {
     @State private var selectedTab: TemplatesSheetTab = .gallery
     @State private var selectedAreaId: String? = nil
     @State private var rawOutlineText: String = ""
+    @State private var selectedExportProjectId: String = ""
 
     private static let sampleMarkdownOutline = """
     # Product Launch 2.0
@@ -30,6 +31,10 @@ public struct TemplatesAndImportSheetView: View {
         )
     }
 
+    private var activeExportableProjects: [Project] {
+        store.projects.filter { !$0.isDeleted && $0.status == .active }
+    }
+
     public var body: some View {
         VStack(spacing: 0) {
             headerBar
@@ -41,14 +46,17 @@ public struct TemplatesAndImportSheetView: View {
                     templatesGalleryContent
                 case .importOutline:
                     markdownImporterContent
+                case .externalImportExport:
+                    externalImportExportContent
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(ThingsMacPalette.canvasBackground)
 
             Divider()
             footerBar
         }
-        .frame(width: 740, height: 590)
+        .frame(width: 780, height: 610)
         .background(ThingsMacPalette.cardSurface)
         .onAppear {
             selectedTab = store.templatesInitialTab
@@ -57,11 +65,29 @@ public struct TemplatesAndImportSheetView: View {
             } else if let aid = store.newProjectDefaultAreaId {
                 selectedAreaId = aid
             }
+            syncDefaultExportProjectSelection()
+        }
+        .onChange(of: store.projects) { _, _ in
+            syncDefaultExportProjectSelection()
+        }
+    }
+
+    private func syncDefaultExportProjectSelection() {
+        let projects = activeExportableProjects
+        if !selectedExportProjectId.isEmpty,
+           projects.contains(where: { $0.id == selectedExportProjectId }) {
+            return
+        }
+        if case .project(let pid) = store.selectedDestination,
+           projects.contains(where: { $0.id == pid }) {
+            selectedExportProjectId = pid
+        } else {
+            selectedExportProjectId = projects.first?.id ?? ""
         }
     }
 
     private var headerBar: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(ThingsMacPalette.anytimeTeal.opacity(0.15))
@@ -71,15 +97,24 @@ public struct TemplatesAndImportSheetView: View {
                     .foregroundStyle(ThingsMacPalette.anytimeTeal)
             }
 
-            Picker("", selection: $selectedTab) {
-                Text(store.tr("v2_templates_title")).tag(TemplatesSheetTab.gallery)
-                Text(store.tr("v2_import_markdown_title")).tag(TemplatesSheetTab.importOutline)
+            // Non-truncating 3-tab Soft Bento selector (sizes naturally in EN, DE, FR, IT, ES)
+            HStack(spacing: 4) {
+                sheetTabPill(.gallery, title: store.tr("v2_templates_title"))
+                sheetTabPill(.importOutline, title: store.tr("v2_import_markdown_title"))
+                sheetTabPill(.externalImportExport, title: store.tr("v30_external_import_export_tab"))
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 360)
+            .padding(3.5)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(ThingsMacPalette.subtleContainer)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
+            )
+            .fixedSize(horizontal: true, vertical: false)
 
-            Spacer()
+            Spacer(minLength: 8)
 
             Menu {
                 Button(store.tr("areas_none")) {
@@ -100,6 +135,7 @@ public struct TemplatesAndImportSheetView: View {
                         .foregroundStyle(ThingsMacPalette.areaGreen)
                     Text(store.area(byId: selectedAreaId)?.title ?? store.tr("areas_assign_chip"))
                         .font(.system(size: 12, weight: .medium))
+                        .fixedSize(horizontal: true, vertical: false)
                 }
                 .padding(.horizontal, 9)
                 .padding(.vertical, 5)
@@ -109,7 +145,7 @@ public struct TemplatesAndImportSheetView: View {
                 )
             }
             .menuStyle(.borderlessButton)
-            .fixedSize()
+            .fixedSize(horizontal: true, vertical: false)
 
             Button {
                 dismiss()
@@ -123,6 +159,37 @@ public struct TemplatesAndImportSheetView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 13)
+    }
+
+    private func sheetTabPill(_ tab: TemplatesSheetTab, title: String) -> some View {
+        let isSelected = selectedTab == tab
+        return Button {
+            withAnimation(.easeOut(duration: 0.15)) {
+                selectedTab = tab
+            }
+        } label: {
+            Text(title)
+                .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                .foregroundStyle(isSelected ? ThingsMacPalette.accentBlue : .primary.opacity(0.82))
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5.5)
+                .background(
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .fill(isSelected ? ThingsMacPalette.cardSurface : Color.clear)
+                        .shadow(color: Color.black.opacity(isSelected ? 0.06 : 0.0), radius: 3, y: 1)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .strokeBorder(
+                            isSelected ? ThingsMacPalette.accentBlue.opacity(0.32) : Color.clear,
+                            lineWidth: 0.85
+                        )
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     // MARK: - Tab 1: Starter & Saved Templates Gallery
@@ -308,6 +375,199 @@ public struct TemplatesAndImportSheetView: View {
         .padding(20)
     }
 
+    // MARK: - Tab 3: Asana & Microsoft Planner Offline Import / Export
+
+    private var externalImportExportContent: some View {
+        let projects = activeExportableProjects
+        let resolvedProjectId = projects.contains(where: { $0.id == selectedExportProjectId })
+            ? selectedExportProjectId
+            : (projects.first?.id ?? "")
+
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                // 1. Offline Import Soft Bento Card
+                VStack(alignment: .leading, spacing: 12) {
+                    sectionHeader(
+                        icon: "arrow.down.doc.fill",
+                        color: ThingsMacPalette.accentBlue,
+                        title: store.tr("v30_external_import_section")
+                    )
+
+                    Text(store.tr("v30_external_import_desc"))
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    ThingsFlowLayout(horizontalSpacing: 10, verticalSpacing: 10) {
+                        softBentoActionButton(
+                            title: store.tr("v30_import_asana"),
+                            systemImage: "tray.and.arrow.down.fill",
+                            tint: ThingsMacPalette.accentBlue,
+                            prominent: true
+                        ) {
+                            if store.importAsanaProjectInteractively(areaIdOverride: selectedAreaId) {
+                                dismiss()
+                            }
+                        }
+
+                        softBentoActionButton(
+                            title: store.tr("v30_import_planner"),
+                            systemImage: "tablecells.badge.ellipsis",
+                            tint: ThingsMacPalette.anytimeTeal,
+                            prominent: true
+                        ) {
+                            if store.importPlannerProjectInteractively(areaIdOverride: selectedAreaId) {
+                                dismiss()
+                            }
+                        }
+                    }
+                    .padding(.top, 2)
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .thingsCardSurface(cornerRadius: 12)
+
+                // 2. Project Export Soft Bento Card
+                VStack(alignment: .leading, spacing: 14) {
+                    sectionHeader(
+                        icon: "square.and.arrow.up.fill",
+                        color: ThingsMacPalette.anytimeTeal,
+                        title: store.tr("v30_external_export_section")
+                    )
+
+                    if projects.isEmpty {
+                        HStack(spacing: 8) {
+                            Image(systemName: "folder.badge.questionmark")
+                                .foregroundStyle(.secondary)
+                            Text(store.tr("v30_external_no_projects"))
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                        }
+                        .padding(12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(ThingsMacPalette.subtleContainer)
+                        )
+                    } else {
+                        HStack(spacing: 10) {
+                            Text(store.tr("v30_external_select_project"))
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: true, vertical: false)
+
+                            Picker(store.tr("v30_external_select_project"), selection: $selectedExportProjectId) {
+                                ForEach(projects) { proj in
+                                    Text(proj.title).tag(proj.id)
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: 340)
+
+                            Spacer()
+                        }
+
+                        ThingsFlowLayout(horizontalSpacing: 10, verticalSpacing: 10) {
+                            softBentoActionButton(
+                                title: store.tr("v30_export_asana_csv"),
+                                systemImage: "doc.text",
+                                tint: ThingsMacPalette.accentBlue,
+                                prominent: false
+                            ) {
+                                guard !resolvedProjectId.isEmpty else { return }
+                                store.exportProjectExternalInteractively(
+                                    projectId: resolvedProjectId,
+                                    format: .asanaCsv
+                                )
+                            }
+
+                            softBentoActionButton(
+                                title: store.tr("v30_export_asana_json"),
+                                systemImage: "curlybraces",
+                                tint: ThingsMacPalette.accentBlue,
+                                prominent: false
+                            ) {
+                                guard !resolvedProjectId.isEmpty else { return }
+                                store.exportProjectExternalInteractively(
+                                    projectId: resolvedProjectId,
+                                    format: .asanaJson
+                                )
+                            }
+
+                            softBentoActionButton(
+                                title: store.tr("v30_export_planner_xlsx"),
+                                systemImage: "tablecells",
+                                tint: ThingsMacPalette.anytimeTeal,
+                                prominent: false
+                            ) {
+                                guard !resolvedProjectId.isEmpty else { return }
+                                store.exportProjectExternalInteractively(
+                                    projectId: resolvedProjectId,
+                                    format: .plannerXlsx
+                                )
+                            }
+
+                            softBentoActionButton(
+                                title: store.tr("v30_export_planner_csv"),
+                                systemImage: "list.bullet.rectangle.portrait",
+                                tint: ThingsMacPalette.anytimeTeal,
+                                prominent: false
+                            ) {
+                                guard !resolvedProjectId.isEmpty else { return }
+                                store.exportProjectExternalInteractively(
+                                    projectId: resolvedProjectId,
+                                    format: .plannerCsv
+                                )
+                            }
+                        }
+                    }
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .thingsCardSurface(cornerRadius: 12)
+            }
+            .padding(20)
+        }
+    }
+
+    private func softBentoActionButton(
+        title: String,
+        systemImage: String,
+        tint: Color,
+        prominent: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(prominent ? tint : .primary.opacity(0.85))
+                Text(title)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(prominent ? tint : .primary)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 8.5)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(prominent ? tint.opacity(0.13) : ThingsMacPalette.subtleContainer)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(
+                        prominent ? tint.opacity(0.36) : Color.primary.opacity(0.12),
+                        lineWidth: 0.9
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
     private var footerBar: some View {
         HStack {
             Spacer()
@@ -339,6 +599,7 @@ public struct TemplatesAndImportSheetView: View {
                 .foregroundStyle(color)
             Text(title)
                 .font(.system(size: 13, weight: .bold))
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

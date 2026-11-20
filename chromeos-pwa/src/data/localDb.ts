@@ -52,6 +52,12 @@ import {
 } from './backupCodec.ts';
 import { parseCsvTaskImport, serializeEntitiesToCsv } from './csvCodec.ts';
 import {
+  exportExternalProjectBytes,
+  type ExternalExportFormat,
+  type ExternalImportedProject,
+  type ExternalImportedTask
+} from './externalProjectCodec.ts';
+import {
   OFFLINE_COMMIT_RESTAMP_THRESHOLD_MS,
   buildRecurringSeriesKey,
   canonicalizeRecurrenceRuleKey,
@@ -4651,6 +4657,263 @@ export class ThingsLocalDb {
       if (imported > 0) this.triggerSync();
       return imported;
     });
+  }
+
+  // ==================== Asana & Microsoft Planner Import / Export ====================
+
+  async importExternalProject(
+    parsed: ExternalImportedProject,
+    areaId?: string | null,
+    workspaceId?: string | null
+  ): Promise<{ projectId: string; title: string; taskCount: number }> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const todayEpoch = startOfDayEpoch(new Date(now));
+      const todayEnd = endOfDayEpoch(new Date(now));
+
+      const activeArea = areaId
+        ? ((await db.get('areas', areaId)) as AreaRecord | undefined)
+        : undefined;
+      const validAreaId = activeArea && !activeArea.isDeleted ? activeArea.id : null;
+
+      const resolvedProjectWorkspaceId =
+        workspaceId?.trim() || parsed.workspaceId?.trim() || null;
+
+      const tx = db.transaction(
+        ['projects', 'headings', 'tags', 'tasks', 'checklist_items'],
+        'readwrite'
+      );
+
+      const allTags = (await tx.objectStore('tags').getAll()) as TagRecord[];
+      const tagMap = new Map<string, TagRecord>();
+      let tagCounter = 0;
+      for (const tg of allTags) {
+        if (!tg.isDeleted) {
+          tagMap.set(tg.title.trim().toLowerCase(), tg);
+          tagCounter++;
+        }
+      }
+
+      const resolveTagIds = async (names: readonly string[]): Promise<string[]> => {
+        const ids: string[] = [];
+        for (const rawName of names) {
+          const trimmed = rawName.trim();
+          if (!trimmed) continue;
+          const lower = trimmed.toLowerCase();
+          const existing = tagMap.get(lower);
+          if (existing) {
+            ids.push(existing.id);
+          } else {
+            tagCounter++;
+            const created: TagRecord = {
+              id: crypto.randomUUID(),
+              title: trimmed,
+              parentTagId: null,
+              shortcut: null,
+              sortOrder: tagCounter * 100,
+              createdAt: now,
+              updatedAt: now,
+              isDeleted: false,
+              isDirty: true
+            };
+            await tx.objectStore('tags').put(created);
+            tagMap.set(lower, created);
+            ids.push(created.id);
+          }
+        }
+        return Array.from(new Set(ids));
+      };
+
+      const projectTitle = parsed.title.trim() || 'Imported Project';
+      const projectId = crypto.randomUUID();
+      const projectTagIds = await resolveTagIds(parsed.tagNames);
+
+      await tx.objectStore('projects').put({
+        id: projectId,
+        areaId: validAreaId,
+        title: projectTitle,
+        notes: parsed.notes ?? '',
+        status: 'ACTIVE',
+        scheduleState: 'TODAY',
+        whenDate: todayEpoch,
+        deadline: null,
+        completedAt: null,
+        lastReviewedAt: now,
+        sortOrder: now,
+        tagIds: projectTagIds,
+        workspaceId: resolvedProjectWorkspaceId,
+        createdAt: now,
+        updatedAt: now,
+        isDeleted: false,
+        isDirty: true
+      } satisfies ProjectRecord);
+
+      let taskCount = 0;
+
+      const persistImportedTask = async (
+        extTask: ExternalImportedTask,
+        headingId: string | null,
+        sortOrder: number
+      ) => {
+        const cleanTitle = extTask.title.trim();
+        if (!cleanTitle) return;
+
+        const taskTagIds = await resolveTagIds(extTask.tagNames);
+        const scheduleState: ScheduleState =
+          extTask.whenDate != null
+            ? extTask.whenDate <= todayEnd
+              ? 'TODAY'
+              : 'UPCOMING'
+            : 'ANYTIME';
+
+        const status: TaskStatus =
+          extTask.status === 'COMPLETED' ? 'COMPLETED' : 'OPEN';
+        const completedAt =
+          status === 'COMPLETED' ? (extTask.completedAt ?? now) : null;
+
+        const taskId = crypto.randomUUID();
+        await tx.objectStore('tasks').put({
+          id: taskId,
+          title: cleanTitle,
+          notes: extTask.notes ?? '',
+          status,
+          scheduleState,
+          whenDate: extTask.whenDate,
+          deadline: extTask.deadline,
+          reminderTime: null,
+          isPinned: Boolean(extTask.isPinned),
+          effortLevel: extTask.effortLevel ?? null,
+          workspaceId: extTask.workspaceId?.trim() || resolvedProjectWorkspaceId,
+          assigneeId: extTask.assigneeId?.trim() || null,
+          completedAt,
+          projectId,
+          headingId,
+          areaId: null,
+          recurrenceRule: null,
+          sortOrder,
+          tagIds: taskTagIds,
+          createdAt: now,
+          updatedAt: now,
+          isDeleted: false,
+          isDirty: true,
+          purgedFromTrash: false
+        } satisfies TaskRecord);
+
+        for (let cIdx = 0; cIdx < extTask.checklistItems.length; cIdx++) {
+          const chk = extTask.checklistItems[cIdx];
+          const chkTitle = chk.title.trim();
+          if (!chkTitle) continue;
+          await tx.objectStore('checklist_items').put({
+            id: crypto.randomUUID(),
+            taskId,
+            title: chkTitle,
+            isCompleted: Boolean(chk.isCompleted),
+            sortOrder: (cIdx + 1) * 100,
+            createdAt: now,
+            updatedAt: now,
+            isDeleted: false,
+            isDirty: true
+          } satisfies ChecklistItemRecord);
+        }
+
+        taskCount++;
+      };
+
+      for (let tIdx = 0; tIdx < parsed.ungroupedTasks.length; tIdx++) {
+        await persistImportedTask(parsed.ungroupedTasks[tIdx], null, (tIdx + 1) * 100);
+      }
+
+      for (let hIdx = 0; hIdx < parsed.phases.length; hIdx++) {
+        const phase = parsed.phases[hIdx];
+        const headingId = crypto.randomUUID();
+        await tx.objectStore('headings').put({
+          id: headingId,
+          projectId,
+          title: phase.title.trim() || `Phase ${hIdx + 1}`,
+          startDate: phase.startDate ?? null,
+          endDate: phase.endDate ?? null,
+          sortOrder: (hIdx + 1) * 1000,
+          isArchived: false,
+          createdAt: now,
+          updatedAt: now,
+          isDeleted: false,
+          isDirty: true
+        } satisfies HeadingRecord);
+
+        for (let tIdx = 0; tIdx < phase.tasks.length; tIdx++) {
+          await persistImportedTask(
+            phase.tasks[tIdx],
+            headingId,
+            (hIdx + 1) * 1000 + (tIdx + 1) * 100
+          );
+        }
+      }
+
+      await tx.done;
+      await this.refreshSnapshot();
+      this.triggerSync();
+
+      return {
+        projectId,
+        title: projectTitle,
+        taskCount
+      };
+    });
+  }
+
+  async exportProjectExternal(
+    projectId: string,
+    format: ExternalExportFormat
+  ): Promise<{
+    filename: string;
+    mimeType: string;
+    bytes: Uint8Array;
+    projectTitle: string;
+  }> {
+    const db = await this.getDb();
+    const project = (await db.get('projects', projectId)) as ProjectRecord | undefined;
+    if (!project || project.isDeleted) {
+      throw new Error('Project not found');
+    }
+
+    const [allHeadings, allTasks, allChecklists, allTags] = await Promise.all([
+      db.getAll('headings') as Promise<HeadingRecord[]>,
+      db.getAll('tasks') as Promise<TaskRecord[]>,
+      db.getAll('checklist_items') as Promise<ChecklistItemRecord[]>,
+      db.getAll('tags') as Promise<TagRecord[]>
+    ]);
+
+    const headings = allHeadings
+      .filter((h) => h.projectId === projectId && !h.isDeleted && !h.isArchived)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt);
+
+    const tasks = allTasks
+      .filter(
+        (t) =>
+          t.projectId === projectId &&
+          !t.isDeleted &&
+          (t.status === 'OPEN' || t.status === 'COMPLETED')
+      )
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt);
+
+    const taskIdSet = new Set(tasks.map((t) => t.id));
+    const checklistItems = allChecklists
+      .filter((c) => !c.isDeleted && taskIdSet.has(c.taskId))
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt);
+
+    const tags = allTags.filter((tg) => !tg.isDeleted);
+
+    return exportExternalProjectBytes(
+      {
+        project,
+        headings,
+        tasks,
+        checklistItems,
+        tags
+      },
+      format
+    );
   }
 }
 

@@ -568,4 +568,10 @@
     <string name="v30_export_planner_xlsx">Export Project to Planner (.xlsx)</string>
     <string name="v30_export_planner_csv">Export Project to Planner CSV</string>
     <string name="v30_external_import_success">Imported project \"%1$s\" (%2$d to-dos)</string>
+    <string name="v30_external_import_section">Import Project File (100% Offline)</string>
+    <string name="v30_external_import_desc">Maps Sections &amp; Buckets to Phases, Subtasks &amp; Checklist Items to Checklists, Start/Due Dates to When/Deadline, and Tags/Labels to Categories.</string>
+    <string name="v30_external_export_section">Export Existing Project</string>
+    <string name="v30_external_select_project">Project to Export</string>
+    <string name="v30_external_no_projects">No active projects available to export yet.</string>
+    <string name="v30_external_export_success">Exported \"%1$s\"</string>
 </resources>

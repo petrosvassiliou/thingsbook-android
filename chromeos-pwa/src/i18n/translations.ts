@@ -445,6 +445,20 @@ export interface TranslationStrings {
   pdfOrientationLabel: string;
   pdfOrientationLandscape: string;
   pdfOrientationPortrait: string;
+  externalImportExportTab: string;
+  importAsanaBtn: string;
+  exportAsanaCsvBtn: string;
+  exportAsanaJsonBtn: string;
+  importPlannerBtn: string;
+  exportPlannerXlsxBtn: string;
+  exportPlannerCsvBtn: string;
+  externalImportSection: string;
+  externalImportDesc: string;
+  externalExportSection: string;
+  externalSelectProject: string;
+  externalNoProjects: string;
+  externalImportSuccessTitle: (title: string, count?: number) => string;
+  externalExportSuccessTitle: (title: string) => string;
 }
 
 export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
@@ -912,7 +926,22 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     pdfTimelineCustom: 'Custom Range',
     pdfOrientationLabel: 'Page Orientation',
     pdfOrientationLandscape: 'Landscape',
-    pdfOrientationPortrait: 'Portrait'
+    pdfOrientationPortrait: 'Portrait',
+    externalImportExportTab: 'Asana & Planner',
+    importAsanaBtn: 'Import from Asana (CSV / JSON)',
+    exportAsanaCsvBtn: 'Export Project to Asana CSV',
+    exportAsanaJsonBtn: 'Export Project to Asana JSON',
+    importPlannerBtn: 'Import from Microsoft Planner (.xlsx / CSV)',
+    exportPlannerXlsxBtn: 'Export Project to Planner (.xlsx)',
+    exportPlannerCsvBtn: 'Export Project to Planner CSV',
+    externalImportSection: 'Import Project File (100% Offline)',
+    externalImportDesc:
+      'Maps Sections & Buckets to Phases, Subtasks & Checklist Items to Checklists, Start/Due Dates to When/Deadline, and Tags/Labels to Categories.',
+    externalExportSection: 'Export Existing Project',
+    externalSelectProject: 'Project to Export',
+    externalNoProjects: 'No active projects available to export yet.',
+    externalImportSuccessTitle: (title, count = 0) => `Imported project "${title}" (${count} to-dos)`,
+    externalExportSuccessTitle: (title) => `Exported "${title}"`
   },
   de: {
     appName: 'Thingsbook',
@@ -1381,7 +1410,22 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     pdfTimelineCustom: 'Benutzerdefiniert',
     pdfOrientationLabel: 'Seitenausrichtung',
     pdfOrientationLandscape: 'Querformat',
-    pdfOrientationPortrait: 'Hochformat'
+    pdfOrientationPortrait: 'Hochformat',
+    externalImportExportTab: 'Asana & Planner',
+    importAsanaBtn: 'Aus Asana importieren (CSV / JSON)',
+    exportAsanaCsvBtn: 'Projekt als Asana-CSV exportieren',
+    exportAsanaJsonBtn: 'Projekt als Asana-JSON exportieren',
+    importPlannerBtn: 'Aus Microsoft Planner importieren (.xlsx / CSV)',
+    exportPlannerXlsxBtn: 'Projekt als Planner (.xlsx) exportieren',
+    exportPlannerCsvBtn: 'Projekt als Planner-CSV exportieren',
+    externalImportSection: 'Projektdatei importieren (100 % offline)',
+    externalImportDesc:
+      'Ordnet Abschnitte & Buckets Phasen zu, Unteraufgaben & Checklistenpunkte Checklisten, Start-/Fälligkeitsdaten Start/Deadline sowie Tags/Bezeichnungen Kategorien.',
+    externalExportSection: 'Bestehendes Projekt exportieren',
+    externalSelectProject: 'Zu exportierendes Projekt',
+    externalNoProjects: 'Noch keine aktiven Projekte zum Exportieren vorhanden.',
+    externalImportSuccessTitle: (title, count = 0) => `Projekt „${title}“ importiert (${count} Aufgaben)`,
+    externalExportSuccessTitle: (title) => `„${title}“ exportiert`
   },
   fr: {
     appName: 'Thingsbook',
@@ -1848,7 +1892,22 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     pdfTimelineCustom: 'Plage personnalisée',
     pdfOrientationLabel: 'Orientation de la page',
     pdfOrientationLandscape: 'Paysage',
-    pdfOrientationPortrait: 'Portrait'
+    pdfOrientationPortrait: 'Portrait',
+    externalImportExportTab: 'Asana et Planner',
+    importAsanaBtn: 'Importer depuis Asana (CSV / JSON)',
+    exportAsanaCsvBtn: 'Exporter vers Asana CSV',
+    exportAsanaJsonBtn: 'Exporter vers Asana JSON',
+    importPlannerBtn: 'Importer depuis Microsoft Planner (.xlsx / CSV)',
+    exportPlannerXlsxBtn: 'Exporter vers Planner (.xlsx)',
+    exportPlannerCsvBtn: 'Exporter vers Planner CSV',
+    externalImportSection: 'Importer un fichier de projet (100 % hors ligne)',
+    externalImportDesc:
+      'Associe les sections et compartiments aux phases, les sous-tâches aux listes de contrôle, les dates de début/échéance et les étiquettes aux catégories.',
+    externalExportSection: 'Exporter un projet existant',
+    externalSelectProject: 'Projet à exporter',
+    externalNoProjects: "Aucun projet actif disponible pour l'exportation.",
+    externalImportSuccessTitle: (title, count = 0) => `Projet « ${title} » importé (${count} tâches)`,
+    externalExportSuccessTitle: (title) => `« ${title} » exporté`
   },
   it: {
     appName: 'Thingsbook',
@@ -2315,7 +2374,22 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     pdfTimelineCustom: 'Intervallo personalizzato',
     pdfOrientationLabel: 'Orientamento pagina',
     pdfOrientationLandscape: 'Orizzontale',
-    pdfOrientationPortrait: 'Verticale'
+    pdfOrientationPortrait: 'Verticale',
+    externalImportExportTab: 'Asana e Planner',
+    importAsanaBtn: 'Importa da Asana (CSV / JSON)',
+    exportAsanaCsvBtn: 'Esporta progetto in Asana CSV',
+    exportAsanaJsonBtn: 'Esporta progetto in Asana JSON',
+    importPlannerBtn: 'Importa da Microsoft Planner (.xlsx / CSV)',
+    exportPlannerXlsxBtn: 'Esporta progetto in Planner (.xlsx)',
+    exportPlannerCsvBtn: 'Esporta progetto in Planner CSV',
+    externalImportSection: 'Importa file di progetto (100% offline)',
+    externalImportDesc:
+      'Associa sezioni e bucket alle fasi, sottoattività ed elementi elenco alle checklist, date di inizio/scadenza e tag/etichette alle categorie.',
+    externalExportSection: 'Esporta progetto esistente',
+    externalSelectProject: 'Progetto da esportare',
+    externalNoProjects: "Nessun progetto attivo disponibile per l'esportazione.",
+    externalImportSuccessTitle: (title, count = 0) => `Progetto "${title}" importato (${count} attività)`,
+    externalExportSuccessTitle: (title) => `"${title}" esportato`
   },
   es: {
     appName: 'Thingsbook',
@@ -2782,7 +2856,22 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     pdfTimelineCustom: 'Rango personalizado',
     pdfOrientationLabel: 'Orientación de página',
     pdfOrientationLandscape: 'Horizontal',
-    pdfOrientationPortrait: 'Vertical'
+    pdfOrientationPortrait: 'Vertical',
+    externalImportExportTab: 'Asana y Planner',
+    importAsanaBtn: 'Importar desde Asana (CSV / JSON)',
+    exportAsanaCsvBtn: 'Exportar proyecto a Asana CSV',
+    exportAsanaJsonBtn: 'Exportar proyecto a Asana JSON',
+    importPlannerBtn: 'Importar desde Microsoft Planner (.xlsx / CSV)',
+    exportPlannerXlsxBtn: 'Exportar proyecto a Planner (.xlsx)',
+    exportPlannerCsvBtn: 'Exportar proyecto a Planner CSV',
+    externalImportSection: 'Importar archivo de proyecto (100 % sin conexión)',
+    externalImportDesc:
+      'Asigna secciones y depósitos a fases, subtareas y elementos a listas de verificación, fechas de inicio/vencimiento y etiquetas a categorías.',
+    externalExportSection: 'Exportar proyecto existente',
+    externalSelectProject: 'Proyecto a exportar',
+    externalNoProjects: 'Aún no hay proyectos activos disponibles para exportar.',
+    externalImportSuccessTitle: (title, count = 0) => `Proyecto «${title}» importado (${count} tareas)`,
+    externalExportSuccessTitle: (title) => `«${title}» exportado`
   }
 };
 

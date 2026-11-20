@@ -165,6 +165,13 @@ public struct SidebarView: View {
                     }
 
                     Button {
+                        store.templatesInitialTab = .externalImportExport
+                        store.isTemplatesSheetPresented = true
+                    } label: {
+                        Label(store.tr("v30_external_import_export_tab"), systemImage: "arrow.up.arrow.down.square")
+                    }
+
+                    Button {
                         store.isNewAreaSheetPresented = true
                     } label: {
                         Label(store.tr("entity_new_area"), systemImage: "folder")
@@ -605,6 +612,21 @@ public struct SidebarView: View {
             }
             Button(store.tr("v2_save_as_template")) {
                 store.saveProjectAsTemplate(proj.id)
+            }
+            Menu(store.tr("v30_external_export_section")) {
+                Button(store.tr("v30_export_asana_csv")) {
+                    store.exportProjectExternalInteractively(projectId: proj.id, format: .asanaCsv)
+                }
+                Button(store.tr("v30_export_asana_json")) {
+                    store.exportProjectExternalInteractively(projectId: proj.id, format: .asanaJson)
+                }
+                Divider()
+                Button(store.tr("v30_export_planner_xlsx")) {
+                    store.exportProjectExternalInteractively(projectId: proj.id, format: .plannerXlsx)
+                }
+                Button(store.tr("v30_export_planner_csv")) {
+                    store.exportProjectExternalInteractively(projectId: proj.id, format: .plannerCsv)
+                }
             }
             Button(store.tr("v2_mark_reviewed")) {
                 store.markProjectReviewed(proj.id)

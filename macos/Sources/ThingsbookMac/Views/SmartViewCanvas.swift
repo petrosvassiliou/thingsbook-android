@@ -628,6 +628,26 @@ public struct SmartViewCanvas: View {
                         Button(store.tr("v2_save_as_template")) {
                             store.saveProjectAsTemplate(project.id)
                         }
+                        Menu(store.tr("v30_external_export_section")) {
+                            Button(store.tr("v30_export_asana_csv")) {
+                                store.exportProjectExternalInteractively(projectId: project.id, format: .asanaCsv)
+                            }
+                            Button(store.tr("v30_export_asana_json")) {
+                                store.exportProjectExternalInteractively(projectId: project.id, format: .asanaJson)
+                            }
+                            Divider()
+                            Button(store.tr("v30_export_planner_xlsx")) {
+                                store.exportProjectExternalInteractively(projectId: project.id, format: .plannerXlsx)
+                            }
+                            Button(store.tr("v30_export_planner_csv")) {
+                                store.exportProjectExternalInteractively(projectId: project.id, format: .plannerCsv)
+                            }
+                            Divider()
+                            Button(store.tr("v30_external_import_export_tab")) {
+                                store.templatesInitialTab = .externalImportExport
+                                store.isTemplatesSheetPresented = true
+                            }
+                        }
                         Button(store.tr("v2_mark_reviewed")) {
                             store.markProjectReviewed(project.id)
                         }

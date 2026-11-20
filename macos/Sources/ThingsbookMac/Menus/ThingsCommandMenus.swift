@@ -106,6 +106,36 @@ public struct ThingsCommandMenus: Commands {
             }
             .disabled(store.isLocked)
 
+            Button(store.tr("v30_external_import_export_tab")) {
+                guard !store.isLocked else { return }
+                store.templatesInitialTab = .externalImportExport
+                store.isTemplatesSheetPresented = true
+            }
+            .disabled(store.isLocked)
+
+            if case .project(let selectedProjectId) = store.selectedDestination {
+                Menu(store.tr("v30_external_export_section")) {
+                    Button(store.tr("v30_export_asana_csv")) {
+                        guard !store.isLocked else { return }
+                        store.exportProjectExternalInteractively(projectId: selectedProjectId, format: .asanaCsv)
+                    }
+                    Button(store.tr("v30_export_asana_json")) {
+                        guard !store.isLocked else { return }
+                        store.exportProjectExternalInteractively(projectId: selectedProjectId, format: .asanaJson)
+                    }
+                    Divider()
+                    Button(store.tr("v30_export_planner_xlsx")) {
+                        guard !store.isLocked else { return }
+                        store.exportProjectExternalInteractively(projectId: selectedProjectId, format: .plannerXlsx)
+                    }
+                    Button(store.tr("v30_export_planner_csv")) {
+                        guard !store.isLocked else { return }
+                        store.exportProjectExternalInteractively(projectId: selectedProjectId, format: .plannerCsv)
+                    }
+                }
+                .disabled(store.isLocked)
+            }
+
             Button(store.tr("v2_save_as_template")) {
                 guard !store.isLocked, case .project(let pid) = store.selectedDestination else { return }
                 store.saveProjectAsTemplate(pid)

@@ -33,6 +33,7 @@ public enum TodayViewMode: String, CaseIterable, Identifiable, Sendable {
 public enum TemplatesSheetTab: Int, CaseIterable, Identifiable, Sendable {
     case gallery = 0
     case importOutline = 1
+    case externalImportExport = 2
 
     public var id: Int { rawValue }
 }
@@ -2092,6 +2093,98 @@ public final class ThingsbookStore: ObservableObject {
            let raw = try? String(contentsOf: url, encoding: .utf8) {
             let count = (try? database.importCsv(raw)) ?? 0
             showToast(trf("csv_status_imported", count))
+        }
+    }
+
+    // MARK: - v3.0 Asana & Microsoft Planner Import / Export
+
+    @discardableResult
+    public func importAsanaProjectInteractively(areaIdOverride: String? = nil) -> Bool {
+        let panel = NSOpenPanel()
+        panel.title = tr("v30_import_asana")
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.commaSeparatedText, .json, .plainText]
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return false
+        }
+        return importExternalProjectFromURL(url, areaIdOverride: areaIdOverride)
+    }
+
+    @discardableResult
+    public func importPlannerProjectInteractively(areaIdOverride: String? = nil) -> Bool {
+        let xlsxType = UTType(filenameExtension: "xlsx") ?? .data
+        let panel = NSOpenPanel()
+        panel.title = tr("v30_import_planner")
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [xlsxType, .commaSeparatedText, .plainText]
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return false
+        }
+        return importExternalProjectFromURL(url, areaIdOverride: areaIdOverride)
+    }
+
+    @discardableResult
+    private func importExternalProjectFromURL(_ url: URL, areaIdOverride: String?) -> Bool {
+        do {
+            let rawData = try Data(contentsOf: url)
+            let parsed = try ExternalProjectCodec.importAutoDetect(
+                data: rawData,
+                fileNameHint: url.lastPathComponent,
+                fallbackTitle: tr("entity_new_project")
+            )
+            let effectiveAreaId: String? = {
+                if let areaIdOverride { return areaIdOverride }
+                if case .area(let aid) = selectedDestination { return aid }
+                return nil
+            }()
+            let res = try database.importExternalProject(parsed, areaId: effectiveAreaId)
+            reloadSnapshot()
+            isTemplatesSheetPresented = false
+            selectedDestination = .project(res.project.id)
+            showToast(trf("v30_external_import_success", res.project.title, res.importedTaskCount))
+            triggerImmediateCloudSync()
+            return true
+        } catch {
+            showToast(error.localizedDescription)
+            return false
+        }
+    }
+
+    public func exportProjectExternalInteractively(projectId: String, format: ExternalExportFormat) {
+        do {
+            let exported = try database.exportProjectExternal(projectId: projectId, format: format)
+            let xlsxType = UTType(filenameExtension: "xlsx") ?? .data
+
+            let panel = NSSavePanel()
+            switch format {
+            case .asanaCsv:
+                panel.title = tr("v30_export_asana_csv")
+                panel.allowedContentTypes = [.commaSeparatedText]
+            case .asanaJson:
+                panel.title = tr("v30_export_asana_json")
+                panel.allowedContentTypes = [.json]
+            case .plannerXlsx:
+                panel.title = tr("v30_export_planner_xlsx")
+                panel.allowedContentTypes = [xlsxType]
+            case .plannerCsv:
+                panel.title = tr("v30_export_planner_csv")
+                panel.allowedContentTypes = [.commaSeparatedText]
+            }
+            panel.nameFieldStringValue = exported.suggestedFileName
+            panel.canCreateDirectories = true
+
+            if panel.runModal() == .OK, let url = panel.url {
+                try exported.data.write(to: url, options: .atomic)
+                showToast(trf("v30_external_export_success", exported.projectTitle))
+            }
+        } catch {
+            showToast(error.localizedDescription)
         }
     }
 

@@ -568,4 +568,10 @@
     <string name="v30_export_planner_xlsx">Esporta progetto in Planner (.xlsx)</string>
     <string name="v30_export_planner_csv">Esporta progetto in Planner CSV</string>
     <string name="v30_external_import_success">Progetto \"%1$s\" importato (%2$d attività)</string>
+    <string name="v30_external_import_section">Importa file di progetto (100% offline)</string>
+    <string name="v30_external_import_desc">Associa sezioni e bucket alle fasi, sottoattività ed elementi elenco alle checklist, date di inizio/scadenza e tag/etichette alle categorie.</string>
+    <string name="v30_external_export_section">Esporta progetto esistente</string>
+    <string name="v30_external_select_project">Progetto da esportare</string>
+    <string name="v30_external_no_projects">Nessun progetto attivo disponibile per l\'esportazione.</string>
+    <string name="v30_external_export_success">\"%1$s\" esportato</string>
 </resources>

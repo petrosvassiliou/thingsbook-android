@@ -409,15 +409,15 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-beta.1")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-beta.1")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 92)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-beta.2")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-beta.2")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 93)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.1", current: "2.5.0", includeBeta: false))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.1", current: "2.5.0", includeBeta: true))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.1", current: "3.0.0-alpha.14"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.2", current: "2.5.0", includeBeta: false))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.2", current: "2.5.0", includeBeta: true))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.2", current: "3.0.0-beta.1"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-beta.1"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-rc.1", current: "3.0.0-beta.2"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-beta.2"))
         let ultraCompact = MacToolbarLayoutMetrics.compute(detailWidth: 506.0, isSidebarCollapsed: false)
         XCTAssertEqual(ultraCompact.usableWidth, 450.0)
         XCTAssertFalse(ultraCompact.showGeminiLabel)
@@ -4366,7 +4366,598 @@ final class ThingsbookCoreTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - 34. v3.0.0-beta.2 Milestone 4: Asana & Microsoft Planner Offline Import / Export
+
+    func testMilestone4AsanaCsvRoundTripAndTwoPassSubtasks() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let millis: (Int, Int, Int) -> Int64 = { y, m, d in
+            let date = cal.date(from: DateComponents(year: y, month: m, day: d))!
+            return DateEpochConverter.startOfDayMillis(for: date, calendar: cal)
+        }
+
+        // Subtask row intentionally appears BEFORE its parent row in CSV to verify 2-pass resolution,
+        // plus another subtask matching parent by Name instead of Task ID.
+        let sampleAsanaCsv = """
+        Task ID,Created At,Completed At,Last Modified,Name,Section/Column,Assignee,Start Date,Due Date,Tags,Notes,Projects,Parent task
+        sub-early,2026-05-01,2026-05-03,2026-05-03,Verify OAuth scopes,Architecture,, , , , ,Q3 Platform Launch,task-100
+        task-100,2026-05-01,,2026-05-04,Design Auth Gateway,Architecture,alice@company.com,2026-05-10,2026-05-18,"Security, API","Line 1\nLine 2 notes",Q3 Platform Launch,
+        sub-by-name,2026-05-02,,2026-05-04,Draft threat model,Architecture,,,,,,Q3 Platform Launch,Design Auth Gateway
+        task-101,2026-05-01,2026-05-09,2026-05-09,Publish RFC,Rollout,bob@company.com,2026-05-05,2026-05-09,Docs,Approved by team,Q3 Platform Launch,
+        task-root,2026-05-01,,2026-05-02,Kickoff alignment,Untitled section,,,,,,Q3 Platform Launch,
+        """
+
+        let imported = try ExternalProjectCodec.importAutoDetect(
+            data: Data(sampleAsanaCsv.utf8),
+            fileNameHint: "export.csv",
+            calendar: cal
+        )
+
+        XCTAssertEqual(imported.title, "Q3 Platform Launch")
+        XCTAssertEqual(imported.ungroupedTasks.map(\.title), ["Kickoff alignment"])
+        XCTAssertEqual(imported.phases.map(\.title), ["Architecture", "Rollout"])
+        XCTAssertEqual(imported.totalTaskCount, 3)
+
+        let archTask = try XCTUnwrap(imported.phases[0].tasks.first)
+        XCTAssertEqual(archTask.title, "Design Auth Gateway")
+        XCTAssertEqual(archTask.status, .open)
+        XCTAssertEqual(archTask.assigneeId, "alice@company.com")
+        XCTAssertEqual(archTask.whenDate, millis(2026, 5, 10))
+        XCTAssertEqual(archTask.deadline, millis(2026, 5, 18))
+        XCTAssertEqual(archTask.tagNames, ["Security", "API"])
+        XCTAssertEqual(archTask.notes, "Line 1\nLine 2 notes")
+        XCTAssertEqual(
+            archTask.checklistItems,
+            [
+                ExternalImportedChecklistItem(title: "Verify OAuth scopes", isCompleted: true),
+                ExternalImportedChecklistItem(title: "Draft threat model", isCompleted: false)
+            ]
+        )
+
+        let doneTask = try XCTUnwrap(imported.phases[1].tasks.first)
+        XCTAssertEqual(doneTask.status, .completed)
+        XCTAssertNotNil(doneTask.completedAt)
+        XCTAssertEqual(doneTask.assigneeId, "bob@company.com")
+
+        // Round-trip through SQLite -> Asana CSV export -> re-import
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let persisted = try db.importExternalProject(imported, calendar: cal)
+        XCTAssertEqual(persisted.importedTaskCount, 3)
+
+        let exportedCsv = try db.exportProjectExternal(
+            projectId: persisted.project.id,
+            format: .asanaCsv,
+            calendar: cal
+        )
+        XCTAssertTrue(exportedCsv.suggestedFileName.hasSuffix("-asana.csv"))
+
+        let roundTripped = try ExternalProjectCodec.importAutoDetect(
+            data: exportedCsv.data,
+            fileNameHint: exportedCsv.suggestedFileName,
+            calendar: cal
+        )
+        XCTAssertEqual(roundTripped.title, "Q3 Platform Launch")
+        XCTAssertEqual(roundTripped.ungroupedTasks.map(\.title), ["Kickoff alignment"])
+        XCTAssertEqual(roundTripped.phases.map(\.title), ["Architecture", "Rollout"])
+        XCTAssertEqual(
+            roundTripped.phases[0].tasks.first?.checklistItems,
+            [
+                ExternalImportedChecklistItem(title: "Verify OAuth scopes", isCompleted: true),
+                ExternalImportedChecklistItem(title: "Draft threat model", isCompleted: false)
+            ]
+        )
+        XCTAssertEqual(roundTripped.phases[1].tasks.first?.status, .completed)
+    }
+
+    func testMilestone4AsanaJsonRestAndStructuredRoundTrip() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let millis: (Int, Int, Int) -> Int64 = { y, m, d in
+            let date = cal.date(from: DateComponents(year: y, month: m, day: d))!
+            return DateEpochConverter.startOfDayMillis(for: date, calendar: cal)
+        }
+
+        // 1. Asana REST API JSON (`{"data": [...]}`)
+        let restJson = """
+        {
+          "data": [
+            {
+              "gid": "12001",
+              "name": "Build Sync Engine",
+              "notes": "Delta cursor support",
+              "completed": false,
+              "completed_at": null,
+              "start_on": "2026-06-01",
+              "due_on": "2026-06-12",
+              "hearted": true,
+              "assignee": { "gid": "u-1", "name": "petros@thingsbook.app" },
+              "tags": [{ "name": "Core" }, { "name": "Sync" }],
+              "memberships": [
+                {
+                  "project": { "gid": "p-1", "name": "Mobile Sync 3.0" },
+                  "section": { "gid": "s-1", "name": "Backend" }
+                }
+              ],
+              "subtasks": [
+                { "name": "Write migration", "completed": true },
+                { "name": "Benchmark batching", "completed": false }
+              ]
+            },
+            {
+              "gid": "12002",
+              "name": "QA Signoff",
+              "notes": "",
+              "completed": true,
+              "completed_at": "2026-06-14T16:20:00.000Z",
+              "due_on": "2026-06-14",
+              "memberships": [
+                {
+                  "project": { "gid": "p-1", "name": "Mobile Sync 3.0" },
+                  "section": null
+                }
+              ],
+              "subtasks": []
+            }
+          ]
+        }
+        """
+
+        let parsedRest = try ExternalProjectCodec.importAutoDetect(
+            data: Data(restJson.utf8),
+            fileNameHint: "asana-rest.json",
+            calendar: cal
+        )
+        XCTAssertEqual(parsedRest.title, "Mobile Sync 3.0")
+        XCTAssertEqual(parsedRest.ungroupedTasks.map(\.title), ["QA Signoff"])
+        XCTAssertEqual(parsedRest.ungroupedTasks.first?.status, .completed)
+        XCTAssertEqual(parsedRest.phases.map(\.title), ["Backend"])
+        let backendTask = try XCTUnwrap(parsedRest.phases.first?.tasks.first)
+        XCTAssertTrue(backendTask.isPinned)
+        XCTAssertEqual(backendTask.whenDate, millis(2026, 6, 1))
+        XCTAssertEqual(backendTask.deadline, millis(2026, 6, 12))
+        XCTAssertEqual(backendTask.assigneeId, "petros@thingsbook.app")
+        XCTAssertEqual(backendTask.tagNames, ["Core", "Sync"])
+        XCTAssertEqual(
+            backendTask.checklistItems,
+            [
+                ExternalImportedChecklistItem(title: "Write migration", isCompleted: true),
+                ExternalImportedChecklistItem(title: "Benchmark batching", isCompleted: false)
+            ]
+        )
+
+        // 2. Structured JSON (`{"project": ..., "sections": [...], "tasks": [...]}`)
+        let structuredJson = """
+        {
+          "project": { "name": "Design System Refresh", "notes": "Soft Bento tokens", "tags": ["UI"] },
+          "sections": [
+            {
+              "name": "Tokens",
+              "start_on": "2026-07-01",
+              "due_on": "2026-07-10",
+              "tasks": [
+                {
+                  "name": "Audit contrast ratios",
+                  "effort_level": "DEEP_FOCUS",
+                  "tags": ["Accessibility"],
+                  "subtasks": [{ "name": "Check DarkAqua", "completed": true }]
+                }
+              ]
+            }
+          ],
+          "tasks": [
+            { "name": "Prepare Figma handoff", "completed": false }
+          ]
+        }
+        """
+
+        let parsedStructured = try ExternalProjectCodec.importAsanaJson(
+            Data(structuredJson.utf8),
+            calendar: cal
+        )
+        XCTAssertEqual(parsedStructured.title, "Design System Refresh")
+        XCTAssertEqual(parsedStructured.notes, "Soft Bento tokens")
+        XCTAssertEqual(parsedStructured.tagNames, ["UI"])
+        XCTAssertEqual(parsedStructured.ungroupedTasks.map(\.title), ["Prepare Figma handoff"])
+        XCTAssertEqual(parsedStructured.phases.first?.startDate, millis(2026, 7, 1))
+        XCTAssertEqual(parsedStructured.phases.first?.endDate, millis(2026, 7, 10))
+        XCTAssertEqual(parsedStructured.phases.first?.tasks.first?.effortLevel, .deepFocus)
+    }
+
+    func testMilestone4PlannerXlsxDeflateAndStoredRoundTripAndExcelSerialDates() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let millis: (Int, Int, Int) -> Int64 = { y, m, d in
+            let date = cal.date(from: DateComponents(year: y, month: m, day: d))!
+            return DateEpochConverter.startOfDayMillis(for: date, calendar: cal)
+        }
+
+        // Excel serial 46154 from base 1899-12-30 -> 2026-05-12
+        XCTAssertEqual(ExternalProjectCodec.parseExternalDate("46154", calendar: cal), millis(2026, 5, 12))
+        XCTAssertEqual(ExternalProjectCodec.parseExternalDate("46154.0", calendar: cal), millis(2026, 5, 12))
+        XCTAssertEqual(ExternalProjectCodec.parseExternalDate("46160.75", calendar: cal), millis(2026, 5, 18))
+
+        // Build synthetic Planner .xlsx mixing Stored (method 0) & Deflate (method 8) ZIP entries,
+        // rich-text sharedStrings, inlineStr, numeric Excel serial dates, and both checklist formats ("2/3" & title match)
+        let sstXml = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="8" uniqueCount="8">
+          <si><t>Task Name</t></si>
+          <si><t>Bucket Name</t></si>
+          <si><t>Progress</t></si>
+          <si><t>Priority</t></si>
+          <si><t>Start Date</t></si>
+          <si><t>Due Date</t></si>
+          <si><r><t>Migrate </t></r><r><t>Database</t></r><rPh><t>IGNORE</t></rPh></si>
+          <si><t>Infrastructure</t></si>
+        </sst>
+        """
+        let wbXml = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+          <sheets><sheet name="Cloud Migration Plan" sheetId="1" r:id="rId1"/></sheets>
+        </workbook>
+        """
+        let sheetXml = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+          <sheetData>
+            <row r="1">
+              <c r="A1" t="s"><v>0</v></c>
+              <c r="B1" t="s"><v>1</v></c>
+              <c r="C1" t="s"><v>2</v></c>
+              <c r="D1" t="s"><v>3</v></c>
+              <c r="E1" t="s"><v>4</v></c>
+              <c r="F1" t="s"><v>5</v></c>
+              <c r="G1" t="inlineStr"><is><t>Completed Checklist Items</t></is></c>
+              <c r="H1" t="inlineStr"><is><t>Checklist Items</t></is></c>
+              <c r="I1" t="inlineStr"><is><t>Labels</t></is></c>
+              <c r="J1" t="inlineStr"><is><t>Assigned To</t></is></c>
+            </row>
+            <row r="2">
+              <c r="A2" t="s"><v>6</v></c>
+              <c r="B2" t="s"><v>7</v></c>
+              <c r="C2" t="inlineStr"><is><t>In progress</t></is></c>
+              <c r="D2" t="inlineStr"><is><t>Urgent</t></is></c>
+              <c r="E2"><v>46154</v></c>
+              <c r="F2"><v>46160.0</v></c>
+              <c r="G2" t="inlineStr"><is><t>2/3</t></is></c>
+              <c r="H2" t="inlineStr"><is><t>Backup prod;Run schema DDL;Verify replicas</t></is></c>
+              <c r="I2" t="inlineStr"><is><t>DBA;Critical</t></is></c>
+              <c r="J2" t="inlineStr"><is><t>sre@company.com</t></is></c>
+            </row>
+            <row r="3">
+              <c r="A3" t="inlineStr"><is><t>Decommission Legacy Host</t></is></c>
+              <c r="B3" t="s"><v>7</v></c>
+              <c r="C3" t="inlineStr"><is><t>Completed</t></is></c>
+              <c r="D3" t="inlineStr"><is><t>Low</t></is></c>
+              <c r="G3" t="inlineStr"><is><t>Archive logs</t></is></c>
+              <c r="H3" t="inlineStr"><is><t>Notify stakeholders;Archive logs</t></is></c>
+              <c r="I3" t="inlineStr"><is><t>Ops</t></is></c>
+            </row>
+          </sheetData>
+        </worksheet>
+        """
+
+        let mixedZip = try XlsxZipArchive.writeEntries([
+            ("xl/workbook.xml", Data(wbXml.utf8), false), // Stored (method 0)
+            ("xl/sharedStrings.xml", Data(sstXml.utf8), true), // Deflate (method 8)
+            ("xl/worksheets/sheet1.xml", Data(sheetXml.utf8), true) // Deflate (method 8)
+        ])
+
+        let parsed = try ExternalProjectCodec.importAutoDetect(
+            data: mixedZip,
+            fileNameHint: "plan.xlsx",
+            calendar: cal
+        )
+        XCTAssertEqual(parsed.title, "Cloud Migration Plan")
+        XCTAssertEqual(parsed.phases.map(\.title), ["Infrastructure"])
+        XCTAssertEqual(parsed.phases[0].tasks.count, 2)
+
+        let task1 = parsed.phases[0].tasks[0]
+        XCTAssertEqual(task1.title, "Migrate Database")
+        XCTAssertEqual(task1.status, .open)
+        XCTAssertTrue(task1.isPinned)
+        XCTAssertEqual(task1.whenDate, millis(2026, 5, 12))
+        XCTAssertEqual(task1.deadline, millis(2026, 5, 18))
+        XCTAssertEqual(task1.assigneeId, "sre@company.com")
+        XCTAssertEqual(task1.tagNames, ["DBA", "Critical"])
+        XCTAssertEqual(
+            task1.checklistItems,
+            [
+                ExternalImportedChecklistItem(title: "Backup prod", isCompleted: true),
+                ExternalImportedChecklistItem(title: "Run schema DDL", isCompleted: true),
+                ExternalImportedChecklistItem(title: "Verify replicas", isCompleted: false)
+            ]
+        )
+
+        let task2 = parsed.phases[0].tasks[1]
+        XCTAssertEqual(task2.title, "Decommission Legacy Host")
+        XCTAssertEqual(task2.status, .completed)
+        XCTAssertEqual(task2.effortLevel, .quickWin)
+        XCTAssertEqual(
+            task2.checklistItems,
+            [
+                ExternalImportedChecklistItem(title: "Notify stakeholders", isCompleted: false),
+                ExternalImportedChecklistItem(title: "Archive logs", isCompleted: true)
+            ]
+        )
+
+        // Test exportPlannerXlsx in both Deflate and Stored modes
+        let proj = Project(id: "p-xlsx", title: "Planner Binary Export", createdAt: millis(2026, 5, 1), updatedAt: millis(2026, 5, 1))
+        let h1 = Heading(id: "h-xlsx", projectId: proj.id, title: "Sprint 1", sortOrder: 1000, createdAt: 1, updatedAt: 1)
+        let tagImportant = Tag(id: "tg-1", title: "Platform", createdAt: 1, updatedAt: 1)
+        let tOpen = TaskItem(
+            id: "t-xlsx-1",
+            title: "Implement OOXML Writer",
+            notes: "Pure Swift + zlib",
+            status: .open,
+            scheduleState: .upcoming,
+            whenDate: millis(2026, 5, 12),
+            deadline: millis(2026, 5, 20),
+            projectId: proj.id,
+            headingId: h1.id,
+            effortLevel: TaskEffortLevel.deepFocus.rawValue,
+            assigneeId: "lead@company.com",
+            checklistItems: [
+                ChecklistItem(id: "c1", taskId: "t-xlsx-1", title: "Central directory", isCompleted: true, sortOrder: 100, createdAt: 1, updatedAt: 1),
+                ChecklistItem(id: "c2", taskId: "t-xlsx-1", title: "Stylesheet", isCompleted: false, sortOrder: 200, createdAt: 1, updatedAt: 1)
+            ],
+            tags: [tagImportant],
+            createdAt: millis(2026, 5, 1),
+            updatedAt: millis(2026, 5, 2)
+        )
+
+        for compressFlag in [true, false] {
+            let xlsxBytes = try ExternalProjectCodec.exportPlannerXlsx(
+                project: proj,
+                headings: [h1],
+                tasks: [tOpen],
+                compressEntries: compressFlag,
+                calendar: cal
+            )
+            let reimported = try ExternalProjectCodec.importPlannerXlsx(xlsxBytes, calendar: cal)
+            XCTAssertEqual(reimported.title, "Planner Binary Export")
+            XCTAssertEqual(reimported.phases.map(\.title), ["Sprint 1"])
+            let rtTask = try XCTUnwrap(reimported.phases.first?.tasks.first)
+            XCTAssertEqual(rtTask.title, "Implement OOXML Writer")
+            XCTAssertEqual(rtTask.notes, "Pure Swift + zlib")
+            XCTAssertEqual(rtTask.whenDate, millis(2026, 5, 12))
+            XCTAssertEqual(rtTask.deadline, millis(2026, 5, 20))
+            XCTAssertEqual(rtTask.effortLevel, .deepFocus)
+            XCTAssertEqual(rtTask.assigneeId, "lead@company.com")
+            XCTAssertEqual(rtTask.tagNames, ["Platform"])
+            XCTAssertEqual(
+                rtTask.checklistItems,
+                [
+                    ExternalImportedChecklistItem(title: "Central directory", isCompleted: true),
+                    ExternalImportedChecklistItem(title: "Stylesheet", isCompleted: false)
+                ]
+            )
+        }
+    }
+
+    func testMilestone4PlannerCsvCommaAndSemicolonRoundTrip() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let millis: (Int, Int, Int) -> Int64 = { y, m, d in
+            let date = cal.date(from: DateComponents(year: y, month: m, day: d))!
+            return DateEpochConverter.startOfDayMillis(for: date, calendar: cal)
+        }
+
+        // Semicolon-delimited localized German Planner CSV
+        let semicolonCsv = """
+        Aufgaben-ID;Aufgabenname;Bucket;Fortschritt;Priorität;Zugewiesen an;Startdatum;Fälligkeitsdatum;Beschreibung;Abgeschlossene Checklistenelemente;Checklistenelemente;Bezeichnungen
+        p-1;Release-Kandidat bauen;Auslieferung;100%;Wichtig;dev@firma.de;12.05.2026;19.05.2026;Signiertes DMG;Notarisierung prüfen;Universal Binary kompilieren\nNotarisierung prüfen;macOS,Release
+        p-2;Pressemitteilung; ;Nicht begonnen;Dringend;;15.05.2026;20.05.2026;;;;Marketing
+        """
+
+        let parsedSemi = try ExternalProjectCodec.importAutoDetect(
+            data: Data(semicolonCsv.utf8),
+            fileNameHint: "Quartalsplan-planner.csv",
+            calendar: cal
+        )
+        XCTAssertEqual(parsedSemi.title, "Quartalsplan")
+        XCTAssertEqual(parsedSemi.ungroupedTasks.map(\.title), ["Pressemitteilung"])
+        XCTAssertEqual(parsedSemi.ungroupedTasks.first?.isPinned, true)
+        XCTAssertEqual(parsedSemi.phases.map(\.title), ["Auslieferung"])
+
+        let deTask = try XCTUnwrap(parsedSemi.phases.first?.tasks.first)
+        XCTAssertEqual(deTask.status, .completed)
+        XCTAssertEqual(deTask.effortLevel, .deepFocus)
+        XCTAssertEqual(deTask.whenDate, millis(2026, 5, 12))
+        XCTAssertEqual(deTask.deadline, millis(2026, 5, 19))
+        XCTAssertEqual(deTask.assigneeId, "dev@firma.de")
+        XCTAssertEqual(deTask.tagNames, ["macOS", "Release"])
+        XCTAssertEqual(
+            deTask.checklistItems,
+            [
+                ExternalImportedChecklistItem(title: "Universal Binary kompilieren", isCompleted: false),
+                ExternalImportedChecklistItem(title: "Notarisierung prüfen", isCompleted: true)
+            ]
+        )
+
+        // Comma-delimited Planner CSV export -> import round-trip
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let importedRes = try db.importExternalProject(parsedSemi, calendar: cal)
+        let exportedPlannerCsv = try db.exportProjectExternal(
+            projectId: importedRes.project.id,
+            format: .plannerCsv,
+            calendar: cal
+        )
+        let reparsedComma = try ExternalProjectCodec.importAutoDetect(
+            data: exportedPlannerCsv.data,
+            fileNameHint: exportedPlannerCsv.suggestedFileName,
+            calendar: cal
+        )
+        XCTAssertEqual(reparsedComma.title, "Quartalsplan")
+        XCTAssertEqual(reparsedComma.ungroupedTasks.count, 1)
+        XCTAssertEqual(reparsedComma.phases.first?.tasks.first?.status, .completed)
+        XCTAssertEqual(reparsedComma.phases.first?.tasks.first?.effortLevel, .deepFocus)
+    }
+
+    func testMilestone4DatabaseExternalImportExportEndToEndAndLocalizationParity() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let millis: (Int, Int, Int) -> Int64 = { y, m, d in
+            let date = cal.date(from: DateComponents(year: y, month: m, day: d))!
+            return DateEpochConverter.startOfDayMillis(for: date, calendar: cal)
+        }
+
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let workArea = try db.createArea(title: "Engineering")
+        let existingDesignTag = try db.createTag(title: "Design")
+
+        let externalSpec = ExternalImportedProject(
+            title: "Enterprise Portal 3.0",
+            notes: "Cross-functional launch plan",
+            ungroupedTasks: [
+                ExternalImportedTask(
+                    title: "Executive Kickoff",
+                    notes: "Deck ready",
+                    status: .completed,
+                    completedAt: millis(2026, 5, 2),
+                    whenDate: millis(2026, 5, 1),
+                    deadline: millis(2026, 5, 2),
+                    tagNames: ["design", "Strategy"], // "design" must reuse existingDesignTag case-insensitively!
+                    checklistItems: [
+                        ExternalImportedChecklistItem(title: "Book room", isCompleted: true),
+                        ExternalImportedChecklistItem(title: "Send invite", isCompleted: true)
+                    ],
+                    assigneeId: "pm@enterprise.io",
+                    workspaceId: "ws-portal"
+                )
+            ],
+            phases: [
+                ExternalImportedPhase(
+                    title: "Phase 1: Implementation",
+                    startDate: millis(2026, 5, 4),
+                    endDate: millis(2026, 5, 22),
+                    tasks: [
+                        ExternalImportedTask(
+                            title: "Build GraphQL Gateway",
+                            notes: "Strict authz",
+                            status: .open,
+                            whenDate: millis(2026, 5, 6),
+                            deadline: millis(2026, 5, 18),
+                            isPinned: true,
+                            effortLevel: .deepFocus,
+                            tagNames: ["Backend", "DESIGN"],
+                            checklistItems: [
+                                ExternalImportedChecklistItem(title: "Schema SDL", isCompleted: true),
+                                ExternalImportedChecklistItem(title: "Rate limiter", isCompleted: false)
+                            ],
+                            assigneeId: "eng@enterprise.io",
+                            workspaceId: "ws-portal"
+                        )
+                    ]
+                )
+            ],
+            tagNames: ["design"],
+            workspaceId: "ws-portal"
+        )
+
+        let created = try db.importExternalProject(
+            externalSpec,
+            areaId: workArea.id,
+            calendar: cal
+        )
+        XCTAssertEqual(created.importedTaskCount, 2)
+        XCTAssertEqual(created.project.areaId, workArea.id)
+        XCTAssertEqual(created.project.workspaceId, "ws-portal")
+        XCTAssertEqual(created.project.tagIds, [existingDesignTag.id])
+        XCTAssertEqual(created.project.totalTaskCount, 2)
+        XCTAssertEqual(created.project.completedTaskCount, 1)
+
+        let snap = try db.loadWorkspaceSnapshot(calendar: cal)
+        // Only 3 tags total: reused "Design" + newly created "Strategy" & "Backend"
+        XCTAssertEqual(snap.tags.count, 3)
+        XCTAssertEqual(snap.tags.filter { $0.title.lowercased() == "design" }.count, 1)
+
+        let headings = try XCTUnwrap(snap.headingsByProject[created.project.id])
+        XCTAssertEqual(headings.count, 1)
+        XCTAssertEqual(headings[0].title, "Phase 1: Implementation")
+        XCTAssertEqual(headings[0].startDate, millis(2026, 5, 4))
+        XCTAssertEqual(headings[0].endDate, millis(2026, 5, 22))
+
+        let openTask = try XCTUnwrap(snap.allOpenTasks.first { $0.projectId == created.project.id })
+        XCTAssertEqual(openTask.title, "Build GraphQL Gateway")
+        XCTAssertTrue(openTask.isPinned)
+        XCTAssertEqual(openTask.effortLevel, TaskEffortLevel.deepFocus.rawValue)
+        XCTAssertEqual(openTask.assigneeId, "eng@enterprise.io")
+        XCTAssertEqual(openTask.workspaceId, "ws-portal")
+        XCTAssertTrue(openTask.tagIds.contains(existingDesignTag.id))
+        XCTAssertEqual(openTask.checklistItems.map(\.isCompleted), [true, false])
+
+        let completedTask = try XCTUnwrap(snap.logbookTasks.first { $0.projectId == created.project.id })
+        XCTAssertEqual(completedTask.title, "Executive Kickoff")
+        XCTAssertEqual(completedTask.status, .completed)
+        XCTAssertEqual(completedTask.assigneeId, "pm@enterprise.io")
+        XCTAssertEqual(completedTask.workspaceId, "ws-portal")
+        XCTAssertEqual(completedTask.checklistItems.map(\.isCompleted), [true, true])
+
+        // Export across all 4 formats and verify both open & completed tasks + checklists round-trip
+        for format in ExternalExportFormat.allCases {
+            let exported = try db.exportProjectExternal(
+                projectId: created.project.id,
+                format: format,
+                calendar: cal
+            )
+            XCTAssertFalse(exported.data.isEmpty)
+            XCTAssertTrue(exported.suggestedFileName.hasSuffix(format.defaultFileSuffix))
+
+            let reimported = try ExternalProjectCodec.importAutoDetect(
+                data: exported.data,
+                fileNameHint: exported.suggestedFileName,
+                calendar: cal
+            )
+            XCTAssertEqual(reimported.title, "Enterprise Portal 3.0")
+            XCTAssertEqual(reimported.totalTaskCount, 2, "Both open and completed tasks must round-trip for \(format)")
+            XCTAssertEqual(reimported.ungroupedTasks.first?.status, .completed)
+            XCTAssertEqual(reimported.ungroupedTasks.first?.assigneeId, "pm@enterprise.io")
+            XCTAssertEqual(reimported.phases.first?.title, "Phase 1: Implementation")
+            XCTAssertEqual(
+                reimported.phases.first?.tasks.first?.checklistItems,
+                [
+                    ExternalImportedChecklistItem(title: "Schema SDL", isCompleted: true),
+                    ExternalImportedChecklistItem(title: "Rate limiter", isCompleted: false)
+                ]
+            )
+            if format == .asanaJson {
+                XCTAssertEqual(reimported.workspaceId, "ws-portal")
+                XCTAssertEqual(reimported.phases.first?.tasks.first?.workspaceId, "ws-portal")
+            }
+        }
+
+        // Verify all 14 Milestone 4 localization keys across EN, DE, FR, IT, ES
+        let plainExternalKeys = [
+            "v30_external_import_export_tab",
+            "v30_import_asana",
+            "v30_export_asana_csv",
+            "v30_export_asana_json",
+            "v30_import_planner",
+            "v30_export_planner_xlsx",
+            "v30_export_planner_csv",
+            "v30_external_import_section",
+            "v30_external_import_desc",
+            "v30_external_export_section",
+            "v30_external_select_project",
+            "v30_external_no_projects"
+        ]
+        for lang in [AppLanguage.en, .de, .fr, .it, .es] {
+            for key in plainExternalKeys {
+                let resolved = ThingsStrings.shared.text(key, lang: lang)
+                XCTAssertFalse(resolved.isEmpty, "Empty \(key) in \(lang.rawValue)")
+                XCTAssertNotEqual(resolved, key, "Unresolved \(key) in \(lang.rawValue)")
+            }
+            let importMsg = ThingsStrings.shared.format("v30_external_import_success", lang: lang, "Roadmap", 12)
+            XCTAssertTrue(importMsg.contains("Roadmap") && importMsg.contains("12"))
+            let exportMsg = ThingsStrings.shared.format("v30_external_export_success", lang: lang, "Roadmap")
+            XCTAssertTrue(exportMsg.contains("Roadmap"))
+        }
+    }
 }
+
 
 
 

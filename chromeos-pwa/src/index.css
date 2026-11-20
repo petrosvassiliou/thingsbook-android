@@ -3272,9 +3272,11 @@ button.v2-stalled-pill:hover {
 .v2-segmented-bar {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
+  max-width: 100%;
   gap: 3px;
   padding: 3px;
-  border-radius: var(--radius-pill);
+  border-radius: 16px;
   background: var(--bg-subtle);
   border: 1px solid var(--border-subtle);
 }
@@ -3283,10 +3285,13 @@ button.v2-stalled-pill:hover {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 12px;
+  padding: 5.5px 12px;
   border-radius: var(--radius-pill);
   font-size: 12.4px;
   font-weight: 620;
+  line-height: 1.3;
+  white-space: normal;
+  text-align: left;
   color: var(--text-secondary);
   transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -5261,5 +5266,87 @@ button.v2-stalled-pill:hover {
   white-space: nowrap;
   flex-shrink: 0;
 }
+
+/* ==================== Milestone 4: Asana & Microsoft Planner Import/Export ==================== */
+
+.v3-external-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.v3-external-bento-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 15px;
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+}
+
+.v3-external-desc {
+  margin: 0;
+  font-size: 12.4px;
+  line-height: 1.48;
+  color: var(--text-secondary);
+  white-space: normal;
+}
+
+.v3-external-btn-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.v3-external-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  min-height: 42px;
+  height: auto;
+  padding: 9.5px 13px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  font-size: 12.8px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
+  transition: background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.v3-external-action-btn:hover:not(:disabled) {
+  background: var(--bg-card-hover);
+  border-color: var(--things-blue);
+  box-shadow: 0 2px 6px rgba(36, 139, 253, 0.1);
+}
+
+.v3-external-action-btn.primary {
+  background: var(--things-blue);
+  border-color: var(--things-blue);
+  color: #ffffff;
+}
+
+.v3-external-action-btn.primary:hover:not(:disabled) {
+  background: var(--things-blue-hover);
+  border-color: var(--things-blue-hover);
+}
+
+.v3-external-action-btn:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .v3-external-btn-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 
 

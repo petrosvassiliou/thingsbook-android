@@ -1,6 +1,9 @@
 package com.pv.thingsbook.ui.components
 
 import android.app.TimePickerDialog
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -43,12 +46,17 @@ import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Event
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -70,6 +78,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -83,6 +92,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.pv.thingsbook.R
+import com.pv.thingsbook.data.external.ExternalExportFormat
 import com.pv.thingsbook.domain.model.Area
 import com.pv.thingsbook.domain.model.CalendarEventItem
 import com.pv.thingsbook.domain.model.Project
@@ -1171,16 +1181,26 @@ private fun QuickReviewChip(
 // Pillar 2: Reusable Project Templates & Markdown / JSON Outline Importer
 // =============================================================================
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ThingsTemplatesAndImportModal(
     initialTab: Int = 0,
     defaultAreaId: String? = null,
     areas: List<Area>,
     userTemplates: List<ProjectTemplate>,
+    projects: List<Project> = emptyList(),
+    currentProjectId: String? = null,
     locale: Locale = Locale.getDefault(),
     onCreateFromTemplate: (template: ProjectTemplate, areaIdOverride: String?) -> Unit,
     onDeleteUserTemplate: (String) -> Unit,
     onImportOutline: (rawOutline: String, areaId: String?) -> Unit,
+    onImportExternalUri: (Uri, String?) -> Unit = { _, _ -> },
+    onExportExternalProject: (
+        projectId: String,
+        format: ExternalExportFormat,
+        onPrepared: (fileName: String, mimeType: String, bytes: ByteArray, projectTitle: String) -> Unit
+    ) -> Unit = { _, _, _ -> },
+    onWriteExportBytes: (Uri, ByteArray, String) -> Unit = { _, _, _ -> },
     onDismiss: () -> Unit
 ) {
     val colors = ThingsTheme.colors
@@ -1200,10 +1220,81 @@ fun ThingsTemplatesAndImportModal(
     }
     val fallbackProjectTitle = stringResource(R.string.entity_new_project)
 
-    var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab.coerceIn(0, 1)) }
+    var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab.coerceIn(0, 2)) }
     var selectedAreaId by remember(defaultAreaId) { mutableStateOf(defaultAreaId) }
     var rawOutline by remember(resolvedLanguageCode) {
         mutableStateOf(StarterProjectTemplates.getSampleOutlineMarkdown(resolvedLanguageCode))
+    }
+
+    var selectedExportProjectId by remember(currentProjectId, projects) {
+        mutableStateOf(
+            currentProjectId?.takeIf { id -> projects.any { it.id == id } }
+                ?: projects.firstOrNull()?.id
+        )
+    }
+    var showExportProjectMenu by remember { mutableStateOf(false) }
+    var pendingExportBytesAndTitle by remember { mutableStateOf<Pair<ByteArray, String>?>(null) }
+
+    val selectedExportProject = remember(selectedExportProjectId, projects) {
+        projects.firstOrNull { it.id == selectedExportProjectId } ?: projects.firstOrNull()
+    }
+
+    val openExternalDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            onImportExternalUri(uri, selectedAreaId)
+        }
+    }
+
+    val createCsvDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        val payload = pendingExportBytesAndTitle
+        pendingExportBytesAndTitle = null
+        if (uri != null && payload != null) {
+            onWriteExportBytes(uri, payload.first, payload.second)
+        }
+    }
+
+    val createJsonDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        val payload = pendingExportBytesAndTitle
+        pendingExportBytesAndTitle = null
+        if (uri != null && payload != null) {
+            onWriteExportBytes(uri, payload.first, payload.second)
+        }
+    }
+
+    val createXlsxDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    ) { uri ->
+        val payload = pendingExportBytesAndTitle
+        pendingExportBytesAndTitle = null
+        if (uri != null && payload != null) {
+            onWriteExportBytes(uri, payload.first, payload.second)
+        }
+    }
+
+    val triggerExternalExport: (ExternalExportFormat) -> Unit = { format ->
+        val targetProject = selectedExportProject
+        if (targetProject != null) {
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            onExportExternalProject(targetProject.id, format) { fileName, _, bytes, projTitle ->
+                pendingExportBytesAndTitle = bytes to projTitle
+                runCatching {
+                    when (format) {
+                        ExternalExportFormat.ASANA_CSV,
+                        ExternalExportFormat.PLANNER_CSV -> createCsvDocumentLauncher.launch(fileName)
+                        ExternalExportFormat.ASANA_JSON -> createJsonDocumentLauncher.launch(fileName)
+                        ExternalExportFormat.PLANNER_XLSX -> createXlsxDocumentLauncher.launch(fileName)
+                    }
+                }
+            }
+        }
     }
 
     val parsedPreview = remember(rawOutline, fallbackProjectTitle) {
@@ -1217,9 +1308,9 @@ fun ThingsTemplatesAndImportModal(
         ThingsTooltipHostBox {
         Surface(
             modifier = Modifier
-                .widthIn(max = 560.dp)
+                .widthIn(max = 600.dp)
                 .fillMaxWidth(0.95f)
-                .heightIn(max = 700.dp)
+                .heightIn(max = 740.dp)
                 .clip(RoundedCornerShape(22.dp)),
             color = colors.cardSurface,
             shape = RoundedCornerShape(22.dp),
@@ -1238,7 +1329,8 @@ fun ThingsTemplatesAndImportModal(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
                     ) {
                         Box(
                             modifier = Modifier
@@ -1252,7 +1344,8 @@ fun ThingsTemplatesAndImportModal(
                         Text(
                             text = stringResource(R.string.v2_templates_title),
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = colors.primaryText
+                            color = colors.primaryText,
+                            softWrap = true
                         )
                     }
                     ThingsHoverTooltip(text = stringResource(R.string.action_cancel)) {
@@ -1269,42 +1362,47 @@ fun ThingsTemplatesAndImportModal(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // 2-Tab Segmented Switch
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(11.dp))
-                        .background(colors.tagPillBg)
-                        .padding(3.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                // 3-Tab Soft Bento Switcher (FlowRow — zero truncation in all 5 locales!)
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = colors.tagPillBg,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    val tabs = listOf(
-                        "📋 ${stringResource(R.string.v2_starter_templates)}",
-                        "📝 ${stringResource(R.string.v2_import_markdown_title)}"
-                    )
-                    tabs.forEachIndexed { idx, title ->
-                        val active = selectedTab == idx
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(9.dp))
-                                .background(if (active) colors.cardSurface else Color.Transparent)
-                                .clickable {
-                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    selectedTab = idx
-                                }
-                                .padding(vertical = 8.dp, horizontal = 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = title,
-                                style = MaterialTheme.typography.labelMedium.copy(
-                                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium
-                                ),
-                                color = if (active) colors.thingsBlue else colors.secondaryText,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                    FlowRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val tabs = listOf(
+                            "📋 ${stringResource(R.string.v2_starter_templates)}",
+                            "📝 ${stringResource(R.string.v2_import_markdown_title)}",
+                            "⇄ ${stringResource(R.string.v30_external_import_export_tab)}"
+                        )
+                        tabs.forEachIndexed { idx, title ->
+                            val active = selectedTab == idx
+                            Surface(
+                                shape = RoundedCornerShape(9.dp),
+                                color = if (active) colors.cardSurface else Color.Transparent,
+                                shadowElevation = if (active) 1.dp else 0.dp,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(9.dp))
+                                    .clickable {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        selectedTab = idx
+                                    }
+                            ) {
+                                Text(
+                                    text = title,
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = if (active) FontWeight.Bold else FontWeight.Medium
+                                    ),
+                                    color = if (active) colors.thingsBlue else colors.secondaryText,
+                                    softWrap = true,
+                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 11.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -1348,116 +1446,350 @@ fun ThingsTemplatesAndImportModal(
                 HorizontalDivider(color = colors.hairlineDivider)
                 Spacer(modifier = Modifier.height(10.dp))
 
-                if (selectedTab == 0) {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f, fill = false)
-                            .heightIn(min = 240.dp, max = 460.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        contentPadding = PaddingValues(bottom = 8.dp)
-                    ) {
-                        if (userTemplates.isNotEmpty()) {
+                when (selectedTab) {
+                    0 -> {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = false)
+                                .heightIn(min = 240.dp, max = 460.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            contentPadding = PaddingValues(bottom = 8.dp)
+                        ) {
+                            if (userTemplates.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        text = stringResource(R.string.v2_my_templates),
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = colors.thingsBlue
+                                    )
+                                }
+                                items(userTemplates, key = { "usr_${it.id}" }) { tpl ->
+                                    TemplateGalleryCard(
+                                        template = tpl,
+                                        onCreate = { onCreateFromTemplate(tpl, selectedAreaId) },
+                                        onDelete = { onDeleteUserTemplate(tpl.id) }
+                                    )
+                                }
+                                item {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                }
+                            }
+
                             item {
                                 Text(
-                                    text = stringResource(R.string.v2_my_templates),
+                                    text = stringResource(R.string.v2_starter_templates),
                                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = colors.thingsBlue
+                                    color = colors.secondaryText
                                 )
                             }
-                            items(userTemplates, key = { "usr_${it.id}" }) { tpl ->
+                            items(localizedStarterTemplates, key = { "${resolvedLanguageCode}_${it.id}" }) { tpl ->
                                 TemplateGalleryCard(
                                     template = tpl,
                                     onCreate = { onCreateFromTemplate(tpl, selectedAreaId) },
-                                    onDelete = { onDeleteUserTemplate(tpl.id) }
+                                    onDelete = null
                                 )
                             }
-                            item {
-                                Spacer(modifier = Modifier.height(4.dp))
-                            }
-                        }
-
-                        item {
-                            Text(
-                                text = stringResource(R.string.v2_starter_templates),
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                color = colors.secondaryText
-                            )
-                        }
-                        items(localizedStarterTemplates, key = { "${resolvedLanguageCode}_${it.id}" }) { tpl ->
-                            TemplateGalleryCard(
-                                template = tpl,
-                                onCreate = { onCreateFromTemplate(tpl, selectedAreaId) },
-                                onDelete = null
-                            )
                         }
                     }
-                } else {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = rawOutline,
-                            onValueChange = { rawOutline = it },
-                            placeholder = {
-                                Text(
-                                    text = stringResource(R.string.v2_import_markdown_hint),
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            },
-                            minLines = 7,
-                            maxLines = 11,
-                            modifier = Modifier.fillMaxWidth()
-                        )
 
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = colors.thingsBlueSoft.copy(alpha = 0.7f),
-                            modifier = Modifier.fillMaxWidth()
+                    1 -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = false)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                            OutlinedTextField(
+                                value = rawOutline,
+                                onValueChange = { rawOutline = it },
+                                placeholder = {
+                                    Text(
+                                        text = stringResource(R.string.v2_import_markdown_hint),
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                },
+                                minLines = 7,
+                                maxLines = 11,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = colors.thingsBlueSoft.copy(alpha = 0.7f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "📁 ${parsedPreview.title}",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = colors.thingsBlue,
+                                        softWrap = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "${parsedPreview.headings.size} § • ${parsedPreview.totalTaskCount} ☑",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = colors.primaryText
+                                    )
+                                }
+                            }
+
+                            Button(
+                                onClick = {
+                                    if (rawOutline.isNotBlank()) {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onImportOutline(rawOutline, selectedAreaId)
+                                    }
+                                },
+                                enabled = rawOutline.isNotBlank(),
+                                colors = ButtonDefaults.buttonColors(containerColor = colors.thingsBlue),
+                                shape = RoundedCornerShape(11.dp),
+                                modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(
-                                    text = "📁 ${parsedPreview.title}",
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = colors.thingsBlue,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Text(
-                                    text = "${parsedPreview.headings.size} § • ${parsedPreview.totalTaskCount} ☑",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                    color = colors.primaryText
+                                    text = stringResource(R.string.v2_import_create_project),
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    softWrap = true
                                 )
                             }
                         }
+                    }
 
-                        Button(
-                            onClick = {
-                                if (rawOutline.isNotBlank()) {
-                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onImportOutline(rawOutline, selectedAreaId)
-                                }
-                            },
-                            enabled = rawOutline.isNotBlank(),
-                            colors = ButtonDefaults.buttonColors(containerColor = colors.thingsBlue),
-                            shape = RoundedCornerShape(11.dp),
-                            modifier = Modifier.fillMaxWidth()
+                    else -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = false)
+                                .heightIn(min = 240.dp, max = 480.dp)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Text(
-                                text = stringResource(R.string.v2_import_create_project),
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold
-                            )
+                            // 1. Offline Import Section
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = colors.tagPillBg.copy(alpha = 0.55f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.FileUpload,
+                                            contentDescription = null,
+                                            tint = colors.thingsBlue,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = stringResource(R.string.v30_external_import_section),
+                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = colors.primaryText,
+                                            softWrap = true
+                                        )
+                                    }
+
+                                    Text(
+                                        text = stringResource(R.string.v30_external_import_desc),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = colors.secondaryText,
+                                        softWrap = true
+                                    )
+
+                                    Spacer(modifier = Modifier.height(2.dp))
+
+                                    ExternalSoftBentoActionButton(
+                                        icon = Icons.Outlined.FileUpload,
+                                        label = stringResource(R.string.v30_import_asana),
+                                        isPrimary = true,
+                                        onClick = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            runCatching { openExternalDocumentLauncher.launch(arrayOf("*/*")) }
+                                        }
+                                    )
+
+                                    ExternalSoftBentoActionButton(
+                                        icon = Icons.Outlined.FileUpload,
+                                        label = stringResource(R.string.v30_import_planner),
+                                        isPrimary = true,
+                                        onClick = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            runCatching { openExternalDocumentLauncher.launch(arrayOf("*/*")) }
+                                        }
+                                    )
+                                }
+                            }
+
+                            // 2. Export Existing Project Section
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = colors.tagPillBg.copy(alpha = 0.55f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.FileDownload,
+                                            contentDescription = null,
+                                            tint = colors.thingsBlue,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = stringResource(R.string.v30_external_export_section),
+                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = colors.primaryText,
+                                            softWrap = true
+                                        )
+                                    }
+
+                                    if (projects.isEmpty() || selectedExportProject == null) {
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = colors.cardSurface,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text(
+                                                text = stringResource(R.string.v30_external_no_projects),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = colors.secondaryText,
+                                                softWrap = true,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                                            )
+                                        }
+                                    } else {
+                                        Text(
+                                            text = stringResource(R.string.v30_external_select_project),
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                            color = colors.secondaryText,
+                                            softWrap = true
+                                        )
+
+                                        Box(modifier = Modifier.fillMaxWidth()) {
+                                            Surface(
+                                                shape = RoundedCornerShape(11.dp),
+                                                color = colors.cardSurface,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .border(
+                                                        width = 1.dp,
+                                                        color = colors.thingsBlue.copy(alpha = 0.35f),
+                                                        shape = RoundedCornerShape(11.dp)
+                                                    )
+                                                    .clip(RoundedCornerShape(11.dp))
+                                                    .clickable { showExportProjectMenu = true }
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                        modifier = Modifier.weight(1f)
+                                                    ) {
+                                                        ProjectProgressRing(
+                                                            progress = selectedExportProject.progress,
+                                                            size = 18.dp
+                                                        )
+                                                        Text(
+                                                            text = selectedExportProject.title,
+                                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                                fontWeight = FontWeight.SemiBold
+                                                            ),
+                                                            color = colors.primaryText,
+                                                            softWrap = true
+                                                        )
+                                                    }
+                                                    Icon(
+                                                        imageVector = Icons.Outlined.ExpandMore,
+                                                        contentDescription = null,
+                                                        tint = colors.secondaryText,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            DropdownMenu(
+                                                expanded = showExportProjectMenu,
+                                                onDismissRequest = { showExportProjectMenu = false }
+                                            ) {
+                                                projects.forEach { proj ->
+                                                    DropdownMenuItem(
+                                                        text = {
+                                                            Row(
+                                                                verticalAlignment = Alignment.CenterVertically,
+                                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                            ) {
+                                                                ProjectProgressRing(
+                                                                    progress = proj.progress,
+                                                                    size = 16.dp
+                                                                )
+                                                                Text(
+                                                                    text = proj.title,
+                                                                    softWrap = true
+                                                                )
+                                                            }
+                                                        },
+                                                        onClick = {
+                                                            selectedExportProjectId = proj.id
+                                                            showExportProjectMenu = false
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(2.dp))
+
+                                        ExternalSoftBentoActionButton(
+                                            icon = Icons.Outlined.FileDownload,
+                                            label = stringResource(R.string.v30_export_asana_csv),
+                                            isPrimary = false,
+                                            onClick = { triggerExternalExport(ExternalExportFormat.ASANA_CSV) }
+                                        )
+                                        ExternalSoftBentoActionButton(
+                                            icon = Icons.Outlined.FileDownload,
+                                            label = stringResource(R.string.v30_export_asana_json),
+                                            isPrimary = false,
+                                            onClick = { triggerExternalExport(ExternalExportFormat.ASANA_JSON) }
+                                        )
+                                        ExternalSoftBentoActionButton(
+                                            icon = Icons.Outlined.FileDownload,
+                                            label = stringResource(R.string.v30_export_planner_xlsx),
+                                            isPrimary = false,
+                                            onClick = { triggerExternalExport(ExternalExportFormat.PLANNER_XLSX) }
+                                        )
+                                        ExternalSoftBentoActionButton(
+                                            icon = Icons.Outlined.FileDownload,
+                                            label = stringResource(R.string.v30_export_planner_csv),
+                                            isPrimary = false,
+                                            onClick = { triggerExternalExport(ExternalExportFormat.PLANNER_CSV) }
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1467,6 +1799,60 @@ fun ThingsTemplatesAndImportModal(
     }
 }
 
+@Composable
+private fun ExternalSoftBentoActionButton(
+    icon: ImageVector,
+    label: String,
+    isPrimary: Boolean,
+    onClick: () -> Unit
+) {
+    val colors = ThingsTheme.colors
+    val containerBg = if (isPrimary) colors.thingsBlue else colors.cardSurface
+    val contentFg = if (isPrimary) Color.White else colors.thingsBlue
+    Surface(
+        shape = RoundedCornerShape(11.dp),
+        color = containerBg,
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (!isPrimary) {
+                    Modifier.border(
+                        width = 1.dp,
+                        color = colors.thingsBlue.copy(alpha = 0.35f),
+                        shape = RoundedCornerShape(11.dp)
+                    )
+                } else {
+                    Modifier
+                }
+            )
+            .clip(RoundedCornerShape(11.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 13.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(9.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = contentFg,
+                modifier = Modifier.size(17.dp)
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                color = contentFg,
+                softWrap = true,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TemplateGalleryCard(
     template: ProjectTemplate,
@@ -1490,7 +1876,8 @@ private fun TemplateGalleryCard(
                     Text(
                         text = template.title,
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                        color = colors.primaryText
+                        color = colors.primaryText,
+                        softWrap = true
                     )
                     if (template.notes.isNotBlank()) {
                         Text(
@@ -1525,15 +1912,16 @@ private fun TemplateGalleryCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
                     text = "${template.blueprint.headings.size} § • ${template.blueprint.totalTaskCount} ☑",
                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                    color = colors.secondaryText
+                    color = colors.secondaryText,
+                    modifier = Modifier.padding(top = 6.dp)
                 )
 
                 Button(
@@ -1542,14 +1930,15 @@ private fun TemplateGalleryCard(
                         onCreate()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = colors.thingsBlue),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                     shape = RoundedCornerShape(9.dp),
-                    modifier = Modifier.height(32.dp)
+                    modifier = Modifier.heightIn(min = 32.dp)
                 ) {
                     Text(
                         text = stringResource(R.string.v2_create_from_template),
                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                        color = Color.White
+                        color = Color.White,
+                        softWrap = true
                     )
                 }
             }

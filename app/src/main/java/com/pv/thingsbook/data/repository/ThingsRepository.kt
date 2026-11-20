@@ -16,6 +16,10 @@ import com.pv.thingsbook.data.backup.BackupTaskDto
 import com.pv.thingsbook.data.backup.BackupTaskTagRefDto
 import com.pv.thingsbook.data.backup.ThingsBackupCodec
 import com.pv.thingsbook.data.backup.ThingsbookBackupPayload
+import com.pv.thingsbook.data.external.ExternalExportFormat
+import com.pv.thingsbook.data.external.ExternalImportedProject
+import com.pv.thingsbook.data.external.ExternalImportedTask
+import com.pv.thingsbook.data.external.ExternalProjectCodec
 import com.pv.thingsbook.data.local.DatabaseSeeder
 import com.pv.thingsbook.data.local.ThingsDatabase
 import com.pv.thingsbook.data.local.entity.AreaEntity
@@ -3782,6 +3786,284 @@ class ThingsRepository @Inject constructor(
             blueprint = blueprint,
             areaIdOverride = areaId
         )
+    }
+
+    // =========================================================================
+    // v3.0 Milestone 4: Asana & Microsoft Planner Project Import / Export
+    // =========================================================================
+
+    suspend fun importExternalProject(
+        parsed: ExternalImportedProject,
+        areaId: String? = null
+    ): Pair<Project, Int> {
+        val now = System.currentTimeMillis()
+        val zone = ZoneId.systemDefault()
+        val todayDate = LocalDate.now(zone)
+        val endOfToday = todayDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1L
+        val projectId = UUID.randomUUID().toString()
+
+        var createdProject: Project? = null
+        var insertedCount = 0
+
+        database.withTransaction {
+            val validAreaIds = database.areaDao().getActiveAreasList().mapTo(HashSet()) { it.id }
+            val resolvedAreaId = areaId?.takeIf { it in validAreaIds }
+            val existingTags = database.tagDao().getAllNonDeletedTagsList().toMutableList()
+
+            suspend fun resolveOrCreateTagIds(tagNames: List<String>): List<String> {
+                if (tagNames.isEmpty()) return emptyList()
+                val resolvedIds = mutableListOf<String>()
+                for (rawName in tagNames) {
+                    val cleanName = rawName.trim()
+                    if (cleanName.isEmpty()) continue
+                    val existing = existingTags.firstOrNull { it.title.equals(cleanName, ignoreCase = true) }
+                    if (existing != null) {
+                        resolvedIds.add(existing.id)
+                    } else {
+                        val newTagId = UUID.randomUUID().toString()
+                        val maxTagSort = existingTags.maxOfOrNull {
+                            it.sortOrder.takeIf(Double::isFinite) ?: 0.0
+                        } ?: 0.0
+                        val newTag = TagEntity(
+                            id = newTagId,
+                            title = cleanName,
+                            parentTagId = null,
+                            shortcut = null,
+                            sortOrder = maxTagSort + 1000.0,
+                            createdAt = now,
+                            updatedAt = now,
+                            isDeleted = false,
+                            isDirty = true
+                        )
+                        database.tagDao().upsert(newTag)
+                        existingTags.add(newTag)
+                        resolvedIds.add(newTagId)
+                    }
+                }
+                return resolvedIds.distinct()
+            }
+
+            val projectTagIds = resolveOrCreateTagIds(parsed.tagNames)
+            val maxProjSort = database.projectDao().getActiveProjectsList()
+                .maxOfOrNull { it.sortOrder.takeIf(Double::isFinite) ?: 0.0 } ?: 0.0
+            val cleanProjectTitle = parsed.title.trim().ifEmpty { "Imported Project" }
+
+            val projectEntity = ProjectEntity(
+                id = projectId,
+                areaId = resolvedAreaId,
+                title = cleanProjectTitle,
+                notes = parsed.notes,
+                status = ProjectStatus.ACTIVE,
+                scheduleState = ScheduleState.ANYTIME,
+                whenDate = null,
+                deadline = null,
+                completedAt = null,
+                lastReviewedAt = now,
+                sortOrder = maxProjSort + 1000.0,
+                tagIdsJson = json.encodeToString(projectTagIds),
+                createdAt = now,
+                updatedAt = now,
+                isDeleted = false,
+                isDirty = true
+            )
+            database.projectDao().upsertProjectWithTags(projectEntity, projectTagIds)
+
+            var completedInsertedCount = 0
+
+            suspend fun insertExternalTask(
+                extTask: ExternalImportedTask,
+                headingId: String?,
+                sortOrder: Double
+            ) {
+                val cleanTitle = extTask.title.trim()
+                if (cleanTitle.isEmpty()) return
+                val taskId = UUID.randomUUID().toString()
+                val taskWhen = extTask.whenDate
+                val taskSchedule = when {
+                    taskWhen != null && taskWhen > endOfToday -> ScheduleState.UPCOMING
+                    taskWhen != null -> ScheduleState.TODAY
+                    else -> ScheduleState.ANYTIME
+                }
+                val taskStatus = extTask.status
+                val resolvedCompletedAt = when (taskStatus) {
+                    TaskStatus.COMPLETED, TaskStatus.CANCELED -> extTask.completedAt ?: now
+                    TaskStatus.OPEN -> null
+                }
+                val taskTagIds = resolveOrCreateTagIds(extTask.tagNames)
+
+                val taskEntity = TaskEntity(
+                    id = taskId,
+                    title = cleanTitle,
+                    notes = extTask.notes,
+                    status = taskStatus,
+                    scheduleState = taskSchedule,
+                    whenDate = taskWhen,
+                    deadline = extTask.deadline,
+                    reminderTime = null,
+                    completedAt = resolvedCompletedAt,
+                    projectId = projectId,
+                    headingId = headingId,
+                    areaId = resolvedAreaId,
+                    recurrenceRuleJson = null,
+                    sortOrder = sortOrder,
+                    isPinned = extTask.isPinned,
+                    effortLevel = EffortLevel.normalize(extTask.effortLevel),
+                    assigneeId = extTask.assigneeId?.trim()?.takeIf { it.isNotEmpty() },
+                    tagIdsJson = json.encodeToString(taskTagIds),
+                    createdAt = now,
+                    updatedAt = now,
+                    isDeleted = false,
+                    isDirty = true
+                )
+                database.taskDao().upsertTaskWithTags(taskEntity, taskTagIds)
+
+                val checklistEntities = extTask.checklistItems
+                    .mapNotNull { chk ->
+                        chk.title.trim().takeIf(String::isNotEmpty)?.let { it to chk.isCompleted }
+                    }
+                    .mapIndexed { cIdx, (cTitle, cDone) ->
+                        ChecklistItemEntity(
+                            id = UUID.randomUUID().toString(),
+                            taskId = taskId,
+                            title = cTitle,
+                            isCompleted = cDone,
+                            sortOrder = (cIdx + 1) * 100.0,
+                            createdAt = now,
+                            updatedAt = now,
+                            isDeleted = false,
+                            isDirty = true
+                        )
+                    }
+                if (checklistEntities.isNotEmpty()) {
+                    database.checklistDao().upsertAll(checklistEntities)
+                }
+
+                insertedCount++
+                if (taskStatus == TaskStatus.COMPLETED) {
+                    completedInsertedCount++
+                }
+            }
+
+            parsed.ungroupedTasks.forEachIndexed { idx, extTask ->
+                insertExternalTask(extTask, headingId = null, sortOrder = (idx + 1) * 10.0)
+            }
+
+            parsed.phases.forEachIndexed { idx, phase ->
+                val headingId = UUID.randomUUID().toString()
+                val hSort = (idx + 1) * 1000.0
+                val clampedEnd = if (phase.startDate != null && phase.endDate != null && phase.endDate < phase.startDate) {
+                    phase.startDate
+                } else {
+                    phase.endDate
+                }
+                database.headingDao().upsert(
+                    HeadingEntity(
+                        id = headingId,
+                        projectId = projectId,
+                        title = phase.title.trim().ifEmpty { "Phase ${idx + 1}" },
+                        startDate = phase.startDate,
+                        endDate = clampedEnd,
+                        sortOrder = hSort,
+                        isArchived = false,
+                        createdAt = now,
+                        updatedAt = now,
+                        isDeleted = false,
+                        isDirty = true
+                    )
+                )
+                phase.tasks.forEachIndexed { tIdx, extTask ->
+                    insertExternalTask(
+                        extTask = extTask,
+                        headingId = headingId,
+                        sortOrder = hSort + (tIdx + 1) * 1.0
+                    )
+                }
+            }
+
+            createdProject = Project(
+                id = projectId,
+                areaId = resolvedAreaId,
+                title = cleanProjectTitle,
+                notes = parsed.notes,
+                status = ProjectStatus.ACTIVE,
+                scheduleState = ScheduleState.ANYTIME,
+                whenDate = null,
+                deadline = null,
+                completedAt = null,
+                lastReviewedAt = now,
+                sortOrder = projectEntity.sortOrder,
+                tagIds = projectTagIds,
+                totalTaskCount = insertedCount,
+                completedTaskCount = completedInsertedCount,
+                createdAt = now,
+                updatedAt = now,
+                isDeleted = false
+            )
+        }
+
+        syncRepository.triggerBackgroundSync()
+        return checkNotNull(createdProject) to insertedCount
+    }
+
+    suspend fun exportProjectExternal(
+        projectId: String,
+        format: ExternalExportFormat
+    ): Triple<String, String, ByteArray> {
+        val projectEntity = database.projectDao().getById(projectId)?.takeIf { !it.isDeleted }
+            ?: throw IllegalArgumentException("Project not found: $projectId")
+        val headingEntities = database.headingDao().getHeadingsForProjectList(projectId)
+        val taskDetails = database.taskDao().getAllActiveTasksWithDetails()
+            .filter { it.task.projectId == projectId }
+        val projTagIds = decodeStringList(projectEntity.tagIdsJson)
+        val allTagsById = database.tagDao().getAllNonDeletedTagsList().associateBy { it.id }
+        val projectTags = projTagIds.mapNotNull { allTagsById[it]?.toDomain() }
+
+        val domainHeadings = headingEntities.map { h ->
+            Heading(
+                id = h.id,
+                projectId = h.projectId,
+                title = h.title,
+                startDate = h.startDate,
+                endDate = h.endDate,
+                sortOrder = h.sortOrder,
+                isArchived = h.isArchived,
+                createdAt = h.createdAt,
+                updatedAt = h.updatedAt,
+                isDeleted = h.isDeleted
+            )
+        }
+        val domainTasks = taskDetails.map { it.toDomain() }
+        val domainProject = Project(
+            id = projectEntity.id,
+            areaId = projectEntity.areaId,
+            title = projectEntity.title,
+            notes = projectEntity.notes,
+            status = projectEntity.status,
+            scheduleState = projectEntity.scheduleState,
+            whenDate = projectEntity.whenDate,
+            deadline = projectEntity.deadline,
+            completedAt = projectEntity.completedAt,
+            lastReviewedAt = projectEntity.lastReviewedAt,
+            sortOrder = projectEntity.sortOrder,
+            tagIds = projTagIds,
+            workspaceId = projectEntity.workspaceId,
+            viewMode = projectEntity.viewMode,
+            totalTaskCount = domainTasks.count { it.status != TaskStatus.CANCELED },
+            completedTaskCount = domainTasks.count { it.status == TaskStatus.COMPLETED },
+            createdAt = projectEntity.createdAt,
+            updatedAt = projectEntity.updatedAt,
+            isDeleted = projectEntity.isDeleted
+        )
+
+        val bytes = ExternalProjectCodec.exportProject(
+            project = domainProject,
+            headings = domainHeadings,
+            tasks = domainTasks,
+            projectTags = projectTags,
+            format = format
+        )
+        val suggestedFileName = ExternalProjectCodec.buildSuggestedExportFileName(domainProject.title, format)
+        return Triple(suggestedFileName, format.mimeType, bytes)
     }
 
     // =========================================================================

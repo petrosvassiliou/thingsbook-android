@@ -293,15 +293,6 @@ fun ExpandableTaskCard(
         }
     }
 
-    LaunchedEffect(isInlineQuickEditing, isExpanded, isSelectionModeActive, isCompletingAnim) {
-        if ((isExpanded || isSelectionModeActive || isCompletingAnim) && isInlineQuickEditing) {
-            isInlineQuickEditing = false
-        } else if (isInlineQuickEditing && !isExpanded) {
-            delay(30)
-            runCatching { inlineQuickTitleFocusRequester.requestFocus() }
-        }
-    }
-
     LaunchedEffect(task.id, task.notes) {
         if (!isNotesFocused && editedNotesField.text != task.notes) {
             editedNotesField = TextFieldValue(
@@ -345,6 +336,15 @@ fun ExpandableTaskCard(
     var isCompletedPendingCommit by remember(task.id) { mutableStateOf(false) }
     val completionStrikeProgress = remember(task.id) { Animatable(0f) }
     val completionExitProgress = remember(task.id) { Animatable(0f) }
+
+    LaunchedEffect(isInlineQuickEditing, isExpanded, isSelectionModeActive, isCompletingAnim) {
+        if ((isExpanded || isSelectionModeActive || isCompletingAnim) && isInlineQuickEditing) {
+            isInlineQuickEditing = false
+        } else if (isInlineQuickEditing && !isExpanded) {
+            delay(30)
+            runCatching { inlineQuickTitleFocusRequester.requestFocus() }
+        }
+    }
 
     LaunchedEffect(task.status, task.whenDate) {
         if (isCompletedPendingCommit && task.status != TaskStatus.OPEN) {

@@ -2176,7 +2176,7 @@ public enum ExternalProjectCodec {
     private static func sanitizedFileStem(_ title: String) -> String {
         let cleaned = title
             .replacingOccurrences(of: #"[\\/:*?"<>|\r\n\t]+"#, with: "-", options: .regularExpression)
-            .replacingOccurrences(of: #"\s+"#, with: "-", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"-{2,}"#, with: "-", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-. "))
         return cleaned.isEmpty ? "project" : String(cleaned.prefix(80))

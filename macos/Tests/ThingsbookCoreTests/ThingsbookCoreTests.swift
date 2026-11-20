@@ -4748,7 +4748,7 @@ final class ThingsbookCoreTests: XCTestCase {
         // Semicolon-delimited localized German Planner CSV
         let semicolonCsv = """
         Aufgaben-ID;Aufgabenname;Bucket;Fortschritt;Priorität;Zugewiesen an;Startdatum;Fälligkeitsdatum;Beschreibung;Abgeschlossene Checklistenelemente;Checklistenelemente;Bezeichnungen
-        p-1;Release-Kandidat bauen;Auslieferung;100%;Wichtig;dev@firma.de;12.05.2026;19.05.2026;Signiertes DMG;Notarisierung prüfen;Universal Binary kompilieren\nNotarisierung prüfen;macOS,Release
+        p-1;Release-Kandidat bauen;Auslieferung;100%;Wichtig;dev@firma.de;12.05.2026;19.05.2026;Signiertes DMG;Notarisierung prüfen;"Universal Binary kompilieren\nNotarisierung prüfen";macOS,Release
         p-2;Pressemitteilung; ;Nicht begonnen;Dringend;;15.05.2026;20.05.2026;;;;Marketing
         """
 

@@ -568,7 +568,11 @@ object ExternalProjectCodec {
                 activeHeaderSection = null
             }
             val resolvedSection = when {
-                rawSection.isNotEmpty() -> ensurePhase(rawSection)
+                rawSection.isNotEmpty() -> if (rawParent.isEmpty()) {
+                    ensurePhase(rawSection)
+                } else {
+                    normalizeAsanaSectionName(rawSection)
+                }
                 else -> activeHeaderSection
             }
 
@@ -645,7 +649,7 @@ object ExternalProjectCodec {
 
         for (entry in topLevelEntries) {
             val built = entry.toDomain()
-            val sec = entry.sectionName
+            val sec = entry.sectionName?.let { ensurePhase(it) }
             if (sec != null) {
                 tasksByPhase.getOrPut(sec) { mutableListOf() }.add(built)
             } else {

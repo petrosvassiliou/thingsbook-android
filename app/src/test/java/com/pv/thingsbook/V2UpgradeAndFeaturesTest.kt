@@ -1857,7 +1857,7 @@ class V2UpgradeAndFeaturesTest {
                 }
             }
             assertNotNull("Missing v2_beta_badge in $folder/strings.xml", badgeText)
-            assertTrue("Expected ALPHA in $folder/strings.xml v2_beta_badge, got '$badgeText'", badgeText!!.contains("ALPHA"))
+            assertTrue("Expected BETA in $folder/strings.xml v2_beta_badge, got '$badgeText'", badgeText!!.contains("BETA"))
         }
     }
 

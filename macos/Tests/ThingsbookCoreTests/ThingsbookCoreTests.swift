@@ -409,15 +409,15 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-beta.2")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-beta.2")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 93)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-beta.3")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-beta.3")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 94)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.2", current: "2.5.0", includeBeta: false))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.2", current: "2.5.0", includeBeta: true))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.2", current: "3.0.0-beta.1"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-rc.1", current: "3.0.0-beta.2"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-beta.2"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.3", current: "2.5.0", includeBeta: false))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.3", current: "2.5.0", includeBeta: true))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.3", current: "3.0.0-beta.2"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-rc.1", current: "3.0.0-beta.3"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-beta.3"))
         let ultraCompact = MacToolbarLayoutMetrics.compute(detailWidth: 506.0, isSidebarCollapsed: false)
         XCTAssertEqual(ultraCompact.usableWidth, 450.0)
         XCTAssertFalse(ultraCompact.showGeminiLabel)

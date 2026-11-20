@@ -4783,9 +4783,9 @@ button.v2-stalled-pill:hover {
   justify-content: space-between;
   gap: 6px;
   padding: 0 8px;
-  cursor: ew-resize;
+  cursor: grab;
   user-select: none;
-  touch-action: none;
+  touch-action: pan-x pan-y;
 }
 
 .roadmap-phase-bar.inferred {
@@ -4795,9 +4795,14 @@ button.v2-stalled-pill:hover {
   box-shadow: none;
 }
 
+.roadmap-phase-bar.armed,
+.roadmap-task-bar.armed,
 .roadmap-phase-bar.dragging,
 .roadmap-task-bar.dragging {
-  opacity: 0.92;
+  opacity: 0.95;
+  cursor: grabbing;
+  touch-action: none;
+  transform: translateY(-1px) scale(1.015);
   box-shadow: 0 6px 18px rgba(56, 152, 236, 0.36);
   z-index: 8;
 }
@@ -4891,9 +4896,9 @@ button.v2-stalled-pill:hover {
   align-items: center;
   gap: 5px;
   padding: 0 8px;
-  cursor: ew-resize;
+  cursor: grab;
   user-select: none;
-  touch-action: none;
+  touch-action: pan-x pan-y;
   overflow: hidden;
 }
 

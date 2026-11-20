@@ -63,8 +63,10 @@ import {
   localDaysBetween,
   orderTaskIdsByVisualOrder,
   renderRoadmapToPngDataUrl,
+  resolveRoadmapHoldDurationMs,
   shiftPhaseDatesByDays,
   shiftTaskDatesByDays,
+  shouldCancelUnarmedRoadmapDrag,
   slugifyFilename,
   wrapTextLines,
   type ProjectRoadmapLayout,
@@ -1117,7 +1119,11 @@ function resolveLaneHeaderHeightPx(laneTitle: string, hasDateSubRow: boolean): n
 interface BarDragState {
   kind: 'phase' | 'task';
   id: string;
+  pointerId: number;
+  pointerType: string;
   startClientX: number;
+  startClientY: number;
+  armed: boolean;
   deltaDays: number;
   moved: boolean;
 }
@@ -1243,25 +1249,61 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
     return layout.days.map((d) => fmt.format(new Date(d.epoch)));
   }, [layout.days, lang]);
 
-  // Pointer drag lifecycle for Phase bars & Task bars
+  // Pointer drag lifecycle for Phase bars & Task bars (requires explicit press-and-hold before dragging)
   useEffect(() => {
     if (!barDrag) return;
 
+    const holdTimer: number | null = !barDrag.armed
+      ? window.setTimeout(() => {
+          setBarDrag((prev) =>
+            prev && !prev.armed ? { ...prev, armed: true } : prev
+          );
+        }, resolveRoadmapHoldDurationMs(barDrag.pointerType))
+      : null;
+
+    const cancelIfUnarmed = () => {
+      if (!barDrag.armed) {
+        if (holdTimer !== null) window.clearTimeout(holdTimer);
+        setBarDrag(null);
+      }
+    };
+
     const onPointerMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== barDrag.pointerId) return;
+
+      if (!barDrag.armed) {
+        if (
+          shouldCancelUnarmedRoadmapDrag(
+            barDrag.startClientX,
+            barDrag.startClientY,
+            ev.clientX,
+            ev.clientY
+          )
+        ) {
+          cancelIfUnarmed();
+        }
+        return;
+      }
+
+      if (ev.cancelable) {
+        ev.preventDefault();
+      }
       const dx = ev.clientX - barDrag.startClientX;
       const delta = Math.round(dx / dayWidth);
       const moved = barDrag.moved || Math.abs(dx) >= 4;
       setBarDrag((prev) =>
-        prev && (prev.deltaDays !== delta || prev.moved !== moved)
+        prev && prev.armed && (prev.deltaDays !== delta || prev.moved !== moved)
           ? { ...prev, deltaDays: delta, moved }
           : prev
       );
     };
 
-    const onPointerUp = () => {
+    const onPointerUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== barDrag.pointerId) return;
+      if (holdTimer !== null) window.clearTimeout(holdTimer);
       const finished = barDrag;
       setBarDrag(null);
-      if (!finished) return;
+      if (!finished || !finished.armed) return;
 
       if (finished.deltaDays !== 0) {
         if (finished.kind === 'phase') {
@@ -1296,13 +1338,25 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
       }
     };
 
-    window.addEventListener('pointermove', onPointerMove);
+    const onPointerCancel = (ev: PointerEvent) => {
+      if (ev.pointerId !== barDrag.pointerId) return;
+      if (holdTimer !== null) window.clearTimeout(holdTimer);
+      setBarDrag(null);
+    };
+
+    const scrollEl = scrollRef.current;
+    window.addEventListener('pointermove', onPointerMove, { passive: false });
     window.addEventListener('pointerup', onPointerUp);
-    window.addEventListener('pointercancel', onPointerUp);
+    window.addEventListener('pointercancel', onPointerCancel);
+    window.addEventListener('scroll', cancelIfUnarmed, true);
+    scrollEl?.addEventListener('scroll', cancelIfUnarmed, { passive: true });
     return () => {
+      if (holdTimer !== null) window.clearTimeout(holdTimer);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
-      window.removeEventListener('pointercancel', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerCancel);
+      window.removeEventListener('scroll', cancelIfUnarmed, true);
+      scrollEl?.removeEventListener('scroll', cancelIfUnarmed);
     };
   }, [barDrag, dayWidth, layout]);
 
@@ -1766,7 +1820,10 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
               const hd = lane.heading;
               const isGeneral = hd === null;
               const phaseDragDelta =
-                hd && barDrag?.kind === 'phase' && barDrag.id === hd.id
+                hd &&
+                barDrag?.kind === 'phase' &&
+                barDrag.id === hd.id &&
+                barDrag.armed
                   ? barDrag.deltaDays
                   : 0;
               const isEditing = hd != null && editingPhaseId === hd.id;
@@ -1989,6 +2046,12 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                           <div
                             className={`roadmap-phase-bar ${
                               lane.isInferred ? 'inferred' : ''
+                            } ${
+                              barDrag?.kind === 'phase' &&
+                              barDrag.id === hd.id &&
+                              barDrag.armed
+                                ? 'armed'
+                                : ''
                             } ${phaseDragDelta !== 0 ? 'dragging' : ''}`}
                             data-testid={`roadmap-phase-bar-${hd.id}`}
                             style={{
@@ -1997,12 +2060,17 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                               width: clampedPhaseBar.widthPx
                             }}
                             onPointerDown={(e) => {
+                              if (e.pointerType === 'mouse' && e.button !== 0) return;
                               if ((e.target as HTMLElement).closest('button')) return;
                               e.stopPropagation();
                               setBarDrag({
                                 kind: 'phase',
                                 id: hd.id,
+                                pointerId: e.pointerId,
+                                pointerType: e.pointerType || 'mouse',
                                 startClientX: e.clientX,
+                                startClientY: e.clientY,
+                                armed: false,
                                 deltaDays: 0,
                                 moved: false
                               });
@@ -2098,7 +2166,9 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                     const tk = pt.task;
                     const isSelected = selectedTaskIds.includes(tk.id);
                     const taskDragDelta =
-                      barDrag?.kind === 'task' && barDrag.id === tk.id
+                      barDrag?.kind === 'task' &&
+                      barDrag.id === tk.id &&
+                      barDrag.armed
                         ? barDrag.deltaDays
                         : 0;
                     const clampedTaskS = Math.max(
@@ -2243,16 +2313,27 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                                 : ''
                             } ${dlUrgent ? 'urgent' : ''} ${
                               isSelected ? 'selected' : ''
+                            } ${
+                              barDrag?.kind === 'task' &&
+                              barDrag.id === tk.id &&
+                              barDrag.armed
+                                ? 'armed'
+                                : ''
                             } ${taskDragDelta !== 0 ? 'dragging' : ''}`}
                             data-testid={`roadmap-task-bar-${tk.id}`}
                             style={{ left: barLeft, width: barWidth }}
                             onPointerDown={(e) => {
+                              if (e.pointerType === 'mouse' && e.button !== 0) return;
                               if ((e.target as HTMLElement).closest('button')) return;
                               e.stopPropagation();
                               setBarDrag({
                                 kind: 'task',
                                 id: tk.id,
+                                pointerId: e.pointerId,
+                                pointerType: e.pointerType || 'mouse',
                                 startClientX: e.clientX,
+                                startClientY: e.clientY,
+                                armed: false,
                                 deltaDays: 0,
                                 moved: false
                               });

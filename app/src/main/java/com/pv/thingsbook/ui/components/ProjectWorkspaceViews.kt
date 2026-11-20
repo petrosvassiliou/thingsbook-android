@@ -18,9 +18,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -2627,14 +2628,21 @@ private fun RoadmapDraggablePhaseBar(
     val currentOnPreview by rememberUpdatedState(onPreviewDeltaChanged)
     val currentOnCommit by rememberUpdatedState(onCommitShift)
 
-    val rawStartDay = phaseBar.startEpochDay + previewDelta
-    val rawEndDay = phaseBar.endEpochDay + previewDelta
+    var isArmedForDrag by remember(phaseBar.headingId) { mutableStateOf(false) }
+
+    val baseStartDay = phaseBar.startEpochDay
+    val baseEndDay = phaseBar.endEpochDay
+    val rawStartDay = baseStartDay + previewDelta
+    val rawEndDay = baseEndDay + previewDelta
     if (rawEndDay < startEpochDayWindow || rawStartDay > endEpochDayWindow) return
 
+    val baseVisibleStartDay = baseStartDay.coerceIn(startEpochDayWindow, endEpochDayWindow)
+    val baseVisibleEndDay = baseEndDay.coerceIn(baseVisibleStartDay, endEpochDayWindow)
     val visibleStartDay = rawStartDay.coerceIn(startEpochDayWindow, endEpochDayWindow)
     val visibleEndDay = rawEndDay.coerceIn(visibleStartDay, endEpochDayWindow)
     val visibleSpanDays = (visibleEndDay - visibleStartDay + 1L).coerceAtLeast(1L).toInt()
 
+    val baseXOffsetDp = dayWidthDp * (baseVisibleStartDay - startEpochDayWindow).toInt()
     val xOffsetDp = dayWidthDp * (visibleStartDay - startEpochDayWindow).toInt()
     val barWidthDp = (dayWidthDp * visibleSpanDays).coerceAtLeast(dayWidthDp)
     val barHeightDp = 28.dp
@@ -2656,6 +2664,7 @@ private fun RoadmapDraggablePhaseBar(
     }
     val barWidthPx = with(density) { barWidthDp.toPx() }
     val xOffsetPx = with(density) { xOffsetDp.toPx() }
+    val baseXOffsetPx = with(density) { baseXOffsetDp.toPx() }
     val totalTimelineWidthPx = with(density) { totalTimelineWidthDp.toPx() }
     val innerPadPx = with(density) { 26.dp.toPx() }
     val fitsInsideBar = barWidthPx >= measuredLabelPx + innerPadPx
@@ -2670,25 +2679,33 @@ private fun RoadmapDraggablePhaseBar(
 
     Box(
         modifier = Modifier
-            .offset(x = xOffsetDp, y = barTopDp)
+            .offset(x = baseXOffsetDp, y = barTopDp)
+            .graphicsLayer {
+                translationX = xOffsetPx - baseXOffsetPx
+                val scale = if (isArmedForDrag) 1.02f else 1f
+                scaleX = scale
+                scaleY = scale
+            }
             .width(barWidthDp)
             .height(barHeightDp)
             .padding(horizontal = 3.dp)
-            .shadow(if (previewDelta != 0L) 6.dp else 2.dp, RoundedCornerShape(10.dp))
+            .shadow(if (isArmedForDrag || previewDelta != 0L) 6.dp else 2.dp, RoundedCornerShape(10.dp))
             .clip(RoundedCornerShape(10.dp))
             .background(gradientBrush)
             .pointerHoverIcon(PointerIcon.Hand)
             .pointerInput(phaseBar.headingId) {
                 var rawDragPx = 0f
                 var lastDelta = 0L
-                detectHorizontalDragGestures(
+                detectDragGesturesAfterLongPress(
                     onDragStart = {
                         rawDragPx = 0f
                         lastDelta = 0L
+                        isArmedForDrag = true
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     },
-                    onHorizontalDrag = { change, dragAmount ->
+                    onDrag = { change, dragAmount ->
                         change.consume()
-                        rawDragPx += dragAmount
+                        rawDragPx += dragAmount.x
                         val snapped = if (currentDayWidthPx > 1f) {
                             (rawDragPx / currentDayWidthPx).roundToInt().toLong()
                         } else 0L
@@ -2700,6 +2717,7 @@ private fun RoadmapDraggablePhaseBar(
                     },
                     onDragEnd = {
                         val finalDelta = lastDelta
+                        isArmedForDrag = false
                         currentOnPreview(0L)
                         if (finalDelta != 0L) {
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -2707,6 +2725,7 @@ private fun RoadmapDraggablePhaseBar(
                         }
                     },
                     onDragCancel = {
+                        isArmedForDrag = false
                         currentOnPreview(0L)
                     }
                 )
@@ -2789,19 +2808,27 @@ private fun RoadmapDraggableTaskBar(
     onClickTask: () -> Unit
 ) {
     val colors = ThingsTheme.colors
+    val density = androidx.compose.ui.platform.LocalDensity.current
     val haptics = LocalHapticFeedback.current
     val currentDayWidthPx by rememberUpdatedState(dayWidthPx)
     val currentOnPreview by rememberUpdatedState(onPreviewDeltaChanged)
     val currentOnCommit by rememberUpdatedState(onCommitShift)
+    var isArmedForDrag by remember(taskBar.taskId) { mutableStateOf(false) }
 
-    val effectiveStartDay = taskBar.startEpochDay + previewDelta
-    val effectiveEndDay = taskBar.endEpochDay + previewDelta
+    val baseStartDay = taskBar.startEpochDay
+    val baseEndDay = taskBar.endEpochDay
+    val effectiveStartDay = baseStartDay + previewDelta
+    val effectiveEndDay = baseEndDay + previewDelta
     if (effectiveEndDay < startEpochDayWindow || effectiveStartDay > endEpochDayWindow) return
 
+    val baseVisibleStartDay = baseStartDay.coerceIn(startEpochDayWindow, endEpochDayWindow)
     val visibleStartDay = effectiveStartDay.coerceIn(startEpochDayWindow, endEpochDayWindow)
     val visibleEndDay = effectiveEndDay.coerceIn(visibleStartDay, endEpochDayWindow)
     val spanDays = (visibleEndDay - visibleStartDay + 1L).coerceAtLeast(1L).toInt()
+    val baseXOffsetDp = dayWidthDp * (baseVisibleStartDay - startEpochDayWindow).toInt()
     val xOffsetDp = dayWidthDp * (visibleStartDay - startEpochDayWindow).toInt()
+    val baseXOffsetPx = with(density) { baseXOffsetDp.toPx() }
+    val xOffsetPx = with(density) { xOffsetDp.toPx() }
     val barWidthDp = (dayWidthDp * spanDays).coerceAtLeast(dayWidthDp)
 
     val isOverdue = taskBar.task.status == TaskStatus.OPEN &&
@@ -2815,6 +2842,7 @@ private fun RoadmapDraggableTaskBar(
         else -> colors.thingsBlueSoft
     }
     val barBorder = when {
+        isArmedForDrag -> colors.thingsBlue
         taskBar.task.status != TaskStatus.OPEN -> colors.hairlineDivider
         isOverdue -> colors.deadlineUrgentRed.copy(alpha = 0.65f)
         taskBar.isActivelyBlocked -> colors.somedayWarmAmber.copy(alpha = 0.72f)
@@ -2829,27 +2857,35 @@ private fun RoadmapDraggableTaskBar(
 
     Box(
         modifier = Modifier
-            .offset(x = xOffsetDp, y = topDp + 6.dp)
+            .offset(x = baseXOffsetDp, y = topDp + 6.dp)
+            .graphicsLayer {
+                translationX = xOffsetPx - baseXOffsetPx
+                val scale = if (isArmedForDrag) 1.02f else 1f
+                scaleX = scale
+                scaleY = scale
+            }
             .width(barWidthDp)
             .height(TASK_ROW_HEIGHT - 12.dp)
             .padding(horizontal = 3.dp)
-            .shadow(if (previewDelta != 0L) 5.dp else 1.dp, RoundedCornerShape(8.dp))
+            .shadow(if (isArmedForDrag || previewDelta != 0L) 5.dp else 1.dp, RoundedCornerShape(8.dp))
             .clip(RoundedCornerShape(8.dp))
             .background(barFill)
-            .border(1.1.dp, barBorder, RoundedCornerShape(8.dp))
+            .border(if (isArmedForDrag) 1.6.dp else 1.1.dp, barBorder, RoundedCornerShape(8.dp))
             .pointerHoverIcon(PointerIcon.Hand)
             .clickable(onClick = onClickTask)
             .pointerInput(taskBar.taskId) {
                 var rawDragPx = 0f
                 var lastDelta = 0L
-                detectHorizontalDragGestures(
+                detectDragGesturesAfterLongPress(
                     onDragStart = {
                         rawDragPx = 0f
                         lastDelta = 0L
+                        isArmedForDrag = true
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     },
-                    onHorizontalDrag = { change, dragAmount ->
+                    onDrag = { change, dragAmount ->
                         change.consume()
-                        rawDragPx += dragAmount
+                        rawDragPx += dragAmount.x
                         val snapped = if (currentDayWidthPx > 1f) {
                             (rawDragPx / currentDayWidthPx).roundToInt().toLong()
                         } else 0L
@@ -2861,6 +2897,7 @@ private fun RoadmapDraggableTaskBar(
                     },
                     onDragEnd = {
                         val finalDelta = lastDelta
+                        isArmedForDrag = false
                         currentOnPreview(0L)
                         if (finalDelta != 0L) {
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -2868,6 +2905,7 @@ private fun RoadmapDraggableTaskBar(
                         }
                     },
                     onDragCancel = {
+                        isArmedForDrag = false
                         currentOnPreview(0L)
                     }
                 )

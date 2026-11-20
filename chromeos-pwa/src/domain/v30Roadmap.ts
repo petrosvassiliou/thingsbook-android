@@ -1811,3 +1811,24 @@ export function downloadBlob(
   document.body.removeChild(link);
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
+
+// ==================== Hold-to-Drag Roadmap Interaction Guard ====================
+
+export const ROADMAP_MOUSE_HOLD_MS = 260;
+export const ROADMAP_TOUCH_HOLD_MS = 320;
+export const ROADMAP_HOLD_MOVE_SLOP_PX = 6;
+
+export function resolveRoadmapHoldDurationMs(pointerType: string): number {
+  return pointerType === 'mouse' ? ROADMAP_MOUSE_HOLD_MS : ROADMAP_TOUCH_HOLD_MS;
+}
+
+export function shouldCancelUnarmedRoadmapDrag(
+  startClientX: number,
+  startClientY: number,
+  currentClientX: number,
+  currentClientY: number,
+  slopPx: number = ROADMAP_HOLD_MOVE_SLOP_PX
+): boolean {
+  return Math.hypot(currentClientX - startClientX, currentClientY - startClientY) > slopPx;
+}
+

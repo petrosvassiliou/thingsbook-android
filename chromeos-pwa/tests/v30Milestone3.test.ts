@@ -17,8 +17,12 @@ import {
   generateRoadmapPdfBytes,
   localDaysBetween,
   normalizeProjectViewMode,
+  ROADMAP_MOUSE_HOLD_MS,
+  ROADMAP_TOUCH_HOLD_MS,
+  resolveRoadmapHoldDurationMs,
   shiftPhaseDatesByDays,
   shiftTaskDatesByDays,
+  shouldCancelUnarmedRoadmapDrag,
   wrapTextLines
 } from '../src/domain/v30Roadmap.ts';
 import {
@@ -856,3 +860,21 @@ test('v3.0.0-alpha.13 generateRoadmapPdfBytes supports A4 portrait vs landscape,
     }
   }
 });
+
+test('v3.0.0-beta.3 Roadmap hold-to-drag guard requires stationary hold and cancels unarmed scroll/swipe motion', () => {
+  assert.equal(resolveRoadmapHoldDurationMs('mouse'), ROADMAP_MOUSE_HOLD_MS);
+  assert.equal(resolveRoadmapHoldDurationMs('touch'), ROADMAP_TOUCH_HOLD_MS);
+  assert.equal(resolveRoadmapHoldDurationMs('pen'), ROADMAP_TOUCH_HOLD_MS);
+  assert.ok(ROADMAP_TOUCH_HOLD_MS >= ROADMAP_MOUSE_HOLD_MS);
+  assert.ok(ROADMAP_MOUSE_HOLD_MS >= 200);
+
+  // Micro jitter (<= 6px) while holding finger/mouse stationary does NOT cancel hold
+  assert.equal(shouldCancelUnarmedRoadmapDrag(100, 200, 103, 204), false);
+  assert.equal(shouldCancelUnarmedRoadmapDrag(100, 200, 106, 200), false);
+
+  // Horizontal, vertical, or diagonal scroll swipe (> 6px) before hold completes cancels immediately
+  assert.equal(shouldCancelUnarmedRoadmapDrag(100, 200, 112, 200), true);
+  assert.equal(shouldCancelUnarmedRoadmapDrag(100, 200, 100, 214), true);
+  assert.equal(shouldCancelUnarmedRoadmapDrag(100, 200, 106, 206), true);
+});
+

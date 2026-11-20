@@ -1057,6 +1057,8 @@ public struct ProjectRoadmapWorkspaceView: View {
     @State private var dayColumnWidth: CGFloat = 38.0
     @State private var activePhaseDrag: (id: String, deltaDays: Int)? = nil
     @State private var activeTaskDrag: (id: String, deltaDays: Int)? = nil
+    @State private var armedPhaseDragId: String? = nil
+    @State private var armedTaskDragId: String? = nil
     @State private var unscheduledStartPopoverTaskId: String? = nil
     @State private var editingTaskInSheet: TaskItem? = nil
     @State private var isPDFExportSheetPresented: Bool = false
@@ -1669,6 +1671,7 @@ public struct ProjectRoadmapWorkspaceView: View {
             }
         }
         .frame(width: totalGridWidth, height: totalHeight, alignment: .topLeading)
+        .coordinateSpace(name: "roadmapTimelineGrid")
     }
 
     @ViewBuilder
@@ -1678,6 +1681,7 @@ public struct ProjectRoadmapWorkspaceView: View {
         layout: ProjectRoadmapLayout,
         totalGridWidth: CGFloat
     ) -> some View {
+        let isArmedThis = armedPhaseDragId == heading.id
         let delta = (activePhaseDrag?.id == heading.id) ? (activePhaseDrag?.deltaDays ?? 0) : 0
         let rawStart = phaseBar.startEpochDay + delta
         let rawEnd = phaseBar.endEpochDay + delta
@@ -1720,13 +1724,17 @@ public struct ProjectRoadmapWorkspaceView: View {
                         )
                     )
                     .opacity(phaseBar.hasExplicitDates ? 0.96 : 0.72)
-                    .shadow(color: ThingsMacPalette.accentBlue.opacity(0.24), radius: 4, y: 1.5)
+                    .shadow(
+                        color: ThingsMacPalette.accentBlue.opacity(isArmedThis ? 0.42 : 0.24),
+                        radius: isArmedThis ? 7 : 4,
+                        y: isArmedThis ? 2.5 : 1.5
+                    )
             )
             .overlay(
                 Capsule(style: .continuous)
                     .strokeBorder(
-                        Color.white.opacity(phaseBar.hasExplicitDates ? 0.45 : 0.65),
-                        style: StrokeStyle(lineWidth: 0.9, dash: phaseBar.hasExplicitDates ? [] : [4, 3])
+                        Color.white.opacity(isArmedThis ? 0.85 : (phaseBar.hasExplicitDates ? 0.45 : 0.65)),
+                        style: StrokeStyle(lineWidth: isArmedThis ? 1.4 : 0.9, dash: phaseBar.hasExplicitDates ? [] : [4, 3])
                     )
             )
             .overlay(alignment: placeLeading ? .leading : .trailing) {
@@ -1741,18 +1749,40 @@ public struct ProjectRoadmapWorkspaceView: View {
                         }
                 }
             }
+            .scaleEffect(isArmedThis ? 1.02 : 1.0)
             .offset(x: barX)
             .gesture(
-                DragGesture(minimumDistance: 4)
+                LongPressGesture(minimumDuration: 0.28, maximumDistance: 8)
+                    .sequenced(before: DragGesture(minimumDistance: 2, coordinateSpace: .named("roadmapTimelineGrid")))
                     .onChanged { value in
-                        let snapped = Int((value.translation.width / dayColumnWidth).rounded())
-                        activePhaseDrag = (heading.id, snapped)
+                        switch value {
+                        case .first:
+                            break
+                        case .second(true, nil):
+                            if armedPhaseDragId != heading.id {
+                                armedPhaseDragId = heading.id
+                            }
+                        case .second(true, let drag?):
+                            if armedPhaseDragId != heading.id {
+                                armedPhaseDragId = heading.id
+                            }
+                            let snapped = Int((drag.translation.width / dayColumnWidth).rounded())
+                            activePhaseDrag = (heading.id, snapped)
+                        default:
+                            break
+                        }
                     }
                     .onEnded { value in
-                        let snapped = Int((value.translation.width / dayColumnWidth).rounded())
+                        let finalDelta: Int = {
+                            if case .second(true, let drag?) = value {
+                                return Int((drag.translation.width / dayColumnWidth).rounded())
+                            }
+                            return 0
+                        }()
+                        armedPhaseDragId = nil
                         activePhaseDrag = nil
-                        if snapped != 0 {
-                            store.shiftHeadingRoadmapDates(heading, deltaDays: snapped)
+                        if finalDelta != 0 {
+                            store.shiftHeadingRoadmapDates(heading, deltaDays: finalDelta)
                         }
                     }
             )
@@ -1785,7 +1815,9 @@ public struct ProjectRoadmapWorkspaceView: View {
         let task = taskBar.task
         let isSelected = store.selectedTaskIds.contains(task.id)
         let isBlocked = store.isTaskActivelyBlocked(task)
-        let isDraggingThis = (activeTaskDrag?.id == task.id)
+        let isArmedThis = armedTaskDragId == task.id
+        let isDraggingThis = isArmedThis
+            || (activeTaskDrag?.id == task.id)
             || (activeTaskDrag != nil && store.selectedTaskIds.contains(task.id) && store.selectedTaskIds.count > 1 && store.selectedTaskIds.contains(activeTaskDrag?.id ?? ""))
         let delta = isDraggingThis ? (activeTaskDrag?.deltaDays ?? 0) : 0
         let baseX = CGFloat(taskBar.startEpochDay - layout.startEpochDay) * dayColumnWidth + 3
@@ -1793,7 +1825,7 @@ public struct ProjectRoadmapWorkspaceView: View {
         let barW = max(dayColumnWidth - 6, CGFloat(taskBar.spanDays) * dayColumnWidth - 6)
 
         let borderTint: Color = {
-            if isSelected { return ThingsMacPalette.accentBlue }
+            if isArmedThis || isSelected { return ThingsMacPalette.accentBlue }
             if isBlocked { return ThingsMacPalette.somedayAmber }
             if task.status == .completed { return ThingsMacPalette.logbookGreen.opacity(0.6) }
             return ThingsMacPalette.accentBlue.opacity(0.45)
@@ -1836,12 +1868,13 @@ public struct ProjectRoadmapWorkspaceView: View {
                         ? ThingsMacPalette.accentBlue.opacity(0.16)
                         : ThingsMacPalette.cardSurface
                 )
-                .shadow(color: Color.black.opacity(isDraggingThis ? 0.14 : 0.05), radius: isDraggingThis ? 6 : 2, y: 1)
+                .shadow(color: Color.black.opacity(isDraggingThis ? 0.16 : 0.05), radius: isDraggingThis ? 6.5 : 2, y: isDraggingThis ? 2 : 1)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(borderTint, lineWidth: isSelected ? 1.5 : 1.05)
+                .strokeBorder(borderTint, lineWidth: (isArmedThis || isSelected) ? 1.55 : 1.05)
         )
+        .scaleEffect(isArmedThis ? 1.02 : 1.0)
         .offset(x: baseX + dragX)
         .simultaneousGesture(
             TapGesture(count: 2).onEnded {
@@ -1858,16 +1891,37 @@ public struct ProjectRoadmapWorkspaceView: View {
             }
         }
         .gesture(
-            DragGesture(minimumDistance: 4)
+            LongPressGesture(minimumDuration: 0.28, maximumDistance: 8)
+                .sequenced(before: DragGesture(minimumDistance: 2, coordinateSpace: .named("roadmapTimelineGrid")))
                 .onChanged { value in
-                    let snapped = Int((value.translation.width / dayColumnWidth).rounded())
-                    activeTaskDrag = (task.id, snapped)
+                    switch value {
+                    case .first:
+                        break
+                    case .second(true, nil):
+                        if armedTaskDragId != task.id {
+                            armedTaskDragId = task.id
+                        }
+                    case .second(true, let drag?):
+                        if armedTaskDragId != task.id {
+                            armedTaskDragId = task.id
+                        }
+                        let snapped = Int((drag.translation.width / dayColumnWidth).rounded())
+                        activeTaskDrag = (task.id, snapped)
+                    default:
+                        break
+                    }
                 }
                 .onEnded { value in
-                    let snapped = Int((value.translation.width / dayColumnWidth).rounded())
+                    let finalDelta: Int = {
+                        if case .second(true, let drag?) = value {
+                            return Int((drag.translation.width / dayColumnWidth).rounded())
+                        }
+                        return 0
+                    }()
+                    armedTaskDragId = nil
                     activeTaskDrag = nil
-                    if snapped != 0 {
-                        store.shiftTaskRoadmapDates(task, deltaDays: snapped)
+                    if finalDelta != 0 {
+                        store.shiftTaskRoadmapDates(task, deltaDays: finalDelta)
                     }
                 }
         )

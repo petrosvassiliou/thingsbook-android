@@ -80,6 +80,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -2249,6 +2251,7 @@ fun ThingsTodayTimelineSection(
     onShiftTimeblock: (taskId: String, deltaMinutes: Int) -> Unit,
     onStartFocusTimer: (task: TaskItem) -> Unit,
     onOpenTask: (String) -> Unit,
+    isFullScreen: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val colors = ThingsTheme.colors
@@ -2261,13 +2264,24 @@ fun ThingsTodayTimelineSection(
     }
     var editingTimeblockTask by remember { mutableStateOf<TaskItem?>(null) }
 
+    LaunchedEffect(isFullScreen) {
+        if (isFullScreen) {
+            editingTimeblockTask = null
+        }
+    }
+
     val suggestedNextSlot = remember(schedule.timedEntries) {
         TimeblockScheduleUtils.suggestNextFreeSlotMinutes(schedule.timedEntries)
     }
 
     LazyColumn(
         modifier = modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            end = 16.dp,
+            top = 8.dp,
+            bottom = if (isFullScreen) 12.dp else 96.dp
+        ),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         if (schedule.conflictCount > 0) {
@@ -2417,7 +2431,13 @@ fun ThingsTodayTimelineSection(
                                     },
                                     shape = RoundedCornerShape(13.dp)
                                 )
-                                .clickable { onOpenTask(task.id) }
+                                .then(
+                                    if (!isFullScreen) {
+                                        Modifier.clickable { onOpenTask(task.id) }
+                                    } else {
+                                        Modifier
+                                    }
+                                )
                         ) {
                             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                                 Row(
@@ -2427,13 +2447,36 @@ fun ThingsTodayTimelineSection(
                                 ) {
                                     ThingsCheckbox(
                                         status = task.status,
-                                        onStatusChange = { onCompleteTask(task.id) },
-                                        isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY
+                                        onStatusChange = { if (!isFullScreen) onCompleteTask(task.id) },
+                                        isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY,
+                                        showHoverTooltip = !isFullScreen,
+                                        modifier = if (isFullScreen) {
+                                            Modifier.pointerInput(Unit) {
+                                                awaitPointerEventScope {
+                                                    while (true) {
+                                                        val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                                        ev.changes.forEach { change ->
+                                                            if (change.pressed != change.previousPressed) {
+                                                                change.consume()
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            Modifier
+                                        }
                                     )
                                     Column(
                                         modifier = Modifier
                                             .weight(1f)
-                                            .clickable { onOpenTask(task.id) }
+                                            .then(
+                                                if (!isFullScreen) {
+                                                    Modifier.clickable { onOpenTask(task.id) }
+                                                } else {
+                                                    Modifier
+                                                }
+                                            )
                                     ) {
                                         Text(
                                             text = task.title.ifBlank { stringResource(R.string.placeholder_todo_title) },
@@ -2464,54 +2507,58 @@ fun ThingsTodayTimelineSection(
                                         }
                                     }
 
-                                    // 1-Tap Start Focus Timer (defaults to task.durationMinutes ?: 25)
-                                    ThingsHoverTooltip(text = stringResource(R.string.action_focus_timer)) {
-                                        IconButton(
-                                            onClick = {
-                                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                onStartFocusTimer(task)
-                                            },
-                                            modifier = Modifier
-                                                .size(30.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(colors.thingsBlueSoft)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Outlined.PlayArrow,
-                                                contentDescription = stringResource(R.string.action_focus_timer),
-                                                tint = colors.thingsBlue,
-                                                modifier = Modifier.size(16.dp)
-                                            )
+                                    if (!isFullScreen) {
+                                        // 1-Tap Start Focus Timer (defaults to task.durationMinutes ?: 25)
+                                        ThingsHoverTooltip(text = stringResource(R.string.action_focus_timer)) {
+                                            IconButton(
+                                                onClick = {
+                                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    onStartFocusTimer(task)
+                                                },
+                                                modifier = Modifier
+                                                    .size(30.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(colors.thingsBlueSoft)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.PlayArrow,
+                                                    contentDescription = stringResource(R.string.action_focus_timer),
+                                                    tint = colors.thingsBlue,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
                                         }
                                     }
                                 }
 
-                                Spacer(modifier = Modifier.height(6.dp))
+                                if (!isFullScreen) {
+                                    Spacer(modifier = Modifier.height(6.dp))
 
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    QuickReviewChip(
-                                        label = "+15m",
-                                        bg = colors.tagPillBg,
-                                        fg = colors.primaryText
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        onShiftTimeblock(task.id, 15)
-                                    }
-                                    QuickReviewChip(
-                                        label = "⏱ ${entry.durationMinutes}m",
-                                        bg = colors.thingsBlueSoft,
-                                        fg = colors.thingsBlue
-                                    ) {
-                                        editingTimeblockTask = task
-                                    }
-                                    QuickReviewChip(
-                                        label = "✕ ${stringResource(R.string.v2_timeblock_clear)}",
-                                        bg = colors.tagPillBg,
-                                        fg = colors.secondaryText
-                                    ) {
-                                        onUpdateTimeblock(task.id, null, null)
+                                        QuickReviewChip(
+                                            label = "+15m",
+                                            bg = colors.tagPillBg,
+                                            fg = colors.primaryText
+                                        ) {
+                                            onShiftTimeblock(task.id, 15)
+                                        }
+                                        QuickReviewChip(
+                                            label = "⏱ ${entry.durationMinutes}m",
+                                            bg = colors.thingsBlueSoft,
+                                            fg = colors.thingsBlue
+                                        ) {
+                                            editingTimeblockTask = task
+                                        }
+                                        QuickReviewChip(
+                                            label = "✕ ${stringResource(R.string.v2_timeblock_clear)}",
+                                            bg = colors.tagPillBg,
+                                            fg = colors.secondaryText
+                                        ) {
+                                            onUpdateTimeblock(task.id, null, null)
+                                        }
                                     }
                                 }
                             }
@@ -2521,8 +2568,8 @@ fun ThingsTodayTimelineSection(
             }
         }
 
-        // Unscheduled Today Section
-        if (schedule.unscheduledTasks.isNotEmpty()) {
+        // Unscheduled Today Section (hidden in pure Full Screen Timeline mode)
+        if (!isFullScreen && schedule.unscheduledTasks.isNotEmpty()) {
             item(key = "unscheduled_today_header") {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
@@ -2620,14 +2667,16 @@ fun ThingsTodayTimelineSection(
         }
     }
 
-    editingTimeblockTask?.let { targetTask ->
-        ThingsTimeblockPickerDialog(
-            initialStartMinutes = targetTask.scheduledStartMinutes,
-            initialDurationMinutes = targetTask.durationMinutes,
-            onSaveTimeblock = { startMins, durMins ->
-                onUpdateTimeblock(targetTask.id, startMins, durMins)
-            },
-            onDismiss = { editingTimeblockTask = null }
-        )
+    if (!isFullScreen) {
+        editingTimeblockTask?.let { targetTask ->
+            ThingsTimeblockPickerDialog(
+                initialStartMinutes = targetTask.scheduledStartMinutes,
+                initialDurationMinutes = targetTask.durationMinutes,
+                onSaveTimeblock = { startMins, durMins ->
+                    onUpdateTimeblock(targetTask.id, startMins, durMins)
+                },
+                onDismiss = { editingTimeblockTask = null }
+            )
+        }
     }
 }

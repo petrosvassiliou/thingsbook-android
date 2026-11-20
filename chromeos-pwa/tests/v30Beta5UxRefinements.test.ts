@@ -7,9 +7,9 @@ import { TRANSLATIONS } from '../src/i18n/translations.ts';
 
 const SRC_DIR = path.resolve(import.meta.dirname, '../src');
 
-test('v3.0.0-beta.5 build constants and localized UX strings exist across all 5 languages', () => {
-  assert.equal(APP_VERSION, '3.0.0-beta.5');
-  assert.equal(APP_BUILD_CODE, 96);
+test('v3.0.0-beta.6 build constants and localized UX strings exist across all 5 languages', () => {
+  assert.equal(APP_VERSION, '3.0.0-beta.6');
+  assert.ok(APP_BUILD_CODE >= 97);
 
   for (const lang of ['en', 'de', 'fr', 'it', 'es'] as const) {
     const dict = TRANSLATIONS[lang];

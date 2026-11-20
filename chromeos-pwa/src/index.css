@@ -5932,8 +5932,15 @@ button.v2-stalled-pill:hover {
   flex-direction: column;
 }
 
-.today-timeline-fullscreen-body .v2-timeline-container {
+.today-timeline-fullscreen-body .v2-timeline-container,
+.today-timeline-fullscreen-body .v2-timeline-root {
   flex: 1 1 auto;
+  margin-top: 0;
+}
+
+.v2-timeline-root.fullscreen .v2-timeline-card-main,
+.v2-timeline-root.fullscreen .things-checkbox {
+  cursor: default;
 }
 
 .project-roadmap-workspace.fullscreen {
@@ -5948,10 +5955,12 @@ button.v2-stalled-pill:hover {
   max-height: none;
 }
 
-.project-roadmap-workspace.fullscreen .roadmap-unscheduled-tray {
-  flex-shrink: 0;
-  max-height: 22vh;
-  overflow-y: auto;
+.project-roadmap-workspace.fullscreen .roadmap-phase-bar,
+.project-roadmap-workspace.fullscreen .roadmap-task-bar,
+.project-roadmap-workspace.fullscreen .roadmap-task-label,
+.project-roadmap-workspace.fullscreen .roadmap-lane-date-chip,
+.project-roadmap-workspace.fullscreen .things-checkbox {
+  cursor: default;
 }
 
 .roadmap-fullscreen-title {

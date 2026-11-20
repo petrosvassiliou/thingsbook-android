@@ -4472,11 +4472,17 @@ class ThingsbookViewModel @Inject constructor(
     val isTimelineFullScreen: StateFlow<Boolean> = _isTimelineFullScreen.asStateFlow()
 
     fun setTimelineFullScreen(enabled: Boolean) {
+        if (enabled) {
+            _expandedTaskId.value = null
+            _selectedTaskIds.value = emptySet()
+            _isMagicPlusMenuOpen.value = false
+            _isQuickFindOpen.value = false
+        }
         _isTimelineFullScreen.value = enabled
     }
 
     fun toggleTimelineFullScreen() {
-        _isTimelineFullScreen.value = !_isTimelineFullScreen.value
+        setTimelineFullScreen(!_isTimelineFullScreen.value)
     }
 
     fun setTodayTimelineMode(timelineMode: Boolean) {

@@ -1274,7 +1274,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
 
   // Pointer drag lifecycle for Phase bars & Task bars (requires explicit press-and-hold before dragging)
   useEffect(() => {
-    if (!barDrag) return;
+    if (!barDrag || isFullScreen) return;
 
     const holdTimer: number | null = !barDrag.armed
       ? window.setTimeout(() => {
@@ -1386,10 +1386,10 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
       window.removeEventListener('scroll', cancelIfUnarmed, true);
       scrollEl?.removeEventListener('scroll', cancelIfUnarmed);
     };
-  }, [barDrag, dayWidth, layout]);
+  }, [barDrag, isFullScreen, dayWidth, layout]);
 
   const stepPhaseByDays = (lane: ProjectRoadmapLayout['lanes'][number], delta: number) => {
-    if (!lane.heading) return;
+    if (isFullScreen || !lane.heading) return;
     const shifted = shiftPhaseDatesByDays(lane.heading, delta, {
       startEpoch: lane.startEpoch,
       endEpoch: lane.endEpoch
@@ -1398,6 +1398,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
   };
 
   const stepTaskByDays = (task: TaskRecord, delta: number) => {
+    if (isFullScreen) return;
     const shifted = shiftTaskDatesByDays(task, delta, layout.todayEpoch);
     void localDb.upsertTask({
       id: task.id,
@@ -1418,7 +1419,12 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
         lane.heading == null
           ? t.projectUngroupedColumn
           : lane.heading.title || t.entityHeading;
-      const laneH = resolveLaneHeaderHeightPx(displayTitle, lane.heading != null);
+      const hasDateSubRow =
+        lane.heading != null &&
+        (!isFullScreen ||
+          lane.heading.startDate != null ||
+          lane.heading.endDate != null);
+      const laneH = resolveLaneHeaderHeightPx(displayTitle, hasDateSubRow);
       heights.set(lane.laneId, laneH);
       yCursor += laneH;
 
@@ -1487,6 +1493,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
     dayWidth,
     timelineWidthPx,
     barDrag,
+    isFullScreen,
     t.projectUngroupedColumn,
     t.entityHeading
   ]);
@@ -1660,69 +1667,73 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
         </div>
 
         <div className="roadmap-toolbar-right">
-          <button
-            type="button"
-            className="chip-btn"
-            onClick={() => onCreateTodoInPhase(null)}
-          >
-            <Plus size={12.5} />
-            <span>{t.entityTodo}</span>
-          </button>
+          {!isFullScreen && (
+            <>
+              <button
+                type="button"
+                className="chip-btn"
+                onClick={() => onCreateTodoInPhase(null)}
+              >
+                <Plus size={12.5} />
+                <span>{t.entityTodo}</span>
+              </button>
 
-          <button
-            type="button"
-            className="chip-btn"
-            onClick={onCreatePhase}
-          >
-            <Plus size={12.5} />
-            <span>{t.boardAddPhase}</span>
-          </button>
+              <button
+                type="button"
+                className="chip-btn"
+                onClick={onCreatePhase}
+              >
+                <Plus size={12.5} />
+                <span>{t.boardAddPhase}</span>
+              </button>
 
-          <div className="dropdown-anchor">
-            <button
-              type="button"
-              className="chip-btn active"
-              data-testid="roadmap-export-btn"
-              title={t.roadmapExport}
-              onClick={() => setExportMenuOpen((v) => !v)}
-            >
-              <Download size={12.5} />
-              <span>{t.roadmapExport}</span>
-            </button>
+              <div className="dropdown-anchor">
+                <button
+                  type="button"
+                  className="chip-btn active"
+                  data-testid="roadmap-export-btn"
+                  title={t.roadmapExport}
+                  onClick={() => setExportMenuOpen((v) => !v)}
+                >
+                  <Download size={12.5} />
+                  <span>{t.roadmapExport}</span>
+                </button>
 
-            {exportMenuOpen && (
-              <>
-                <div
-                  style={{ position: 'fixed', inset: 0, zIndex: 75 }}
-                  onClick={() => setExportMenuOpen(false)}
-                />
-                <div className="dropdown-popover" data-testid="roadmap-export-menu">
-                  <button
-                    type="button"
-                    className="dropdown-item"
-                    data-testid="roadmap-export-pdf-btn"
-                    onClick={openPdfExportDialog}
-                  >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                      <FileText size={14} style={{ color: 'var(--things-blue)' }} />
-                      <span>{t.roadmapExportPdf}</span>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="dropdown-item"
-                    data-testid="roadmap-export-png-btn"
-                    onClick={handleExportPng}
-                  >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                      <FileImage size={14} style={{ color: 'var(--things-blue)' }} />
-                      <span>{t.roadmapExportPng}</span>
-                    </span>
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
+                {exportMenuOpen && (
+                  <>
+                    <div
+                      style={{ position: 'fixed', inset: 0, zIndex: 75 }}
+                      onClick={() => setExportMenuOpen(false)}
+                    />
+                    <div className="dropdown-popover" data-testid="roadmap-export-menu">
+                      <button
+                        type="button"
+                        className="dropdown-item"
+                        data-testid="roadmap-export-pdf-btn"
+                        onClick={openPdfExportDialog}
+                      >
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                          <FileText size={14} style={{ color: 'var(--things-blue)' }} />
+                          <span>{t.roadmapExportPdf}</span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="dropdown-item"
+                        data-testid="roadmap-export-png-btn"
+                        onClick={handleExportPng}
+                      >
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                          <FileImage size={14} style={{ color: 'var(--things-blue)' }} />
+                          <span>{t.roadmapExportPng}</span>
+                        </span>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </>
+          )}
 
           {onToggleFullScreen && (
             <button
@@ -1730,7 +1741,16 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
               className={`chip-btn ${isFullScreen ? 'active' : ''}`}
               data-testid="roadmap-fullscreen-btn"
               title={isFullScreen ? t.timelineExitFullscreen : t.timelineFullscreen}
-              onClick={onToggleFullScreen}
+              onClick={() => {
+                if (!isFullScreen) {
+                  setExportMenuOpen(false);
+                  setPdfDialogOpen(false);
+                  setBarDrag(null);
+                  setDragOverLaneId(null);
+                  setEditingPhaseId(null);
+                }
+                onToggleFullScreen();
+              }}
             >
               {isFullScreen ? <Minimize2 size={12.5} /> : <Maximize2 size={12.5} />}
               <span>{isFullScreen ? t.timelineExitFullscreen : t.timelineFullscreen}</span>
@@ -1870,13 +1890,14 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
               const hd = lane.heading;
               const isGeneral = hd === null;
               const phaseDragDelta =
+                !isFullScreen &&
                 hd &&
                 barDrag?.kind === 'phase' &&
                 barDrag.id === hd.id &&
                 barDrag.armed
                   ? barDrag.deltaDays
                   : 0;
-              const isEditing = hd != null && editingPhaseId === hd.id;
+              const isEditing = !isFullScreen && hd != null && editingPhaseId === hd.id;
               const phaseTitle = isGeneral
                 ? t.projectUngroupedColumn
                 : hd.title || t.entityHeading;
@@ -1955,10 +1976,11 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                   {/* Phase Lane Header Row (synchronized height across left column, right grid, and SVG) */}
                   <div
                     className={`roadmap-lane-row ${
-                      dragOverLaneId === lane.laneId ? 'drag-over' : ''
+                      !isFullScreen && dragOverLaneId === lane.laneId ? 'drag-over' : ''
                     }`}
                     style={{ height: laneRowHeight, minHeight: laneRowHeight }}
                     onDragOver={(e) => {
+                      if (isFullScreen) return;
                       if (hasDraggedTaskMime(e.dataTransfer)) {
                         e.preventDefault();
                         e.dataTransfer.dropEffect = 'move';
@@ -1968,7 +1990,10 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                     onDragLeave={() => {
                       if (dragOverLaneId === lane.laneId) setDragOverLaneId(null);
                     }}
-                    onDrop={(e) => void handleDropOnLaneHeader(e, hd ? hd.id : null)}
+                    onDrop={(e) => {
+                      if (isFullScreen) return;
+                      void handleDropOnLaneHeader(e, hd ? hd.id : null);
+                    }}
                   >
                     <div
                       className="roadmap-sticky-cell lane-cell"
@@ -2000,10 +2025,9 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             <span
                               className="roadmap-lane-title"
                               onDoubleClick={() => {
-                                if (hd) {
-                                  setEditingPhaseId(hd.id);
-                                  setEditingPhaseTitle(hd.title);
-                                }
+                                if (isFullScreen || !hd) return;
+                                setEditingPhaseId(hd.id);
+                                setEditingPhaseTitle(hd.title);
                               }}
                             >
                               {phaseTitle}
@@ -2020,70 +2044,99 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             </span>
                           )}
 
-                          <div className="roadmap-cell-quick-btns">
-                            {hd && (
+                          {!isFullScreen && (
+                            <div className="roadmap-cell-quick-btns">
+                              {hd && (
+                                <button
+                                  type="button"
+                                  className="roadmap-step-btn"
+                                  title={t.actionRename}
+                                  onClick={() => {
+                                    setEditingPhaseId(hd.id);
+                                    setEditingPhaseTitle(hd.title);
+                                  }}
+                                >
+                                  <Edit3 size={11.5} />
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 className="roadmap-step-btn"
-                                title={t.actionRename}
-                                onClick={() => {
-                                  setEditingPhaseId(hd.id);
-                                  setEditingPhaseTitle(hd.title);
-                                }}
+                                title={t.entityNewTodo}
+                                onClick={() => onCreateTodoInPhase(hd ? hd.id : null)}
                               >
-                                <Edit3 size={11.5} />
+                                <Plus size={12.5} />
                               </button>
-                            )}
-                            <button
-                              type="button"
-                              className="roadmap-step-btn"
-                              title={t.entityNewTodo}
-                              onClick={() => onCreateTodoInPhase(hd ? hd.id : null)}
-                            >
-                              <Plus size={12.5} />
-                            </button>
-                          </div>
+                            </div>
+                          )}
                         </div>
 
-                        {hd && (
-                          <div className="roadmap-lane-dates-subrow">
-                            <button
-                              type="button"
-                              className={`roadmap-lane-date-chip ${
-                                formattedStart != null ? 'has-date' : ''
-                              }`}
-                              title={t.phaseSetStartDate}
-                              onClick={() => onOpenHeadingStartModal(hd.id)}
-                            >
-                              <Calendar size={10} />
-                              <span>
-                                {formattedStart != null
-                                  ? formattedStart
-                                  : `+ ${t.phaseSetStartDate}`}
-                              </span>
-                            </button>
+                        {hd &&
+                          (!isFullScreen ||
+                            formattedStart != null ||
+                            formattedEnd != null) && (
+                            <div className="roadmap-lane-dates-subrow">
+                              {(!isFullScreen || formattedStart != null) && (
+                                <button
+                                  type="button"
+                                  className={`roadmap-lane-date-chip ${
+                                    formattedStart != null ? 'has-date' : ''
+                                  }`}
+                                  disabled={isFullScreen}
+                                  style={
+                                    isFullScreen
+                                      ? { pointerEvents: 'none', cursor: 'default' }
+                                      : undefined
+                                  }
+                                  title={isFullScreen ? undefined : t.phaseSetStartDate}
+                                  onClick={
+                                    isFullScreen
+                                      ? undefined
+                                      : () => onOpenHeadingStartModal(hd.id)
+                                  }
+                                >
+                                  <Calendar size={10} />
+                                  <span>
+                                    {formattedStart != null
+                                      ? formattedStart
+                                      : `+ ${t.phaseSetStartDate}`}
+                                  </span>
+                                </button>
+                              )}
 
-                            <button
-                              type="button"
-                              className={`roadmap-lane-date-chip ${
-                                isPhaseOverdue
-                                  ? 'overdue'
-                                  : formattedEnd != null
-                                    ? 'has-date'
-                                    : ''
-                              }`}
-                              title={t.phaseSetEndDate}
-                              onClick={() => onOpenHeadingEndModal(hd.id)}
-                            >
-                              <Flag size={10} />
-                              <span>
-                                {formattedEnd != null
-                                  ? formattedEnd
-                                  : `+ ${t.phaseSetEndDate}`}
-                              </span>
-                            </button>
-                          </div>
-                        )}
+                              {(!isFullScreen || formattedEnd != null) && (
+                                <button
+                                  type="button"
+                                  className={`roadmap-lane-date-chip ${
+                                    isPhaseOverdue
+                                      ? 'overdue'
+                                      : formattedEnd != null
+                                        ? 'has-date'
+                                        : ''
+                                  }`}
+                                  disabled={isFullScreen}
+                                  style={
+                                    isFullScreen
+                                      ? { pointerEvents: 'none', cursor: 'default' }
+                                      : undefined
+                                  }
+                                  title={isFullScreen ? undefined : t.phaseSetEndDate}
+                                  onClick={
+                                    isFullScreen
+                                      ? undefined
+                                      : () => onOpenHeadingEndModal(hd.id)
+                                  }
+                                >
+                                  <Flag size={10} />
+                                  <span>
+                                    {formattedEnd != null
+                                      ? formattedEnd
+                                      : `+ ${t.phaseSetEndDate}`}
+                                  </span>
+                                </button>
+                              )}
+                            </div>
+                          )}
                       </div>
                     </div>
 
@@ -2097,6 +2150,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             className={`roadmap-phase-bar ${
                               lane.isInferred ? 'inferred' : ''
                             } ${
+                              !isFullScreen &&
                               barDrag?.kind === 'phase' &&
                               barDrag.id === hd.id &&
                               barDrag.armed
@@ -2107,9 +2161,11 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             style={{
                               top: phaseBarTopPx,
                               left: clampedPhaseBar.leftPx,
-                              width: clampedPhaseBar.widthPx
+                              width: clampedPhaseBar.widthPx,
+                              cursor: isFullScreen ? 'default' : undefined
                             }}
                             onPointerDown={(e) => {
+                              if (isFullScreen) return;
                               if (e.pointerType === 'mouse' && e.button !== 0) return;
                               if ((e.target as HTMLElement).closest('button')) return;
                               e.stopPropagation();
@@ -2140,32 +2196,34 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                                   : `${phaseDragDelta}d`}
                               </span>
                             )}
-                            <span className="roadmap-bar-step-controls">
-                              <button
-                                type="button"
-                                className="roadmap-bar-step-btn"
-                                title={t.roadmapShiftEarlier}
-                                aria-label={t.roadmapShiftEarlier}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  stepPhaseByDays(lane, -1);
-                                }}
-                              >
-                                <ChevronLeft size={11} />
-                              </button>
-                              <button
-                                type="button"
-                                className="roadmap-bar-step-btn"
-                                title={t.roadmapShiftLater}
-                                aria-label={t.roadmapShiftLater}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  stepPhaseByDays(lane, 1);
-                                }}
-                              >
-                                <ChevronRight size={11} />
-                              </button>
-                            </span>
+                            {!isFullScreen && (
+                              <span className="roadmap-bar-step-controls">
+                                <button
+                                  type="button"
+                                  className="roadmap-bar-step-btn"
+                                  title={t.roadmapShiftEarlier}
+                                  aria-label={t.roadmapShiftEarlier}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    stepPhaseByDays(lane, -1);
+                                  }}
+                                >
+                                  <ChevronLeft size={11} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="roadmap-bar-step-btn"
+                                  title={t.roadmapShiftLater}
+                                  aria-label={t.roadmapShiftLater}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    stepPhaseByDays(lane, 1);
+                                  }}
+                                >
+                                  <ChevronRight size={11} />
+                                </button>
+                              </span>
+                            )}
                           </div>
 
                           {!clampedPhaseBar.showTitleInside && (
@@ -2194,7 +2252,10 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             </span>
                           )}
                         </>
-                      ) : hd && lane.startEpoch == null && lane.endEpoch == null ? (
+                      ) : !isFullScreen &&
+                        hd &&
+                        lane.startEpoch == null &&
+                        lane.endEpoch == null ? (
                         <button
                           type="button"
                           className="roadmap-set-phase-dates-inline"
@@ -2214,8 +2275,9 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                   {/* Plotted Task Rows inside Lane */}
                   {lane.plottedTasks.map((pt) => {
                     const tk = pt.task;
-                    const isSelected = selectedTaskIds.includes(tk.id);
+                    const isSelected = !isFullScreen && selectedTaskIds.includes(tk.id);
                     const taskDragDelta =
+                      !isFullScreen &&
                       barDrag?.kind === 'task' &&
                       barDrag.id === tk.id &&
                       barDrag.armed
@@ -2259,9 +2321,16 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                       >
                         <div
                           className="roadmap-sticky-cell task-cell"
-                          style={{ width: LABEL_COL_WIDTH_PX }}
-                          draggable
+                          style={{
+                            width: LABEL_COL_WIDTH_PX,
+                            cursor: isFullScreen ? 'default' : undefined
+                          }}
+                          draggable={!isFullScreen}
                           onDragStart={(e) => {
+                            if (isFullScreen) {
+                              e.preventDefault();
+                              return;
+                            }
                             attachMultiTaskDragPreview(
                               e.dataTransfer,
                               dragIdsForRow,
@@ -2273,6 +2342,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                           }}
                           onClick={(e) => {
                             e.stopPropagation();
+                            if (isFullScreen) return;
                             if (e.shiftKey) {
                               onSelectTask(tk.id, true, true);
                             } else if (e.ctrlKey || e.metaKey || selectedTaskIds.length > 0) {
@@ -2285,6 +2355,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                           }}
                           onDoubleClick={(e) => {
                             e.stopPropagation();
+                            if (isFullScreen) return;
                             onOpenTaskEditor(tk.id);
                           }}
                         >
@@ -2293,8 +2364,16 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             className={`things-checkbox ${
                               tk.status === 'COMPLETED' ? 'completed' : ''
                             }`}
+                            disabled={isFullScreen}
+                            aria-disabled={isFullScreen || undefined}
+                            style={
+                              isFullScreen
+                                ? { pointerEvents: 'none', opacity: 0.55, cursor: 'default' }
+                                : undefined
+                            }
                             onClick={(e) => {
                               e.stopPropagation();
+                              if (isFullScreen) return;
                               void localDb.upsertTask({
                                 id: tk.id,
                                 status: tk.status === 'COMPLETED' ? 'OPEN' : 'COMPLETED'
@@ -2321,46 +2400,48 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             {tk.title || t.placeholderTodoTitle}
                           </span>
 
-                          <div className="roadmap-cell-quick-btns">
-                            <button
-                              type="button"
-                              className="roadmap-step-btn"
-                              title={t.roadmapShiftEarlier}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                stepTaskByDays(tk, -1);
-                              }}
-                              onDoubleClick={(e) => e.stopPropagation()}
-                            >
-                              <ChevronLeft size={11.5} />
-                            </button>
-                            <button
-                              type="button"
-                              className="roadmap-step-btn"
-                              title={t.roadmapShiftLater}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                stepTaskByDays(tk, 1);
-                              }}
-                              onDoubleClick={(e) => e.stopPropagation()}
-                            >
-                              <ChevronRight size={11.5} />
-                            </button>
-                            <button
-                              type="button"
-                              className="roadmap-step-btn"
-                              data-testid={`roadmap-task-open-modal-${tk.id}`}
-                              title={t.actionEdit}
-                              aria-label={t.actionEdit}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onOpenTaskEditor(tk.id);
-                              }}
-                              onDoubleClick={(e) => e.stopPropagation()}
-                            >
-                              <Edit3 size={11.5} />
-                            </button>
-                          </div>
+                          {!isFullScreen && (
+                            <div className="roadmap-cell-quick-btns">
+                              <button
+                                type="button"
+                                className="roadmap-step-btn"
+                                title={t.roadmapShiftEarlier}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  stepTaskByDays(tk, -1);
+                                }}
+                                onDoubleClick={(e) => e.stopPropagation()}
+                              >
+                                <ChevronLeft size={11.5} />
+                              </button>
+                              <button
+                                type="button"
+                                className="roadmap-step-btn"
+                                title={t.roadmapShiftLater}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  stepTaskByDays(tk, 1);
+                                }}
+                                onDoubleClick={(e) => e.stopPropagation()}
+                              >
+                                <ChevronRight size={11.5} />
+                              </button>
+                              <button
+                                type="button"
+                                className="roadmap-step-btn"
+                                data-testid={`roadmap-task-open-modal-${tk.id}`}
+                                title={t.actionEdit}
+                                aria-label={t.actionEdit}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onOpenTaskEditor(tk.id);
+                                }}
+                                onDoubleClick={(e) => e.stopPropagation()}
+                              >
+                                <Edit3 size={11.5} />
+                              </button>
+                            </div>
+                          )}
                         </div>
 
                         <div
@@ -2378,6 +2459,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             } ${dlUrgent ? 'urgent' : ''} ${
                               isSelected ? 'selected' : ''
                             } ${
+                              !isFullScreen &&
                               barDrag?.kind === 'task' &&
                               barDrag.id === tk.id &&
                               barDrag.armed
@@ -2385,8 +2467,13 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                                 : ''
                             } ${taskDragDelta !== 0 ? 'dragging' : ''}`}
                             data-testid={`roadmap-task-bar-${tk.id}`}
-                            style={{ left: barLeft, width: barWidth }}
+                            style={{
+                              left: barLeft,
+                              width: barWidth,
+                              cursor: isFullScreen ? 'default' : undefined
+                            }}
                             onPointerDown={(e) => {
+                              if (isFullScreen) return;
                               if (e.pointerType === 'mouse' && e.button !== 0) return;
                               if ((e.target as HTMLElement).closest('button')) return;
                               e.stopPropagation();
@@ -2406,6 +2493,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             }}
                             onClick={(e) => {
                               e.stopPropagation();
+                              if (isFullScreen) return;
                               if (suppressNextBarClickRef.current) {
                                 suppressNextBarClickRef.current = false;
                                 return;
@@ -2422,6 +2510,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             }}
                             onDoubleClick={(e) => {
                               e.stopPropagation();
+                              if (isFullScreen) return;
                               onOpenTaskEditor(tk.id);
                             }}
                           >
@@ -2475,109 +2564,47 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
         </div>
       </div>
 
-      {/* Compact Unscheduled Tray Below Timeline */}
-      {(layout.unscheduledTasks.length > 0 || layout.unscheduledPhases.length > 0) && (
-        <section
-          className="roadmap-unscheduled-tray"
-          data-testid="roadmap-unscheduled-tray"
-        >
-          <div className="roadmap-unscheduled-header">
-            <div className="roadmap-unscheduled-title-group">
-              <span className="roadmap-unscheduled-title">
-                {t.roadmapUnscheduledSection} (
-                {layout.unscheduledTasks.length + layout.unscheduledPhases.length})
-              </span>
-              <span className="roadmap-unscheduled-hint">
-                {t.roadmapUnscheduledHint}
-              </span>
-            </div>
-          </div>
-
-          <div className="roadmap-unscheduled-list">
-            {layout.unscheduledPhases.map((hd) => (
-              <div key={`unsch-phase-${hd.id}`} className="roadmap-unscheduled-item">
-                <div className="roadmap-unscheduled-item-left">
-                  <span className="board-column-accent" />
-                  <span className="roadmap-unscheduled-name">
-                    {hd.title || t.entityHeading}
-                  </span>
-                  <span className="meta-badge">{t.entityHeading}</span>
-                </div>
-                <div className="roadmap-unscheduled-actions">
-                  <button
-                    type="button"
-                    className="chip-btn"
-                    onClick={() => {
-                      const today = startOfDayEpoch();
-                      void localDb.updateHeadingDates(
-                        hd.id,
-                        today,
-                        addDaysLocal(today, 6)
-                      );
-                    }}
-                  >
-                    <Sun size={11.5} style={{ color: 'var(--today-star)' }} />
-                    <span>{t.viewToday}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="chip-btn"
-                    onClick={() => onOpenHeadingStartModal(hd.id)}
-                  >
-                    <Calendar size={11.5} />
-                    <span>{t.phaseSetStartDate}</span>
-                  </button>
-                </div>
+      {/* Compact Unscheduled Tray Below Timeline (Hidden in Full Screen so 100% of viewport is pure Gantt Timeline) */}
+      {!isFullScreen &&
+        (layout.unscheduledTasks.length > 0 || layout.unscheduledPhases.length > 0) && (
+          <section
+            className="roadmap-unscheduled-tray"
+            data-testid="roadmap-unscheduled-tray"
+          >
+            <div className="roadmap-unscheduled-header">
+              <div className="roadmap-unscheduled-title-group">
+                <span className="roadmap-unscheduled-title">
+                  {t.roadmapUnscheduledSection} (
+                  {layout.unscheduledTasks.length + layout.unscheduledPhases.length})
+                </span>
+                <span className="roadmap-unscheduled-hint">
+                  {t.roadmapUnscheduledHint}
+                </span>
               </div>
-            ))}
+            </div>
 
-            {layout.unscheduledTasks.map((tk) => {
-              const isSelected = selectedTaskIds.includes(tk.id);
-              const dragIds =
-                isSelected && selectedTaskIds.length > 1
-                  ? orderTaskIdsByVisualOrder(selectedTaskIds, orderedVisibleTaskIds)
-                  : [tk.id];
-              return (
-                <div
-                  key={`unsch-task-${tk.id}`}
-                  className={`roadmap-unscheduled-item ${isSelected ? 'selected' : ''}`}
-                  draggable
-                  onDragStart={(e) => {
-                    attachMultiTaskDragPreview(
-                      e.dataTransfer,
-                      dragIds,
-                      t.dragTasksCount(dragIds.length)
-                    );
-                  }}
-                >
+            <div className="roadmap-unscheduled-list">
+              {layout.unscheduledPhases.map((hd) => (
+                <div key={`unsch-phase-${hd.id}`} className="roadmap-unscheduled-item">
                   <div className="roadmap-unscheduled-item-left">
-                    <button
-                      type="button"
-                      className="things-checkbox"
-                      onClick={() =>
-                        void localDb.upsertTask({ id: tk.id, status: 'COMPLETED' })
-                      }
-                    />
-                    <button
-                      type="button"
-                      className="roadmap-unscheduled-task-btn"
-                      onClick={() => onOpenTaskEditor(tk.id)}
-                    >
-                      {tk.title || t.placeholderTodoTitle}
-                    </button>
+                    <span className="board-column-accent" />
+                    <span className="roadmap-unscheduled-name">
+                      {hd.title || t.entityHeading}
+                    </span>
+                    <span className="meta-badge">{t.entityHeading}</span>
                   </div>
-
                   <div className="roadmap-unscheduled-actions">
                     <button
                       type="button"
                       className="chip-btn"
-                      onClick={() =>
-                        void localDb.upsertTask({
-                          id: tk.id,
-                          scheduleState: 'TODAY',
-                          whenDate: startOfDayEpoch()
-                        })
-                      }
+                      onClick={() => {
+                        const today = startOfDayEpoch();
+                        void localDb.updateHeadingDates(
+                          hd.id,
+                          today,
+                          addDaysLocal(today, 6)
+                        );
+                      }}
                     >
                       <Sun size={11.5} style={{ color: 'var(--today-star)' }} />
                       <span>{t.viewToday}</span>
@@ -2585,35 +2612,99 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                     <button
                       type="button"
                       className="chip-btn"
-                      onClick={() =>
-                        void localDb.upsertTask({
-                          id: tk.id,
-                          scheduleState: 'UPCOMING',
-                          whenDate: addDaysLocal(startOfDayEpoch(), 1)
-                        })
-                      }
-                    >
-                      <CalendarDays size={11.5} />
-                      <span>{t.dateTomorrow}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="chip-btn"
-                      onClick={() => onOpenWhenModal(tk.id)}
+                      onClick={() => onOpenHeadingStartModal(hd.id)}
                     >
                       <Calendar size={11.5} />
-                      <span>{t.actionWhen}</span>
+                      <span>{t.phaseSetStartDate}</span>
                     </button>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
+              ))}
+
+              {layout.unscheduledTasks.map((tk) => {
+                const isSelected = selectedTaskIds.includes(tk.id);
+                const dragIds =
+                  isSelected && selectedTaskIds.length > 1
+                    ? orderTaskIdsByVisualOrder(selectedTaskIds, orderedVisibleTaskIds)
+                    : [tk.id];
+                return (
+                  <div
+                    key={`unsch-task-${tk.id}`}
+                    className={`roadmap-unscheduled-item ${isSelected ? 'selected' : ''}`}
+                    draggable
+                    onDragStart={(e) => {
+                      attachMultiTaskDragPreview(
+                        e.dataTransfer,
+                        dragIds,
+                        t.dragTasksCount(dragIds.length)
+                      );
+                    }}
+                  >
+                    <div className="roadmap-unscheduled-item-left">
+                      <button
+                        type="button"
+                        className="things-checkbox"
+                        onClick={() =>
+                          void localDb.upsertTask({ id: tk.id, status: 'COMPLETED' })
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="roadmap-unscheduled-task-btn"
+                        onClick={() => onOpenTaskEditor(tk.id)}
+                      >
+                        {tk.title || t.placeholderTodoTitle}
+                      </button>
+                    </div>
+
+                    <div className="roadmap-unscheduled-actions">
+                      <button
+                        type="button"
+                        className="chip-btn"
+                        onClick={() =>
+                          void localDb.upsertTask({
+                            id: tk.id,
+                            scheduleState: 'TODAY',
+                            whenDate: startOfDayEpoch()
+                          })
+                        }
+                      >
+                        <Sun size={11.5} style={{ color: 'var(--today-star)' }} />
+                        <span>{t.viewToday}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="chip-btn"
+                        onClick={() =>
+                          void localDb.upsertTask({
+                            id: tk.id,
+                            scheduleState: 'UPCOMING',
+                            whenDate: addDaysLocal(startOfDayEpoch(), 1)
+                          })
+                        }
+                      >
+                        <CalendarDays size={11.5} />
+                        <span>{t.dateTomorrow}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="chip-btn"
+                        onClick={() => onOpenWhenModal(tk.id)}
+                      >
+                        <Calendar size={11.5} />
+                        <span>{t.actionWhen}</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
       {/* Soft Bento Export Roadmap as PDF Configuration Modal */}
-      {pdfDialogOpen &&
+      {!isFullScreen &&
+        pdfDialogOpen &&
         typeof document !== 'undefined' &&
         createPortal(
           <div

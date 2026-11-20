@@ -34,6 +34,7 @@ interface TodayTimelineViewProps {
   areasMap: Map<string, AreaRecord>;
   projectsMap: Map<string, ProjectRecord>;
   t: TranslationStrings;
+  isFullScreen?: boolean;
   onExpandTask: (taskId: string) => void;
   onStartFocusTimer: (taskId: string, taskTitle: string, durationMinutes?: number | null) => void;
 }
@@ -44,6 +45,7 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
   areasMap,
   projectsMap,
   t,
+  isFullScreen = false,
   onExpandTask,
   onStartFocusTimer
 }) => {
@@ -71,7 +73,11 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
   };
 
   return (
-    <div className="v2-timeline-root" data-testid="today-timeline-view" onClick={(e) => e.stopPropagation()}>
+    <div
+      className={`v2-timeline-root ${isFullScreen ? 'fullscreen' : ''}`}
+      data-testid="today-timeline-view"
+      onClick={(e) => e.stopPropagation()}
+    >
       {/* All-Day Calendar Events Strip */}
       {timeline.allDayEvents.length > 0 && (
         <div className="v2-timeline-allday-bar">
@@ -162,16 +168,26 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
                   <button
                     type="button"
                     className="things-checkbox"
-                    title={t.actionComplete}
-                    onClick={() => void localDb.upsertTask({ id: tk.id, status: 'COMPLETED' })}
+                    disabled={isFullScreen}
+                    aria-disabled={isFullScreen || undefined}
+                    style={
+                      isFullScreen
+                        ? { pointerEvents: 'none', opacity: 0.55, cursor: 'default' }
+                        : undefined
+                    }
+                    title={isFullScreen ? undefined : t.actionComplete}
+                    onClick={() => {
+                      if (isFullScreen) return;
+                      void localDb.upsertTask({ id: tk.id, status: 'COMPLETED' });
+                    }}
                   >
                     {tk.status === 'COMPLETED' && <Check size={12} strokeWidth={3} />}
                   </button>
 
                   <div
                     className="v2-timeline-card-main"
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => onExpandTask(tk.id)}
+                    style={{ cursor: isFullScreen ? 'default' : 'pointer' }}
+                    onClick={isFullScreen ? undefined : () => onExpandTask(tk.id)}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
                       <span style={{ fontWeight: 620, fontSize: 14 }}>
@@ -199,51 +215,53 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
                     )}
                   </div>
 
-                  <div className="v2-timeline-card-actions">
-                    <button
-                      type="button"
-                      className="chip-btn"
-                      title={t.timelineShiftPlus15m}
-                      onClick={() =>
-                        void localDb.upsertTask({
-                          id: tk.id,
-                          scheduledStartMinutes: Math.min(1425, item.startMinutes + 15),
-                          durationMinutes: item.durationMinutes
-                        })
-                      }
-                    >
-                      <span>{t.timelineShiftPlus15m}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="chip-btn active"
-                      title={t.actionFocusTimerMinutes(tk.durationMinutes ?? item.durationMinutes)}
-                      onClick={() =>
-                        onStartFocusTimer(
-                          tk.id,
-                          tk.title || t.placeholderTodoTitle,
-                          tk.durationMinutes ?? item.durationMinutes
-                        )
-                      }
-                    >
-                      <Timer size={12.5} />
-                      <span>{tk.durationMinutes ?? item.durationMinutes}m</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      title={t.timeblockClear}
-                      onClick={() =>
-                        void localDb.upsertTask({
-                          id: tk.id,
-                          scheduledStartMinutes: null,
-                          durationMinutes: null
-                        })
-                      }
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
+                  {!isFullScreen && (
+                    <div className="v2-timeline-card-actions">
+                      <button
+                        type="button"
+                        className="chip-btn"
+                        title={t.timelineShiftPlus15m}
+                        onClick={() =>
+                          void localDb.upsertTask({
+                            id: tk.id,
+                            scheduledStartMinutes: Math.min(1425, item.startMinutes + 15),
+                            durationMinutes: item.durationMinutes
+                          })
+                        }
+                      >
+                        <span>{t.timelineShiftPlus15m}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="chip-btn active"
+                        title={t.actionFocusTimerMinutes(tk.durationMinutes ?? item.durationMinutes)}
+                        onClick={() =>
+                          onStartFocusTimer(
+                            tk.id,
+                            tk.title || t.placeholderTodoTitle,
+                            tk.durationMinutes ?? item.durationMinutes
+                          )
+                        }
+                      >
+                        <Timer size={12.5} />
+                        <span>{tk.durationMinutes ?? item.durationMinutes}m</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        title={t.timeblockClear}
+                        onClick={() =>
+                          void localDb.upsertTask({
+                            id: tk.id,
+                            scheduledStartMinutes: null,
+                            durationMinutes: null
+                          })
+                        }
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -251,8 +269,8 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
         </div>
       )}
 
-      {/* Unscheduled Today Tray */}
-      {timeline.unscheduledTasks.length > 0 && (
+      {/* Unscheduled Today Tray (Hidden in Full Screen so 100% of screen is pure hourly Timeline) */}
+      {!isFullScreen && timeline.unscheduledTasks.length > 0 && (
         <div className="v2-unscheduled-tray" data-testid="unscheduled-today-tray">
           <div className="v2-unscheduled-header">
             <div>

@@ -1545,6 +1545,17 @@ export const App: React.FC = () => {
     activeProjectViewMode === 'roadmap';
   const isAnyTimelineFullScreen = isTodayTimelineFullScreen || isRoadmapFullScreen;
 
+  const enterTimelineFullScreen = useCallback(() => {
+    setExpandedTaskId(null);
+    setSelectedTaskIds([]);
+    setMagicFabOpen(false);
+    setQuickFindOpen(false);
+    setViewSortDropdownOpen(false);
+    setProjectHeaderMenuOpen(false);
+    setProjectAreaDropdownOpen(false);
+    setIsTimelineFullScreen(true);
+  }, []);
+
   useEffect(() => {
     if (!isTimelineFullScreen) return;
     const inTodayTimeline =
@@ -1999,6 +2010,11 @@ export const App: React.FC = () => {
         return;
       }
 
+      // Pure Timeline-only Full Screen: block all non-Escape global shortcuts
+      if (isTodayTimelineFullScreen || isRoadmapFullScreen) {
+        return;
+      }
+
       const inInteractiveControl =
         inInput || Boolean(target?.closest('button, a, [role="button"]'));
       const anyOtherModalOpen =
@@ -2255,6 +2271,8 @@ export const App: React.FC = () => {
     quickFindOpen,
     expandedTaskId,
     isTimelineFullScreen,
+    isTodayTimelineFullScreen,
+    isRoadmapFullScreen,
     selectedTaskIds,
     mobileDrawerOpen,
     activeNav,
@@ -3095,8 +3113,8 @@ export const App: React.FC = () => {
                 </div>
               )}
 
-            {/* Built-in 25-Minute Focus / Pomodoro Timer Banner (Android v1.7.0) */}
-            {focusTimer && (
+            {/* Built-in 25-Minute Focus / Pomodoro Timer Banner (Android v1.7.0; hidden in pure Timeline Full Screen) */}
+            {!isAnyTimelineFullScreen && focusTimer && (
               <FocusTimerBanner
                 timer={focusTimer}
                 t={t}
@@ -3155,32 +3173,6 @@ export const App: React.FC = () => {
                     </div>
 
                     <div className="timeline-fullscreen-bar-right">
-                      <div className="v2-segmented-toggle" data-testid="today-mode-toggle">
-                        <button
-                          type="button"
-                          className="v2-segmented-btn"
-                          data-testid="today-mode-list-btn"
-                          title={t.todayModeList}
-                          onClick={() => {
-                            setIsTimelineFullScreen(false);
-                            setTodayViewMode('list');
-                          }}
-                        >
-                          <List size={13.5} />
-                          <span>{t.todayModeList}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="v2-segmented-btn active"
-                          data-testid="today-mode-timeline-btn"
-                          title={t.todayModeTimeline}
-                          onClick={() => setTodayViewMode('timeline')}
-                        >
-                          <CalendarDays size={13.5} />
-                          <span>{t.todayModeTimeline}</span>
-                        </button>
-                      </div>
-
                       <button
                         type="button"
                         className="chip-btn active"
@@ -3300,7 +3292,7 @@ export const App: React.FC = () => {
                                 className="chip-btn"
                                 data-testid="today-timeline-fullscreen-btn"
                                 title={t.timelineFullscreen}
-                                onClick={() => setIsTimelineFullScreen(true)}
+                                onClick={enterTimelineFullScreen}
                               >
                                 <Maximize2 size={13} />
                                 <span>{t.timelineFullscreen}</span>
@@ -3475,7 +3467,9 @@ export const App: React.FC = () => {
                           areasMap={areasMap}
                           projectsMap={allNonDeletedProjectsMap}
                           t={t}
+                          isFullScreen={isTodayTimelineFullScreen}
                           onExpandTask={(taskId) => {
+                            if (isTodayTimelineFullScreen) return;
                             setSelectedTaskIds([]);
                             setExpandedTaskId(taskId);
                           }}
@@ -4592,7 +4586,13 @@ export const App: React.FC = () => {
                       project={project}
                       projectTitle={project.title}
                       isFullScreen={isRoadmapFullScreen}
-                      onToggleFullScreen={() => setIsTimelineFullScreen((v) => !v)}
+                      onToggleFullScreen={() => {
+                        if (isRoadmapFullScreen) {
+                          setIsTimelineFullScreen(false);
+                        } else {
+                          enterTimelineFullScreen();
+                        }
+                      }}
                       layout={activeProjectRoadmapLayout}
                       selectedTaskIds={selectedTaskIds}
                       orderedVisibleTaskIds={orderedVisibleTaskIds}
@@ -4601,6 +4601,7 @@ export const App: React.FC = () => {
                       t={t}
                       onSelectTask={handleSelectTask}
                       onOpenTaskEditor={(taskId) => {
+                        if (isRoadmapFullScreen) return;
                         setSelectedTaskIds([]);
                         setExpandedTaskId(taskId);
                       }}
@@ -5164,8 +5165,8 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Floating Multi-Selection Bar (ThingsMultiSelectionBar) */}
-        {selectedTaskIds.length > 0 && !expandedTaskId && (() => {
+        {/* Floating Multi-Selection Bar (ThingsMultiSelectionBar; hidden in Timeline/Roadmap Full Screen) */}
+        {!isAnyTimelineFullScreen && selectedTaskIds.length > 0 && !expandedTaskId && (() => {
           const allVisibleIds = orderedVisibleTaskIds;
           const allSelectedPinned =
             selectedTaskIds.length > 0 &&
@@ -5322,28 +5323,30 @@ export const App: React.FC = () => {
           );
         })()}
 
-        {/* Context-Aware Magic Plus FAB */}
-        <MagicPlusFab
-          open={magicFabOpen}
-          activeNav={activeNav}
-          currentViewTitle={currentViewTitle}
-          tasks={snapshot.tasks}
-          headings={snapshot.headings}
-          scrollContainerRef={workspaceScrollRef}
-          t={t}
-          onToggleOpen={() => setMagicFabOpen((v) => !v)}
-          onClose={() => setMagicFabOpen(false)}
-          onNewTodo={() => void createNewTodoInCurrentContext(null)}
-          onNewHeading={() => void createNewHeadingInActiveProject()}
-          onNewProject={() =>
-            setProjectModalState({
-              open: true,
-              project: null,
-              defaultAreaId: defaultAreaIdForNewProject
-            })
-          }
-          onDropInsert={(drop) => void handleMagicPlusDropInsert(drop)}
-        />
+        {/* Context-Aware Magic Plus FAB (Hidden in Timeline / Roadmap Full Screen) */}
+        {!isAnyTimelineFullScreen && (
+          <MagicPlusFab
+            open={magicFabOpen}
+            activeNav={activeNav}
+            currentViewTitle={currentViewTitle}
+            tasks={snapshot.tasks}
+            headings={snapshot.headings}
+            scrollContainerRef={workspaceScrollRef}
+            t={t}
+            onToggleOpen={() => setMagicFabOpen((v) => !v)}
+            onClose={() => setMagicFabOpen(false)}
+            onNewTodo={() => void createNewTodoInCurrentContext(null)}
+            onNewHeading={() => void createNewHeadingInActiveProject()}
+            onNewProject={() =>
+              setProjectModalState({
+                open: true,
+                project: null,
+                defaultAreaId: defaultAreaIdForNewProject
+              })
+            }
+            onDropInsert={(drop) => void handleMagicPlusDropInsert(drop)}
+          />
+        )}
       </main>
 
       {/* ==================== MODALS ==================== */}
@@ -6046,18 +6049,20 @@ export const App: React.FC = () => {
         />
       )}
 
-      <ActionableReminderBanner
-        reminders={inAppReminders}
-        t={t}
-        onComplete={(taskId) => void handleActionableReminderAction('complete', taskId)}
-        onSnooze1h={(taskId) => void handleActionableReminderAction('snooze-1h', taskId)}
-        onTomorrow={(taskId) => void handleActionableReminderAction('tomorrow', taskId)}
-        onDismiss={(taskId) =>
-          setInAppReminders((prev) => prev.filter((r) => r.taskId !== taskId))
-        }
-      />
+      {!isAnyTimelineFullScreen && (
+        <ActionableReminderBanner
+          reminders={inAppReminders}
+          t={t}
+          onComplete={(taskId) => void handleActionableReminderAction('complete', taskId)}
+          onSnooze1h={(taskId) => void handleActionableReminderAction('snooze-1h', taskId)}
+          onTomorrow={(taskId) => void handleActionableReminderAction('tomorrow', taskId)}
+          onDismiss={(taskId) =>
+            setInAppReminders((prev) => prev.filter((r) => r.taskId !== taskId))
+          }
+        />
+      )}
 
-      {undoBanner && (
+      {!isAnyTimelineFullScreen && undoBanner && (
         <UndoSnackbarBanner
           key={undoBanner.id}
           message={undoBanner.message}

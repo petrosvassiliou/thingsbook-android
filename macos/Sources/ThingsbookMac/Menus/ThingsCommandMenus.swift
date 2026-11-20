@@ -18,8 +18,13 @@ public struct ThingsCommandMenus: Commands {
     }
 
     @MainActor
+    private var isCommandBlocked: Bool {
+        store.isLocked || store.isTimelineFullScreen || store.activeSheet != nil
+    }
+
+    @MainActor
     private func isShortcutBlocked() -> Bool {
-        store.isLocked || store.activeSheet != nil || Self.isTextInputActive()
+        isCommandBlocked || Self.isTextInputActive()
     }
 
     @MainActor
@@ -44,136 +49,136 @@ public struct ThingsCommandMenus: Commands {
     public var body: some Commands {
         CommandGroup(after: .appInfo) {
             Button(store.tr("settings_updates_search_btn") + "…") {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.settingsTab = .about
                 store.isSettingsPresented = true
                 Task {
                     _ = await store.performManualUpdateCheck()
                 }
             }
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
         }
 
         CommandGroup(replacing: .newItem) {
             Button(store.tr("entity_new_todo")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.createNewTaskInCurrentContext()
             }
             .keyboardShortcut("n", modifiers: [.command])
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("macos_menubar_quick_entry")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.quickEntryPrefillTitle = ""
                 store.quickEntryPrefillNotes = ""
                 store.quickEntryAutoStartVoice = false
                 store.isQuickEntryPresented = true
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("shortcut_voice_capture_short")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.quickEntryPrefillTitle = ""
                 store.quickEntryPrefillNotes = ""
                 store.quickEntryAutoStartVoice = true
                 store.isQuickEntryPresented = true
             }
             .keyboardShortcut("v", modifiers: [.command, .shift, .control])
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Divider()
 
             Button(store.tr("entity_new_project")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.newProjectDefaultAreaId = nil
                 store.isNewProjectSheetPresented = true
             }
             .keyboardShortcut("n", modifiers: [.command, .option])
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("v2_templates_title")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.templatesInitialTab = .gallery
                 store.isTemplatesSheetPresented = true
             }
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("v2_import_markdown_title")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.templatesInitialTab = .importOutline
                 store.isTemplatesSheetPresented = true
             }
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("v30_external_import_export_tab")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.templatesInitialTab = .externalImportExport
                 store.isTemplatesSheetPresented = true
             }
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             if case .project(let selectedProjectId) = store.selectedDestination {
                 Menu(store.tr("v30_external_export_section")) {
                     Button(store.tr("v30_export_asana_csv")) {
-                        guard !store.isLocked else { return }
+                        guard !isCommandBlocked else { return }
                         store.exportProjectExternalInteractively(projectId: selectedProjectId, format: .asanaCsv)
                     }
                     Button(store.tr("v30_export_asana_json")) {
-                        guard !store.isLocked else { return }
+                        guard !isCommandBlocked else { return }
                         store.exportProjectExternalInteractively(projectId: selectedProjectId, format: .asanaJson)
                     }
                     Divider()
                     Button(store.tr("v30_export_planner_xlsx")) {
-                        guard !store.isLocked else { return }
+                        guard !isCommandBlocked else { return }
                         store.exportProjectExternalInteractively(projectId: selectedProjectId, format: .plannerXlsx)
                     }
                     Button(store.tr("v30_export_planner_csv")) {
-                        guard !store.isLocked else { return }
+                        guard !isCommandBlocked else { return }
                         store.exportProjectExternalInteractively(projectId: selectedProjectId, format: .plannerCsv)
                     }
                 }
-                .disabled(store.isLocked)
+                .disabled(isCommandBlocked)
             }
 
             Button(store.tr("v2_save_as_template")) {
-                guard !store.isLocked, case .project(let pid) = store.selectedDestination else { return }
+                guard !isCommandBlocked, case .project(let pid) = store.selectedDestination else { return }
                 store.saveProjectAsTemplate(pid)
             }
-            .disabled(store.isLocked || {
+            .disabled(isCommandBlocked || {
                 if case .project = store.selectedDestination { return false }
                 return true
             }())
 
             Button(store.tr("entity_new_area")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.isNewAreaSheetPresented = true
             }
             .keyboardShortcut("n", modifiers: [.command, .control])
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("v30_perspective_new")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.editingPerspective = nil
                 store.isPerspectiveEditorPresented = true
             }
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Divider()
 
             Button(store.tr("backup_create_button")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.exportBackupInteractively(password: nil)
             }
             .keyboardShortcut("e", modifiers: [.command, .shift])
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("backup_restore_button")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.importBackupInteractively()
             }
             .keyboardShortcut("i", modifiers: [.command, .shift])
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
         }
 
         CommandGroup(replacing: .undoRedo) {
@@ -184,11 +189,11 @@ public struct ThingsCommandMenus: Commands {
                         return
                     }
                 }
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.performUndo()
             }
             .keyboardShortcut("z", modifiers: [.command])
-            .disabled(store.isLocked || store.undoBanner == nil)
+            .disabled(isCommandBlocked || store.undoBanner == nil)
         }
 
         CommandGroup(after: .pasteboard) {
@@ -197,16 +202,16 @@ public struct ThingsCommandMenus: Commands {
                     responder.selectAll(nil)
                     return
                 }
-                guard !store.isLocked, store.activeSheet == nil else { return }
+                guard !isCommandBlocked else { return }
                 store.selectAllVisibleTasks()
             }
             .keyboardShortcut("a", modifiers: [.command])
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
         }
 
         CommandMenu(store.tr("macos_todo_menu")) {
             Button(store.tr("action_complete")) {
-                guard !store.isLocked, store.activeSheet == nil else { return }
+                guard !isCommandBlocked else { return }
                 if store.selectedTaskIds.count > 1 {
                     store.completeSelectedTasks()
                 } else if let id = store.expandedTaskId ?? store.selectedTaskIds.first,
@@ -215,24 +220,24 @@ public struct ThingsCommandMenus: Commands {
                 }
             }
             .keyboardShortcut("k", modifiers: [.command])
-            .disabled(store.isLocked || store.activeSheet != nil)
+            .disabled(isCommandBlocked)
 
             Button(store.tr(allPinTargetsPinned ? "v25_unpin_task" : "v25_pin_task")) {
                 guard !isShortcutBlocked() else { return }
                 store.togglePinForSelectedOrExpandedTasks()
             }
             .keyboardShortcut("p", modifiers: [.command, .shift])
-            .disabled(store.isLocked || store.activeSheet != nil || pinTargetIds.isEmpty)
+            .disabled(isCommandBlocked || pinTargetIds.isEmpty)
 
             Button(store.tr("action_duplicate_todo")) {
                 guard !isShortcutBlocked() else { return }
                 store.duplicateSelectedOrExpandedTask()
             }
             .keyboardShortcut("d", modifiers: [.command])
-            .disabled(store.isLocked || store.activeSheet != nil)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("action_attach_file")) {
-                guard !store.isLocked, store.activeSheet == nil else { return }
+                guard !isCommandBlocked else { return }
                 if let id = store.expandedTaskId ?? store.selectedTaskIds.first {
                     store.pickAndAttachFiles(taskId: id)
                 } else if case .project(let pid) = store.selectedDestination {
@@ -240,17 +245,17 @@ public struct ThingsCommandMenus: Commands {
                 }
             }
             .keyboardShortcut("a", modifiers: [.command, .shift])
-            .disabled(store.isLocked || store.activeSheet != nil)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("action_focus_timer")) {
-                guard !store.isLocked, store.activeSheet == nil else { return }
+                guard !isCommandBlocked else { return }
                 if let id = store.expandedTaskId ?? store.selectedTaskIds.first,
                    let task = store.allOpenTasks.first(where: { $0.id == id }) {
                     store.startFocusTimer(for: task)
                 }
             }
             .keyboardShortcut("f", modifiers: [.command, .option])
-            .disabled(store.isLocked || store.activeSheet != nil)
+            .disabled(isCommandBlocked)
 
             Divider()
 
@@ -259,21 +264,21 @@ public struct ThingsCommandMenus: Commands {
                 scheduleSelected(.today)
             }
             .keyboardShortcut("t", modifiers: [.command])
-            .disabled(store.isLocked || store.activeSheet != nil)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("view_this_evening")) {
                 guard !isShortcutBlocked() else { return }
                 scheduleSelected(.thisEvening)
             }
             .keyboardShortcut("e", modifiers: [.command])
-            .disabled(store.isLocked || store.activeSheet != nil)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("view_someday")) {
                 guard !isShortcutBlocked() else { return }
                 scheduleSelected(.someday)
             }
             .keyboardShortcut("o", modifiers: [.command])
-            .disabled(store.isLocked || store.activeSheet != nil)
+            .disabled(isCommandBlocked)
 
             let shortcutTags = store.tags.filter { ($0.shortcut?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) }
             if !shortcutTags.isEmpty {
@@ -285,7 +290,7 @@ public struct ThingsCommandMenus: Commands {
                             store.applyTagShortcut(String(firstChar))
                         }
                         .keyboardShortcut(KeyEquivalent(firstChar), modifiers: [.control])
-                        .disabled(store.isLocked || store.activeSheet != nil)
+                        .disabled(isCommandBlocked)
                     }
                 }
             }
@@ -297,130 +302,133 @@ public struct ThingsCommandMenus: Commands {
                     responder.doCommand(by: #selector(NSStandardKeyBindingResponding.deleteToBeginningOfLine(_:)))
                     return
                 }
-                guard !store.isLocked, store.activeSheet == nil else { return }
+                guard !isCommandBlocked else { return }
                 store.deleteSelectedTasks()
             }
             .keyboardShortcut(.delete, modifiers: [.command])
-            .disabled(store.isLocked || store.activeSheet != nil)
+            .disabled(isCommandBlocked)
         }
 
         CommandMenu(store.tr("macos_go_menu")) {
             Button(store.tr("quick_find_title")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.isQuickFindPresented = true
             }
             .keyboardShortcut("f", modifiers: [.command])
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("v2_weekly_review_title")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.isWeeklyReviewPresented = true
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Divider()
 
             Button(store.tr("view_inbox")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.selectedDestination = .smartView(.inbox)
             }
             .keyboardShortcut("1", modifiers: [.command])
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("view_today")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.selectedDestination = .smartView(.today)
             }
             .keyboardShortcut("2", modifiers: [.command])
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("view_upcoming")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.selectedDestination = .smartView(.upcoming)
             }
             .keyboardShortcut("3", modifiers: [.command])
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("view_anytime")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.selectedDestination = .smartView(.anytime)
             }
             .keyboardShortcut("4", modifiers: [.command])
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("view_someday")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.selectedDestination = .smartView(.someday)
             }
             .keyboardShortcut("5", modifiers: [.command])
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("view_logbook")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.selectedDestination = .smartView(.logbook)
             }
             .keyboardShortcut("6", modifiers: [.command])
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("view_trash")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.selectedDestination = .smartView(.trash)
             }
             .keyboardShortcut("7", modifiers: [.command])
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Divider()
 
             Button(store.tr("areas_manage_title")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.isAreaManagerPresented = true
             }
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("tags_manage_title")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.isTagManagerPresented = true
             }
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Divider()
 
             Button(store.tr("gemini_hub_title")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.geminiInitialTab = .brainDump
                 store.isGeminiSheetPresented = true
             }
             .keyboardShortcut("g", modifiers: [.command])
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             Button(store.tr("sync_action_now")) {
-                guard !store.isLocked else { return }
+                guard !isCommandBlocked else { return }
                 store.syncNow()
             }
             .keyboardShortcut("r", modifiers: [.command, .option])
-            .disabled(store.isLocked)
+            .disabled(isCommandBlocked)
 
             if case .project(let activeProjectId) = store.selectedDestination {
                 Divider()
 
                 Button(store.tr("v30_project_mode_list")) {
-                    guard !store.isLocked else { return }
+                    guard !isCommandBlocked else { return }
                     store.setProjectViewMode(activeProjectId, mode: .list)
                 }
                 .keyboardShortcut("1", modifiers: [.command, .control])
+                .disabled(isCommandBlocked)
 
                 Button(store.tr("v30_project_mode_board")) {
-                    guard !store.isLocked else { return }
+                    guard !isCommandBlocked else { return }
                     store.setProjectViewMode(activeProjectId, mode: .board)
                 }
                 .keyboardShortcut("2", modifiers: [.command, .control])
+                .disabled(isCommandBlocked)
 
                 Button(store.tr("v30_project_mode_roadmap")) {
-                    guard !store.isLocked else { return }
+                    guard !isCommandBlocked else { return }
                     store.setProjectViewMode(activeProjectId, mode: .roadmap)
                 }
                 .keyboardShortcut("3", modifiers: [.command, .control])
+                .disabled(isCommandBlocked)
             }
         }
     }

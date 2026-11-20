@@ -66,7 +66,7 @@ public struct MainWorkspaceView: View {
         case .smartView(.logbook), .smartView(.trash):
             return false
         default:
-            return !store.isLocked
+            return !store.isLocked && !store.isTimelineFullScreen
         }
     }
 
@@ -82,7 +82,7 @@ public struct MainWorkspaceView: View {
                             .fill(Color(nsColor: .separatorColor).opacity(0.65))
                             .frame(height: 1)
 
-                        if let focus = store.focusTimer {
+                        if !store.isTimelineFullScreen, let focus = store.focusTimer {
                             focusTimerBanner(focus)
                                 .padding(.horizontal, 36)
                                 .padding(.top, 14)
@@ -126,23 +126,25 @@ public struct MainWorkspaceView: View {
                     )
 
                     // Bottom Overlays: Multi-select bar, Undo Banner, Toast & Magic Plus Button
-                    HStack(alignment: .bottom, spacing: 14) {
-                        Spacer()
+                    if !store.isTimelineFullScreen {
+                        HStack(alignment: .bottom, spacing: 14) {
+                            Spacer()
 
-                        if store.selectedTaskIds.count > 1 {
-                            multiSelectBar
-                        } else if let undo = store.undoBanner {
-                            undoPillBanner(undo)
-                        } else if let toast = store.toastMessage {
-                            toastPill(toast)
+                            if store.selectedTaskIds.count > 1 {
+                                multiSelectBar
+                            } else if let undo = store.undoBanner {
+                                undoPillBanner(undo)
+                            } else if let toast = store.toastMessage {
+                                toastPill(toast)
+                            }
+
+                            Spacer()
+
+                            magicPlusButton
                         }
-
-                        Spacer()
-
-                        magicPlusButton
+                        .padding(.horizontal, 28)
+                        .padding(.bottom, 22)
                     }
-                    .padding(.horizontal, 28)
-                    .padding(.bottom, 22)
                 }
                 .coordinateSpace(name: MacMagicPlusCoordinateSpace.name)
                 .onPreferenceChange(DetailPaneWidthPreferenceKey.self) { newWidth in
@@ -152,8 +154,10 @@ public struct MainWorkspaceView: View {
                 }
                 .toolbarBackground(.hidden, for: .windowToolbar)
                 .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
-                        unifiedDetailToolbar(metrics: toolbarMetrics)
+                    if !store.isTimelineFullScreen {
+                        ToolbarItem(placement: .primaryAction) {
+                            unifiedDetailToolbar(metrics: toolbarMetrics)
+                        }
                     }
                 }
             }
@@ -196,6 +200,10 @@ public struct MainWorkspaceView: View {
             removeTaskKeyboardMonitor()
         }
         .onChange(of: store.isTimelineFullScreen) { _, fullScreen in
+            if fullScreen {
+                isMagicPlusMenuOpen = false
+                isBatchTagPopoverOpen = false
+            }
             withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
                 if fullScreen {
                     columnVisibilityBeforeTimelineFullScreen = columnVisibility
@@ -206,6 +214,11 @@ public struct MainWorkspaceView: View {
                 } else {
                     columnVisibility = .all
                 }
+            }
+        }
+        .onChange(of: columnVisibility) { _, newVisibility in
+            if store.isTimelineFullScreen && newVisibility != .detailOnly {
+                columnVisibility = .detailOnly
             }
         }
         .onChange(of: store.preferences.language) { _, newLang in
@@ -312,24 +325,27 @@ public struct MainWorkspaceView: View {
                 return event
             }
 
-            // Exit Timeline Full Screen on Escape when modal and sheets are closed (and not editing inline text):
-            if store.expandedTaskId == nil,
-               store.activeSheet == nil,
-               store.isTimelineFullScreen {
-                if let responder = NSApp.keyWindow?.firstResponder, responder is NSText {
-                    return event
-                }
-                let cleanMods = event.modifierFlags.intersection([.command, .option, .control, .shift])
-                if event.keyCode == 53 && cleanMods.isEmpty {
-                    withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
-                        store.isTimelineFullScreen = false
+            // In Timeline Full Screen: Escape exits Full Screen, and Return/Space task modal opening is blocked:
+            if store.isTimelineFullScreen {
+                if store.activeSheet == nil {
+                    let cleanMods = event.modifierFlags.intersection([.command, .option, .control, .shift])
+                    if event.keyCode == 53 && cleanMods.isEmpty {
+                        withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+                            store.isTimelineFullScreen = false
+                        }
+                        return nil
                     }
+                }
+                let blockingMods = event.modifierFlags.intersection([.command, .option, .control])
+                if blockingMods.isEmpty && (event.keyCode == 36 || event.keyCode == 76 || event.keyCode == 49) {
                     return nil
                 }
+                return event
             }
 
             // When modal is closed, no sheet is presented, 1 task is selected, and user is not editing text:
             if store.activeSheet == nil,
+               !store.isTimelineFullScreen,
                store.expandedTaskId == nil,
                store.selectedTaskIds.count == 1 {
                 if let responder = NSApp.keyWindow?.firstResponder, responder is NSText {
@@ -997,9 +1013,13 @@ public struct MainWorkspaceView: View {
         .fixedSize(horizontal: true, vertical: false)
     }
 
+    private var isToolbarDisabled: Bool {
+        store.isLocked || store.isTimelineFullScreen
+    }
+
     private func quickFindToolbarButton(metrics: MacToolbarLayoutMetrics) -> some View {
         Button {
-            guard !store.isLocked else { return }
+            guard !isToolbarDisabled else { return }
             store.isQuickFindPresented = true
         } label: {
             HStack(spacing: 7) {
@@ -1046,13 +1066,14 @@ public struct MainWorkspaceView: View {
         }
         .buttonStyle(.plain)
         .fixedSize(horizontal: true, vertical: false)
-        .disabled(store.isLocked)
+        .disabled(isToolbarDisabled)
+        .opacity(isToolbarDisabled ? 0.38 : 1.0)
         .thingsTooltip(store.tr("topbar_tooltip_quick_find"))
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
-                isQuickFindHovered = hovering
+                isQuickFindHovered = hovering && !isToolbarDisabled
             }
-            if hovering && !store.isLocked {
+            if hovering && !isToolbarDisabled {
                 NSCursor.pointingHand.set()
             } else {
                 NSCursor.arrow.set()
@@ -1072,10 +1093,10 @@ public struct MainWorkspaceView: View {
                     systemImage: "plus.bubble",
                     width: btnW,
                     height: btnH,
-                    isDisabled: store.isLocked,
+                    isDisabled: isToolbarDisabled,
                     helpText: store.tr("topbar_tooltip_quick_entry")
                 ) {
-                    guard !store.isLocked else { return }
+                    guard !isToolbarDisabled else { return }
                     store.quickEntryPrefillTitle = ""
                     store.quickEntryPrefillNotes = ""
                     store.quickEntryAutoStartVoice = false
@@ -1086,10 +1107,10 @@ public struct MainWorkspaceView: View {
                     systemImage: "mic",
                     width: btnW,
                     height: btnH,
-                    isDisabled: store.isLocked,
+                    isDisabled: isToolbarDisabled,
                     helpText: store.tr("topbar_tooltip_voice_input")
                 ) {
-                    guard !store.isLocked else { return }
+                    guard !isToolbarDisabled else { return }
                     store.quickEntryPrefillTitle = ""
                     store.quickEntryPrefillNotes = ""
                     store.quickEntryAutoStartVoice = true
@@ -1104,10 +1125,10 @@ public struct MainWorkspaceView: View {
                 minWidth: CGFloat(metrics.geminiPillMinWidth),
                 height: btnH,
                 showLabel: metrics.showGeminiLabel,
-                isDisabled: store.isLocked,
+                isDisabled: isToolbarDisabled,
                 helpText: store.tr("gemini_hub_title")
             ) {
-                guard !store.isLocked else { return }
+                guard !isToolbarDisabled else { return }
                 store.geminiInitialTab = .brainDump
                 store.isGeminiSheetPresented = true
             }
@@ -1119,10 +1140,10 @@ public struct MainWorkspaceView: View {
                 MacToolbarIconButton(
                     width: CGFloat(metrics.syncButtonWidth),
                     height: btnH,
-                    isDisabled: store.isLocked,
+                    isDisabled: isToolbarDisabled,
                     helpText: store.tr("topbar_tooltip_cloud_sync"),
                     action: {
-                        guard !store.isLocked else { return }
+                        guard !isToolbarDisabled else { return }
                         if !store.preferences.localOnlyDbMode && store.syncSnapshot.userEmailOrId != nil {
                             store.syncNow()
                         }
@@ -1143,10 +1164,10 @@ public struct MainWorkspaceView: View {
                     systemImage: "gearshape",
                     width: btnW,
                     height: btnH,
-                    isDisabled: store.isLocked,
+                    isDisabled: isToolbarDisabled,
                     helpText: store.tr("topbar_tooltip_settings")
                 ) {
-                    guard !store.isLocked else { return }
+                    guard !isToolbarDisabled else { return }
                     store.settingsTab = .general
                     store.isSettingsPresented = true
                 }

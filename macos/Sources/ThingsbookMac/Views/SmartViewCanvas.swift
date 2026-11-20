@@ -83,7 +83,7 @@ public struct SmartViewCanvas: View {
             }
             .padding(.horizontal, isAnyTimelineFullScreen ? 22 : 40)
             .padding(.top, isAnyTimelineFullScreen ? 14 : 26)
-            .padding(.bottom, 96)
+            .padding(.bottom, isAnyTimelineFullScreen ? 22 : 96)
             .frame(maxWidth: (isWideProjectWorkspace || isAnyTimelineFullScreen) ? .infinity : 880, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
@@ -286,8 +286,6 @@ public struct SmartViewCanvas: View {
             }
 
             Spacer(minLength: 12)
-
-            todayModePicker
 
             timelineFullScreenButton
         }
@@ -2158,15 +2156,17 @@ private struct TodayDailyTimelineView: View {
     }
 
     var body: some View {
+        let isFullScreen = store.isTimelineFullScreen
+        let slots = timedSlots
+        let conflicts = conflictingSlotIds
+        let visibleUnscheduled = isFullScreen ? [] : unscheduledTasks
+
         VStack(alignment: .leading, spacing: 18) {
             if !allDayEvents.isEmpty {
                 MacCompactCalendarEventsBlock(store: store, events: allDayEvents)
             }
 
-            let slots = timedSlots
-            let conflicts = conflictingSlotIds
-
-            if slots.isEmpty && unscheduledTasks.isEmpty {
+            if slots.isEmpty && visibleUnscheduled.isEmpty && (!isFullScreen || allDayEvents.isEmpty) {
                 VStack(spacing: 12) {
                     Image(systemName: "clock.badge.checkmark")
                         .font(.system(size: 36, weight: .light))
@@ -2192,7 +2192,7 @@ private struct TodayDailyTimelineView: View {
                     }
                 }
 
-                if !unscheduledTasks.isEmpty {
+                if !visibleUnscheduled.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 7) {
                             Image(systemName: "tray.and.arrow.down.fill")
@@ -2200,7 +2200,7 @@ private struct TodayDailyTimelineView: View {
                                 .foregroundStyle(ThingsMacPalette.todayYellow)
                             Text(store.tr("v2_unscheduled_today"))
                                 .font(.system(size: 14, weight: .bold))
-                            Text("\(unscheduledTasks.count)")
+                            Text("\(visibleUnscheduled.count)")
                                 .font(.system(size: 11, weight: .bold, design: .rounded))
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 7)
@@ -2212,11 +2212,16 @@ private struct TodayDailyTimelineView: View {
 
                         Divider().opacity(0.65)
 
-                        ForEach(unscheduledTasks) { task in
+                        ForEach(visibleUnscheduled) { task in
                             unscheduledTaskRow(task)
                         }
                     }
                 }
+            }
+        }
+        .onChange(of: store.isTimelineFullScreen) { _, fullScreen in
+            if fullScreen {
+                activePopoverTaskId = nil
             }
         }
     }
@@ -2228,6 +2233,7 @@ private struct TodayDailyTimelineView: View {
         hasConflict: Bool
     ) -> some View {
         Button {
+            guard !store.isTimelineFullScreen else { return }
             AppleCalendarService.shared.openEventInAppleCalendar(ev)
         } label: {
             HStack(spacing: 10) {
@@ -2278,47 +2284,112 @@ private struct TodayDailyTimelineView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .thingsTooltip(store.tr("macos_open_in_calendar"))
+        .disabled(store.isTimelineFullScreen)
+        .allowsHitTesting(!store.isTimelineFullScreen)
+        .thingsTooltip(store.isTimelineFullScreen ? "" : store.tr("macos_open_in_calendar"))
     }
 
+    @ViewBuilder
     private func timelineTaskRow(
         _ task: TaskItem,
         startMinutes: Int,
         endMinutes: Int,
         hasConflict: Bool
     ) -> some View {
+        let card = timelineTaskRowCard(
+            task,
+            startMinutes: startMinutes,
+            endMinutes: endMinutes,
+            hasConflict: hasConflict
+        )
+        if store.isTimelineFullScreen {
+            card
+        } else {
+            card
+                .simultaneousGesture(
+                    TapGesture(count: 2).onEnded {
+                        store.openTaskModal(task.id)
+                    }
+                )
+                .onTapGesture {
+                    store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
+                }
+                .contextMenu {
+                    Button {
+                        store.openTaskModal(task.id)
+                    } label: {
+                        Label("\(store.tr("action_more_options"))…", systemImage: "slider.horizontal.3")
+                    }
+                    Divider()
+                    Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
+                        store.toggleTaskCompletion(task)
+                    }
+                    Divider()
+                    Button(role: .destructive) {
+                        store.deleteTask(task)
+                    } label: {
+                        Text(store.tr("action_delete"))
+                    }
+                }
+                .thingsTaskDraggable(store: store, task: task)
+        }
+    }
+
+    private func timelineTaskRowCard(
+        _ task: TaskItem,
+        startMinutes: Int,
+        endMinutes: Int,
+        hasConflict: Bool
+    ) -> some View {
+        let isFullScreen = store.isTimelineFullScreen
+        let timeLabelText = "\(TaskItem.formatMinutesOfDay(startMinutes))–\(TaskItem.formatMinutesOfDay(endMinutes % 1440))"
         let isPopoverPresented = Binding<Bool>(
-            get: { activePopoverTaskId == task.id },
-            set: { open in activePopoverTaskId = open ? task.id : nil }
+            get: { !isFullScreen && activePopoverTaskId == task.id },
+            set: { open in activePopoverTaskId = (open && !isFullScreen) ? task.id : nil }
         )
 
         return HStack(spacing: 12) {
-            Button {
-                activePopoverTaskId = task.id
-            } label: {
-                Text("\(TaskItem.formatMinutesOfDay(startMinutes))–\(TaskItem.formatMinutesOfDay(endMinutes % 1440))")
+            if isFullScreen {
+                Text(timeLabelText)
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
                     .foregroundStyle(ThingsMacPalette.anytimeTeal)
                     .frame(width: 98, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-            .popover(isPresented: isPopoverPresented) {
-                TimeblockPopoverView(
-                    store: store,
-                    currentStartMinutes: task.scheduledStartMinutes,
-                    currentDurationMinutes: task.durationMinutes
-                ) { sMins, dMins in
-                    store.setTaskTimeblock(task.id, startMinutes: sMins, durationMinutes: dMins)
+            } else {
+                Button {
+                    activePopoverTaskId = task.id
+                } label: {
+                    Text(timeLabelText)
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundStyle(ThingsMacPalette.anytimeTeal)
+                        .frame(width: 98, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: isPopoverPresented) {
+                    TimeblockPopoverView(
+                        store: store,
+                        currentStartMinutes: task.scheduledStartMinutes,
+                        currentDurationMinutes: task.durationMinutes
+                    ) { sMins, dMins in
+                        store.setTaskTimeblock(task.id, startMinutes: sMins, durationMinutes: dMins)
+                    }
                 }
             }
 
             ThingsCheckboxButton(
                 status: task.status,
                 isSomeday: false,
-                helpText: store.tr("macos_checkbox_help"),
-                onToggleComplete: { store.toggleTaskCompletion(task) },
-                onCancelTask: { store.cancelTask(task) }
+                helpText: isFullScreen ? "" : store.tr("macos_checkbox_help"),
+                onToggleComplete: {
+                    guard !store.isTimelineFullScreen else { return }
+                    store.toggleTaskCompletion(task)
+                },
+                onCancelTask: {
+                    guard !store.isTimelineFullScreen else { return }
+                    store.cancelTask(task)
+                }
             )
+            .disabled(isFullScreen)
+            .allowsHitTesting(!isFullScreen)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 7) {
@@ -2348,84 +2419,60 @@ private struct TodayDailyTimelineView: View {
 
             Spacer()
 
-            HStack(spacing: 6) {
-                Button("+15m") {
-                    store.shiftTaskTimeblock(task, deltaMinutes: 15)
-                }
-                .controlSize(.small)
-                .buttonStyle(.bordered)
-                .fixedSize(horizontal: true, vertical: false)
-                .thingsTooltip(store.tr("macos_tooltip_shift_15m"))
-
-                Button {
-                    store.startFocusTimer(for: task)
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 9.5))
-                        Text("\(task.durationMinutes ?? 25)m")
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            if !isFullScreen {
+                HStack(spacing: 6) {
+                    Button("+15m") {
+                        store.shiftTaskTimeblock(task, deltaMinutes: 15)
                     }
+                    .controlSize(.small)
+                    .buttonStyle(.bordered)
                     .fixedSize(horizontal: true, vertical: false)
-                }
-                .controlSize(.small)
-                .buttonStyle(.borderedProminent)
-                .fixedSize(horizontal: true, vertical: false)
-                .thingsTooltip(store.tr("action_focus_timer"))
+                    .thingsTooltip(store.tr("macos_tooltip_shift_15m"))
 
-                ThingsUtilityIconButton(
-                    systemImage: "slider.horizontal.3",
-                    tint: .secondary,
-                    helpText: store.tr("action_more_options")
-                ) {
-                    store.openTaskModal(task.id)
-                }
+                    Button {
+                        store.startFocusTimer(for: task)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 9.5))
+                            Text("\(task.durationMinutes ?? 25)m")
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                    }
+                    .controlSize(.small)
+                    .buttonStyle(.borderedProminent)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .thingsTooltip(store.tr("action_focus_timer"))
 
-                Button {
-                    store.setTaskTimeblock(task.id, startMinutes: nil, durationMinutes: nil)
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
+                    ThingsUtilityIconButton(
+                        systemImage: "slider.horizontal.3",
+                        tint: .secondary,
+                        helpText: store.tr("action_more_options")
+                    ) {
+                        store.openTaskModal(task.id)
+                    }
+
+                    Button {
+                        store.setTaskTimeblock(task.id, startMinutes: nil, durationMinutes: nil)
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .thingsTooltip(store.tr("v2_timeblock_clear"))
                 }
-                .buttonStyle(.plain)
-                .thingsTooltip(store.tr("v2_timeblock_clear"))
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .thingsCardSurface(cornerRadius: 11, isSelected: store.selectedTaskIds.contains(task.id))
+        .thingsCardSurface(cornerRadius: 11, isSelected: !isFullScreen && store.selectedTaskIds.contains(task.id))
         .overlay(
             RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .strokeBorder(hasConflict ? ThingsMacPalette.somedayAmber.opacity(0.65) : Color.clear, lineWidth: 1.2)
         )
         .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .simultaneousGesture(
-            TapGesture(count: 2).onEnded {
-                store.openTaskModal(task.id)
-            }
-        )
-        .onTapGesture {
-            store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
-        }
-        .contextMenu {
-            Button {
-                store.openTaskModal(task.id)
-            } label: {
-                Label("\(store.tr("action_more_options"))…", systemImage: "slider.horizontal.3")
-            }
-            Divider()
-            Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
-                store.toggleTaskCompletion(task)
-            }
-            Divider()
-            Button(role: .destructive) {
-                store.deleteTask(task)
-            } label: {
-                Text(store.tr("action_delete"))
-            }
-        }
-        .thingsTaskDraggable(store: store, task: task)
     }
 
     private func unscheduledTaskRow(_ task: TaskItem) -> some View {
@@ -2737,6 +2784,7 @@ private struct MacCompactCalendarEventRow: View {
         let trimmedCalendarName = event.calendarDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
 
         Button {
+            guard !store.isTimelineFullScreen else { return }
             AppleCalendarService.shared.openEventInAppleCalendar(event)
         } label: {
             HStack(spacing: 7.5) {
@@ -2782,17 +2830,19 @@ private struct MacCompactCalendarEventRow: View {
             .padding(.vertical, CGFloat(MacCalendarAppointmentStyleMetrics.rowVerticalPadding))
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.primary.opacity(isHovering ? 0.045 : 0))
+                    .fill(Color.primary.opacity((!store.isTimelineFullScreen && isHovering) ? 0.045 : 0))
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(store.isTimelineFullScreen)
+        .allowsHitTesting(!store.isTimelineFullScreen)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
-                isHovering = hovering
+                isHovering = hovering && !store.isTimelineFullScreen
             }
         }
-        .thingsTooltip(store.tr("macos_open_in_calendar"))
+        .thingsTooltip(store.isTimelineFullScreen ? "" : store.tr("macos_open_in_calendar"))
     }
 }
 

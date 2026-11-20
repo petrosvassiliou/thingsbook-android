@@ -76,7 +76,15 @@ public final class ThingsbookStore: ObservableObject {
             }
         }
     }
-    @Published public var isTimelineFullScreen: Bool = false
+    @Published public var isTimelineFullScreen: Bool = false {
+        didSet {
+            if isTimelineFullScreen {
+                expandedTaskId = nil
+                selectedTaskIds.removeAll()
+                lastSelectedTaskId = nil
+            }
+        }
+    }
 
     @Published public var inboxTasks: [TaskItem] = []
     @Published public var todayDaytimeTasks: [TaskItem] = []
@@ -650,6 +658,7 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func handleRowClick(taskId: String, modifiers: NSEvent.ModifierFlags = NSEvent.modifierFlags) {
+        guard !isTimelineFullScreen else { return }
         let isShift = modifiers.contains(.shift)
         let isCmd = modifiers.contains(.command)
 
@@ -701,7 +710,7 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func openTaskModal(_ taskId: String) {
-        guard task(byId: taskId) != nil else { return }
+        guard !isTimelineFullScreen, task(byId: taskId) != nil else { return }
         withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
             selectedTaskIds = [taskId]
             lastSelectedTaskId = taskId
@@ -1011,7 +1020,13 @@ public final class ThingsbookStore: ObservableObject {
 
     public func toggleTimelineFullScreen() {
         withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
-            isTimelineFullScreen.toggle()
+            let next = !isTimelineFullScreen
+            if next {
+                expandedTaskId = nil
+                selectedTaskIds.removeAll()
+                lastSelectedTaskId = nil
+            }
+            isTimelineFullScreen = next
         }
     }
 
@@ -2708,35 +2723,40 @@ public final class ThingsbookStore: ObservableObject {
 
 public extension View {
     @MainActor
+    @ViewBuilder
     func thingsTaskDraggable(store: ThingsbookStore, task: TaskItem) -> some View {
-        let payload = store.dragPayload(for: task.id)
-        let isMulti = store.selectedTaskIds.contains(task.id) && store.selectedTaskIds.count > 1
-        let previewTitle = isMulti
-            ? store.trf("v30_drag_multi_count", store.selectedTaskIds.count)
-            : (task.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? store.tr("macos_untitled_todo")
-                : task.title)
-        return self.draggable(payload) {
-            HStack(spacing: 7) {
-                Image(systemName: isMulti ? "square.stack.3d.up.fill" : "checkmark.circle")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(ThingsMacPalette.accentBlue)
-                Text(previewTitle)
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
+        if store.isTimelineFullScreen {
+            self
+        } else {
+            let payload = store.dragPayload(for: task.id)
+            let isMulti = store.selectedTaskIds.contains(task.id) && store.selectedTaskIds.count > 1
+            let previewTitle = isMulti
+                ? store.trf("v30_drag_multi_count", store.selectedTaskIds.count)
+                : (task.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? store.tr("macos_untitled_todo")
+                    : task.title)
+            self.draggable(payload) {
+                HStack(spacing: 7) {
+                    Image(systemName: isMulti ? "square.stack.3d.up.fill" : "checkmark.circle")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(ThingsMacPalette.accentBlue)
+                    Text(previewTitle)
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(ThingsMacPalette.cardSurface)
+                        .shadow(color: Color.black.opacity(0.14), radius: 8, y: 3)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.45), lineWidth: 1)
+                )
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(ThingsMacPalette.cardSurface)
-                    .shadow(color: Color.black.opacity(0.14), radius: 8, y: 3)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.45), lineWidth: 1)
-            )
         }
     }
 }

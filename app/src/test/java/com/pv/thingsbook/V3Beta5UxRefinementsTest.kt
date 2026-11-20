@@ -157,7 +157,7 @@ class V3Beta5UxRefinementsTest {
                 assertTrue("Blank $key in $folder/strings.xml", keys[key]!!.isNotBlank())
             }
         }
-        assertEquals(96, BuildConfig.VERSION_CODE)
-        assertEquals("3.0.0-beta.5", BuildConfig.VERSION_NAME)
+        assertTrue(BuildConfig.VERSION_CODE >= 97)
+        assertEquals("3.0.0-beta.6", BuildConfig.VERSION_NAME)
     }
 }

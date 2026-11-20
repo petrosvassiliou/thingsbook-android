@@ -770,9 +770,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(96, BuildConfig.VERSION_CODE)
-        assertEquals("3.0.0-beta.5", BuildConfig.VERSION_NAME)
-        assertTrue("3.0.0-beta.5 pre-release contains -beta", BuildConfig.VERSION_NAME.contains("-beta"))
+        assertEquals(97, BuildConfig.VERSION_CODE)
+        assertEquals("3.0.0-beta.6", BuildConfig.VERSION_NAME)
+        assertTrue("3.0.0-beta.6 pre-release contains -beta", BuildConfig.VERSION_NAME.contains("-beta"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),

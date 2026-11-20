@@ -281,12 +281,20 @@ import kotlinx.coroutines.launch
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.delay
+import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.TreeSet
+
+internal fun shouldLockLandscapeForTimelineFullScreen(
+    isEffectiveTimelineFullScreen: Boolean,
+    smallestScreenWidthDp: Int,
+    isChromeOsOrPcHardware: Boolean
+): Boolean = isEffectiveTimelineFullScreen && smallestScreenWidthDp < 600 && !isChromeOsOrPcHardware
 
 @OptIn(ExperimentalAnimationApi::class, ExperimentalLayoutApi::class)
 @Composable
@@ -514,6 +522,29 @@ fun ThingsSmartViewScreen(
         !isQuickFindOpen
     val isEffectiveTimelineFullScreen = isTimelineFullScreen && (isTodayTimelineActive || isProjectRoadmapActive)
 
+    val isChromeOsOrPcHardware = remember(appCtx) {
+        val pm = appCtx.packageManager
+        pm.hasSystemFeature("org.chromium.arc") ||
+            pm.hasSystemFeature("org.chromium.arc.device_management") ||
+            pm.hasSystemFeature(PackageManager.FEATURE_PC)
+    }
+    val lockPhoneLandscape = shouldLockLandscapeForTimelineFullScreen(
+        isEffectiveTimelineFullScreen = isEffectiveTimelineFullScreen,
+        smallestScreenWidthDp = configuration.smallestScreenWidthDp,
+        isChromeOsOrPcHardware = isChromeOsOrPcHardware
+    )
+
+    DisposableEffect(lockPhoneLandscape, appCtx) {
+        if (lockPhoneLandscape) {
+            appCtx.findHostActivity()?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            onDispose {
+                appCtx.findHostActivity()?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
+        } else {
+            onDispose { }
+        }
+    }
+
     val isWideScreen = configuration.screenWidthDp >= 700
     val showSidebar = isWideScreen && isSidebarVisible && !isEffectiveTimelineFullScreen
     var isMobileDrawerOpen by remember { mutableStateOf(false) }
@@ -579,6 +610,17 @@ fun ThingsSmartViewScreen(
     val context = LocalContext.current
     val currentHardwareShortcutHandler by rememberUpdatedState<(android.view.KeyEvent) -> Boolean> { nativeEvent ->
         if (biometricAppLockEnabled && !isAppUnlocked) return@rememberUpdatedState false
+        if (isEffectiveTimelineFullScreen) {
+            if (nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_ESCAPE) {
+                viewModel.setTimelineFullScreen(false)
+                return@rememberUpdatedState true
+            }
+            val ctrlOrMetaFs = nativeEvent.isCtrlPressed || nativeEvent.isMetaPressed
+            return@rememberUpdatedState ctrlOrMetaFs ||
+                nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_ENTER ||
+                nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER ||
+                nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_SPACE
+        }
         val ctrlOrMeta = nativeEvent.isCtrlPressed || nativeEvent.isMetaPressed
         when {
             ctrlOrMeta && nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_N -> {
@@ -718,6 +760,21 @@ fun ThingsSmartViewScreen(
             .onPreviewKeyEvent { event ->
                 if (biometricAppLockEnabled && !isAppUnlocked) return@onPreviewKeyEvent false
                 if (event.type == KeyEventType.KeyDown) {
+                    if (isEffectiveTimelineFullScreen) {
+                        if (event.key == Key.Escape) {
+                            viewModel.setTimelineFullScreen(false)
+                            return@onPreviewKeyEvent true
+                        }
+                        val ctrlOrMetaFs = event.isCtrlPressed || event.isMetaPressed
+                        if (ctrlOrMetaFs ||
+                            event.key == Key.Enter ||
+                            event.key == Key.NumPadEnter ||
+                            event.key == Key.Spacebar
+                        ) {
+                            return@onPreviewKeyEvent true
+                        }
+                        return@onPreviewKeyEvent false
+                    }
                     val ctrlOrMeta = event.isCtrlPressed || event.isMetaPressed
                     when {
                         ctrlOrMeta && event.isShiftPressed && event.key == Key.N -> {
@@ -830,6 +887,7 @@ fun ThingsSmartViewScreen(
             .onKeyEvent { event ->
                 if (biometricAppLockEnabled && !isAppUnlocked) return@onKeyEvent false
                 if (event.type == KeyEventType.KeyDown &&
+                    !isEffectiveTimelineFullScreen &&
                     !event.isCtrlPressed &&
                     !event.isMetaPressed &&
                     !event.isAltPressed &&
@@ -856,9 +914,9 @@ fun ThingsSmartViewScreen(
                     }
                 }
             )
-            // Swipe down gesture on any list opens Quick Find inline immediately
-            .pointerInput(biometricAppLockEnabled, isAppUnlocked) {
-                if (biometricAppLockEnabled && !isAppUnlocked) return@pointerInput
+            // Swipe down gesture on any list opens Quick Find inline immediately (disabled in Full Screen Timeline)
+            .pointerInput(biometricAppLockEnabled, isAppUnlocked, isEffectiveTimelineFullScreen) {
+                if ((biometricAppLockEnabled && !isAppUnlocked) || isEffectiveTimelineFullScreen) return@pointerInput
                 var accumulatedPull = 0f
                 detectVerticalDragGestures(
                     onDragStart = { accumulatedPull = 0f },
@@ -978,19 +1036,21 @@ fun ThingsSmartViewScreen(
                         )
                     }
 
-                    focusTimerState?.let { timerState ->
-                        ThingsFocusTimerBanner(
-                            timerState = timerState,
-                            onTogglePause = { viewModel.toggleFocusTimerPause() },
-                            onAddFiveMinutes = { viewModel.addFiveMinutesToFocusTimer() },
-                            onCompleteTask = { viewModel.completeFocusTimerTask() },
-                            onStopTimer = { viewModel.stopFocusTimer() },
-                            onClickTask = { viewModel.toggleTaskExpansion(timerState.taskId) }
-                        )
+                    if (!isEffectiveTimelineFullScreen) {
+                        focusTimerState?.let { timerState ->
+                            ThingsFocusTimerBanner(
+                                timerState = timerState,
+                                onTogglePause = { viewModel.toggleFocusTimerPause() },
+                                onAddFiveMinutes = { viewModel.addFiveMinutesToFocusTimer() },
+                                onCompleteTask = { viewModel.completeFocusTimerTask() },
+                                onStopTimer = { viewModel.stopFocusTimer() },
+                                onClickTask = { viewModel.toggleTaskExpansion(timerState.taskId) }
+                            )
+                        }
                     }
 
                     if (isEffectiveTimelineFullScreen && isTodayTimelineActive) {
-                        // Compact Full Screen Today Timeline Header Bar
+                        // Clean Single-Row Full Screen Today Timeline Header Bar
                         val plannedFmt = formatDurationCompact(todayCapacitySummary.first) ?: "${todayCapacitySummary.first}m"
                         val freeFmt = formatDurationCompact(todayCapacitySummary.second) ?: "0m"
                         val exitFsLabel = stringResource(R.string.v30_timeline_exit_fullscreen)
@@ -999,12 +1059,14 @@ fun ThingsSmartViewScreen(
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            FlowRow(
-                                modifier = Modifier.weight(1f),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .horizontalScroll(rememberScrollState()),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -1052,51 +1114,44 @@ fun ThingsSmartViewScreen(
                                                 text = capacityText,
                                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                                                 color = colors.thingsBlue,
-                                                maxLines = 1
+                                                maxLines = 1,
+                                                softWrap = false
                                             )
                                         }
                                     }
                                 }
                             }
 
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                ThingsTodayModeSegmentedToggle(
-                                    isTimelineMode = isTodayTimelineMode,
-                                    onModeChange = { viewModel.setTodayTimelineMode(it) }
-                                )
-                                ThingsHoverTooltip(text = exitFsLabel) {
-                                    Surface(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .clickable {
-                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                viewModel.setTimelineFullScreen(false)
-                                            },
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = colors.thingsBlueSoft,
-                                        border = BorderStroke(0.75.dp, colors.thingsBlue.copy(alpha = 0.45f))
+                            ThingsHoverTooltip(text = exitFsLabel) {
+                                Surface(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            viewModel.setTimelineFullScreen(false)
+                                        },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = colors.thingsBlueSoft,
+                                    border = BorderStroke(0.75.dp, colors.thingsBlue.copy(alpha = 0.45f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                                     ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Outlined.CloseFullscreen,
-                                                contentDescription = exitFsLabel,
-                                                tint = colors.thingsBlue,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                            Text(
-                                                text = exitFsLabel,
-                                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                                color = colors.thingsBlue,
-                                                maxLines = 1
-                                            )
-                                        }
+                                        Icon(
+                                            imageVector = Icons.Outlined.CloseFullscreen,
+                                            contentDescription = exitFsLabel,
+                                            tint = colors.thingsBlue,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Text(
+                                            text = exitFsLabel,
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                            color = colors.thingsBlue,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
                                     }
                                 }
                             }
@@ -1224,6 +1279,7 @@ fun ThingsSmartViewScreen(
                         isProjectView = isProjectView,
                         isAreaView = isAreaView,
                         isQuickFindOpen = isQuickFindOpen,
+                        isEffectiveTimelineFullScreen = isEffectiveTimelineFullScreen,
                         currentProject = currentProject,
                         projectWorkspaceMode = currentProjectWorkspaceMode,
                         currentArea = currentArea,
@@ -1281,7 +1337,7 @@ fun ThingsSmartViewScreen(
         }
 
         // Floating Multi-Task Selection Action Bar (Mouse Ctrl/Shift-Click, Touch Long-Press & Things-for-iPhone Swipe)
-        if (selectedTaskIds.isNotEmpty()) {
+        if (!isEffectiveTimelineFullScreen && selectedTaskIds.isNotEmpty()) {
             ThingsMultiSelectionBar(
                 selectedCount = selectedTaskIds.size,
                 totalVisibleCount = allVisibleTaskIds.size,
@@ -1342,22 +1398,24 @@ fun ThingsSmartViewScreen(
                 )
         )
 
-        // Expandable Context-Sensitive "Magic Plus" Menu + Drag & Drop FAB (bottom-right)
-        MagicPlusOverlaySection(
-            viewModel = viewModel,
-            navTarget = navTarget,
-            currentArea = currentArea,
-            primaryTasks = primaryTasks,
-            projectHeadings = projectHeadings,
-            areasCount = areas.size,
-            projectDragController = projectDragController,
-            onDragStateChanged = { state -> magicDragState = state },
-            onRequestCreateProject = { areaId ->
-                projectDialogPreselectedAreaId = areaId
-                editingProject = null
-                showCreateProjectDialog = true
-            }
-        )
+        // Expandable Context-Sensitive "Magic Plus" Menu + Drag & Drop FAB (bottom-right, hidden in Full Screen Timeline)
+        if (!isEffectiveTimelineFullScreen) {
+            MagicPlusOverlaySection(
+                viewModel = viewModel,
+                navTarget = navTarget,
+                currentArea = currentArea,
+                primaryTasks = primaryTasks,
+                projectHeadings = projectHeadings,
+                areasCount = areas.size,
+                projectDragController = projectDragController,
+                onDragStateChanged = { state -> magicDragState = state },
+                onRequestCreateProject = { areaId ->
+                    projectDialogPreselectedAreaId = areaId
+                    editingProject = null
+                    showCreateProjectDialog = true
+                }
+            )
+        }
 
         // Phone-Only (< 700dp) Slide-Over Hamburger Navigation Drawer
         if (!isWideScreen) {
@@ -2387,6 +2445,7 @@ private fun ThingsMainTaskLazyList(
     isProjectView: Boolean,
     isAreaView: Boolean,
     isQuickFindOpen: Boolean,
+    isEffectiveTimelineFullScreen: Boolean = false,
     currentProject: Project? = null,
     projectWorkspaceMode: ProjectWorkspaceMode = ProjectWorkspaceMode.LIST,
     currentArea: Area?,
@@ -2446,7 +2505,6 @@ private fun ThingsMainTaskLazyList(
     val deletedProjects by viewModel.deletedProjects.collectAsState()
     val groupTodayByProjectOrArea by viewModel.groupTodayByProjectOrArea.collectAsState()
     val isTodayTimelineMode by viewModel.isTodayTimelineMode.collectAsState()
-    val isTimelineFullScreen by viewModel.isTimelineFullScreen.collectAsState()
 
     // Project sections as displayed: tasks without (valid) heading first, then one section per heading
     val projectSections: Map<String?, List<TaskItem>> = remember(
@@ -2491,19 +2549,32 @@ private fun ThingsMainTaskLazyList(
         ThingsTodayTimelineSection(
             todayTasks = combinedTodayTasks,
             todayCalendarEvents = if (calendarEventsEnabled) todayCalendarEvents else emptyList(),
-            onCompleteTask = { taskId -> viewModel.updateTaskStatus(taskId, TaskStatus.COMPLETED) },
+            onCompleteTask = { taskId ->
+                if (!isEffectiveTimelineFullScreen) {
+                    viewModel.updateTaskStatus(taskId, TaskStatus.COMPLETED)
+                }
+            },
             onUpdateTimeblock = { taskId, startMins, durMins ->
-                viewModel.updateTaskTimeblock(taskId, startMins, durMins)
+                if (!isEffectiveTimelineFullScreen) {
+                    viewModel.updateTaskTimeblock(taskId, startMins, durMins)
+                }
             },
             onShiftTimeblock = { taskId, deltaMins ->
-                viewModel.shiftTaskTimeblock(taskId, deltaMins)
+                if (!isEffectiveTimelineFullScreen) {
+                    viewModel.shiftTaskTimeblock(taskId, deltaMins)
+                }
             },
             onStartFocusTimer = { targetTask ->
-                viewModel.startFocusTimer(targetTask.id, targetTask.title, targetTask.durationMinutes)
+                if (!isEffectiveTimelineFullScreen) {
+                    viewModel.startFocusTimer(targetTask.id, targetTask.title, targetTask.durationMinutes)
+                }
             },
             onOpenTask = { taskId ->
-                viewModel.expandTask(taskId)
+                if (!isEffectiveTimelineFullScreen) {
+                    viewModel.expandTask(taskId)
+                }
             },
+            isFullScreen = isEffectiveTimelineFullScreen,
             modifier = modifier.imePadding()
         )
         return
@@ -2576,34 +2647,48 @@ private fun ThingsMainTaskLazyList(
                 currentEpochDay = currentEpochDay,
                 locale = activeLocale,
                 onShiftHeadingDates = { heading, deltaDays, fallbackRange ->
-                    viewModel.shiftHeadingRoadmapDates(heading, deltaDays, fallbackRange)
+                    if (!isEffectiveTimelineFullScreen) {
+                        viewModel.shiftHeadingRoadmapDates(heading, deltaDays, fallbackRange)
+                    }
                 },
                 onShiftTaskDates = { task, deltaDays ->
-                    viewModel.shiftTaskRoadmapDates(task, deltaDays)
+                    if (!isEffectiveTimelineFullScreen) {
+                        viewModel.shiftTaskRoadmapDates(task, deltaDays)
+                    }
                 },
                 onUpdateHeadingStartDate = { headingId, startDate ->
-                    viewModel.updateHeadingStartDate(headingId, startDate)
+                    if (!isEffectiveTimelineFullScreen) {
+                        viewModel.updateHeadingStartDate(headingId, startDate)
+                    }
                 },
                 onUpdateTaskDeadline = { task, deadline ->
-                    viewModel.updateTaskDeadline(task, deadline)
+                    if (!isEffectiveTimelineFullScreen) {
+                        viewModel.updateTaskDeadline(task, deadline)
+                    }
                 },
                 onScheduleTaskToday = { task ->
-                    val todayStartMillis = LocalDate.now()
-                        .atStartOfDay(ZoneId.systemDefault())
-                        .toInstant()
-                        .toEpochMilli()
-                    viewModel.updateTaskSchedule(task, ScheduleState.TODAY, todayStartMillis)
+                    if (!isEffectiveTimelineFullScreen) {
+                        val todayStartMillis = LocalDate.now()
+                            .atStartOfDay(ZoneId.systemDefault())
+                            .toInstant()
+                            .toEpochMilli()
+                        viewModel.updateTaskSchedule(task, ScheduleState.TODAY, todayStartMillis)
+                    }
                 },
                 onUpdateTaskStatus = { taskId, status ->
-                    viewModel.updateTaskStatus(taskId, status)
+                    if (!isEffectiveTimelineFullScreen) {
+                        viewModel.updateTaskStatus(taskId, status)
+                    }
                 },
                 onOpenTaskEditor = { taskId ->
-                    viewModel.expandTask(taskId)
+                    if (!isEffectiveTimelineFullScreen) {
+                        viewModel.expandTask(taskId)
+                    }
                 },
                 onShowError = { msg ->
                     viewModel.showUiMessage(msg)
                 },
-                isFullScreen = isTimelineFullScreen,
+                isFullScreen = isEffectiveTimelineFullScreen,
                 onToggleFullScreen = { viewModel.toggleTimelineFullScreen() },
                 projectTitle = currentProject.title,
                 modifier = modifier.imePadding()

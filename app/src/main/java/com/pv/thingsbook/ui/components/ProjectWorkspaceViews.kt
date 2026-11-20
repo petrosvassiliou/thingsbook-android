@@ -1626,148 +1626,180 @@ fun ProjectRoadmapWorkspace(
     var unscheduledHeadingPickerTarget by remember { mutableStateOf<Heading?>(null) }
     var unscheduledTaskDeadlineTarget by remember { mutableStateOf<TaskItem?>(null) }
 
+    LaunchedEffect(isFullScreen) {
+        if (isFullScreen) {
+            showPdfExportDialog = false
+            unscheduledHeadingPickerTarget = null
+            unscheduledTaskDeadlineTarget = null
+            livePreviewDeltaDays.clear()
+        }
+    }
+
+    val renderToolbarLeftControls: @Composable () -> Unit = {
+        if (isFullScreen && !projectTitle.isNullOrBlank()) {
+            ThingsHoverTooltip(text = projectTitle) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = colors.cardSurface,
+                    border = BorderStroke(0.75.dp, colors.hairlineDivider)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .widthIn(max = 460.dp)
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        ProjectProgressRing(progress = project.progress, size = 16.dp)
+                        Text(
+                            text = projectTitle,
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                            color = colors.primaryText,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = colors.tagPillBg
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.CalendarMonth,
+                    contentDescription = null,
+                    tint = colors.thingsBlue,
+                    modifier = Modifier.size(14.5.dp)
+                )
+                Text(
+                    text = windowRangeLabel,
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = colors.primaryText,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        }
+
+        // Jump to Today Chip
+        Surface(
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .pointerHoverIcon(PointerIcon.Hand)
+                .clickable {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    jumpToToday()
+                },
+            shape = RoundedCornerShape(10.dp),
+            color = colors.thingsBlueSoft,
+            border = BorderStroke(0.75.dp, colors.thingsBlue.copy(alpha = 0.35f))
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.WbSunny,
+                    contentDescription = null,
+                    tint = colors.thingsBlue,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = stringResource(R.string.v30_roadmap_jump_today),
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = colors.thingsBlue,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        }
+
+        // Zoom Toggle (- / +)
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = colors.tagPillBg,
+            border = BorderStroke(0.75.dp, colors.hairlineDivider)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                IconButton(
+                    onClick = { if (zoomIndex > 0) zoomIndex-- },
+                    enabled = zoomIndex > 0,
+                    modifier = Modifier.size(26.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Remove,
+                        contentDescription = "-",
+                        tint = if (zoomIndex > 0) colors.primaryText else colors.tertiaryText,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+                Text(
+                    text = "${zoomIndex + 1}x",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = colors.secondaryText,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.padding(horizontal = 3.dp)
+                )
+                IconButton(
+                    onClick = { if (zoomIndex < zoomLevelsDp.lastIndex) zoomIndex++ },
+                    enabled = zoomIndex < zoomLevelsDp.lastIndex,
+                    modifier = Modifier.size(26.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Add,
+                        contentDescription = "+",
+                        tint = if (zoomIndex < zoomLevelsDp.lastIndex) colors.primaryText else colors.tertiaryText,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp, vertical = if (isFullScreen) 10.dp else 4.dp)
     ) {
-        // 1. Roadmap Toolbar (Optional Full-Screen Project Title, Date window, Jump to Today, Zoom Toggle, Export PDF/PNG, Full Screen)
+        // 1. Roadmap Toolbar (Single-row pure timeline controls in Full Screen; Export menu only outside Full Screen)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            FlowRow(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                if (isFullScreen && !projectTitle.isNullOrBlank()) {
-                    ThingsHoverTooltip(text = projectTitle) {
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = colors.cardSurface,
-                            border = BorderStroke(0.75.dp, colors.hairlineDivider)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .widthIn(max = if (isWideScreen) 360.dp else 220.dp)
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(7.dp)
-                            ) {
-                                ProjectProgressRing(progress = project.progress, size = 16.dp)
-                                Text(
-                                    text = projectTitle,
-                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                                    color = colors.primaryText,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = colors.tagPillBg
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.CalendarMonth,
-                            contentDescription = null,
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(14.5.dp)
-                        )
-                        Text(
-                            text = windowRangeLabel,
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                            color = colors.primaryText
-                        )
-                    }
-                }
-
-                // Jump to Today Chip
-                Surface(
+            if (isFullScreen) {
+                Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .pointerHoverIcon(PointerIcon.Hand)
-                        .clickable {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            jumpToToday()
-                        },
-                    shape = RoundedCornerShape(10.dp),
-                    color = colors.thingsBlueSoft,
-                    border = BorderStroke(0.75.dp, colors.thingsBlue.copy(alpha = 0.35f))
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.WbSunny,
-                            contentDescription = null,
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = stringResource(R.string.v30_roadmap_jump_today),
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                            color = colors.thingsBlue
-                        )
-                    }
+                    renderToolbarLeftControls()
                 }
-
-                // Zoom Toggle (- / +)
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = colors.tagPillBg,
-                    border = BorderStroke(0.75.dp, colors.hairlineDivider)
+            } else {
+                FlowRow(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        IconButton(
-                            onClick = { if (zoomIndex > 0) zoomIndex-- },
-                            enabled = zoomIndex > 0,
-                            modifier = Modifier.size(26.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Remove,
-                                contentDescription = "-",
-                                tint = if (zoomIndex > 0) colors.primaryText else colors.tertiaryText,
-                                modifier = Modifier.size(14.dp)
-                            )
-                        }
-                        Text(
-                            text = "${zoomIndex + 1}x",
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                            color = colors.secondaryText,
-                            modifier = Modifier.padding(horizontal = 3.dp)
-                        )
-                        IconButton(
-                            onClick = { if (zoomIndex < zoomLevelsDp.lastIndex) zoomIndex++ },
-                            enabled = zoomIndex < zoomLevelsDp.lastIndex,
-                            modifier = Modifier.size(26.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Add,
-                                contentDescription = "+",
-                                tint = if (zoomIndex < zoomLevelsDp.lastIndex) colors.primaryText else colors.tertiaryText,
-                                modifier = Modifier.size(14.dp)
-                            )
-                        }
-                    }
+                    renderToolbarLeftControls()
                 }
             }
 
@@ -1775,10 +1807,12 @@ fun ProjectRoadmapWorkspace(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                RoadmapExportMenuPill(
-                    onExportPdf = { showPdfExportDialog = true },
-                    onExportPng = { triggerPngExport() }
-                )
+                if (!isFullScreen) {
+                    RoadmapExportMenuPill(
+                        onExportPdf = { showPdfExportDialog = true },
+                        onExportPng = { triggerPngExport() }
+                    )
+                }
 
                 if (onToggleFullScreen != null) {
                     val fsLabel = stringResource(
@@ -1815,7 +1849,8 @@ fun ProjectRoadmapWorkspace(
                                     text = fsLabel,
                                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                                     color = if (isFullScreen) colors.thingsBlue else colors.primaryText,
-                                    maxLines = 1
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }
@@ -1824,13 +1859,13 @@ fun ProjectRoadmapWorkspace(
             }
         }
 
-        // 2. Scrollable Gantt Card + Unscheduled Section
+        // 2. Scrollable Gantt Card (+ Unscheduled Section outside Full Screen)
         Column(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .verticalScroll(verticalScrollState)
-                .padding(bottom = 96.dp),
+                .padding(bottom = if (isFullScreen) 12.dp else 96.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Surface(
@@ -1880,14 +1915,15 @@ fun ProjectRoadmapWorkspace(
                             onShiftHeadingDates = onShiftHeadingDates,
                             onShiftTaskDates = onShiftTaskDates,
                             onUpdateTaskStatus = onUpdateTaskStatus,
-                            onOpenTaskEditor = onOpenTaskEditor
+                            onOpenTaskEditor = onOpenTaskEditor,
+                            readOnly = isFullScreen
                         )
                     }
                 }
             }
 
-            // 3. Unscheduled Section Card
-            if (layout.unscheduledHeadings.isNotEmpty() || layout.unscheduledTasks.isNotEmpty()) {
+            // 3. Unscheduled Section Card (hidden in pure Full Screen Timeline mode)
+            if (!isFullScreen && (layout.unscheduledHeadings.isNotEmpty() || layout.unscheduledTasks.isNotEmpty())) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
@@ -2033,7 +2069,7 @@ fun ProjectRoadmapWorkspace(
         }
     }
 
-    if (showPdfExportDialog) {
+    if (!isFullScreen && showPdfExportDialog) {
         RoadmapPdfExportDialog(
             project = project,
             projectHeadings = projectHeadings,
@@ -2063,24 +2099,26 @@ fun ProjectRoadmapWorkspace(
         )
     }
 
-    unscheduledHeadingPickerTarget?.let { targetHeading ->
-        DeadlineDatePickerDialog(
-            currentDeadline = targetHeading.startDate,
-            locale = locale,
-            onApplyDeadline = { picked -> onUpdateHeadingStartDate(targetHeading.id, picked) },
-            onDismiss = { unscheduledHeadingPickerTarget = null },
-            titleText = stringResource(R.string.v30_phase_set_start_date),
-            clearButtonText = stringResource(R.string.v30_phase_clear_start_date)
-        )
-    }
+    if (!isFullScreen) {
+        unscheduledHeadingPickerTarget?.let { targetHeading ->
+            DeadlineDatePickerDialog(
+                currentDeadline = targetHeading.startDate,
+                locale = locale,
+                onApplyDeadline = { picked -> onUpdateHeadingStartDate(targetHeading.id, picked) },
+                onDismiss = { unscheduledHeadingPickerTarget = null },
+                titleText = stringResource(R.string.v30_phase_set_start_date),
+                clearButtonText = stringResource(R.string.v30_phase_clear_start_date)
+            )
+        }
 
-    unscheduledTaskDeadlineTarget?.let { targetTask ->
-        DeadlineDatePickerDialog(
-            currentDeadline = targetTask.deadline,
-            locale = locale,
-            onApplyDeadline = { picked -> onUpdateTaskDeadline(targetTask, picked) },
-            onDismiss = { unscheduledTaskDeadlineTarget = null }
-        )
+        unscheduledTaskDeadlineTarget?.let { targetTask ->
+            DeadlineDatePickerDialog(
+                currentDeadline = targetTask.deadline,
+                locale = locale,
+                onApplyDeadline = { picked -> onUpdateTaskDeadline(targetTask, picked) },
+                onDismiss = { unscheduledTaskDeadlineTarget = null }
+            )
+        }
     }
 }
 
@@ -2241,7 +2279,8 @@ private fun RoadmapSynchronizedLanesBody(
     onShiftHeadingDates: (heading: Heading, deltaDays: Long, fallbackRange: Pair<Long, Long>?) -> Unit,
     onShiftTaskDates: (task: TaskItem, deltaDays: Long) -> Unit,
     onUpdateTaskStatus: (taskId: String, status: TaskStatus) -> Unit,
-    onOpenTaskEditor: (taskId: String) -> Unit
+    onOpenTaskEditor: (taskId: String) -> Unit,
+    readOnly: Boolean = false
 ) {
     val colors = ThingsTheme.colors
     val density = LocalDensity.current
@@ -2387,7 +2426,7 @@ private fun RoadmapSynchronizedLanesBody(
                                         }
                                     }
                                 }
-                                if (row.heading != null && row.phaseBar != null) {
+                                if (!readOnly && row.heading != null && row.phaseBar != null) {
                                     Row(horizontalArrangement = Arrangement.spacedBy(1.dp)) {
                                         ThingsHoverTooltip(text = shiftEarlierLabel) {
                                             IconButton(
@@ -2439,7 +2478,13 @@ private fun RoadmapSynchronizedLanesBody(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(TASK_ROW_HEIGHT)
-                                .clickable { onOpenTaskEditor(task.id) }
+                                .then(
+                                    if (!readOnly) {
+                                        Modifier.clickable { onOpenTaskEditor(task.id) }
+                                    } else {
+                                        Modifier
+                                    }
+                                )
                                 .padding(start = 12.dp, end = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
@@ -2451,8 +2496,25 @@ private fun RoadmapSynchronizedLanesBody(
                             ) {
                                 ThingsCheckbox(
                                     status = task.status,
-                                    onStatusChange = { next -> onUpdateTaskStatus(task.id, next) },
-                                    size = 16.dp
+                                    onStatusChange = { next -> if (!readOnly) onUpdateTaskStatus(task.id, next) },
+                                    size = 16.dp,
+                                    showHoverTooltip = !readOnly,
+                                    modifier = if (readOnly) {
+                                        Modifier.pointerInput(Unit) {
+                                            awaitPointerEventScope {
+                                                while (true) {
+                                                    val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                                    ev.changes.forEach { change ->
+                                                        if (change.pressed != change.previousPressed) {
+                                                            change.consume()
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        Modifier
+                                    }
                                 )
                                 Text(
                                     text = task.title.ifBlank { stringResource(R.string.placeholder_todo_title) },
@@ -2465,31 +2527,33 @@ private fun RoadmapSynchronizedLanesBody(
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
-                            Row(horizontalArrangement = Arrangement.spacedBy(0.dp)) {
-                                ThingsHoverTooltip(text = shiftEarlierLabel) {
-                                    IconButton(
-                                        onClick = { onShiftTaskDates(task, -1L) },
-                                        modifier = Modifier.size(20.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.ChevronLeft,
-                                            contentDescription = shiftEarlierLabel,
-                                            tint = colors.secondaryText,
-                                            modifier = Modifier.size(13.dp)
-                                        )
+                            if (!readOnly) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(0.dp)) {
+                                    ThingsHoverTooltip(text = shiftEarlierLabel) {
+                                        IconButton(
+                                            onClick = { onShiftTaskDates(task, -1L) },
+                                            modifier = Modifier.size(20.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.ChevronLeft,
+                                                contentDescription = shiftEarlierLabel,
+                                                tint = colors.secondaryText,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                        }
                                     }
-                                }
-                                ThingsHoverTooltip(text = shiftLaterLabel) {
-                                    IconButton(
-                                        onClick = { onShiftTaskDates(task, 1L) },
-                                        modifier = Modifier.size(20.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.ChevronRight,
-                                            contentDescription = shiftLaterLabel,
-                                            tint = colors.secondaryText,
-                                            modifier = Modifier.size(13.dp)
-                                        )
+                                    ThingsHoverTooltip(text = shiftLaterLabel) {
+                                        IconButton(
+                                            onClick = { onShiftTaskDates(task, 1L) },
+                                            modifier = Modifier.size(20.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.ChevronRight,
+                                                contentDescription = shiftLaterLabel,
+                                                tint = colors.secondaryText,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -2559,7 +2623,7 @@ private fun RoadmapSynchronizedLanesBody(
                     }
                 }
 
-                // Phase Bars & Task Bars with Horizontal Drag-to-Reschedule
+                // Phase Bars & Task Bars with Horizontal Drag-to-Reschedule (read-only in Full Screen)
                 displayRows.forEachIndexed { idx, row ->
                     val topDp = rowTopsDp[idx]
                     val rowHeightDp = rowHeightsDp[idx]
@@ -2584,7 +2648,8 @@ private fun RoadmapSynchronizedLanesBody(
                                     },
                                     onCommitShift = { delta ->
                                         onShiftHeadingDates(heading, delta, pb.startEpochDay to pb.endEpochDay)
-                                    }
+                                    },
+                                    readOnly = readOnly
                                 )
                             }
                         }
@@ -2607,7 +2672,8 @@ private fun RoadmapSynchronizedLanesBody(
                                 onCommitShift = { delta ->
                                     onShiftTaskDates(tb.task, delta)
                                 },
-                                onClickTask = { onOpenTaskEditor(tb.taskId) }
+                                onClickTask = { onOpenTaskEditor(tb.taskId) },
+                                readOnly = readOnly
                             )
                         }
                     }
@@ -2698,7 +2764,8 @@ private fun RoadmapDraggablePhaseBar(
     dayWidthPx: Float,
     previewDelta: Long,
     onPreviewDeltaChanged: (Long) -> Unit,
-    onCommitShift: (Long) -> Unit
+    onCommitShift: (Long) -> Unit,
+    readOnly: Boolean = false
 ) {
     val colors = ThingsTheme.colors
     val density = LocalDensity.current
@@ -2771,44 +2838,51 @@ private fun RoadmapDraggablePhaseBar(
             .shadow(if (isArmedForDrag || previewDelta != 0L) 6.dp else 2.dp, RoundedCornerShape(10.dp))
             .clip(RoundedCornerShape(10.dp))
             .background(gradientBrush)
-            .pointerHoverIcon(PointerIcon.Hand)
-            .pointerInput(phaseBar.headingId) {
-                var rawDragPx = 0f
-                var lastDelta = 0L
-                detectDragGesturesAfterLongPress(
-                    onDragStart = {
-                        rawDragPx = 0f
-                        lastDelta = 0L
-                        isArmedForDrag = true
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    },
-                    onDrag = { change, dragAmount ->
-                        change.consume()
-                        rawDragPx += dragAmount.x
-                        val snapped = if (currentDayWidthPx > 1f) {
-                            (rawDragPx / currentDayWidthPx).roundToInt().toLong()
-                        } else 0L
-                        if (snapped != lastDelta) {
-                            lastDelta = snapped
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            currentOnPreview(snapped)
+            .then(
+                if (!readOnly) {
+                    Modifier
+                        .pointerHoverIcon(PointerIcon.Hand)
+                        .pointerInput(phaseBar.headingId) {
+                            var rawDragPx = 0f
+                            var lastDelta = 0L
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = {
+                                    rawDragPx = 0f
+                                    lastDelta = 0L
+                                    isArmedForDrag = true
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    rawDragPx += dragAmount.x
+                                    val snapped = if (currentDayWidthPx > 1f) {
+                                        (rawDragPx / currentDayWidthPx).roundToInt().toLong()
+                                    } else 0L
+                                    if (snapped != lastDelta) {
+                                        lastDelta = snapped
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        currentOnPreview(snapped)
+                                    }
+                                },
+                                onDragEnd = {
+                                    val finalDelta = lastDelta
+                                    isArmedForDrag = false
+                                    currentOnPreview(0L)
+                                    if (finalDelta != 0L) {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        currentOnCommit(finalDelta)
+                                    }
+                                },
+                                onDragCancel = {
+                                    isArmedForDrag = false
+                                    currentOnPreview(0L)
+                                }
+                            )
                         }
-                    },
-                    onDragEnd = {
-                        val finalDelta = lastDelta
-                        isArmedForDrag = false
-                        currentOnPreview(0L)
-                        if (finalDelta != 0L) {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            currentOnCommit(finalDelta)
-                        }
-                    },
-                    onDragCancel = {
-                        isArmedForDrag = false
-                        currentOnPreview(0L)
-                    }
-                )
-            }
+                } else {
+                    Modifier
+                }
+            )
             .padding(horizontal = 10.dp),
         contentAlignment = Alignment.CenterStart
     ) {
@@ -2884,7 +2958,8 @@ private fun RoadmapDraggableTaskBar(
     previewDelta: Long,
     onPreviewDeltaChanged: (Long) -> Unit,
     onCommitShift: (Long) -> Unit,
-    onClickTask: () -> Unit
+    onClickTask: () -> Unit,
+    readOnly: Boolean = false
 ) {
     val colors = ThingsTheme.colors
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -2950,45 +3025,52 @@ private fun RoadmapDraggableTaskBar(
             .clip(RoundedCornerShape(8.dp))
             .background(barFill)
             .border(if (isArmedForDrag) 1.6.dp else 1.1.dp, barBorder, RoundedCornerShape(8.dp))
-            .pointerHoverIcon(PointerIcon.Hand)
-            .clickable(onClick = onClickTask)
-            .pointerInput(taskBar.taskId) {
-                var rawDragPx = 0f
-                var lastDelta = 0L
-                detectDragGesturesAfterLongPress(
-                    onDragStart = {
-                        rawDragPx = 0f
-                        lastDelta = 0L
-                        isArmedForDrag = true
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    },
-                    onDrag = { change, dragAmount ->
-                        change.consume()
-                        rawDragPx += dragAmount.x
-                        val snapped = if (currentDayWidthPx > 1f) {
-                            (rawDragPx / currentDayWidthPx).roundToInt().toLong()
-                        } else 0L
-                        if (snapped != lastDelta) {
-                            lastDelta = snapped
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            currentOnPreview(snapped)
+            .then(
+                if (!readOnly) {
+                    Modifier
+                        .pointerHoverIcon(PointerIcon.Hand)
+                        .clickable(onClick = onClickTask)
+                        .pointerInput(taskBar.taskId) {
+                            var rawDragPx = 0f
+                            var lastDelta = 0L
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = {
+                                    rawDragPx = 0f
+                                    lastDelta = 0L
+                                    isArmedForDrag = true
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    rawDragPx += dragAmount.x
+                                    val snapped = if (currentDayWidthPx > 1f) {
+                                        (rawDragPx / currentDayWidthPx).roundToInt().toLong()
+                                    } else 0L
+                                    if (snapped != lastDelta) {
+                                        lastDelta = snapped
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        currentOnPreview(snapped)
+                                    }
+                                },
+                                onDragEnd = {
+                                    val finalDelta = lastDelta
+                                    isArmedForDrag = false
+                                    currentOnPreview(0L)
+                                    if (finalDelta != 0L) {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        currentOnCommit(finalDelta)
+                                    }
+                                },
+                                onDragCancel = {
+                                    isArmedForDrag = false
+                                    currentOnPreview(0L)
+                                }
+                            )
                         }
-                    },
-                    onDragEnd = {
-                        val finalDelta = lastDelta
-                        isArmedForDrag = false
-                        currentOnPreview(0L)
-                        if (finalDelta != 0L) {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            currentOnCommit(finalDelta)
-                        }
-                    },
-                    onDragCancel = {
-                        isArmedForDrag = false
-                        currentOnPreview(0L)
-                    }
-                )
-            }
+                } else {
+                    Modifier
+                }
+            )
             .padding(horizontal = 8.dp),
         contentAlignment = Alignment.CenterStart
     ) {

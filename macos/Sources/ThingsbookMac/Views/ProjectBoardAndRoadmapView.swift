@@ -109,57 +109,71 @@ struct PhaseStartDatePillButton: View {
         return df.string(from: DateEpochConverter.date(fromMillis: startMs))
     }
 
+    @ViewBuilder
     var body: some View {
         let hasStartDate = heading.startDate != nil
+        let isFullScreen = store.isTimelineFullScreen
 
-        Button {
-            isPopoverOpen = true
-        } label: {
-            HStack(spacing: compact ? 3 : 4) {
-                Image(systemName: hasStartDate ? "calendar" : "calendar.badge.plus")
-                    .font(.system(size: compact ? 9 : 10, weight: .semibold))
-                if let formattedStartDate {
-                    Text(store.trf("v30_phase_starts_on", formattedStartDate))
-                        .font(.system(size: compact ? 10 : 11, weight: .semibold))
-                        .lineLimit(1)
-                } else {
-                    Text(store.tr("v30_phase_set_start_date"))
-                        .font(.system(size: compact ? 10 : 11, weight: .medium))
-                        .lineLimit(1)
+        if isFullScreen && !hasStartDate {
+            EmptyView()
+        } else {
+            Button {
+                guard !store.isTimelineFullScreen else { return }
+                isPopoverOpen = true
+            } label: {
+                HStack(spacing: compact ? 3 : 4) {
+                    Image(systemName: hasStartDate ? "calendar" : "calendar.badge.plus")
+                        .font(.system(size: compact ? 9 : 10, weight: .semibold))
+                    if let formattedStartDate {
+                        Text(store.trf("v30_phase_starts_on", formattedStartDate))
+                            .font(.system(size: compact ? 10 : 11, weight: .semibold))
+                            .lineLimit(1)
+                    } else {
+                        Text(store.tr("v30_phase_set_start_date"))
+                            .font(.system(size: compact ? 10 : 11, weight: .medium))
+                            .lineLimit(1)
+                    }
+                }
+                .foregroundStyle(hasStartDate ? ThingsMacPalette.accentBlue : ((!isFullScreen && isHovering) ? ThingsMacPalette.accentBlue : .secondary))
+                .padding(.horizontal, compact ? 6.5 : 8.5)
+                .padding(.vertical, compact ? 2 : 3)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(
+                            hasStartDate
+                                ? ThingsMacPalette.inboxBlue.opacity((!isFullScreen && isHovering) ? 0.24 : 0.15)
+                                : Color.primary.opacity((!isFullScreen && isHovering) ? 0.08 : 0.045)
+                        )
+                )
+                .contentShape(Capsule(style: .continuous))
+                .fixedSize(horizontal: true, vertical: false)
+            }
+            .buttonStyle(.plain)
+            .fixedSize(horizontal: true, vertical: false)
+            .disabled(isFullScreen)
+            .allowsHitTesting(!isFullScreen)
+            .onHover { hovering in
+                isHovering = hovering && !store.isTimelineFullScreen
+            }
+            .onChange(of: store.isTimelineFullScreen) { _, fullScreen in
+                if fullScreen {
+                    isPopoverOpen = false
                 }
             }
-            .foregroundStyle(hasStartDate ? ThingsMacPalette.accentBlue : (isHovering ? ThingsMacPalette.accentBlue : .secondary))
-            .padding(.horizontal, compact ? 6.5 : 8.5)
-            .padding(.vertical, compact ? 2 : 3)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(
-                        hasStartDate
-                            ? ThingsMacPalette.inboxBlue.opacity(isHovering ? 0.24 : 0.15)
-                            : Color.primary.opacity(isHovering ? 0.08 : 0.045)
-                    )
-            )
-            .contentShape(Capsule(style: .continuous))
-            .fixedSize(horizontal: true, vertical: false)
-        }
-        .buttonStyle(.plain)
-        .fixedSize(horizontal: true, vertical: false)
-        .onHover { hovering in
-            isHovering = hovering
-        }
-        .thingsTooltip(store.tr("v30_phase_set_start_date"))
-        .popover(isPresented: $isPopoverOpen) {
-            DeadlinePopoverView(
-                store: store,
-                currentDeadlineMillis: heading.startDate,
-                customTitle: store.tr("v30_phase_set_start_date"),
-                customClearTitle: store.tr("v30_phase_clear_start_date"),
-                accentTint: ThingsMacPalette.accentBlue
-            ) { newStartMs in
-                if let newStartMs, let existingEnd = heading.endDate, newStartMs > existingEnd {
-                    store.updateHeadingDates(heading.id, startDate: newStartMs, endDate: newStartMs)
-                } else {
-                    store.updateHeadingStartDate(heading.id, startDate: newStartMs)
+            .thingsTooltip(isFullScreen ? "" : store.tr("v30_phase_set_start_date"))
+            .popover(isPresented: $isPopoverOpen) {
+                DeadlinePopoverView(
+                    store: store,
+                    currentDeadlineMillis: heading.startDate,
+                    customTitle: store.tr("v30_phase_set_start_date"),
+                    customClearTitle: store.tr("v30_phase_clear_start_date"),
+                    accentTint: ThingsMacPalette.accentBlue
+                ) { newStartMs in
+                    if let newStartMs, let existingEnd = heading.endDate, newStartMs > existingEnd {
+                        store.updateHeadingDates(heading.id, startDate: newStartMs, endDate: newStartMs)
+                    } else {
+                        store.updateHeadingStartDate(heading.id, startDate: newStartMs)
+                    }
                 }
             }
         }
@@ -189,58 +203,72 @@ struct PhaseEndDatePillButton: View {
         return DateEpochConverter.epochDay(forMillis: endMs) < todayEpochDay
     }
 
+    @ViewBuilder
     var body: some View {
         let activeTint = isOverdue ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.accentBlue
         let hasEndDate = heading.endDate != nil
+        let isFullScreen = store.isTimelineFullScreen
 
-        Button {
-            isPopoverOpen = true
-        } label: {
-            HStack(spacing: compact ? 3 : 4) {
-                Image(systemName: hasEndDate ? "calendar.badge.clock" : "calendar.badge.plus")
-                    .font(.system(size: compact ? 9 : 10, weight: .semibold))
-                if let formattedEndDate {
-                    Text(store.trf("phase_ends_on", formattedEndDate))
-                        .font(.system(size: compact ? 10 : 11, weight: .semibold))
-                        .lineLimit(1)
-                } else {
-                    Text(store.tr("phase_set_end_date"))
-                        .font(.system(size: compact ? 10 : 11, weight: .medium))
-                        .lineLimit(1)
+        if isFullScreen && !hasEndDate {
+            EmptyView()
+        } else {
+            Button {
+                guard !store.isTimelineFullScreen else { return }
+                isPopoverOpen = true
+            } label: {
+                HStack(spacing: compact ? 3 : 4) {
+                    Image(systemName: hasEndDate ? "calendar.badge.clock" : "calendar.badge.plus")
+                        .font(.system(size: compact ? 9 : 10, weight: .semibold))
+                    if let formattedEndDate {
+                        Text(store.trf("phase_ends_on", formattedEndDate))
+                            .font(.system(size: compact ? 10 : 11, weight: .semibold))
+                            .lineLimit(1)
+                    } else {
+                        Text(store.tr("phase_set_end_date"))
+                            .font(.system(size: compact ? 10 : 11, weight: .medium))
+                            .lineLimit(1)
+                    }
+                }
+                .foregroundStyle(hasEndDate ? activeTint : ((!isFullScreen && isHovering) ? ThingsMacPalette.accentBlue : .secondary))
+                .padding(.horizontal, compact ? 6.5 : 8.5)
+                .padding(.vertical, compact ? 2 : 3)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(
+                            hasEndDate
+                                ? activeTint.opacity((!isFullScreen && isHovering) ? 0.18 : 0.12)
+                                : Color.primary.opacity((!isFullScreen && isHovering) ? 0.08 : 0.045)
+                        )
+                )
+                .contentShape(Capsule(style: .continuous))
+                .fixedSize(horizontal: true, vertical: false)
+            }
+            .buttonStyle(.plain)
+            .fixedSize(horizontal: true, vertical: false)
+            .disabled(isFullScreen)
+            .allowsHitTesting(!isFullScreen)
+            .onHover { hovering in
+                isHovering = hovering && !store.isTimelineFullScreen
+            }
+            .onChange(of: store.isTimelineFullScreen) { _, fullScreen in
+                if fullScreen {
+                    isPopoverOpen = false
                 }
             }
-            .foregroundStyle(hasEndDate ? activeTint : (isHovering ? ThingsMacPalette.accentBlue : .secondary))
-            .padding(.horizontal, compact ? 6.5 : 8.5)
-            .padding(.vertical, compact ? 2 : 3)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(
-                        hasEndDate
-                            ? activeTint.opacity(isHovering ? 0.18 : 0.12)
-                            : Color.primary.opacity(isHovering ? 0.08 : 0.045)
-                    )
-            )
-            .contentShape(Capsule(style: .continuous))
-            .fixedSize(horizontal: true, vertical: false)
-        }
-        .buttonStyle(.plain)
-        .fixedSize(horizontal: true, vertical: false)
-        .onHover { hovering in
-            isHovering = hovering
-        }
-        .thingsTooltip(store.tr("phase_set_end_date"))
-        .popover(isPresented: $isPopoverOpen) {
-            DeadlinePopoverView(
-                store: store,
-                currentDeadlineMillis: heading.endDate,
-                customTitle: store.tr("phase_set_end_date"),
-                customClearTitle: store.tr("phase_clear_end_date"),
-                accentTint: ThingsMacPalette.accentBlue
-            ) { newEndMs in
-                if let newEndMs, let existingStart = heading.startDate, newEndMs < existingStart {
-                    store.updateHeadingDates(heading.id, startDate: newEndMs, endDate: newEndMs)
-                } else {
-                    store.updateHeadingEndDate(heading.id, endDate: newEndMs)
+            .thingsTooltip(isFullScreen ? "" : store.tr("phase_set_end_date"))
+            .popover(isPresented: $isPopoverOpen) {
+                DeadlinePopoverView(
+                    store: store,
+                    currentDeadlineMillis: heading.endDate,
+                    customTitle: store.tr("phase_set_end_date"),
+                    customClearTitle: store.tr("phase_clear_end_date"),
+                    accentTint: ThingsMacPalette.accentBlue
+                ) { newEndMs in
+                    if let newEndMs, let existingStart = heading.startDate, newEndMs < existingStart {
+                        store.updateHeadingDates(heading.id, startDate: newEndMs, endDate: newEndMs)
+                    } else {
+                        store.updateHeadingEndDate(heading.id, endDate: newEndMs)
+                    }
                 }
             }
         }
@@ -1159,9 +1187,19 @@ public struct ProjectRoadmapWorkspaceView: View {
                 }
             }
 
-            // Unscheduled Tray
-            if !layout.unscheduledTasks.isEmpty || rows.isEmpty {
+            // Unscheduled Tray (hidden in Timeline Full Screen so 100% of height is dedicated to the Gantt Timeline)
+            if !store.isTimelineFullScreen && (!layout.unscheduledTasks.isEmpty || rows.isEmpty) {
                 unscheduledSectionCard(unscheduledTasks: layout.unscheduledTasks)
+            }
+        }
+        .onChange(of: store.isTimelineFullScreen) { _, fullScreen in
+            if fullScreen {
+                activePhaseDrag = nil
+                activeTaskDrag = nil
+                armedPhaseDragId = nil
+                armedTaskDragId = nil
+                unscheduledStartPopoverTaskId = nil
+                isPDFExportSheetPresented = false
             }
         }
         .sheet(isPresented: $isPDFExportSheetPresented) {
@@ -1256,7 +1294,8 @@ public struct ProjectRoadmapWorkspaceView: View {
                 action: onJumpToday
             )
 
-            if let primarySelectedId = store.selectedTaskIds.first,
+            if !store.isTimelineFullScreen,
+               let primarySelectedId = store.selectedTaskIds.first,
                let selectedTask = (openTasks + completedTasks).first(where: { $0.id == primarySelectedId }) {
                 HStack(spacing: 4) {
                     Button {
@@ -1348,48 +1387,50 @@ public struct ProjectRoadmapWorkspaceView: View {
             )
             .fixedSize()
 
-            // Export Roadmap Menu (Configurable PDF Dialog & 1-Click PNG)
-            Menu {
-                Button {
-                    isPDFExportSheetPresented = true
-                } label: {
-                    Label(store.tr("v30_roadmap_export_pdf"), systemImage: "doc.richtext")
-                }
+            // Export Roadmap Menu (hidden in Timeline Full Screen)
+            if !isFull {
+                Menu {
+                    Button {
+                        isPDFExportSheetPresented = true
+                    } label: {
+                        Label(store.tr("v30_roadmap_export_pdf"), systemImage: "doc.richtext")
+                    }
 
-                Button {
-                    exportRoadmapPNGInteractively(layout: layout)
+                    Button {
+                        exportRoadmapPNGInteractively(layout: layout)
+                    } label: {
+                        Label(store.tr("v30_roadmap_export_png"), systemImage: "photo")
+                    }
                 } label: {
-                    Label(store.tr("v30_roadmap_export_png"), systemImage: "photo")
-                }
-            } label: {
-                HStack(spacing: 5.5) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 11.5, weight: .semibold))
-                    Text(store.tr("v30_roadmap_export"))
-                        .font(.system(size: 12, weight: .semibold))
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8.5, weight: .bold))
-                        .opacity(0.75)
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [ThingsMacPalette.inboxBlue, ThingsMacPalette.accentBlue],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+                    HStack(spacing: 5.5) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 11.5, weight: .semibold))
+                        Text(store.tr("v30_roadmap_export"))
+                            .font(.system(size: 12, weight: .semibold))
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8.5, weight: .bold))
+                            .opacity(0.75)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [ThingsMacPalette.inboxBlue, ThingsMacPalette.accentBlue],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
                             )
-                        )
-                )
+                    )
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .thingsTooltip(store.tr("v30_roadmap_export"))
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .thingsTooltip(store.tr("v30_roadmap_export"))
 
             // Full Screen / Exit Full Screen Toggle Button
             Button {
@@ -1446,113 +1487,159 @@ public struct ProjectRoadmapWorkspaceView: View {
                 let rHeight = rowHeight(for: row)
                 switch row {
                 case .generalHeader:
-                    HStack(spacing: 6) {
-                        Capsule()
-                            .fill(ThingsMacPalette.inboxBlue)
-                            .frame(width: 3.5, height: 15)
-                        Text(store.tr("v30_board_ungrouped_column"))
-                            .font(.system(size: 12.5, weight: .bold))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 12)
-                    .frame(width: labelColumnWidth, height: rHeight)
-                    .thingsDropTarget(cornerRadius: 8) { payloads in
-                        store.dropTasksIntoProjectSection(payloads, projectId: project.id, headingId: nil)
-                    }
+                    roadmapLeftGeneralHeaderRow(height: rHeight)
 
                 case .phaseHeader(let heading, _):
-                    let hasOpenInPhase = openTasks.contains { $0.headingId == heading.id }
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(alignment: .top, spacing: 6) {
-                            Capsule()
-                                .fill(ThingsMacPalette.inboxBlue)
-                                .frame(width: 3.5, height: 15)
-                                .padding(.top, 1)
-                            Text(heading.title)
-                                .font(.system(size: 12.5, weight: .bold))
-                                .foregroundStyle(.primary)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.leading)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Spacer(minLength: 0)
-                        }
-
-                        HStack(spacing: 5) {
-                            PhaseStartDatePillButton(store: store, heading: heading, compact: true)
-                            PhaseEndDatePillButton(
-                                store: store,
-                                heading: heading,
-                                hasOpenTasks: hasOpenInPhase,
-                                compact: true
-                            )
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.leading, 9.5)
-                    }
-                    .padding(.horizontal, 10)
-                    .frame(width: labelColumnWidth, height: rHeight, alignment: .center)
-                    .thingsDropTarget(cornerRadius: 8) { payloads in
-                        store.dropTasksIntoProjectSection(payloads, projectId: project.id, headingId: heading.id)
-                    }
+                    roadmapLeftPhaseHeaderRow(heading: heading, height: rHeight)
 
                 case .task(let bar):
-                    let isSelected = store.selectedTaskIds.contains(bar.id)
-                    HStack(spacing: 7) {
-                        ThingsCheckboxButton(
-                            status: bar.task.status,
-                            isSomeday: bar.task.scheduleState == .someday,
-                            helpText: store.tr("macos_checkbox_help"),
-                            onToggleComplete: { store.toggleTaskCompletion(bar.task) },
-                            onCancelTask: { store.cancelTask(bar.task) }
-                        )
-                        Text(bar.task.title.isEmpty ? store.tr("macos_untitled_todo") : bar.task.title)
-                            .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
-                            .foregroundStyle(bar.task.status == .completed ? .secondary : .primary)
-                            .lineLimit(1)
-                        Spacer(minLength: 2)
-                    }
-                    .padding(.leading, 18)
-                    .padding(.trailing, 8)
-                    .frame(width: labelColumnWidth, height: rHeight)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(isSelected ? ThingsMacPalette.accentBlue.opacity(0.12) : Color.clear)
-                    )
-                    .contentShape(Rectangle())
-                    .simultaneousGesture(
-                        TapGesture(count: 2).onEnded {
-                            store.openTaskModal(bar.id)
-                        }
-                    )
-                    .onTapGesture {
-                        store.handleRowClick(taskId: bar.id, modifiers: NSEvent.modifierFlags)
-                    }
-                    .contextMenu {
-                        Button {
-                            store.openTaskModal(bar.id)
-                        } label: {
-                            Label("\(store.tr("action_more_options"))…", systemImage: "slider.horizontal.3")
-                        }
-                        Divider()
-                        Button(bar.task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
-                            store.toggleTaskCompletion(bar.task)
-                        }
-                        Divider()
-                        Button(role: .destructive) {
-                            store.deleteTask(bar.task)
-                        } label: {
-                            Text(store.tr("action_delete"))
-                        }
-                    }
-                    .thingsTaskDraggable(store: store, task: bar.task)
+                    roadmapLeftTaskLabelRow(bar: bar, height: rHeight)
                 }
             }
         }
         .padding(.bottom, 10)
         .frame(width: labelColumnWidth, height: totalHeight, alignment: .topLeading)
         .background(ThingsMacPalette.subtleContainer.opacity(0.45))
+    }
+
+    @ViewBuilder
+    private func roadmapLeftGeneralHeaderRow(height: CGFloat) -> some View {
+        let generalHeaderRow = HStack(spacing: 6) {
+            Capsule()
+                .fill(ThingsMacPalette.inboxBlue)
+                .frame(width: 3.5, height: 15)
+            Text(store.tr("v30_board_ungrouped_column"))
+                .font(.system(size: 12.5, weight: .bold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .frame(width: labelColumnWidth, height: height)
+
+        if store.isTimelineFullScreen {
+            generalHeaderRow
+        } else {
+            generalHeaderRow
+                .thingsDropTarget(cornerRadius: 8) { payloads in
+                    store.dropTasksIntoProjectSection(payloads, projectId: project.id, headingId: nil)
+                }
+        }
+    }
+
+    @ViewBuilder
+    private func roadmapLeftPhaseHeaderRow(heading: Heading, height: CGFloat) -> some View {
+        let hasOpenInPhase = openTasks.contains { $0.headingId == heading.id }
+        let showPhasePills = !store.isTimelineFullScreen || heading.startDate != nil || heading.endDate != nil
+        let phaseHeaderRow = VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .top, spacing: 6) {
+                Capsule()
+                    .fill(ThingsMacPalette.inboxBlue)
+                    .frame(width: 3.5, height: 15)
+                    .padding(.top, 1)
+                Text(heading.title)
+                    .font(.system(size: 12.5, weight: .bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+
+            if showPhasePills {
+                HStack(spacing: 5) {
+                    PhaseStartDatePillButton(store: store, heading: heading, compact: true)
+                    PhaseEndDatePillButton(
+                        store: store,
+                        heading: heading,
+                        hasOpenTasks: hasOpenInPhase,
+                        compact: true
+                    )
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 9.5)
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(width: labelColumnWidth, height: height, alignment: .center)
+
+        if store.isTimelineFullScreen {
+            phaseHeaderRow
+        } else {
+            phaseHeaderRow
+                .thingsDropTarget(cornerRadius: 8) { payloads in
+                    store.dropTasksIntoProjectSection(payloads, projectId: project.id, headingId: heading.id)
+                }
+        }
+    }
+
+    @ViewBuilder
+    private func roadmapLeftTaskLabelRow(bar: RoadmapTaskBar, height: CGFloat) -> some View {
+        let isFullScreen = store.isTimelineFullScreen
+        let isSelected = !isFullScreen && store.selectedTaskIds.contains(bar.id)
+        let rowContent = HStack(spacing: 7) {
+            ThingsCheckboxButton(
+                status: bar.task.status,
+                isSomeday: bar.task.scheduleState == .someday,
+                helpText: isFullScreen ? "" : store.tr("macos_checkbox_help"),
+                onToggleComplete: {
+                    guard !store.isTimelineFullScreen else { return }
+                    store.toggleTaskCompletion(bar.task)
+                },
+                onCancelTask: {
+                    guard !store.isTimelineFullScreen else { return }
+                    store.cancelTask(bar.task)
+                }
+            )
+            .disabled(isFullScreen)
+            .allowsHitTesting(!isFullScreen)
+
+            Text(bar.task.title.isEmpty ? store.tr("macos_untitled_todo") : bar.task.title)
+                .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
+                .foregroundStyle(bar.task.status == .completed ? .secondary : .primary)
+                .lineLimit(1)
+            Spacer(minLength: 2)
+        }
+        .padding(.leading, 18)
+        .padding(.trailing, 8)
+        .frame(width: labelColumnWidth, height: height)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(isSelected ? ThingsMacPalette.accentBlue.opacity(0.12) : Color.clear)
+        )
+        .contentShape(Rectangle())
+
+        if isFullScreen {
+            rowContent
+        } else {
+            rowContent
+                .simultaneousGesture(
+                    TapGesture(count: 2).onEnded {
+                        store.openTaskModal(bar.id)
+                    }
+                )
+                .onTapGesture {
+                    store.handleRowClick(taskId: bar.id, modifiers: NSEvent.modifierFlags)
+                }
+                .contextMenu {
+                    Button {
+                        store.openTaskModal(bar.id)
+                    } label: {
+                        Label("\(store.tr("action_more_options"))…", systemImage: "slider.horizontal.3")
+                    }
+                    Divider()
+                    Button(bar.task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
+                        store.toggleTaskCompletion(bar.task)
+                    }
+                    Divider()
+                    Button(role: .destructive) {
+                        store.deleteTask(bar.task)
+                    } label: {
+                        Text(store.tr("action_delete"))
+                    }
+                }
+                .thingsTaskDraggable(store: store, task: bar.task)
+        }
     }
 
     // MARK: - Right Timeline Grid, Bars & Dependency Canvas
@@ -1735,8 +1822,9 @@ public struct ProjectRoadmapWorkspaceView: View {
         layout: ProjectRoadmapLayout,
         totalGridWidth: CGFloat
     ) -> some View {
-        let isArmedThis = armedPhaseDragId == heading.id
-        let delta = (activePhaseDrag?.id == heading.id) ? (activePhaseDrag?.deltaDays ?? 0) : 0
+        let isFullScreen = store.isTimelineFullScreen
+        let isArmedThis = !isFullScreen && armedPhaseDragId == heading.id
+        let delta = (!isFullScreen && activePhaseDrag?.id == heading.id) ? (activePhaseDrag?.deltaDays ?? 0) : 0
         let rawStart = phaseBar.startEpochDay + delta
         let rawEnd = phaseBar.endEpochDay + delta
 
@@ -1752,7 +1840,7 @@ public struct ProjectRoadmapWorkspaceView: View {
                 && (totalGridWidth - (barX + barW) < estimatedTitleWidth)
                 && (barX >= estimatedTitleWidth)
 
-            HStack(spacing: 6) {
+            let phaseCapsule = HStack(spacing: 6) {
                 Image(systemName: "flag.checkered")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(.white.opacity(0.95))
@@ -1805,74 +1893,84 @@ public struct ProjectRoadmapWorkspaceView: View {
             }
             .scaleEffect(isArmedThis ? 1.02 : 1.0)
             .offset(x: barX)
-            .gesture(
-                LongPressGesture(minimumDuration: 0.28, maximumDistance: 8)
-                    .sequenced(before: DragGesture(minimumDistance: 2, coordinateSpace: .named("roadmapTimelineGrid")))
-                    .onChanged { value in
-                        switch value {
-                        case .first:
-                            break
-                        case .second(true, nil):
-                            if armedPhaseDragId != heading.id {
-                                armedPhaseDragId = heading.id
+
+            if isFullScreen {
+                phaseCapsule
+            } else {
+                phaseCapsule
+                    .gesture(
+                        LongPressGesture(minimumDuration: 0.28, maximumDistance: 8)
+                            .sequenced(before: DragGesture(minimumDistance: 2, coordinateSpace: .named("roadmapTimelineGrid")))
+                            .onChanged { value in
+                                switch value {
+                                case .first:
+                                    break
+                                case .second(true, nil):
+                                    if armedPhaseDragId != heading.id {
+                                        armedPhaseDragId = heading.id
+                                    }
+                                case .second(true, let drag?):
+                                    if armedPhaseDragId != heading.id {
+                                        armedPhaseDragId = heading.id
+                                    }
+                                    let snapped = Int((drag.translation.width / dayColumnWidth).rounded())
+                                    activePhaseDrag = (heading.id, snapped)
+                                default:
+                                    break
+                                }
                             }
-                        case .second(true, let drag?):
-                            if armedPhaseDragId != heading.id {
-                                armedPhaseDragId = heading.id
+                            .onEnded { value in
+                                let finalDelta: Int = {
+                                    if case .second(true, let drag?) = value {
+                                        return Int((drag.translation.width / dayColumnWidth).rounded())
+                                    }
+                                    return 0
+                                }()
+                                armedPhaseDragId = nil
+                                activePhaseDrag = nil
+                                if finalDelta != 0 {
+                                    store.shiftHeadingRoadmapDates(heading, deltaDays: finalDelta)
+                                }
                             }
-                            let snapped = Int((drag.translation.width / dayColumnWidth).rounded())
-                            activePhaseDrag = (heading.id, snapped)
-                        default:
-                            break
+                    )
+                    .contextMenu {
+                        Button(store.tr("v30_roadmap_shift_earlier")) {
+                            store.shiftHeadingRoadmapDates(heading, deltaDays: -1)
+                        }
+                        Button(store.tr("v30_roadmap_shift_later")) {
+                            store.shiftHeadingRoadmapDates(heading, deltaDays: 1)
+                        }
+                        if heading.startDate != nil {
+                            Divider()
+                            Button(store.tr("v30_phase_clear_start_date")) {
+                                store.updateHeadingStartDate(heading.id, startDate: nil)
+                            }
+                        }
+                        if heading.endDate != nil {
+                            Button(store.tr("phase_clear_end_date")) {
+                                store.updateHeadingEndDate(heading.id, endDate: nil)
+                            }
                         }
                     }
-                    .onEnded { value in
-                        let finalDelta: Int = {
-                            if case .second(true, let drag?) = value {
-                                return Int((drag.translation.width / dayColumnWidth).rounded())
-                            }
-                            return 0
-                        }()
-                        armedPhaseDragId = nil
-                        activePhaseDrag = nil
-                        if finalDelta != 0 {
-                            store.shiftHeadingRoadmapDates(heading, deltaDays: finalDelta)
-                        }
-                    }
-            )
-            .contextMenu {
-                Button(store.tr("v30_roadmap_shift_earlier")) {
-                    store.shiftHeadingRoadmapDates(heading, deltaDays: -1)
-                }
-                Button(store.tr("v30_roadmap_shift_later")) {
-                    store.shiftHeadingRoadmapDates(heading, deltaDays: 1)
-                }
-                if heading.startDate != nil {
-                    Divider()
-                    Button(store.tr("v30_phase_clear_start_date")) {
-                        store.updateHeadingStartDate(heading.id, startDate: nil)
-                    }
-                }
-                if heading.endDate != nil {
-                    Button(store.tr("phase_clear_end_date")) {
-                        store.updateHeadingEndDate(heading.id, endDate: nil)
-                    }
-                }
             }
         }
     }
 
+    @ViewBuilder
     private func roadmapTaskBarView(
         taskBar: RoadmapTaskBar,
         layout: ProjectRoadmapLayout
     ) -> some View {
         let task = taskBar.task
-        let isSelected = store.selectedTaskIds.contains(task.id)
+        let isFullScreen = store.isTimelineFullScreen
+        let isSelected = !isFullScreen && store.selectedTaskIds.contains(task.id)
         let isBlocked = store.isTaskActivelyBlocked(task)
-        let isArmedThis = armedTaskDragId == task.id
-        let isDraggingThis = isArmedThis
+        let isArmedThis = !isFullScreen && armedTaskDragId == task.id
+        let isDraggingThis = !isFullScreen && (
+            isArmedThis
             || (activeTaskDrag?.id == task.id)
             || (activeTaskDrag != nil && store.selectedTaskIds.contains(task.id) && store.selectedTaskIds.count > 1 && store.selectedTaskIds.contains(activeTaskDrag?.id ?? ""))
+        )
         let delta = isDraggingThis ? (activeTaskDrag?.deltaDays ?? 0) : 0
         let baseX = CGFloat(taskBar.startEpochDay - layout.startEpochDay) * dayColumnWidth + 3
         let dragX = CGFloat(delta) * dayColumnWidth
@@ -1885,7 +1983,7 @@ public struct ProjectRoadmapWorkspaceView: View {
             return ThingsMacPalette.accentBlue.opacity(0.45)
         }()
 
-        return HStack(spacing: 6) {
+        let taskBarContent = HStack(spacing: 6) {
             if isBlocked {
                 Image(systemName: "hourglass")
                     .font(.system(size: 10, weight: .bold))
@@ -1930,85 +2028,91 @@ public struct ProjectRoadmapWorkspaceView: View {
         )
         .scaleEffect(isArmedThis ? 1.02 : 1.0)
         .offset(x: baseX + dragX)
-        .simultaneousGesture(
-            TapGesture(count: 2).onEnded {
-                store.openTaskModal(task.id)
-            }
-        )
-        .onTapGesture {
-            store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
-        }
-        .gesture(
-            LongPressGesture(minimumDuration: 0.28, maximumDistance: 8)
-                .sequenced(before: DragGesture(minimumDistance: 2, coordinateSpace: .named("roadmapTimelineGrid")))
-                .onChanged { value in
-                    switch value {
-                    case .first:
-                        break
-                    case .second(true, nil):
-                        if armedTaskDragId != task.id {
-                            armedTaskDragId = task.id
+
+        if isFullScreen {
+            taskBarContent
+        } else {
+            taskBarContent
+                .simultaneousGesture(
+                    TapGesture(count: 2).onEnded {
+                        store.openTaskModal(task.id)
+                    }
+                )
+                .onTapGesture {
+                    store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
+                }
+                .gesture(
+                    LongPressGesture(minimumDuration: 0.28, maximumDistance: 8)
+                        .sequenced(before: DragGesture(minimumDistance: 2, coordinateSpace: .named("roadmapTimelineGrid")))
+                        .onChanged { value in
+                            switch value {
+                            case .first:
+                                break
+                            case .second(true, nil):
+                                if armedTaskDragId != task.id {
+                                    armedTaskDragId = task.id
+                                }
+                            case .second(true, let drag?):
+                                if armedTaskDragId != task.id {
+                                    armedTaskDragId = task.id
+                                }
+                                let snapped = Int((drag.translation.width / dayColumnWidth).rounded())
+                                activeTaskDrag = (task.id, snapped)
+                            default:
+                                break
+                            }
                         }
-                    case .second(true, let drag?):
-                        if armedTaskDragId != task.id {
-                            armedTaskDragId = task.id
+                        .onEnded { value in
+                            let finalDelta: Int = {
+                                if case .second(true, let drag?) = value {
+                                    return Int((drag.translation.width / dayColumnWidth).rounded())
+                                }
+                                return 0
+                            }()
+                            armedTaskDragId = nil
+                            activeTaskDrag = nil
+                            if finalDelta != 0 {
+                                store.shiftTaskRoadmapDates(task, deltaDays: finalDelta)
+                            }
                         }
-                        let snapped = Int((drag.translation.width / dayColumnWidth).rounded())
-                        activeTaskDrag = (task.id, snapped)
-                    default:
-                        break
+                )
+                .contextMenu {
+                    Button {
+                        store.openTaskModal(task.id)
+                    } label: {
+                        Label("\(store.tr("action_more_options"))…", systemImage: "slider.horizontal.3")
+                    }
+                    Divider()
+                    Button(store.tr("v30_roadmap_shift_earlier")) {
+                        store.shiftTaskRoadmapDates(task, deltaDays: -1)
+                    }
+                    Button(store.tr("v30_roadmap_shift_later")) {
+                        store.shiftTaskRoadmapDates(task, deltaDays: 1)
+                    }
+                    Divider()
+                    Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
+                        store.toggleTaskCompletion(task)
+                    }
+                    Button(store.tr("view_today")) {
+                        var copy = task
+                        copy.scheduleState = .today
+                        copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
+                        store.updateTask(copy)
+                    }
+                    Button(store.tr("view_someday")) {
+                        var copy = task
+                        copy.scheduleState = .someday
+                        copy.whenDate = nil
+                        copy.deadline = nil
+                        store.updateTask(copy)
+                    }
+                    Divider()
+                    Button(role: .destructive) {
+                        store.deleteTask(task)
+                    } label: {
+                        Text(store.tr("action_delete"))
                     }
                 }
-                .onEnded { value in
-                    let finalDelta: Int = {
-                        if case .second(true, let drag?) = value {
-                            return Int((drag.translation.width / dayColumnWidth).rounded())
-                        }
-                        return 0
-                    }()
-                    armedTaskDragId = nil
-                    activeTaskDrag = nil
-                    if finalDelta != 0 {
-                        store.shiftTaskRoadmapDates(task, deltaDays: finalDelta)
-                    }
-                }
-        )
-        .contextMenu {
-            Button {
-                store.openTaskModal(task.id)
-            } label: {
-                Label("\(store.tr("action_more_options"))…", systemImage: "slider.horizontal.3")
-            }
-            Divider()
-            Button(store.tr("v30_roadmap_shift_earlier")) {
-                store.shiftTaskRoadmapDates(task, deltaDays: -1)
-            }
-            Button(store.tr("v30_roadmap_shift_later")) {
-                store.shiftTaskRoadmapDates(task, deltaDays: 1)
-            }
-            Divider()
-            Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
-                store.toggleTaskCompletion(task)
-            }
-            Button(store.tr("view_today")) {
-                var copy = task
-                copy.scheduleState = .today
-                copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
-                store.updateTask(copy)
-            }
-            Button(store.tr("view_someday")) {
-                var copy = task
-                copy.scheduleState = .someday
-                copy.whenDate = nil
-                copy.deadline = nil
-                store.updateTask(copy)
-            }
-            Divider()
-            Button(role: .destructive) {
-                store.deleteTask(task)
-            } label: {
-                Text(store.tr("action_delete"))
-            }
         }
     }
 
